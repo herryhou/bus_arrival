@@ -266,11 +266,116 @@ pub struct GridOrigin {
     pub y0_cm: DistCm,
 }
 
+/// Parsed GPS data from NMEA sentences.
+///
+/// # Memory Layout (32 bytes total)
+///
+/// Note: Rust's default layout reorders fields for optimal alignment.
+///
+/// ```text
+/// Offset  Field            Type        Size
+/// ------  ---------------  ----------  ----
+/// 0       lat              f64         8
+/// 8       lon              f64         8
+/// 16      speed_cms        SpeedCms    4
+/// 20      heading_cdeg     HeadCdeg    2
+/// 22      hdop_x10         u16         2
+/// 24      has_fix          bool        1
+/// 25-31   (padding)        -           7
+/// ------                              ----
+/// TOTAL                              32
+/// ```
+///
+/// # Field Descriptions
+/// - `lat`: Latitude in degrees WGS84 (negative for South)
+/// - `lon`: Longitude in degrees WGS84 (negative for West)
+/// - `heading_cdeg`: Heading in centidegrees (0.01° units, 0-36000)
+/// - `speed_cms`: Speed in centimeters per second
+/// - `hdop_x10`: Horizontal dilution of precision × 10 (HDOP × 10)
+/// - `has_fix`: Whether GPS has a valid fix
+///
+/// # Use Cases
+/// - **Input to localization pipeline**: Raw GPS data from NMEA sentences
+/// - **Quality filtering**: Use `hdop_x10` and `has_fix` to filter poor quality data
+/// - **Speed estimation**: Used for Kalman filter and outlier detection
+/// - **Direction validation**: Compare `heading_cdeg` with route heading
+///
+/// # Example
+/// ```rust
+/// # use shared::GpsPoint;
+/// let mut point = GpsPoint::new();
+/// // Parse from NMEA...
+/// point.lat = 25.0478;
+/// point.lon = 121.5170;
+/// point.heading_cdeg = 4500; // 45° in centidegrees
+/// point.speed_cms = 500;     // 5 m/s in cm/s
+/// point.hdop_x10 = 12;       // HDOP 1.2
+/// point.has_fix = true;
+/// ```
+#[derive(Debug, Clone)]
+pub struct GpsPoint {
+    /// Latitude in degrees WGS84
+    pub lat: f64,
+
+    /// Longitude in degrees WGS84
+    pub lon: f64,
+
+    /// Heading in centidegrees (0.01° units, 0-36000)
+    pub heading_cdeg: HeadCdeg,
+
+    /// Speed in centimeters per second
+    pub speed_cms: SpeedCms,
+
+    /// HDOP × 10 (Horizontal dilution of precision)
+    pub hdop_x10: u16,
+
+    /// Valid GPS fix
+    pub has_fix: bool,
+}
+
+impl GpsPoint {
+    /// Creates a new GpsPoint with default values.
+    ///
+    /// # Returns
+    ///
+    /// A GpsPoint with all fields set to zero/false:
+    /// - `lat`: 0.0
+    /// - `lon`: 0.0
+    /// - `heading_cdeg`: 0
+    /// - `speed_cms`: 0
+    /// - `hdop_x10`: 0
+    /// - `has_fix`: false
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use shared::GpsPoint;
+    /// let point = GpsPoint::new();
+    /// assert_eq!(point.lat, 0.0);
+    /// assert_eq!(point.lon, 0.0);
+    /// assert_eq!(point.heading_cdeg, 0);
+    /// assert_eq!(point.speed_cms, 0);
+    /// assert_eq!(point.hdop_x10, 0);
+    /// assert_eq!(point.has_fix, false);
+    /// ```
+    pub fn new() -> Self {
+        GpsPoint {
+            lat: 0.0,
+            lon: 0.0,
+            heading_cdeg: 0,
+            speed_cms: 0,
+            hdop_x10: 0,
+            has_fix: false,
+        }
+    }
+}
+
 const _: () = {
     // Compile-time assertions for struct sizes
     let _ = [(); 52 - std::mem::size_of::<RouteNode>()];
     let _ = [(); 12 - std::mem::size_of::<Stop>()];
     let _ = [(); 8 - std::mem::size_of::<GridOrigin>()];
+    let _ = [(); 32 - std::mem::size_of::<GpsPoint>()];
 };
 
 #[cfg(test)]
@@ -485,5 +590,63 @@ mod tests {
 
         assert_eq!(rel_x, 500, "relative X should be 500 cm");
         assert_eq!(rel_y, 300, "relative Y should be 300 cm");
+    }
+
+    #[test]
+    fn gpspoint_size() {
+        // Verify GpsPoint is exactly 32 bytes
+        assert_eq!(
+            std::mem::size_of::<GpsPoint>(),
+            32,
+            "GpsPoint should be exactly 32 bytes"
+        );
+        // Natural alignment for f64 fields
+        assert_eq!(
+            std::mem::align_of::<GpsPoint>(),
+            8,
+            "GpsPoint should have 8-byte alignment"
+        );
+    }
+
+    #[test]
+    fn gpspoint_new() {
+        // Verify GpsPoint::new() returns correct default values
+        let point = GpsPoint::new();
+
+        assert_eq!(point.lat, 0.0, "lat should be 0.0");
+        assert_eq!(point.lon, 0.0, "lon should be 0.0");
+        assert_eq!(point.heading_cdeg, 0, "heading_cdeg should be 0");
+        assert_eq!(point.speed_cms, 0, "speed_cms should be 0");
+        assert_eq!(point.hdop_x10, 0, "hdop_x10 should be 0");
+        assert_eq!(point.has_fix, false, "has_fix should be false");
+    }
+
+    #[test]
+    fn gpspoint_field_offsets() {
+        // Verify field offsets match the documented layout
+        use std::mem::offset_of;
+
+        assert_eq!(offset_of!(GpsPoint, lat), 0, "lat should be at offset 0");
+        assert_eq!(offset_of!(GpsPoint, lon), 8, "lon should be at offset 8");
+        assert_eq!(
+            offset_of!(GpsPoint, speed_cms),
+            16,
+            "speed_cms should be at offset 16"
+        );
+        assert_eq!(
+            offset_of!(GpsPoint, heading_cdeg),
+            20,
+            "heading_cdeg should be at offset 20"
+        );
+        assert_eq!(
+            offset_of!(GpsPoint, hdop_x10),
+            22,
+            "hdop_x10 should be at offset 22"
+        );
+        assert_eq!(
+            offset_of!(GpsPoint, has_fix),
+            24,
+            "has_fix should be at offset 24"
+        );
     }
 }
