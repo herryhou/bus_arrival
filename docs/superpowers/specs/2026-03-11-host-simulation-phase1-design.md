@@ -79,6 +79,8 @@ const _: () = assert!(core::mem::size_of::<RouteNode>() == 52);
 
 Size: 52 bytes × 640 nodes = 33.3 KB (Flash)
 
+**NOTE:** All coordinates (x_cm, y_cm, dx_cm, dy_cm) are stored as **relative offsets from grid origin**, not absolute Earth coordinates. This prevents i32 overflow and ensures safe arithmetic.
+
 ### Stop (shared/src/lib.rs)
 
 ```rust
@@ -94,21 +96,12 @@ Size: 12 bytes × 50 stops = 600 bytes (Flash)
 
 ## Processing Pipeline
 
-### 1. Coordinate Conversion (coord.rs)
+### 1. Douglas-Peucker Simplification (simplify.rs)
 
-**Input:** lat/lon (WGS84)
-**Output:** x_cm, y_cm (planar approximation)
+**Input:** Raw lat/lon polyline
+**Output:** Simplified lat/lon polyline
 
-```rust
-fn latlon_to_cm(lat: f64, lon: f64, lat_avg: f64) -> (i32, i32) {
-    const R_CM: f64 = 637_100_000.0;  // Earth radius in cm
-    let y_cm = (lat.to_radians() * R_CM).round() as i32;
-    let x_cm = (lon.to_radians() * lat_avg.to_radians().cos() * R_CM).round() as i32;
-    (x_cm, y_cm)
-}
-```
-
-### 2. Douglas-Peucker Simplification (simplify.rs)
+**IMPORTANT:** Operates directly on lat/lon coordinates, not converted coordinates.
 
 **Parameters:**
 - ε_general = 700 cm (default tolerance)
@@ -118,7 +111,32 @@ fn latlon_to_cm(lat: f64, lon: f64, lat_avg: f64) -> (i32, i32) {
 
 **Algorithm:** Recursive RDP with curve detection and stop protection.
 
-### 3. Route Linearization (linearize.rs)
+### 2. Compute lat_avg and Bbox Origin
+
+**After simplification:**
+- `lat_avg = mean(all simplified node lats)` — used for entire route
+- `x0_cm = min(all x_cm)`, `y0_cm = min(all y_cm)` — bbox origin
+
+### 3. Coordinate Conversion (coord.rs)
+
+**Input:** lat/lon (WGS84), lat_avg (shared), x0_cm/y0_cm (origin)
+**Output:** Relative x_cm, y_cm
+
+**CRITICAL:** Use relative coordinates to avoid i32 overflow at high longitudes.
+
+```rust
+fn latlon_to_cm_relative(lat: f64, lon: f64, lat_avg: f64,
+                          x0_cm: i32, y0_cm: i32) -> (i32, i32) {
+    const R_CM: f64 = 637_100_000.0;
+    let y_abs = (lat.to_radians() * R_CM).round() as i64;
+    let x_abs = (lon.to_radians() * lat_avg.to_radians().cos() * R_CM).round() as i64;
+    // Return offset from origin (safe from overflow)
+    ((x_abs - x0_cm as i64) as i32,
+     (y_abs - y0_cm as i64) as i32)
+}
+```
+
+### 4. Route Linearization (linearize.rs)
 
 **For each segment (P[i], P[i+1]):**
 ```rust
@@ -133,12 +151,20 @@ line_c = -(line_a × x[i] + line_b × y[i])  // i64
 heading_cdeg = atan2(dy, dx) × 100  // 0.01° units
 ```
 
-### 4. Stop Projection (stops.rs)
+### 5. Stop Projection (stops.rs)
 
 **For each stop:**
-1. Convert lat/lon → x_cm/y_cm
+1. Convert lat/lon → relative x_cm/y_cm (using same lat_avg and origin)
 2. Find closest segment
-3. Project onto route: `progress_cm = cum_dist[seg] + t × seg_len[seg]`
+3. Project onto route with t clamping:
+
+```rust
+// t ∈ [0.0, 1.0], clamp to prevent projection outside segment
+let t_num = dot_i64(sx - p_i.x, sy - p_i.y, dx, dy);
+let t = (t_num as f64 / len2_cm2 as f64).clamp(0.0, 1.0);
+let progress_cm = cum_dist[seg] + (t * seg_len[seg] as f64).round() as i32;
+```
+
 4. Compute corridors with overlap protection:
    - `corridor_start = progress_cm - 8000`
    - `corridor_end = progress_cm + 4000`
@@ -152,24 +178,24 @@ heading_cdeg = atan2(dy, dx) × 100  // 0.01° units
 
 **Output:** List of segment indices per grid cell (~1.2 KB Flash)
 
-### 6. Binary Packing (pack.rs)
+### 7. Binary Packing (pack.rs)
 
 **Output format (route_data.bin):**
 
-| Offset | Field          | Type    | Size    |
-|--------|----------------|---------|---------|
-| 0      | magic          | u32     | 4 B     |
-| 4      | version        | u16     | 2 B     |
-| 6      | node_count     | u16     | 2 B     |
-| 8      | stop_count     | u8      | 1 B     |
-| 9      | x0_cm          | i32     | 4 B     |
-| 13     | y0_cm          | i32     | 4 B     |
-| 17     | route_nodes[]  | RouteNode[] | N×52 B |
-| ...    | stops[]        | Stop[]  | M×12 B  |
-| ...    | grid_index     | bytes   | ~1.2 KB |
-| -4     | crc32          | u32     | 4 B     |
+| Offset | Field          | Type    | Size    | Description |
+|--------|----------------|---------|---------|-------------|
+| 0      | magic          | u32     | 4 B     | 0x42555341 ("BUSA") |
+| 4      | version        | u16     | 2 B     | Format version = 1 |
+| 6      | node_count     | u16     | 2 B     | Number of RouteNodes |
+| 8      | stop_count     | u8      | 1 B     | Number of Stops |
+| 9      | x0_cm          | i32     | 4 B     | Grid origin x (cm, relative) |
+| 13     | y0_cm          | i32     | 4 B     | Grid origin y (cm, relative) |
+| 17     | route_nodes[]  | RouteNode[] | N×52 B | Route nodes (relative coords) |
+| ...    | stops[]        | Stop[]  | M×12 B  | Stops with corridors |
+| ...    | grid_index     | bytes   | ~1.2 KB | Spatial grid index |
+| -4     | crc32          | u32     | 4 B     | CRC32 of entire file |
 
-**Magic:** 0x42555341 ("BUSA")
+**Magic value:** `0x42555341` (ASCII "BUSA" for "BUS Arrival")
 **Version:** 1
 
 ## CLI Interface
