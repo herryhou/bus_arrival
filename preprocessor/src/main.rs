@@ -3,7 +3,10 @@
 // Phase 1: Route simplification, stop projection, and binary packing
 
 use std::env;
+use std::fs;
 use std::process;
+
+mod input;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -38,5 +41,34 @@ fn main() {
     println!("Output file:");
     println!("  Binary data: {}", output_bin_path);
     println!();
-    println!("TODO: Implement pipeline");
+
+    // Parse route.json
+    let route_json = fs::read_to_string(route_json_path)
+        .unwrap_or_else(|e| {
+            eprintln!("Error reading route file {}: {}", route_json_path, e);
+            process::exit(1);
+        });
+
+    let route_input: input::RouteInput = serde_json::from_str(&route_json)
+        .unwrap_or_else(|e| {
+            eprintln!("Error parsing route JSON: {}", e);
+            process::exit(1);
+        });
+
+    println!("Parsed route with {} points", route_input.route_points.len());
+
+    // Parse stops.json
+    let stops_json = fs::read_to_string(stops_json_path)
+        .unwrap_or_else(|e| {
+            eprintln!("Error reading stops file {}: {}", stops_json_path, e);
+            process::exit(1);
+        });
+
+    let stops_input: input::StopsInput = serde_json::from_str(&stops_json)
+        .unwrap_or_else(|e| {
+            eprintln!("Error parsing stops JSON: {}", e);
+            process::exit(1);
+        });
+
+    println!("Parsed {} stops", stops_input.stops.len());
 }
