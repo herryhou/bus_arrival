@@ -6,6 +6,7 @@ use std::env;
 use std::fs;
 use std::process;
 
+mod coord;
 mod input;
 
 fn main() {
