@@ -44,9 +44,9 @@ bus_arrival/
     ↓
 ① Douglas-Peucker 簡化        ← 直接在 lat/lon 操作
     ↓
-② 計算 lat_avg、bbox 原點      ← 簡化後節點的均值 / min
+② 計算 lat_avg                ← 簡化後節點的均值
     ↓
-③ latlon → x_cm/y_cm（相對）  ← 統一用同一個 lat_avg
+③ latlon → x_cm/y_cm（相對）  ← 統一用固定原點 (120.0°E, 20.0°N)
     ↓
 ④ Route Linearization          ← 預算所有幾何係數
     ↓
@@ -56,6 +56,12 @@ bus_arrival/
     ↓
 ⑦ Binary Packing
 ```
+
+**Fixed Origin**: All routes use a unified fixed origin at (120.0°E, 20.0°N) instead of computing bbox-specific origin. This ensures:
+- All routes share the same coordinate system
+- Simpler implementation (no bbox computation needed)
+- Consistent behavior across routes
+- Safe from i32 overflow (Taiwan coordinates fit in ±2,000 km range from this origin)
 
 ## Data Structures
 
@@ -130,27 +136,35 @@ Size: 12 bytes × 50 stops = 600 bytes (Flash)
 
 **Algorithm:** Recursive RDP with curve detection and stop protection.
 
-### 2. Compute lat_avg and Bbox Origin
+### 2. Compute lat_avg
 
 **After simplification:**
-- `lat_avg = mean(all simplified node lats)` — used for entire route
-- `x0_cm = min(all x_cm)`, `y0_cm = min(all y_cm)` — bbox origin
+- `lat_avg = mean(all simplified node lats)` — used for x-coordinate scaling
+
+**NOTE:** Origin is FIXED at (120.0°E, 20.0°N) for all routes. No bbox computation needed.
 
 ### 3. Coordinate Conversion (coord.rs)
 
-**Input:** lat/lon (WGS84), lat_avg (shared), x0_cm/y0_cm (origin)
-**Output:** Relative x_cm, y_cm
+**Input:** lat/lon (WGS84), lat_avg (shared)
+**Output:** Relative x_cm, y_cm (offset from fixed origin)
 
-**CRITICAL:** Use relative coordinates to avoid i32 overflow at high longitudes.
+**CRITICAL:** Use relative coordinates to avoid i32 overflow. Fixed origin at (120.0°E, 20.0°N) ensures Taiwan routes fit in i32 range.
 
 ```rust
-fn latlon_to_cm_relative(lat: f64, lon: f64, lat_avg: f64,
-                          x0_cm: i32, y0_cm: i32) -> (i32, i32) {
+const FIXED_ORIGIN_LON: f64 = 120.0;  // degrees East
+const FIXED_ORIGIN_LAT: f64 = 20.0;   // degrees North
+
+fn latlon_to_cm_relative(lat: f64, lon: f64, lat_avg: f64) -> (i32, i32) {
     const R_CM: f64 = 637_100_000.0;
+
+    // Pre-computed fixed origin in cm
+    let x0_cm = fixed_origin_x_cm();  // ~1.33×10^9 cm
+    let y0_cm = fixed_origin_y_cm();  // ~2.22×10^8 cm
+
     let y_abs = (lat.to_radians() * R_CM).round() as i64;
     let x_abs = (lon.to_radians() * lat_avg.to_radians().cos() * R_CM).round() as i64;
-    // Return offset from origin (safe from overflow)
-    ((x_abs - x0_cm as i64) as i32,
+    // Return offset from fixed origin (safe from overflow)
+    ((x_abs - x0_cm) as i32,
      (y_abs - y0_cm as i64) as i32)
 }
 ```

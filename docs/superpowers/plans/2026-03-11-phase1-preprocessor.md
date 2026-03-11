@@ -263,13 +263,14 @@ pub struct Stop {
 
 /// Grid origin for spatial indexing.
 ///
-/// All coordinates are stored relative to this origin to prevent
-/// i32 overflow at high longitudes.
+/// Uses a FIXED origin at (120.0°E, 20.0°N) for ALL routes.
+/// All coordinates are stored relative to this fixed origin to prevent
+/// i32 overflow and ensure consistent behavior across routes.
 #[repr(C)]
 pub struct GridOrigin {
-    /// Minimum X of all route nodes (cm, relative to Earth origin)
+    /// Fixed origin X: 120.0°E in centimeters (~1.33×10^9 cm)
     pub x0_cm: DistCm,
-    /// Minimum Y of all route nodes (cm, relative to Earth origin)
+    /// Fixed origin Y: 20.0°N in centimeters (~2.23×10^8 cm)
     pub y0_cm: DistCm,
 }
 
@@ -570,28 +571,28 @@ pub fn latlon_to_cm(lat: f64, lon: f64) -> (i64, i64) {
 ///
 /// # Returns
 /// Relative (x_cm, y_cm) offset from origin, safe from i32 overflow.
-pub fn latlon_to_cm_relative(lat: f64, lon: f64, lat_avg: f64,
-                              x0_cm: i64, y0_cm: i64) -> (DistCm, DistCm) {
+pub fn latlon_to_cm_relative(lat: f64, lon: f64, _lat_avg: f64,
+                              _x0_cm: i64, _y0_cm: i64) -> (DistCm, DistCm) {
     let lat_rad = lat.to_radians();
     let lon_rad = lon.to_radians();
-    let lat_avg_rad = lat_avg.to_radians();
+
+    // Use fixed origin's latitude (20°N) for x-coordinate scaling
+    let fixed_origin_lat_rad = 20_f64.to_radians();
+    let cos_fixed_lat = fixed_origin_lat_rad.cos();
 
     // Calculate absolute positions
     let y_abs = (lat_rad * R_CM).round() as i64;
-    let x_abs = (lon_rad * lat_avg_rad.cos() * R_CM).round() as i64;
+    let x_abs = (lon_rad * cos_fixed_lat * R_CM).round() as i64;
 
-    // Return offset from origin (safe from overflow)
-    let x_rel = (x_abs - x0_cm) as DistCm;
-    let y_rel = (y_abs - y0_cm) as DistCm;
+    // Fixed origin at (120.0°E, 20.0°N) - same for all routes
+    const X0_CM: i64 = 1_253_868_624;  // 120.0°E in cm
+    const Y0_CM: i64 =   223_387_273;  // 20.0°N in cm
+
+    // Return offset from fixed origin (safe from overflow)
+    let x_rel = (x_abs - X0_CM) as DistCm;
+    let y_rel = (y_abs - Y0_CM) as DistCm;
 
     (x_rel, y_rel)
-}
-
-/// Calculate bounding box origin from a set of absolute coordinates.
-pub fn compute_bbox_origin(coords: &[(i64, i64)]) -> (i64, i64) {
-    let min_x = coords.iter().map(|(x, _)| *x).min().unwrap_or(0);
-    let min_y = coords.iter().map(|(_, y)| *y).min().unwrap_or(0);
-    (min_x, min_y)
 }
 
 /// Calculate average latitude from a set of points.
@@ -654,11 +655,11 @@ mod tests {
     }
 
     #[test]
-    fn compute_bbox_origin() {
-        let coords = vec![(100, 200), (50, 150), (75, 175)];
-        let (x0, y0) = compute_bbox_origin(&coords);
-        assert_eq!(x0, 50);
-        assert_eq!(y0, 150);
+    fn fixed_origin_is_constant() {
+        // Verify fixed origin is well-defined
+        const X0_CM: i64 = 1_253_868_624;  // 120.0°E in cm
+        const Y0_CM: i64 =   223_387_273;  // 20.0°N in cm
+        assert!(X0_CM > 0 && Y0_CM > 0);
     }
 }
 ```

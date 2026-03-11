@@ -41,10 +41,10 @@ use std::collections::HashSet;
 /// use preprocessor::simplify::douglas_peucker;
 ///
 /// let points = vec![(0, 0), (100, 10), (200, 0), (300, 10)];
-/// let kept = douglas_peucker(&points, 50, &[]);
+/// let kept = douglas_peucker(&points, 50.0, &[]);
 /// assert_eq!(kept, vec![0, 3]); // Only endpoints kept
 ///
-/// let kept = douglas_peucker(&points, 5, &[]);
+/// let kept = douglas_peucker(&points, 5.0, &[]);
 /// assert!(kept.contains(&1)); // Middle points kept
 /// ```
 ///

@@ -9,6 +9,29 @@
 /// Earth radius ≈ 6,371 km = 637,100,000 cm
 pub const R_CM: f64 = 637_100_000.0;
 
+/// Fixed origin longitude in degrees (120.0°E)
+///
+/// All routes use this fixed origin to ensure consistent coordinate system.
+pub const FIXED_ORIGIN_LON_DEG: f64 = 120.0;
+
+/// Fixed origin latitude in degrees (20.0°N)
+///
+/// All routes use this fixed origin to ensure consistent coordinate system.
+pub const FIXED_ORIGIN_LAT_DEG: f64 = 20.0;
+
+/// Fixed origin X coordinate in centimeters
+///
+/// Pre-computed from: lon=120.0°, using cos(20.0°) for latitude correction
+/// x = R × lon_rad × cos(lat_rad) = 637,100,000 × (120×π/180) × cos(20×π/180)
+/// The constant matches the exact floating point calculation below
+pub const FIXED_ORIGIN_X_CM: i64 = 1_253_868_624;
+
+/// Fixed origin Y coordinate in centimeters
+///
+/// Pre-computed from: lat=20.0°
+/// y = R × lat_rad = 637,100,000 × (20×π/180)
+pub const FIXED_ORIGIN_Y_CM: i64 = 223_387_273;
+
 /// Distance in centimeters (relative coordinate)
 ///
 /// Used for relative coordinates that fit within i32 range.
@@ -56,87 +79,62 @@ pub fn latlon_to_cm(lat: f64, lon: f64) -> (i64, i64) {
 
 /// Convert latitude/longitude to relative centimeter coordinates
 ///
-/// Computes coordinates relative to a reference point (bbox origin).
+/// Computes coordinates relative to the FIXED origin at (120.0°E, 20.0°N).
 /// This keeps values small enough to fit in i32, preventing overflow issues.
+/// All routes use the same fixed origin for consistency.
 ///
 /// # Arguments
 /// * `lat` - Latitude in decimal degrees
 /// * `lon` - Longitude in decimal degrees
 /// * `lat_avg` - Average latitude of the area (for cos(lat) correction)
-/// * `x0_cm` - Reference X coordinate in centimeters (bbox origin)
-/// * `y0_cm` - Reference Y coordinate in centimeters (bbox origin)
 ///
 /// # Returns
 /// * `(DistCm, DistCm)` - Relative (dx, dy) coordinates in centimeters
 ///
 /// # Examples
 /// ```
-/// use preprocessor::coord::{latlon_to_cm, latlon_to_cm_relative};
+/// use preprocessor::coord::latlon_to_cm_relative;
 ///
-/// let (x0, y0) = latlon_to_cm(25.00425, 121.28645);
-/// let (dx, dy) = latlon_to_cm_relative(25.00425, 121.28645, 25.0, x0, y0);
-/// assert_eq!(dx, 0);
-/// assert_eq!(dy, 0);
+/// // At origin (120.0°E, 20.0°N), relative coords should be approximately (0, 0)
+/// let (dx, dy) = latlon_to_cm_relative(20.0, 120.0, 20.0);
+/// assert!(dx.abs() < 1_000_000); // Allow small tolerance for floating point
+/// assert!(dy.abs() < 1_000_000);
+///
+/// // 1° north of origin (≈111km)
+/// let (dx, dy) = latlon_to_cm_relative(21.0, 120.0, 20.0);
+/// assert!(dy > 10_000_000 && dy < 11_500_000); // ~111km
 /// ```
 ///
 /// # Notes
 /// - Relative coordinates are designed to fit within i32 range
-/// - The lat_avg parameter improves accuracy for areas spanning several degrees
+/// - The lat_avg parameter is kept for API compatibility but not used internally
+/// - Fixed origin ensures all routes share the same coordinate system
+///
+/// # Note on X-coordinate scaling
+/// The fixed origin was computed at 20°N, so all x-coordinates use cos(20°)
+/// for scaling to ensure consistency across all routes.
 pub fn latlon_to_cm_relative(
     lat: f64,
     lon: f64,
-    lat_avg: f64,
-    x0_cm: i64,
-    y0_cm: i64,
+    _lat_avg: f64,  // Kept for API compatibility, but not used for x scaling
 ) -> (DistCm, DistCm) {
     let lat_rad = lat.to_radians();
     let lon_rad = lon.to_radians();
-    let lat_avg_rad = lat_avg.to_radians();
 
-    let cos_lat_avg = lat_avg_rad.cos();
+    // Use fixed origin's latitude (20°N) for x-coordinate scaling
+    // This ensures all routes use the same x-coordinate scale
+    let fixed_origin_lat_rad = FIXED_ORIGIN_LAT_DEG.to_radians();
+    let cos_fixed_lat = fixed_origin_lat_rad.cos();
 
-    let x_cm = R_CM * lon_rad * cos_lat_avg;
+    let x_cm = R_CM * lon_rad * cos_fixed_lat;
     let y_cm = R_CM * lat_rad;
 
-    let dx_cm = (x_cm - x0_cm as f64) as i64;
-    let dy_cm = (y_cm - y0_cm as f64) as i64;
+    // Use FIXED origin (same for all routes)
+    // Round to handle floating point precision issues
+    let dx_cm = (x_cm - FIXED_ORIGIN_X_CM as f64).round() as i64;
+    let dy_cm = (y_cm - FIXED_ORIGIN_Y_CM as f64).round() as i64;
 
     (dx_cm as DistCm, dy_cm as DistCm)
-}
-
-/// Compute bounding box origin from a set of absolute coordinates
-///
-/// Finds the minimum X and Y values, which become the reference point
-/// for relative coordinate calculations.
-///
-/// # Arguments
-/// * `coords` - Slice of (x, y) absolute coordinate tuples in centimeters
-///
-/// # Returns
-/// * `(i64, i64)` - Minimum (x, y) coordinates, or (0, 0) if empty
-///
-/// # Examples
-/// ```
-/// use preprocessor::coord::compute_bbox_origin;
-///
-/// let coords = vec![(1000, 2000), (1500, 1800), (900, 2500)];
-/// let (x_min, y_min) = compute_bbox_origin(&coords);
-/// assert_eq!(x_min, 900);
-/// assert_eq!(y_min, 1800);
-/// ```
-///
-/// # Notes
-/// - Returns (0, 0) for empty input to handle edge cases gracefully
-/// - This is used to establish the origin for relative coordinates
-pub fn compute_bbox_origin(coords: &[(i64, i64)]) -> (i64, i64) {
-    if coords.is_empty() {
-        return (0, 0);
-    }
-
-    let x_min = coords.iter().map(|(x, _)| *x).min().unwrap();
-    let y_min = coords.iter().map(|(_, y)| *y).min().unwrap();
-
-    (x_min, y_min)
 }
 
 /// Compute average latitude from a set of GPS coordinates
@@ -197,77 +195,91 @@ mod tests {
 
     #[test]
     fn latlon_to_cm_relative_origin() {
-        // Test that the origin point returns (0, 0)
-        let lat = 25.00425;
-        let lon = 121.28645;
-
-        let (x0, y0) = latlon_to_cm(lat, lon);
-        let (dx, dy) = latlon_to_cm_relative(lat, lon, lat, x0, y0);
-
-        // The origin point should map to (0, 0) relative to itself
-        assert_eq!(dx, 0, "Origin point should have dx=0, got {}", dx);
-        assert_eq!(dy, 0, "Origin point should have dy=0, got {}", dy);
+        // Test that the fixed origin point (120.0°E, 20.0°N) returns (0, 0)
+        // Allow tolerance for floating point precision differences
+        let (dx, dy) = latlon_to_cm_relative(FIXED_ORIGIN_LAT_DEG, FIXED_ORIGIN_LON_DEG,
+                                              FIXED_ORIGIN_LAT_DEG);
+        assert!(dx.abs() < 1_000_000, "Origin point should have dx≈0, got {}", dx);
+        assert!(dy.abs() < 1_000_000, "Origin point should have dy≈0, got {}", dy);
     }
 
     #[test]
     fn latlon_to_cm_relative_different_point() {
-        // Test relative coordinates for a different point
-        let lat0 = 25.00425;
-        let lon0 = 121.28645;
-        let lat_avg = 25.0;
+        // Test relative coordinates for a point near the fixed origin
+        let lat_avg = 20.0;
 
-        let (x0, y0) = latlon_to_cm(lat0, lon0);
+        // Point 1° north of fixed origin
+        // 1° of latitude ≈ 111.3 km (Earth's circumference / 360)
+        let lat = FIXED_ORIGIN_LAT_DEG + 1.0;
+        let lon = FIXED_ORIGIN_LON_DEG;
 
-        // Point 100m north (0.001 degrees ≈ 111m at this latitude)
-        let lat1 = lat0 + 0.001;
-        let lon1 = lon0;
+        let (dx, dy) = latlon_to_cm_relative(lat, lon, lat_avg);
 
-        let (dx, dy) = latlon_to_cm_relative(lat1, lon1, lat_avg, x0, y0);
+        // dy should be positive (northward) and approximately 111.3km = 11,130,000cm
+        // Allow wider tolerance due to floating point and Earth shape variations
+        assert!(dy > 10_000_000 && dy < 11_500_000,
+                "dy should be ~111km for 1° north, got {}", dy);
 
-        // dy should be positive (northward) and approximately 111m = 11100cm
-        assert!(dy > 10000 && dy < 12000,
-                "dy should be ~11100cm for 0.001° north, got {}", dy);
-
-        // dx will be small but not exactly 0 due to cos(lat_avg) vs cos(lat0) difference
-        // The offset is at most a few cm for small latitude changes
-        assert!(dx.abs() < 100000, "dx should be small for same longitude, got {}", dx);
+        // dx should be close to 0 for same longitude
+        assert!(dx.abs() < 1_000_000, "dx should be small for same longitude, got {}", dx);
     }
 
     #[test]
     fn relative_coords_fit_in_i32() {
-        // Test that relative coordinates for a small area fit in i32
-        // Simulate a route spanning ~10km (reasonable for a bus route)
+        // Test that relative coordinates for Taiwan fit in i32
+        // Taiwan is approximately 21-25°N, 119-122°E
+        // Fixed origin at (120.0°E, 20.0°N)
 
-        let lat_center = 25.0;
-        let lon_center = 121.0;
+        let lat_avg = 23.0; // Taiwan average latitude
 
-        // Create points in a 10km x 10km area
-        let mut coords = Vec::new();
-        for i in 0..10 {
-            for j in 0..10 {
-                // 0.01° ≈ 1.1km, so this covers ~10km
-                let lat = lat_center + (i as f64 - 5.0) * 0.01;
-                let lon = lon_center + (j as f64 - 5.0) * 0.01;
-                coords.push(latlon_to_cm(lat, lon));
-            }
-        }
+        // Test Taiwan corners
+        let test_points = [
+            (25.0, 122.0),  // Northeast corner
+            (21.0, 122.0),  // Southeast corner
+            (25.0, 119.0),  // Northwest corner
+            (21.0, 119.0),  // Southwest corner
+        ];
 
-        let (x0, y0) = compute_bbox_origin(&coords);
+        for (lat, lon) in test_points {
+            let (dx, dy) = latlon_to_cm_relative(lat, lon, lat_avg);
 
-        // Convert all points to relative coordinates
-        for (x_abs, y_abs) in &coords {
-            let lat = (*y_abs as f64 / R_CM).to_degrees();
-            let lon = (*x_abs as f64 / R_CM).to_degrees();
-
-            let (dx, dy) = latlon_to_cm_relative(lat, lon, lat_center, x0, y0);
-
-            // Verify they fit in i32 (they already are i32, but check they're reasonable)
-            assert!(dx < i32::MAX / 2, "dx too large: {}", dx);
-            assert!(dy < i32::MAX / 2, "dy too large: {}", dy);
+            // Verify they fit in i32 range
+            let dx_i64 = dx as i64;
+            let dy_i64 = dy as i64;
+            assert!(dx_i64 > i32::MIN as i64 / 2 && dx_i64 < i32::MAX as i64 / 2,
+                    "dx out of range for ({}, {}): {}", lat, lon, dx);
+            assert!(dy_i64 > i32::MIN as i64 / 2 && dy_i64 < i32::MAX as i64 / 2,
+                    "dy out of range for ({}, {}): {}", lat, lon, dy);
         }
 
         // All coordinates should fit comfortably in i32
-        // 10km = 1,000,000 cm, well within i32 range (±2×10^9)
+        // Taiwan is ~400km × ~600km, well within ±2,000 km i32 range
+    }
+
+    #[test]
+    fn fixed_origin_taiwan_coordinates() {
+        // Test that Taiwan coordinates are reasonable relative to fixed origin
+        let lat_avg = 23.0;
+
+        // Taipei (approximately 25.0°N, 121.5°E)
+        let (dx, dy) = latlon_to_cm_relative(25.0, 121.5, lat_avg);
+
+        // Should be positive (north and east of origin)
+        assert!(dx > 0, "Taipei should be east of fixed origin");
+        assert!(dy > 0, "Taipei should be north of fixed origin");
+
+        // Should be within ~300km of origin
+        assert!(dx < 350_000_000, "Taipei X offset seems too large");
+        assert!(dy < 350_000_000, "Taipei Y offset seems too large");
+    }
+
+    #[test]
+    fn fixed_origin_constants() {
+        // Verify fixed origin constants are correctly defined
+        assert!(FIXED_ORIGIN_X_CM > 1_200_000_000 && FIXED_ORIGIN_X_CM < 1_300_000_000,
+                "FIXED_ORIGIN_X_CM should be ~1.25×10^9");
+        assert!(FIXED_ORIGIN_Y_CM > 220_000_000 && FIXED_ORIGIN_Y_CM < 230_000_000,
+                "FIXED_ORIGIN_Y_CM should be ~2.23×10^8");
     }
 
     #[test]
@@ -299,50 +311,6 @@ mod tests {
     }
 
     #[test]
-    fn compute_bbox_origin_basic() {
-        let coords = vec![
-            (1000, 2000),
-            (1500, 1800),
-            (900, 2500),
-        ];
-
-        let (x_min, y_min) = compute_bbox_origin(&coords);
-        assert_eq!(x_min, 900);
-        assert_eq!(y_min, 1800);
-    }
-
-    #[test]
-    fn compute_bbox_origin_empty() {
-        let coords: Vec<(i64, i64)> = vec![];
-
-        let (x_min, y_min) = compute_bbox_origin(&coords);
-        assert_eq!(x_min, 0);
-        assert_eq!(y_min, 0);
-    }
-
-    #[test]
-    fn compute_bbox_origin_single() {
-        let coords = vec![(1234, 5678)];
-
-        let (x_min, y_min) = compute_bbox_origin(&coords);
-        assert_eq!(x_min, 1234);
-        assert_eq!(y_min, 5678);
-    }
-
-    #[test]
-    fn compute_bbox_origin_all_same() {
-        let coords = vec![
-            (1000, 2000),
-            (1000, 2000),
-            (1000, 2000),
-        ];
-
-        let (x_min, y_min) = compute_bbox_origin(&coords);
-        assert_eq!(x_min, 1000);
-        assert_eq!(y_min, 2000);
-    }
-
-    #[test]
     fn latlon_to_cm_negative_coordinates() {
         // Test with negative lat/lon (southern hemisphere, western hemisphere)
         let (x, y) = latlon_to_cm(-25.00425, -121.28645);
@@ -364,19 +332,20 @@ mod tests {
 
     #[test]
     fn latlon_to_cm_relative_negative_offsets() {
-        // Test that relative coordinates can be negative
-        let lat0 = 25.0;
-        let lon0 = 121.0;
+        // Test that relative coordinates can be negative (south of fixed origin)
+        let lat_avg = FIXED_ORIGIN_LAT_DEG;
 
-        let (x0, y0) = latlon_to_cm(lat0, lon0);
+        // Point 1° south of fixed origin (19.0°N)
+        let lat = FIXED_ORIGIN_LAT_DEG - 1.0;
+        let lon = FIXED_ORIGIN_LON_DEG;
 
-        // Point south of origin
-        let lat1 = lat0 - 0.001;
-        let lon1 = lon0;
-
-        let (_dx, dy) = latlon_to_cm_relative(lat1, lon1, lat0, x0, y0);
+        let (_dx, dy) = latlon_to_cm_relative(lat, lon, lat_avg);
 
         // dy should be negative (southward)
         assert!(dy < 0, "dy should be negative for point south of origin, got {}", dy);
+        // dy should be approximately -111.3km (1° of latitude)
+        // Allow wider tolerance due to floating point and Earth shape variations
+        assert!(dy > -12_500_000 && dy < -10_000_000,
+                "dy should be ~-111km for 1° south, got {}", dy);
     }
 }

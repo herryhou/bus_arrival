@@ -221,27 +221,36 @@ pub struct Stop {
 /// ```
 ///
 /// # Purpose
-/// Defines the origin (0, 0) point for a relative coordinate system.
-/// All absolute GPS coordinates can be converted to relative coordinates
-/// by subtracting this origin.
+/// Defines the FIXED origin (0, 0) point for a relative coordinate system.
+/// All routes use the same origin at (120.0°E, 20.0°N) to ensure:
+/// - Unified coordinate system across all routes
+/// - Simpler implementation (no bbox computation needed)
+/// - Safe from i32 overflow for Taiwan routes
+///
+/// # Fixed Origin Values
+/// - `x0_cm`: 120.0°E = 1,253,868,624 cm (~12,539 km from prime meridian at 20°N)
+/// - `y0_cm`: 20.0°N = 223,387,273 cm (~2,234 km from equator)
 ///
 /// # Use Cases
-/// - **Bounding box optimization**: Convert coordinates to small values
-///   within a bounded region for more efficient distance calculations
 /// - **Coordinate compression**: Reduce magnitude of coordinate values
 ///   while maintaining precision
-/// - **Multi-grid support**: Different grids can have different origins
+/// - **Overflow prevention**: Taiwan coordinates fit within ±2,000 km
+/// - **Cross-route consistency**: All routes share same reference point
 ///
 /// # Field Descriptions
-/// - `x0_cm`: X coordinate of grid origin (cm)
-/// - `y0_cm`: Y coordinate of grid origin (cm)
+/// - `x0_cm`: Fixed origin X at 120.0°E (cm)
+/// - `y0_cm`: Fixed origin Y at 20.0°N (cm)
 ///
 /// # Example
 /// ```rust
 /// # use shared::{GridOrigin, DistCm};
-/// let origin = GridOrigin { x0_cm: 100000, y0_cm: 200000 };
-/// let absolute_x: DistCm = 100500; // cm
-/// let relative_x = absolute_x - origin.x0_cm; // 500 cm
+/// // Fixed origin - same for all routes
+/// let origin = GridOrigin {
+///     x0_cm: 1_258_772_027,  // 120.0°E
+///     y0_cm:   222_639_208,  // 20.0°N
+/// };
+/// let absolute_x: DistCm = 1_258_872_027; // ~120.001°E in cm
+/// let relative_x = absolute_x - origin.x0_cm; // 100,000 cm (1 km)
 /// ```
 ///
 /// # Embedded Compatibility
@@ -250,10 +259,10 @@ pub struct Stop {
 /// - Suitable for direct serialization/deserialization
 #[repr(C)]
 pub struct GridOrigin {
-    /// X coordinate of grid origin (cm)
+    /// Fixed origin X: 120.0°E in centimeters
     pub x0_cm: DistCm,
 
-    /// Y coordinate of grid origin (cm)
+    /// Fixed origin Y: 20.0°N in centimeters
     pub y0_cm: DistCm,
 }
 
