@@ -8,6 +8,7 @@ use std::process;
 
 mod coord;
 mod input;
+mod linearize;
 mod simplify;
 
 fn main() {
