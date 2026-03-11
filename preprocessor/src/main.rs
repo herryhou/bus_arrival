@@ -1,0 +1,42 @@
+// Offline preprocessor for GPS bus arrival detection system
+//
+// Phase 1: Route simplification, stop projection, and binary packing
+
+use std::env;
+use std::process;
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    // Require exactly 3 arguments: route.json, stops.json, route_data.bin
+    if args.len() != 4 {
+        eprintln!("Usage: preprocessor <route.json> <stops.json> <route_data.bin>");
+        eprintln!();
+        eprintln!("Arguments:");
+        eprintln!("  route.json     - Input file containing route GPS coordinates");
+        eprintln!("  stops.json     - Input file containing bus stop information");
+        eprintln!("  route_data.bin - Output file for processed binary data");
+        eprintln!();
+        eprintln!("Example:");
+        eprintln!("  preprocessor route.json stops.json route_data.bin");
+        process::exit(1);
+    }
+
+    let route_json_path = &args[1];
+    let stops_json_path = &args[2];
+    let output_bin_path = &args[3];
+
+    // Print Phase 1 header
+    println!("========================================");
+    println!("Bus Arrival Preprocessor - Phase 1");
+    println!("========================================");
+    println!();
+    println!("Input files:");
+    println!("  Route JSON: {}", route_json_path);
+    println!("  Stops JSON: {}", stops_json_path);
+    println!();
+    println!("Output file:");
+    println!("  Binary data: {}", output_bin_path);
+    println!();
+    println!("TODO: Implement pipeline");
+}
