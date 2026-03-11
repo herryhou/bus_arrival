@@ -10,6 +10,7 @@ pub mod coord;
 pub mod input;
 pub mod linearize;
 pub mod simplify;
+pub mod stops;
 
 pub fn hello() -> &'static str {
     "Preprocessor placeholder"

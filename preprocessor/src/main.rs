@@ -10,6 +10,7 @@ mod coord;
 mod input;
 mod linearize;
 mod simplify;
+mod stops;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
