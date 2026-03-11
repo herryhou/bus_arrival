@@ -8,6 +8,7 @@ use std::process;
 
 mod coord;
 mod input;
+mod simplify;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
