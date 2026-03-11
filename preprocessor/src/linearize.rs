@@ -302,6 +302,87 @@ pub fn linearize_route(nodes_cm: &[(i64, i64)]) -> Vec<RouteNode> {
     route
 }
 
+/// Build route graph with binary packing format
+///
+/// Creates a simplified route node structure for binary serialization.
+/// This includes only the essential fields needed for the embedded device.
+///
+/// # Arguments
+/// * `points_grid` - Simplified route points in grid-relative coordinates
+/// * `route_points` - Original route points with way_id and node_id
+/// * `lat_avg` - Average latitude for coordinate conversion
+///
+/// # Returns
+/// Vector of RouteNode structs ready for binary packing
+pub fn build_route_graph(
+    points_grid: &[(i64, i64)],
+    route_points: &[crate::input::RoutePoint],
+    _lat_avg: f64,
+) -> Vec<crate::route::RouteNode> {
+    if points_grid.is_empty() {
+        return vec![];
+    }
+
+    let n = points_grid.len();
+    let mut route_nodes = Vec::with_capacity(n);
+
+    // Build route nodes with linked structure
+    for i in 0..n {
+        let (x_cm, y_cm) = points_grid[i];
+
+        // Find original route point to get way_id and node_id
+        // Use the closest original point
+        let mut closest_point_idx = 0;
+        let mut min_dist = f64::MAX;
+
+        for (j, rp) in route_points.iter().enumerate() {
+            let (rp_x, rp_y) = crate::coord::latlon_to_cm(rp.lat, rp.lon);
+            let dist = ((rp_x - x_cm) as f64).hypot((rp_y - y_cm) as f64);
+            if dist < min_dist {
+                min_dist = dist;
+                closest_point_idx = j;
+            }
+        }
+
+        let closest_point = &route_points[closest_point_idx];
+        let way_id = closest_point.way_id;
+        let node_id = closest_point.node_id;
+
+        let lat_cm = x_cm as i32;
+        let lon_cm = y_cm as i32;
+
+        let prev_index = if i > 0 { (i - 1) as u32 } else { u32::MAX };
+        let next_index = if i < n - 1 { (i + 1) as u32 } else { u32::MAX };
+
+        // Compute distance to previous node
+        let dist_to_prev = if i > 0 {
+            let (prev_x, prev_y) = points_grid[i - 1];
+            let dx = x_cm - prev_x;
+            let dy = y_cm - prev_y;
+            let dist = ((dx * dx + dy * dy) as f64).sqrt() as u32;
+            if dist > u16::MAX as u32 {
+                u16::MAX
+            } else {
+                dist as u16
+            }
+        } else {
+            0
+        };
+
+        route_nodes.push(crate::route::RouteNode {
+            way_id,
+            node_id,
+            lat_cm,
+            lon_cm,
+            prev_index,
+            next_index,
+            dist_to_prev,
+        });
+    }
+
+    route_nodes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

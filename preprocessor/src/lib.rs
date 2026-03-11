@@ -9,6 +9,8 @@
 pub mod coord;
 pub mod input;
 pub mod linearize;
+pub mod pack;
+pub mod route;
 pub mod simplify;
 pub mod stops;
 

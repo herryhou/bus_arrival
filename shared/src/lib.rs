@@ -227,9 +227,9 @@ pub struct Stop {
 /// - Simpler implementation (no bbox computation needed)
 /// - Safe from i32 overflow for Taiwan routes
 ///
-/// # Fixed Origin Values
+/// # Fixed Origin Values (computed at compile time)
 /// - `x0_cm`: 120.0°E = 1,253,868,624 cm (~12,539 km from prime meridian at 20°N)
-/// - `y0_cm`: 20.0°N = 223,387,273 cm (~2,234 km from equator)
+/// - `y0_cm`: 20.0°N = 222,639,208 cm (~2,226 km from equator)
 ///
 /// # Use Cases
 /// - **Coordinate compression**: Reduce magnitude of coordinate values

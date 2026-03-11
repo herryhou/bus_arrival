@@ -19,18 +19,37 @@ pub const FIXED_ORIGIN_LON_DEG: f64 = 120.0;
 /// All routes use this fixed origin to ensure consistent coordinate system.
 pub const FIXED_ORIGIN_LAT_DEG: f64 = 20.0;
 
+/// Compute cosine using a small Taylor approximation (const-friendly)
+const fn cos_deg(deg: f64) -> f64 {
+    let rad = deg * std::f64::consts::PI / 180.0;
+    // Small-angle approximation is sufficient for our precision needs
+    // cos(x) ≈ 1 - x²/2 for small x, but we need better accuracy
+    // Use Taylor series around 0: cos(x) = 1 - x²/2! + x⁴/4! - x⁶/6!
+    let x2 = rad * rad;
+    let x4 = x2 * x2;
+    let x6 = x2 * x4;
+    1.0 - x2 / 2.0 + x4 / 24.0 - x6 / 720.0
+}
+
 /// Fixed origin X coordinate in centimeters
 ///
-/// Pre-computed from: lon=120.0°, using cos(20.0°) for latitude correction
-/// x = R × lon_rad × cos(lat_rad) = 637,100,000 × (120×π/180) × cos(20×π/180)
-/// The constant matches the exact floating point calculation below
-pub const FIXED_ORIGIN_X_CM: i64 = 1_253_868_624;
+/// Computed at compile time: R × lon_rad × cos(lat_rad)
+/// where lon=120.0°, lat=20.0°
+pub const FIXED_ORIGIN_X_CM: i64 = {
+    let lon_rad = FIXED_ORIGIN_LON_DEG * std::f64::consts::PI / 180.0;
+    let x_cm = R_CM * lon_rad * cos_deg(FIXED_ORIGIN_LAT_DEG);
+    x_cm as i64
+};
 
 /// Fixed origin Y coordinate in centimeters
 ///
-/// Pre-computed from: lat=20.0°
-/// y = R × lat_rad = 637,100,000 × (20×π/180)
-pub const FIXED_ORIGIN_Y_CM: i64 = 223_387_273;
+/// Computed at compile time: R × lat_rad
+/// where lat=20.0°
+pub const FIXED_ORIGIN_Y_CM: i64 = {
+    let lat_rad = FIXED_ORIGIN_LAT_DEG * std::f64::consts::PI / 180.0;
+    let y_cm = R_CM * lat_rad;
+    y_cm as i64
+};
 
 /// Distance in centimeters (relative coordinate)
 ///
@@ -116,7 +135,7 @@ pub fn latlon_to_cm(lat: f64, lon: f64) -> (i64, i64) {
 pub fn latlon_to_cm_relative(
     lat: f64,
     lon: f64,
-    _lat_avg: f64,  // Kept for API compatibility, but not used for x scaling
+    _lat_avg: f64, // Kept for API compatibility, but not used for x scaling
 ) -> (DistCm, DistCm) {
     let lat_rad = lat.to_radians();
     let lon_rad = lon.to_radians();
@@ -181,26 +200,51 @@ mod tests {
 
         // X and Y should be on order of 10^8 to 10^9 cm
         // (degrees * 111 km/degree * 100000 cm/km)
-        assert!(x > 100_000_000, "X coordinate should be > 10^8 cm, got {}", x);
-        assert!(y > 100_000_000, "Y coordinate should be > 10^8 cm, got {}", y);
+        assert!(
+            x > 100_000_000,
+            "X coordinate should be > 10^8 cm, got {}",
+            x
+        );
+        assert!(
+            y > 100_000_000,
+            "Y coordinate should be > 10^8 cm, got {}",
+            y
+        );
 
         // At lon=121 with cos(25°)≈0.9, x ≈ R * 121° * π/180 * 0.9 ≈ 1.22×10^9 cm
-        assert!(x > 1_200_000_000 && x < 1_300_000_000,
-                "X coordinate out of expected range: {}", x);
+        assert!(
+            x > 1_200_000_000 && x < 1_300_000_000,
+            "X coordinate out of expected range: {}",
+            x
+        );
 
         // At lat=25, y ≈ R * 25° * π/180 ≈ 2.78×10^8 cm
-        assert!(y > 270_000_000 && y < 290_000_000,
-                "Y coordinate out of expected range: {}", y);
+        assert!(
+            y > 270_000_000 && y < 290_000_000,
+            "Y coordinate out of expected range: {}",
+            y
+        );
     }
 
     #[test]
     fn latlon_to_cm_relative_origin() {
         // Test that the fixed origin point (120.0°E, 20.0°N) returns (0, 0)
         // Allow tolerance for floating point precision differences
-        let (dx, dy) = latlon_to_cm_relative(FIXED_ORIGIN_LAT_DEG, FIXED_ORIGIN_LON_DEG,
-                                              FIXED_ORIGIN_LAT_DEG);
-        assert!(dx.abs() < 1_000_000, "Origin point should have dx≈0, got {}", dx);
-        assert!(dy.abs() < 1_000_000, "Origin point should have dy≈0, got {}", dy);
+        let (dx, dy) = latlon_to_cm_relative(
+            FIXED_ORIGIN_LAT_DEG,
+            FIXED_ORIGIN_LON_DEG,
+            FIXED_ORIGIN_LAT_DEG,
+        );
+        assert!(
+            dx.abs() < 1_000_000,
+            "Origin point should have dx≈0, got {}",
+            dx
+        );
+        assert!(
+            dy.abs() < 1_000_000,
+            "Origin point should have dy≈0, got {}",
+            dy
+        );
     }
 
     #[test]
@@ -217,11 +261,18 @@ mod tests {
 
         // dy should be positive (northward) and approximately 111.3km = 11,130,000cm
         // Allow wider tolerance due to floating point and Earth shape variations
-        assert!(dy > 10_000_000 && dy < 11_500_000,
-                "dy should be ~111km for 1° north, got {}", dy);
+        assert!(
+            dy > 10_000_000 && dy < 11_500_000,
+            "dy should be ~111km for 1° north, got {}",
+            dy
+        );
 
         // dx should be close to 0 for same longitude
-        assert!(dx.abs() < 1_000_000, "dx should be small for same longitude, got {}", dx);
+        assert!(
+            dx.abs() < 1_000_000,
+            "dx should be small for same longitude, got {}",
+            dx
+        );
     }
 
     #[test]
@@ -234,10 +285,10 @@ mod tests {
 
         // Test Taiwan corners
         let test_points = [
-            (25.0, 122.0),  // Northeast corner
-            (21.0, 122.0),  // Southeast corner
-            (25.0, 119.0),  // Northwest corner
-            (21.0, 119.0),  // Southwest corner
+            (25.0, 122.0), // Northeast corner
+            (21.0, 122.0), // Southeast corner
+            (25.0, 119.0), // Northwest corner
+            (21.0, 119.0), // Southwest corner
         ];
 
         for (lat, lon) in test_points {
@@ -246,10 +297,20 @@ mod tests {
             // Verify they fit in i32 range
             let dx_i64 = dx as i64;
             let dy_i64 = dy as i64;
-            assert!(dx_i64 > i32::MIN as i64 / 2 && dx_i64 < i32::MAX as i64 / 2,
-                    "dx out of range for ({}, {}): {}", lat, lon, dx);
-            assert!(dy_i64 > i32::MIN as i64 / 2 && dy_i64 < i32::MAX as i64 / 2,
-                    "dy out of range for ({}, {}): {}", lat, lon, dy);
+            assert!(
+                dx_i64 > i32::MIN as i64 / 2 && dx_i64 < i32::MAX as i64 / 2,
+                "dx out of range for ({}, {}): {}",
+                lat,
+                lon,
+                dx
+            );
+            assert!(
+                dy_i64 > i32::MIN as i64 / 2 && dy_i64 < i32::MAX as i64 / 2,
+                "dy out of range for ({}, {}): {}",
+                lat,
+                lon,
+                dy
+            );
         }
 
         // All coordinates should fit comfortably in i32
@@ -276,19 +337,19 @@ mod tests {
     #[test]
     fn fixed_origin_constants() {
         // Verify fixed origin constants are correctly defined
-        assert!(FIXED_ORIGIN_X_CM > 1_200_000_000 && FIXED_ORIGIN_X_CM < 1_300_000_000,
-                "FIXED_ORIGIN_X_CM should be ~1.25×10^9");
-        assert!(FIXED_ORIGIN_Y_CM > 220_000_000 && FIXED_ORIGIN_Y_CM < 230_000_000,
-                "FIXED_ORIGIN_Y_CM should be ~2.23×10^8");
+        assert!(
+            FIXED_ORIGIN_X_CM > 1_200_000_000 && FIXED_ORIGIN_X_CM < 1_300_000_000,
+            "FIXED_ORIGIN_X_CM should be ~1.25×10^9"
+        );
+        assert!(
+            FIXED_ORIGIN_Y_CM > 220_000_000 && FIXED_ORIGIN_Y_CM < 230_000_000,
+            "FIXED_ORIGIN_Y_CM should be ~2.23×10^8"
+        );
     }
 
     #[test]
     fn compute_lat_avg_basic() {
-        let points = vec![
-            (25.0, 121.0),
-            (26.0, 122.0),
-            (25.5, 121.5),
-        ];
+        let points = vec![(25.0, 121.0), (26.0, 122.0), (25.5, 121.5)];
 
         let avg = compute_lat_avg(&points);
         assert_eq!(avg, 25.5);
@@ -342,10 +403,17 @@ mod tests {
         let (_dx, dy) = latlon_to_cm_relative(lat, lon, lat_avg);
 
         // dy should be negative (southward)
-        assert!(dy < 0, "dy should be negative for point south of origin, got {}", dy);
+        assert!(
+            dy < 0,
+            "dy should be negative for point south of origin, got {}",
+            dy
+        );
         // dy should be approximately -111.3km (1° of latitude)
         // Allow wider tolerance due to floating point and Earth shape variations
-        assert!(dy > -12_500_000 && dy < -10_000_000,
-                "dy should be ~-111km for 1° south, got {}", dy);
+        assert!(
+            dy > -12_500_000 && dy < -10_000_000,
+            "dy should be ~-111km for 1° south, got {}",
+            dy
+        );
     }
 }

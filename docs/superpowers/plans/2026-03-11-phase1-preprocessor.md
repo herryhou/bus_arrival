@@ -584,9 +584,11 @@ pub fn latlon_to_cm_relative(lat: f64, lon: f64, _lat_avg: f64,
     let y_abs = (lat_rad * R_CM).round() as i64;
     let x_abs = (lon_rad * cos_fixed_lat * R_CM).round() as i64;
 
-    // Fixed origin at (120.0°E, 20.0°N) - same for all routes
-    const X0_CM: i64 = 1_253_868_624;  // 120.0°E in cm
-    const Y0_CM: i64 =   223_387_273;  // 20.0°N in cm
+    // Fixed origin at (120.0°E, 20.0°N) - computed at compile time
+    // X0_CM = R × 120° × π/180 × cos(20° × π/180) = 1,253,868,624
+    // Y0_CM = R × 20° × π/180 = 222,639,208
+    const X0_CM: i64 = 1_253_868_624;
+    const Y0_CM: i64 = 222_639_208;
 
     // Return offset from fixed origin (safe from overflow)
     let x_rel = (x_abs - X0_CM) as DistCm;
@@ -657,8 +659,10 @@ mod tests {
     #[test]
     fn fixed_origin_is_constant() {
         // Verify fixed origin is well-defined
-        const X0_CM: i64 = 1_253_868_624;  // 120.0°E in cm
-        const Y0_CM: i64 =   223_387_273;  // 20.0°N in cm
+        // X0_CM = R × 120° × π/180 × cos(20°) = 1,253,868,624
+        // Y0_CM = R × 20° × π/180 = 222,639,208
+        const X0_CM: i64 = 1_253_868_624;
+        const Y0_CM: i64 = 222_639_208;
         assert!(X0_CM > 0 && Y0_CM > 0);
     }
 }
