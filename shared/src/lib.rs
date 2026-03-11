@@ -162,9 +162,106 @@ pub struct RouteNode {
     pub _pad: i16,
 }
 
+/// Bus stop with corridor boundaries for arrival detection.
+///
+/// # Memory Layout (12 bytes total)
+///
+/// ```text
+/// Offset  Field               Type    Size
+/// ------  ------------------  ----    ----
+/// 0       progress_cm        i32     4
+/// 4       corridor_start_cm  i32     4
+/// 8       corridor_end_cm    i32     4
+/// ------                              ----
+/// TOTAL                              12
+/// ```
+///
+/// # Corridor Dimensions
+/// - **L_pre = 80m**: Corridor extends 8000 cm behind the stop
+/// - **L_post = 40m**: Corridor extends 4000 cm ahead of the stop
+/// - Total corridor length: 120m (12000 cm)
+///
+/// # Field Descriptions
+/// - `progress_cm`: Distance from route origin to stop position (cm)
+/// - `corridor_start_cm`: Distance to start of detection corridor (cm)
+/// - `corridor_end_cm`: Distance to end of detection corridor (cm)
+///
+/// # Invariants
+/// - `corridor_start_cm < progress_cm < corridor_end_cm`
+/// - The stop is positioned within the corridor, not at the center
+/// - Typical: start = progress - 8000, end = progress + 4000
+///
+/// # Embedded Compatibility
+/// - `#[repr(C)]` ensures stable layout across platforms
+/// - No padding required (3× i32 = 12 bytes, naturally aligned)
+/// - Suitable for direct serialization/deserialization
+#[repr(C)]
+pub struct Stop {
+    /// Distance from route origin to stop (cm)
+    pub progress_cm: DistCm,
+
+    /// Start of detection corridor (cm, typically progress - 8000)
+    pub corridor_start_cm: DistCm,
+
+    /// End of detection corridor (cm, typically progress + 4000)
+    pub corridor_end_cm: DistCm,
+}
+
+/// Grid origin for relative coordinate system.
+///
+/// # Memory Layout (8 bytes total)
+///
+/// ```text
+/// Offset  Field    Type    Size
+/// ------  -------  ----    ----
+/// 0       x0_cm    i32     4
+/// 4       y0_cm    i32     4
+/// ------                  ----
+/// TOTAL                  8
+/// ```
+///
+/// # Purpose
+/// Defines the origin (0, 0) point for a relative coordinate system.
+/// All absolute GPS coordinates can be converted to relative coordinates
+/// by subtracting this origin.
+///
+/// # Use Cases
+/// - **Bounding box optimization**: Convert coordinates to small values
+///   within a bounded region for more efficient distance calculations
+/// - **Coordinate compression**: Reduce magnitude of coordinate values
+///   while maintaining precision
+/// - **Multi-grid support**: Different grids can have different origins
+///
+/// # Field Descriptions
+/// - `x0_cm`: X coordinate of grid origin (cm)
+/// - `y0_cm`: Y coordinate of grid origin (cm)
+///
+/// # Example
+/// ```rust
+/// # use shared::{GridOrigin, DistCm};
+/// let origin = GridOrigin { x0_cm: 100000, y0_cm: 200000 };
+/// let absolute_x: DistCm = 100500; // cm
+/// let relative_x = absolute_x - origin.x0_cm; // 500 cm
+/// ```
+///
+/// # Embedded Compatibility
+/// - `#[repr(C)]` ensures stable layout across platforms
+/// - No padding required (2× i32 = 8 bytes, naturally aligned)
+/// - Suitable for direct serialization/deserialization
+#[repr(C)]
+pub struct GridOrigin {
+    /// X coordinate of grid origin (cm)
+    pub x0_cm: DistCm,
+
+    /// Y coordinate of grid origin (cm)
+    pub y0_cm: DistCm,
+}
+
 const _: () = {
-    // Compile-time assertion: RouteNode must be exactly 52 bytes
+    // Compile-time assertions for struct sizes
     let _ = [(); 52 - std::mem::size_of::<RouteNode>()];
+    let _ = [(); 12 - std::mem::size_of::<Stop>()];
+    let _ = [(); 8 - std::mem::size_of::<GridOrigin>()];
 };
 
 #[cfg(test)]
@@ -271,5 +368,113 @@ mod tests {
         assert_eq!(len2, 10000);
         assert_eq!(x, 123456);
         assert_eq!(heading, 4500);
+    }
+
+    #[test]
+    fn stop_size() {
+        // Verify Stop is exactly 12 bytes
+        assert_eq!(
+            std::mem::size_of::<Stop>(),
+            12,
+            "Stop should be exactly 12 bytes"
+        );
+        // Natural alignment for i32 fields
+        assert_eq!(
+            std::mem::align_of::<Stop>(),
+            4,
+            "Stop should have 4-byte alignment"
+        );
+    }
+
+    #[test]
+    fn stop_field_offsets() {
+        // Verify field offsets match the documented layout
+        use std::mem::offset_of;
+
+        assert_eq!(
+            offset_of!(Stop, progress_cm),
+            0,
+            "progress_cm should be at offset 0"
+        );
+        assert_eq!(
+            offset_of!(Stop, corridor_start_cm),
+            4,
+            "corridor_start_cm should be at offset 4"
+        );
+        assert_eq!(
+            offset_of!(Stop, corridor_end_cm),
+            8,
+            "corridor_end_cm should be at offset 8"
+        );
+    }
+
+    #[test]
+    fn stop_corridor_monotonic() {
+        // Verify corridor invariant: start < progress < end
+        let stop = Stop {
+            progress_cm: 10000,
+            corridor_start_cm: 2000,  // 10000 - 8000
+            corridor_end_cm: 14000,   // 10000 + 4000
+        };
+
+        assert!(
+            stop.corridor_start_cm < stop.progress_cm,
+            "corridor_start_cm should be less than progress_cm"
+        );
+        assert!(
+            stop.progress_cm < stop.corridor_end_cm,
+            "progress_cm should be less than corridor_end_cm"
+        );
+    }
+
+    #[test]
+    fn grid_origin_size() {
+        // Verify GridOrigin is exactly 8 bytes
+        assert_eq!(
+            std::mem::size_of::<GridOrigin>(),
+            8,
+            "GridOrigin should be exactly 8 bytes"
+        );
+        // Natural alignment for i32 fields
+        assert_eq!(
+            std::mem::align_of::<GridOrigin>(),
+            4,
+            "GridOrigin should have 4-byte alignment"
+        );
+    }
+
+    #[test]
+    fn grid_origin_field_offsets() {
+        // Verify field offsets match the documented layout
+        use std::mem::offset_of;
+
+        assert_eq!(
+            offset_of!(GridOrigin, x0_cm),
+            0,
+            "x0_cm should be at offset 0"
+        );
+        assert_eq!(
+            offset_of!(GridOrigin, y0_cm),
+            4,
+            "y0_cm should be at offset 4"
+        );
+    }
+
+    #[test]
+    fn grid_origin_relative_coords() {
+        // Verify relative coordinate calculation
+        let origin = GridOrigin {
+            x0_cm: 100000,
+            y0_cm: 200000,
+        };
+
+        let abs_x: DistCm = 100500;
+        let abs_y: DistCm = 200300;
+
+        let rel_x = abs_x - origin.x0_cm;
+        let rel_y = abs_y - origin.y0_cm;
+
+        assert_eq!(rel_x, 500, "relative X should be 500 cm");
+        assert_eq!(rel_y, 300, "relative Y should be 300 cm");
     }
 }
