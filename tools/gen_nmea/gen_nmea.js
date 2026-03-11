@@ -1,32 +1,190 @@
 #!/usr/bin/env node
 /**
- * gen_nmea.js — GPS 公車路線 NMEA 模擬器
- * 為到站偵測 Pipeline 產生測試資料（test.nmea + ground_truth.json）
- * 純 Node.js，無需任何外部套件。
+ * gen_nmea.js — GPS Bus Route NMEA Simulator
+ * Generates test data (test.nmea + ground_truth.json) for arrival detection pipeline
+ * Pure Node.js, no external dependencies.
+ *
+ * AGENT USAGE:
+ *   # Step 1: Discover parameter shapes
+ *   ./gen_nmea.js schema generate
+ *
+ *   # Step 2: Execute with discovered schema
+ *   ./gen_nmea.js generate --json '{"route":"route.json","scenario":"normal"}'
+ *
+ *   # Step 3: Check exit code + parse result
+ *   # exit 0 = ok, exit 1 = validation, exit 2 = execution error
  */
 
 'use strict';
 
-const fs   = require('fs');
+const fs = require('fs');
+
+// ─── JSON Schema for Agent Discovery ──────────────────────────────────────────
+
+const GENERATE_SCHEMA = {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GenerateNMEA",
+  "description": "Generate NMEA sentences and ground truth for bus route simulation",
+  "type": "object",
+  "properties": {
+    "route": {
+      "type": "string",
+      "description": "Path to route JSON file containing route_points and stops",
+      "default": "route.json"
+    },
+    "scenario": {
+      "type": "string",
+      "description": "Simulation scenario preset",
+      "enum": ["normal", "drift", "jump", "outage"],
+      "default": "normal"
+    },
+    "out_nmea": {
+      "type": "string",
+      "description": "Output path for NMEA sentences file",
+      "default": "test.nmea"
+    },
+    "out_gt": {
+      "type": "string",
+      "description": "Output path for ground truth JSON file",
+      "default": "ground_truth.json"
+    }
+  }
+};
+
+const CLI_SCHEMA = {
+  "version": "1.0.0",
+  "name": "gen_nmea",
+  "description": "GPS bus route NMEA simulator for arrival detection testing",
+  "commands": ["schema", "generate", "help"]
+};
+
+// ─── Output Helpers ───────────────────────────────────────────────────────────
+
+let globalFlags = {
+  json: false,
+  nonInteractive: false,
+  dryRun: false,
+  verbose: false,
+  force: false
+};
+
+function output(data) {
+  if (globalFlags.json) {
+    console.log(JSON.stringify(data, null, 2));
+  } else {
+    if (data.status === 'ok') {
+      console.log(`✓ ${data.message || 'Success'}`);
+      if (data.logs) data.logs.forEach(log => console.log(`  ${log}`));
+    } else {
+      console.error(`✗ Error ${data.code}: ${data.message}`);
+      if (data.validation_errors) {
+        data.validation_errors.forEach(e => console.error(`  - ${e}`));
+      }
+    }
+  }
+}
+
+function exitSuccess(data) {
+  output({ status: 'ok', ...data });
+  process.exit(0);
+}
+
+function exitError(code, message, validationErrors = null) {
+  const data = {
+    status: 'error',
+    code: code,
+    message: message
+  };
+  if (validationErrors) data.validation_errors = validationErrors;
+  output(data);
+  process.exit(code);
+}
 
 // ─── CLI 解析 ────────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
   const args = {
-    route:    'route.json',
+    command: 'generate',
+    commandArgs: [],
+    route: 'route.json',
     scenario: 'normal',
-    outNmea:  'test.nmea',
-    outGt:    'ground_truth.json',
+    out_nmea: 'test.nmea',
+    out_gt: 'ground_truth.json',
   };
+  const commands = ['schema', 'generate', 'help'];
+  let commandFound = false;
+
   for (let i = 2; i < argv.length; i++) {
-    switch (argv[i]) {
-      case '--route':    args.route    = argv[++i]; break;
-      case '--scenario': args.scenario = argv[++i]; break;
-      case '--out-nmea': args.outNmea  = argv[++i]; break;
-      case '--out-gt':   args.outGt    = argv[++i]; break;
+    const arg = argv[i];
+
+    // Help is special - always show help and exit
+    if (arg === '--help' || arg === '-h') {
+      args.command = 'help';
+      return args;
+    }
+
+    // Check for global flags first
+    if (arg === '--json') {
+      globalFlags.json = true;
+      continue;
+    }
+    if (arg === '--non-interactive') {
+      globalFlags.nonInteractive = true;
+      continue;
+    }
+    if (arg === '--dry-run') {
+      globalFlags.dryRun = true;
+      continue;
+    }
+    if (arg === '--verbose') {
+      globalFlags.verbose = true;
+      continue;
+    }
+    if (arg === '--force') {
+      globalFlags.force = true;
+      continue;
+    }
+
+    // Check for --json payload
+    if (arg === '--json-payload') {
+      const payload = argv[++i];
+      try {
+        const parsed = JSON.parse(payload);
+        Object.assign(args, parsed);
+      } catch (e) {
+        exitError(1, `Invalid JSON payload: ${e.message}`);
+      }
+      continue;
+    }
+
+    // Check for command (only first command is used, rest go to commandArgs)
+    if (commands.includes(arg)) {
+      if (!commandFound) {
+        args.command = arg;
+        commandFound = true;
+      } else {
+        args.commandArgs.push(arg);
+      }
+      continue;
+    }
+
+    // After a command, collect remaining args for the command
+    if (commandFound) {
+      args.commandArgs.push(arg);
+      continue;
+    }
+
+    // Legacy flag support for backwards compatibility (before any command)
+    switch (arg) {
+      case '--route':
+      case '--scenario':
+      case '--out-nmea':
+      case '--out-gt':
+        const key = arg.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+        args[key === 'outNmea' ? 'out_nmea' : key === 'outGt' ? 'out_gt' : key] = argv[++i];
+        break;
       default:
-        console.error(`未知選項：${argv[i]}`);
-        process.exit(1);
+        exitError(1, `Unknown option: ${arg}`, [`Use --help for usage information`]);
     }
   }
   return args;
@@ -297,43 +455,204 @@ function simulate(route, cfg) {
   return { nmeaLines, groundTruth };
 }
 
+// ─── Commands ─────────────────────────────────────────────────────────────────
+
+function cmdSchema(args) {
+  // Schema command always outputs JSON (agent-friendly)
+  const target = args[0]; // schema subcommand like 'generate'
+
+  if (!target) {
+    console.log(JSON.stringify(CLI_SCHEMA, null, 2));
+    process.exit(0);
+  }
+
+  if (target === 'generate') {
+    console.log(JSON.stringify(GENERATE_SCHEMA, null, 2));
+    process.exit(0);
+  }
+
+  // Error for schema - still JSON
+  console.log(JSON.stringify({
+    status: 'error',
+    code: 1,
+    message: `Unknown command for schema: ${target}`,
+    available_commands: CLI_SCHEMA.commands
+  }, null, 2));
+  process.exit(1);
+}
+
+function cmdHelp() {
+  const helpText = `
+gen_nmea.js — GPS Bus Route NMEA Simulator
+
+USAGE:
+  ./gen_nmea.js <command> [options]
+
+COMMANDS:
+  generate    Generate NMEA sentences and ground truth (default)
+  schema      Display JSON Schema for parameter discovery
+  help        Show this help message
+
+GENERATE OPTIONS:
+  --json-payload '{"route":"path","scenario":"normal"}'    Structured JSON input (recommended for agents)
+  --route <path>                                           Route JSON file (default: route.json)
+  --scenario <name>                                        Scenario: normal, drift, jump, outage (default: normal)
+  --out-nmea <path>                                        NMEA output file (default: test.nmea)
+  --out-gt <path>                                          Ground truth output file (default: ground_truth.json)
+
+GLOBAL FLAGS:
+  --json                    Output structured JSON instead of human-readable text
+  --non-interactive         Fail instead of prompting (currently: no prompts anyway)
+  --dry-run                 Simulate without writing output files
+  --verbose                 Include debug logs in JSON output
+  --force                   Skip confirmation prompts (currently: none)
+
+SCENARIOS:
+  normal    HDOP=3.5, σ=18m, 8 sats, no anomalies
+  drift     HDOP=7.0, σ=35m, 5 sats, urban canyon drift
+  jump      Normal GPS, but with 100m+ position jump at 30% distance
+  outage    GPS signal outage on segments 15-17
+
+AGENT USAGE EXAMPLES:
+  # Step 1: Discover parameter shapes
+  ./gen_nmea.js schema generate
+
+  # Step 2: Execute with discovered schema
+  ./gen_nmea.js generate --json-payload '{"route":"route.json","scenario":"drift"}' --json
+
+  # Step 3: Check exit code + parse result
+  # exit 0 = ok, exit 1 = validation error, exit 2 = execution error
+
+EXIT CODES:
+  0  Success
+  1  Validation error (missing/invalid parameters)
+  2  Execution error (file not found, write failed, etc.)
+  3  (reserved for future auth errors)
+  4  Cancelled by user
+
+EXAMPLES:
+  # Human-readable output (default)
+  ./gen_nmea.js generate --route myroute.json --scenario drift
+
+  # Agent-friendly JSON output
+  ./gen_nmea.js generate --json-payload '{"route":"myroute.json","scenario":"drift"}' --json
+
+  # Dry run simulation
+  ./gen_nmea.js generate --scenario jump --dry-run --json
+`;
+
+  if (globalFlags.json) {
+    exitSuccess({
+      command: 'help',
+      data: { help_text: helpText.trim() },
+      message: 'Help documentation'
+    });
+  } else {
+    console.log(helpText);
+    process.exit(0);
+  }
+}
+
+function cmdGenerate(args) {
+  const logs = [];
+  const startTime = Date.now();
+
+  if (globalFlags.verbose) logs.push('Starting NMEA generation...');
+
+  // Validate scenario
+  const cfg = SCENARIOS[args.scenario];
+  if (!cfg) {
+    exitError(1, `Unknown scenario: ${args.scenario}`,
+      [`Available scenarios: ${Object.keys(SCENARIOS).join(', ')}`]);
+  }
+
+  // Load route file
+  let route;
+  try {
+    const routeContent = fs.readFileSync(args.route, 'utf8');
+    route = JSON.parse(routeContent);
+    if (globalFlags.verbose) logs.push(`Loaded route from ${args.route}`);
+  } catch (e) {
+    exitError(2, `Cannot read route file "${args.route}": ${e.message}`);
+  }
+
+  // Validate route structure
+  const validationErrors = [];
+  if (!Array.isArray(route.route_points) || route.route_points.length < 2) {
+    validationErrors.push('route_points must be an array with at least 2 points');
+  }
+  if (!Array.isArray(route.stops)) {
+    validationErrors.push('Missing required field: stops');
+  }
+  if (validationErrors.length > 0) {
+    exitError(1, 'Route validation failed', validationErrors);
+  }
+
+  if (globalFlags.verbose) {
+    logs.push(`Scenario: ${args.scenario}`);
+    logs.push(`Route points: ${route.route_points.length}`);
+    logs.push(`Stops: ${route.stops.length}`);
+  }
+
+  // Run simulation
+  const { nmeaLines, groundTruth } = simulate(route, cfg);
+
+  // Write outputs (unless dry-run)
+  if (!globalFlags.dryRun) {
+    try {
+      fs.writeFileSync(args.out_nmea, nmeaLines.join('\n') + '\n', 'utf8');
+      if (globalFlags.verbose) logs.push(`Wrote ${nmeaLines.length} NMEA lines to ${args.out_nmea}`);
+    } catch (e) {
+      exitError(2, `Failed to write NMEA file "${args.out_nmea}": ${e.message}`);
+    }
+
+    try {
+      fs.writeFileSync(args.out_gt, JSON.stringify(groundTruth, null, 2), 'utf8');
+      if (globalFlags.verbose) logs.push(`Wrote ${groundTruth.length} stop events to ${args.out_gt}`);
+    } catch (e) {
+      exitError(2, `Failed to write ground truth file "${args.out_gt}": ${e.message}`);
+    }
+  } else {
+    logs.push('[DRY RUN] Skipped writing output files');
+  }
+
+  const duration = Date.now() - startTime;
+
+  exitSuccess({
+    command: 'generate',
+    data: {
+      scenario: args.scenario,
+      route_points: route.route_points.length,
+      stops: route.stops.length,
+      nmea_lines: nmeaLines.length,
+      ground_truth_entries: groundTruth.length,
+      output_nmea: args.out_nmea,
+      output_gt: args.out_gt,
+      dry_run: globalFlags.dryRun
+    },
+    logs: globalFlags.verbose ? logs : undefined,
+    duration_ms: duration,
+    message: `Generated ${nmeaLines.length} NMEA lines, ${groundTruth.length} stop events`
+  });
+}
+
 // ─── 入口 ────────────────────────────────────────────────────────────────────
 
 function main() {
   const args = parseArgs(process.argv);
 
-  const cfg = SCENARIOS[args.scenario];
-  if (!cfg) {
-    console.error(`未知場景：${args.scenario}。可用：${Object.keys(SCENARIOS).join(', ')}`);
-    process.exit(1);
+  switch (args.command) {
+    case 'schema':
+      cmdSchema(args.commandArgs);
+      break;
+    case 'help':
+      cmdHelp();
+      break;
+    case 'generate':
+    default:
+      cmdGenerate(args);
+      break;
   }
-
-  let route;
-  try {
-    route = JSON.parse(fs.readFileSync(args.route, 'utf8'));
-  } catch (e) {
-    console.error(`無法讀取路線檔案 "${args.route}"：${e.message}`);
-    process.exit(1);
-  }
-
-  if (!Array.isArray(route.route_points) || route.route_points.length < 2) {
-    console.error('route.json：route_points 至少需要 2 個節點');
-    process.exit(1);
-  }
-  if (!Array.isArray(route.stops)) {
-    console.error('route.json：缺少 stops 欄位');
-    process.exit(1);
-  }
-
-  console.log(`場景：${args.scenario} | 節點：${route.route_points.length} | 站點：${route.stops.length}`);
-
-  const { nmeaLines, groundTruth } = simulate(route, cfg);
-
-  fs.writeFileSync(args.outNmea, nmeaLines.join('\n') + '\n', 'utf8');
-  console.log(`✓ NMEA  → ${args.outNmea}  (${nmeaLines.length} 行)`);
-
-  fs.writeFileSync(args.outGt, JSON.stringify(groundTruth, null, 2), 'utf8');
-  console.log(`✓ GT    → ${args.outGt}  (${groundTruth.length} 次停靠)`);
 }
 
 main();
