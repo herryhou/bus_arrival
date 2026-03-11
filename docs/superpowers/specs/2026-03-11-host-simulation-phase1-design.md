@@ -38,6 +38,25 @@ bus_arrival/
 │       └── pack.rs             # Serialize to route_data.bin
 ```
 
+## processing_steps
+```txt
+原始 polyline (lat/lon)
+    ↓
+① Douglas-Peucker 簡化        ← 直接在 lat/lon 操作
+    ↓
+② 計算 lat_avg、bbox 原點      ← 簡化後節點的均值 / min
+    ↓
+③ latlon → x_cm/y_cm（相對）  ← 統一用同一個 lat_avg
+    ↓
+④ Route Linearization          ← 預算所有幾何係數
+    ↓
+⑤ Stop Projection
+    ↓
+⑥ Grid Index
+    ↓
+⑦ Binary Packing
+```
+
 ## Data Structures
 
 ### Semantic Type Aliases (shared/src/lib.rs)
