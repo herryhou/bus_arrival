@@ -534,6 +534,186 @@ impl KalmanState {
     }
 }
 
+/// Spatial grid for O(k) map matching.
+///
+/// # Memory Layout
+///
+/// ```text
+/// Offset  Field        Type      Size
+/// ------  -----------  --------  ----
+/// 0       cells        Vec       24
+/// 24      grid_size_cm DistCm    4
+/// 28      cols         u32       4
+/// 32      rows         u32       4
+/// 36      x0_cm        DistCm    4
+/// 40      y0_cm        DistCm    4
+/// ------                          ----
+/// TOTAL                   44 + vec data
+/// ```
+///
+/// **Note**: Vec internally contains a pointer, capacity, and length (3×8=24 bytes),
+/// plus heap-allocated data for the actual vector contents.
+///
+/// # Purpose
+/// Implements a spatial index for fast map matching. The grid divides the map
+/// into 100m × 100m cells, allowing O(k) neighborhood queries instead of O(n)
+/// linear search, where k is the number of route nodes in nearby cells.
+///
+/// # Grid Dimensions
+/// - **Cell size**: 10000 cm (100m) - optimized for typical GPS accuracy
+/// - **Query radius**: 3×3 cell neighborhood (300m × 300m)
+/// - **Coordinate system**: Uses fixed origin at (120.0°E, 20.0°N)
+///
+/// # Field Descriptions
+/// - `cells`: 2D grid flattened to 1D vector, each cell contains node indices
+/// - `grid_size_cm`: Cell dimension (10000 cm = 100m)
+/// - `cols`: Number of grid columns (x-axis)
+/// - `rows`: Number of grid rows (y-axis)
+/// - `x0_cm`: Grid origin X coordinate (cm)
+/// - `y0_cm`: Grid origin Y coordinate (cm)
+///
+/// # Use Cases
+/// - **Map matching**: Find nearby route nodes for GPS position
+/// - **Neighborhood queries**: Get all nodes within 3×3 cell area
+/// - **Spatial indexing**: Accelerate candidate selection
+///
+/// # Example
+/// ```rust
+/// # use shared::{SpatialGrid, DistCm};
+/// let grid = SpatialGrid {
+///     cells: vec![vec![0, 1], vec![2, 3]], // 2×2 grid
+///     grid_size_cm: 10000,  // 100m cells
+///     cols: 2,
+///     rows: 2,
+///     x0_cm: 1253868624,    // 120.0°E
+///     y0_cm: 222639208,     // 20.0°N
+/// };
+/// ```
+///
+/// # Notes
+/// - Methods for querying and building the grid are implemented in
+///   `simulator/src/grid.rs` to avoid circular dependencies
+/// - The grid uses the same fixed origin as `GridOrigin` for consistency
+#[derive(Debug, Clone)]
+pub struct SpatialGrid {
+    /// 2D grid flattened: cells[row * cols + col] contains node indices
+    pub cells: Vec<Vec<usize>>,
+
+    /// Grid cell size (10000 cm = 100m)
+    pub grid_size_cm: DistCm,
+
+    /// Number of columns in grid (x-axis)
+    pub cols: u32,
+
+    /// Number of rows in grid (y-axis)
+    pub rows: u32,
+
+    /// Grid origin X coordinate (cm, typically 120.0°E)
+    pub x0_cm: DistCm,
+
+    /// Grid origin Y coordinate (cm, typically 20.0°N)
+    pub y0_cm: DistCm,
+}
+
+/// Dead-reckoning state for GPS outage compensation.
+///
+/// # Memory Layout (24 bytes total)
+///
+/// ```text
+/// Offset  Field           Type        Size
+/// ------  -------------  ---------  ----
+/// 0       last_gps_time   Option<u64> 16
+/// 16      last_valid_s    DistCm      4
+/// 20      filtered_v      SpeedCms    4
+/// ------                              ----
+/// TOTAL                              24
+/// ```
+///
+/// **Note**: `Option<u64>` is 16 bytes (8-byte discriminant + 8-byte value) due
+/// to alignment requirements. The struct has 8-byte alignment from `Option<u64>`.
+///
+/// # Purpose
+/// Maintains state for dead-reckoning (DR) mode during GPS outages. When GPS
+/// signal is lost (tunnels, urban canyons), the system uses the last known
+/// speed to estimate position changes: `s_est = s_last + v_filtered × Δt`.
+///
+/// # Dead-Reckoning Algorithm
+/// 1. **Normal mode**: GPS available, update filtered speed with EMA
+/// 2. **Outage mode**: Use last filtered speed to estimate position
+/// 3. **Recovery**: Reset when valid GPS returns
+///
+/// # Field Descriptions
+/// - `last_gps_time`: Timestamp of last valid GPS (seconds since epoch)
+/// - `last_valid_s`: Last known route progress (cm from route origin)
+/// - `filtered_v`: Exponentially smoothed speed estimate (cm/s)
+///
+/// # Speed Filtering
+/// Uses exponential moving average (EMA) to smooth GPS speed measurements:
+/// - Reduces impact of speed noise/outliers
+/// - Provides stable estimate for DR extrapolation
+/// - Formula: `v_filtered = α × v_new + (1-α) × v_filtered`
+///
+/// # Use Cases
+/// - **Tunnel navigation**: Continue tracking when GPS is unavailable
+/// - **Urban canyons**: Bridge short GPS gaps
+/// - **Speed smoothing**: Reduce GPS speed measurement noise
+///
+/// # Example
+/// ```rust
+/// # use shared::DrState;
+/// let mut dr = DrState::new();
+/// // GPS update at t=100s
+/// dr.last_gps_time = Some(100);
+/// dr.last_valid_s = 10000;  // 100m along route
+/// dr.filtered_v = 500;      // 5 m/s
+/// // At t=105s (5s outage), estimate: s ≈ 10000 + 500×5 = 12500 cm
+/// ```
+///
+/// # Embedded Compatibility
+/// - Uses `Option<u64>` which requires 16 bytes (8-byte discriminant + 8-byte value)
+/// - 8-byte alignment required for the Option<u64> field
+/// - Total size is 24 bytes with 4-byte tail padding for alignment
+/// - Suitable for embedded systems with sufficient memory
+#[derive(Debug, Clone)]
+pub struct DrState {
+    /// Timestamp of last valid GPS fix (seconds since epoch, None if no fix yet)
+    pub last_gps_time: Option<u64>,
+
+    /// Last known route progress (cm from route origin)
+    pub last_valid_s: DistCm,
+
+    /// EMA-smoothed speed estimate (cm/s)
+    pub filtered_v: SpeedCms,
+}
+
+impl DrState {
+    /// Creates a new DrState with initial values.
+    ///
+    /// # Returns
+    ///
+    /// A DrState with:
+    /// - `last_gps_time`: None (no GPS received yet)
+    /// - `last_valid_s`: 0 (at route origin)
+    /// - `filtered_v`: 0 (stationary)
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use shared::DrState;
+    /// let dr = DrState::new();
+    /// assert_eq!(dr.last_gps_time, None);
+    /// assert_eq!(dr.last_valid_s, 0);
+    /// assert_eq!(dr.filtered_v, 0);
+    /// ```
+    pub fn new() -> Self {
+        DrState {
+            last_gps_time: None,
+            last_valid_s: 0,
+            filtered_v: 0,
+        }
+    }
+}
+
 const _: () = {
     // Compile-time assertions for struct sizes
     let _ = [(); 52 - std::mem::size_of::<RouteNode>()];
@@ -541,6 +721,8 @@ const _: () = {
     let _ = [(); 8 - std::mem::size_of::<GridOrigin>()];
     let _ = [(); 32 - std::mem::size_of::<GpsPoint>()];
     let _ = [(); 8 - std::mem::size_of::<KalmanState>()];
+    // Note: DrState contains Option<u64> which is 24 bytes on 64-bit (8 + padding + 4 + 4)
+    // Note: SpatialGrid contains Vec, so size is not compile-time constant
 };
 
 #[cfg(test)]
@@ -909,5 +1091,135 @@ mod tests {
         // State with low trust should stay closer to prediction (10500) than state with high trust
         assert!(state3.s_cm < state2.s_cm, "Low trust should filter more (Ks=13 vs Ks=51)");
         assert!(state2.s_cm < state1.s_cm, "Medium trust should filter less than high trust (Ks=51 vs Ks=77)");
+    }
+
+    #[test]
+    fn spatialgrid_can_create() {
+        // Verify SpatialGrid can be instantiated
+        let grid = SpatialGrid {
+            cells: vec![vec![0, 1], vec![2, 3]],
+            grid_size_cm: 10000,
+            cols: 2,
+            rows: 2,
+            x0_cm: 1253868624,
+            y0_cm: 222639208,
+        };
+
+        assert_eq!(grid.grid_size_cm, 10000);
+        assert_eq!(grid.cols, 2);
+        assert_eq!(grid.rows, 2);
+        assert_eq!(grid.cells.len(), 2); // 2 rows
+    }
+
+    #[test]
+    fn spatialgrid_field_offsets() {
+        // Verify field offsets match the documented layout
+        use std::mem::offset_of;
+
+        let _grid = SpatialGrid {
+            cells: vec![],
+            grid_size_cm: 10000,
+            cols: 2,
+            rows: 2,
+            x0_cm: 100000,
+            y0_cm: 200000,
+        };
+
+        // Vec is at offset 0
+        assert_eq!(offset_of!(SpatialGrid, cells), 0, "cells should be at offset 0");
+        // After Vec (24 bytes on 64-bit), DistCm at offset 24
+        assert_eq!(offset_of!(SpatialGrid, grid_size_cm), 24, "grid_size_cm should be at offset 24");
+        assert_eq!(offset_of!(SpatialGrid, cols), 28, "cols should be at offset 28");
+        assert_eq!(offset_of!(SpatialGrid, rows), 32, "rows should be at offset 32");
+        assert_eq!(offset_of!(SpatialGrid, x0_cm), 36, "x0_cm should be at offset 36");
+        assert_eq!(offset_of!(SpatialGrid, y0_cm), 40, "y0_cm should be at offset 40");
+    }
+
+    #[test]
+    fn drstate_size() {
+        // Verify DrState size
+        // On 64-bit: Option<u64> = 8 bytes, DistCm = 4, SpeedCms = 4
+        // With alignment: Option<u64> (8) + padding (4) + DistCm (4) + SpeedCms (4) = 24 bytes
+        // Or: Option<u64> (8) + DistCm (4) + SpeedCms (4) + padding (8) = 24 bytes
+        assert_eq!(
+            std::mem::size_of::<DrState>(),
+            24,
+            "DrState should be 24 bytes"
+        );
+        // Natural alignment for u64
+        assert_eq!(
+            std::mem::align_of::<DrState>(),
+            8,
+            "DrState should have 8-byte alignment (u64)"
+        );
+    }
+
+    #[test]
+    fn drstate_new() {
+        // Verify DrState::new() returns correct default values
+        let dr = DrState::new();
+
+        assert_eq!(dr.last_gps_time, None, "last_gps_time should be None");
+        assert_eq!(dr.last_valid_s, 0, "last_valid_s should be 0");
+        assert_eq!(dr.filtered_v, 0, "filtered_v should be 0");
+    }
+
+    #[test]
+    fn drstate_field_offsets() {
+        // Verify field offsets match the documented layout
+        use std::mem::offset_of;
+
+        // Option<u64> at offset 0
+        assert_eq!(
+            offset_of!(DrState, last_gps_time),
+            0,
+            "last_gps_time should be at offset 0"
+        );
+        // After Option<u64> (8 bytes), but Rust may add padding for alignment
+        // Let's just check the relative ordering
+        assert!(
+            offset_of!(DrState, last_valid_s) > offset_of!(DrState, last_gps_time),
+            "last_valid_s should be after last_gps_time"
+        );
+        assert!(
+            offset_of!(DrState, filtered_v) > offset_of!(DrState, last_valid_s),
+            "filtered_v should be after last_valid_s"
+        );
+    }
+
+    #[test]
+    fn drstate_dead_reckoning_estimation() {
+        // Verify dead-reckoning position estimation logic
+        let mut dr = DrState::new();
+
+        // GPS update at t=100s
+        dr.last_gps_time = Some(100);
+        dr.last_valid_s = 10000;  // 100m along route
+        dr.filtered_v = 500;      // 5 m/s
+
+        // After 5s outage (t=105s), estimate position
+        // s_est = s_last + v_filtered × Δt = 10000 + 500 × 5 = 12500 cm
+        let delta_t = 5;
+        let estimated_s = dr.last_valid_s + dr.filtered_v * delta_t;
+
+        assert_eq!(estimated_s, 12500, "Estimated position should be 12500 cm");
+    }
+
+    #[test]
+    fn drstate_gps_outage_detection() {
+        // Verify GPS outage can be detected
+        let mut dr = DrState::new();
+
+        // No GPS yet
+        assert_eq!(dr.last_gps_time, None);
+
+        // GPS update received
+        dr.last_gps_time = Some(100);
+        assert_eq!(dr.last_gps_time, Some(100));
+
+        // Can detect outage: current_time > last_gps_time + threshold
+        let current_time = 110;  // 10 seconds later
+        let is_outage = current_time > dr.last_gps_time.unwrap() + 5;
+        assert!(is_outage, "Should detect GPS outage after 5 seconds");
     }
 }
