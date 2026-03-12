@@ -22,26 +22,39 @@ pub fn simplify_and_interpolate(
     }
 
     if points.len() <= 2 {
-        // Still check for interpolation even if only 2 points
         let mut result = vec![points[0]];
-        interpolate_recursive(points[0], points[1], &mut result);
-        result.push(points[1]);
+        if points.len() == 2 {
+            interpolate_recursive(points[0], points[1], &mut result);
+            result.push(points[1]);
+        }
         return result;
     }
 
     let mut keep = HashSet::new();
+    
+    // Always keep start and end
     keep.insert(0);
     keep.insert(points.len() - 1);
 
-    let mut protected = HashSet::new();
+    // Identify ALL indices that MUST be kept
+    let mut split_points = Vec::new();
+    split_points.push(0);
     for &idx in stop_indices {
-        if idx < points.len() {
-            protected.insert(idx);
+        if idx > 0 && idx < points.len() - 1 {
+            split_points.push(idx);
+            keep.insert(idx);
         }
     }
+    split_points.push(points.len() - 1);
+    split_points.sort_unstable();
+    split_points.dedup();
 
-    // Step 1: Douglas-Peucker
-    douglas_peucker_recursive(points, 0, points.len() - 1, epsilon_cm, &protected, &mut keep);
+    // Step 1: Douglas-Peucker on each interval between split points
+    for i in 0..split_points.len() - 1 {
+        let start = split_points[i];
+        let end = split_points[i+1];
+        douglas_peucker_recursive(points, start, end, epsilon_cm, &mut keep);
+    }
 
     let mut kept_indices: Vec<usize> = keep.into_iter().collect();
     kept_indices.sort_unstable();
@@ -84,7 +97,6 @@ fn douglas_peucker_recursive(
     start_idx: usize,
     end_idx: usize,
     epsilon_cm: f64,
-    protected: &HashSet<usize>,
     keep: &mut HashSet<usize>,
 ) {
     if end_idx <= start_idx + 1 {
@@ -106,10 +118,10 @@ fn douglas_peucker_recursive(
         effective_epsilon = 250.0; // ε_curve
     }
 
-    if max_dist > effective_epsilon || protected.contains(&furthest_idx) {
+    if max_dist > effective_epsilon {
         keep.insert(furthest_idx);
-        douglas_peucker_recursive(points, start_idx, furthest_idx, epsilon_cm, protected, keep);
-        douglas_peucker_recursive(points, furthest_idx, end_idx, epsilon_cm, protected, keep);
+        douglas_peucker_recursive(points, start_idx, furthest_idx, epsilon_cm, keep);
+        douglas_peucker_recursive(points, furthest_idx, end_idx, epsilon_cm, keep);
     }
 }
 

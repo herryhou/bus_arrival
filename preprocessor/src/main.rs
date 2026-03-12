@@ -42,34 +42,44 @@ fn main() {
 
     println!("Loaded {} route points and {} stops", route_input.route_points.len(), stops_input.stops.len());
 
-    // 2. Initial coordinate conversion for simplification and stop protection
+    // 2. Initial coordinate conversion and deduplication
     let lat_avg = coord::compute_lat_avg(&route_input.route_points.iter().map(|p| (p.lat(), p.lon())).collect::<Vec<_>>());
     println!("Computed average latitude: {:.6}°", lat_avg);
     
     let mut route_pts_cm = Vec::with_capacity(route_input.route_points.len());
     for p in &route_input.route_points {
         let (x, y) = coord::latlon_to_cm_relative(p.lat(), p.lon(), lat_avg);
-        route_pts_cm.push((x as i64, y as i64));
+        let pt = (x as i64, y as i64);
+        
+        // Deduplicate consecutive identical points
+        if let Some(&last_pt) = route_pts_cm.last() {
+            if last_pt == pt {
+                continue;
+            }
+        }
+        route_pts_cm.push(pt);
     }
+    println!("Loaded and deduplicated route: {} -> {} points", route_input.route_points.len(), route_pts_cm.len());
 
     // Identify indices of route points near stops (±30m protection)
     let mut protected_indices = Vec::new();
+    let protection_radius_cm2 = 3000i64 * 3000i64; // 30m radius
+
     for stop in &stops_input.stops {
         let (sx, sy) = coord::latlon_to_cm_relative(stop.lat, stop.lon, lat_avg);
-        let mut best_idx = 0;
-        let mut min_dist2 = i64::MAX;
         
         for (i, p) in route_pts_cm.iter().enumerate() {
             let dx = p.0 - sx as i64;
             let dy = p.1 - sy as i64;
             let d2 = dx*dx + dy*dy;
-            if d2 < min_dist2 {
-                min_dist2 = d2;
-                best_idx = i;
+            if d2 <= protection_radius_cm2 {
+                protected_indices.push(i);
             }
         }
-        protected_indices.push(best_idx);
     }
+    protected_indices.sort_unstable();
+    protected_indices.dedup();
+    println!("Protected {} points near stops", protected_indices.len());
 
     // 3. Simplify route (Douglas-Peucker + Curve/Stop/Length Protection)
     let epsilon_general = 700.0; // 7m
