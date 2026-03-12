@@ -3,6 +3,18 @@
 //! All physical quantities use semantic integer types to prevent unit confusion
 //! and enable zero-cost runtime behavior on no_std targets.
 
+/// Earth's radius in centimeters
+pub const EARTH_R_CM: f64 = 637_100_000.0;
+
+/// Fixed origin longitude in degrees (120.0°E)
+pub const FIXED_ORIGIN_LON_DEG: f64 = 120.0;
+
+/// Fixed origin latitude in degrees (20.0°N)
+pub const FIXED_ORIGIN_LAT_DEG: f64 = 20.0;
+
+/// Average latitude for projection (Taiwan: 25.0°N)
+pub const PROJECTION_LAT_AVG: f64 = 25.0;
+
 pub mod binfile;
 
 /// Distance in centimeters.
@@ -106,6 +118,7 @@ pub struct GridOrigin {
 /// Parsed GPS data from NMEA sentences.
 #[derive(Debug, Clone)]
 pub struct GpsPoint {
+    pub timestamp: u64, // seconds since epoch
     pub lat: f64,
     pub lon: f64,
     pub heading_cdeg: HeadCdeg,
@@ -117,6 +130,7 @@ pub struct GpsPoint {
 impl GpsPoint {
     pub fn new() -> Self {
         GpsPoint {
+            timestamp: 0,
             lat: 0.0,
             lon: 0.0,
             heading_cdeg: 0,
@@ -133,11 +147,12 @@ impl GpsPoint {
 pub struct KalmanState {
     pub s_cm: DistCm,
     pub v_cms: SpeedCms,
+    pub last_seg_idx: usize,
 }
 
 impl KalmanState {
     pub fn new() -> Self {
-        KalmanState { s_cm: 0, v_cms: 0 }
+        KalmanState { s_cm: 0, v_cms: 0, last_seg_idx: 0 }
     }
 
     pub fn update(&mut self, z_cm: DistCm, v_gps_cms: SpeedCms) {
