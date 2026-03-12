@@ -111,7 +111,7 @@ fn main() {
 
     // 8. Pack and write binary
     let output_file = fs::File::create(output_bin_path).expect("Failed to create output file");
-    pack::pack_route_data(
+    pack::pack_v8_route_data(
         &route_nodes,
         &projected_stops,
         &grid,

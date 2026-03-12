@@ -3,6 +3,9 @@ name = "shared"
 version.workspace = true
 edition.workspace = true
 
-[dependencies]
-crc32fast = { workspace = true }
+[features]
+default = ["std"]
+std = ["crc32fast/std"]
 
+[dependencies]
+crc32fast = { workspace = true, default-features = false }

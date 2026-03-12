@@ -1,5 +1,5 @@
 use assert_cmd::Command;
-use shared::RouteData;
+use shared::binfile::RouteData;
 use std::fs;
 use tempfile::NamedTempFile;
 

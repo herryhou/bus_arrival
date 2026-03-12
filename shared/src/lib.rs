@@ -1,59 +1,168 @@
-//! Shared types and binary loader for GPS bus arrival detection system.
+//! Shared types for GPS bus arrival detection system.
 //!
-//! Optimized for RP2350 (Pico 2) with zero-copy parsing and integer-only logic.
+//! All physical quantities use semantic integer types to prevent unit confusion
+//! and enable zero-cost runtime behavior on no_std targets.
 
-use core::marker::PhantomData;
-use core::mem::size_of;
+pub mod binfile;
 
-/// Magic bytes for route_data.bin: "BUSA" (BUS Arrival)
-pub const MAGIC: u32 = 0x42555341;
-
-/// Format version
-pub const VERSION: u16 = 1;
-
+/// Distance in centimeters.
+/// Range: ±21,474,836 cm ≈ ±214 km — sufficient for bus routes.
 pub type DistCm = i32;
+
+/// Speed in centimeters per second.
+/// Range: 0..21,474,836 cm/s ≈ 0..214 km/h — covers bus speeds.
 pub type SpeedCms = i32;
+
+/// Heading in hundredths of a degree.
+/// Range: -18000..18000 = -180°..+180°
 pub type HeadCdeg = i16;
+
+/// Probability scaled 0..255 (u8 = probability × 255).
+/// Precision: 1/256 ≈ 0.004 — sufficient for arrival decisions.
 pub type Prob8 = u8;
+
+/// Squared distance (cm²) for intermediate calculations.
+/// Prevents overflow in dot products: (2×10⁶)² ≈ 4×10¹² < i64::MAX.
 pub type Dist2 = i64;
 
-/// Error types for the bus arrival system
-#[derive(Debug, PartialEq)]
-pub enum BusError {
-    InvalidMagic,
-    InvalidVersion,
-    InvalidLength,
-    ChecksumMismatch,
-    OutOfBounds,
-}
-
-/// Route node representing a point in a bus route.
-/// Layout (52 bytes): len2(8), line_c(8), x(4), y(4), cum_dist(4), dx(4), dy(4), seg_len(4), line_a(4), line_b(4), heading(2), pad(2)
+/// Route node with ALL precomputed segment coefficients.
+///
+/// Field ordering: i64 fields placed first to satisfy 8-byte alignment
+/// without compiler-inserted padding on ARM Cortex-M33.
+/// Total size = 52 bytes (verified at compile time).
+///
+/// # Layout
+/// ```text
+/// offset  0: len2_cm2     i64   8 bytes  (|P[i+1]-P[i]|², cm²)
+/// offset  8: line_c       i64   8 bytes  (= -(A·x₀ + B·y₀))
+/// offset 16: x_cm         i32   4 bytes
+/// offset 20: y_cm         i32   4 bytes
+/// offset 24: cum_dist_cm  i32   4 bytes
+/// offset 28: dx_cm        i32   4 bytes  (segment vector x)
+/// offset 32: dy_cm        i32   4 bytes  (segment vector y)
+/// offset 36: seg_len_cm   i32   4 bytes  (offline sqrt, not used runtime)
+/// offset 40: line_a       i32   4 bytes  (= -dy)
+/// offset 44: line_b       i32   4 bytes  (= dx)
+/// offset 48: heading_cdeg i16   2 bytes
+/// offset 50: _pad         i16   2 bytes
+/// total: 52 bytes (no padding gaps)
+/// ```
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct RouteNode {
-    pub len2_cm2: i64,
-    pub line_c: i64,
-    pub x_cm: i32,
-    pub y_cm: i32,
-    pub cum_dist_cm: i32,
-    pub dx_cm: i32,
-    pub dy_cm: i32,
-    pub seg_len_cm: i32,
-    pub line_a: i32,
-    pub line_b: i32,
-    pub heading_cdeg: i16,
+    // ── i64 fields first ──────────────────────────────────────────
+    /// Squared segment length: |P[i+1] - P[i]|² in cm²
+    pub len2_cm2: Dist2,
+    /// Line constant: -(line_a × x₀ + line_b × y₀)
+    pub line_c: Dist2,
+
+    // ── i32 fields ────────────────────────────────────────────────
+    /// X coordinate (relative to grid origin) in cm
+    pub x_cm: DistCm,
+    /// Y coordinate (relative to grid origin) in cm
+    pub y_cm: DistCm,
+    /// Cumulative distance from route start in cm
+    pub cum_dist_cm: DistCm,
+    /// Segment vector X: x[i+1] - x[i] in cm
+    pub dx_cm: DistCm,
+    /// Segment vector Y: y[i+1] - y[i] in cm
+    pub dy_cm: DistCm,
+    /// Segment length in cm (sqrt computed offline only)
+    pub seg_len_cm: DistCm,
+    /// Line coefficient A: = -dy_cm (for distance calculation)
+    pub line_a: DistCm,
+    /// Line coefficient B: = dx_cm (for distance calculation)
+    pub line_b: DistCm,
+
+    // ── i16 fields ────────────────────────────────────────────────
+    /// Segment heading in 0.01° (e.g., 9000 = 90°)
+    pub heading_cdeg: HeadCdeg,
+    /// Padding to align struct size
     pub _pad: i16,
 }
 
-/// Bus stop with corridor boundaries for arrival detection.
-/// Layout (12 bytes): progress(4), start(4), end(4)
+/// Bus stop with precomputed corridor boundaries.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Stop {
+    /// Position along route in cm
     pub progress_cm: DistCm,
+    /// Corridor start: progress_cm - 8000 cm (80m before stop)
     pub corridor_start_cm: DistCm,
+    /// Corridor end: progress_cm + 4000 cm (40m after stop)
     pub corridor_end_cm: DistCm,
+}
+
+/// Grid origin for spatial indexing.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct GridOrigin {
+    /// Fixed origin X coordinate (cm)
+    pub x0_cm: DistCm,
+    /// Fixed origin Y coordinate (cm)
+    pub y0_cm: DistCm,
+}
+
+/// Parsed GPS data from NMEA sentences.
+#[derive(Debug, Clone)]
+pub struct GpsPoint {
+    pub lat: f64,
+    pub lon: f64,
+    pub heading_cdeg: HeadCdeg,
+    pub speed_cms: SpeedCms,
+    pub hdop_x10: u16,
+    pub has_fix: bool,
+}
+
+impl GpsPoint {
+    pub fn new() -> Self {
+        GpsPoint {
+            lat: 0.0,
+            lon: 0.0,
+            heading_cdeg: 0,
+            speed_cms: 0,
+            hdop_x10: 0,
+            has_fix: false,
+        }
+    }
+}
+
+/// 1D Kalman filter state for route progress estimation.
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct KalmanState {
+    pub s_cm: DistCm,
+    pub v_cms: SpeedCms,
+}
+
+impl KalmanState {
+    pub fn new() -> Self {
+        KalmanState { s_cm: 0, v_cms: 0 }
+    }
+
+    pub fn update(&mut self, z_cm: DistCm, v_gps_cms: SpeedCms) {
+        let s_pred = self.s_cm + self.v_cms;
+        let v_pred = self.v_cms;
+        self.s_cm = s_pred + (51 * (z_cm - s_pred)) / 256;
+        self.v_cms = v_pred + (77 * (v_gps_cms - v_pred)) / 256;
+    }
+
+    pub fn update_adaptive(&mut self, z_cm: DistCm, v_gps_cms: SpeedCms, hdop_x10: u16) {
+        let ks = Self::ks_from_hdop(hdop_x10);
+        let s_pred = self.s_cm + self.v_cms;
+        let v_pred = self.v_cms;
+        self.s_cm = s_pred + (ks * (z_cm - s_pred)) / 256;
+        self.v_cms = v_pred + (77 * (v_gps_cms - v_pred)) / 256;
+    }
+
+    fn ks_from_hdop(hdop_x10: u16) -> i32 {
+        match hdop_x10 {
+            0..=20 => 77,
+            21..=30 => 51,
+            31..=50 => 26,
+            _ => 13,
+        }
+    }
 }
 
 /// Spatial grid for O(k) map matching (used by preprocessor to build).
@@ -67,139 +176,24 @@ pub struct SpatialGrid {
     pub y0_cm: DistCm,
 }
 
-/// A read-only view into the spatial grid index.
-/// Enables O(1) cell access directly from Flash memory.
-pub struct SpatialGridView<'a> {
-    pub cols: u32,
-    pub rows: u32,
-    pub grid_size_cm: i32,
-    offsets_base: *const u8,
-    data_base: *const u8,
-    _marker: PhantomData<&'a u8>,
+/// Dead-reckoning state for GPS outage compensation.
+#[derive(Debug, Clone)]
+pub struct DrState {
+    pub last_gps_time: Option<u64>,
+    pub last_valid_s: DistCm,
+    pub filtered_v: SpeedCms,
 }
 
-impl<'a> SpatialGridView<'a> {
-    /// Returns the segment indices for a specific cell.
-    pub fn get_cell(&self, col: u32, row: u32) -> Result<&'a [u16], BusError> {
-        if col >= self.cols || row >= self.rows {
-            return Err(BusError::OutOfBounds);
+impl DrState {
+    pub fn new() -> Self {
+        DrState {
+            last_gps_time: None,
+            last_valid_s: 0,
+            filtered_v: 0,
         }
-        let idx = (row * self.cols + col) as usize;
-        
-        // Read offset (u32) using unaligned read
-        let offset_ptr = unsafe { self.offsets_base.add(idx * 4) as *const u32 };
-        let start_offset = unsafe { core::ptr::read_unaligned(offset_ptr) } as usize;
-        
-        // Read count (u8)
-        let cell_ptr = unsafe { self.data_base.add(start_offset) };
-        let count = unsafe { *cell_ptr } as usize;
-        
-        // Read segment indices (u16 list)
-        let indices_ptr = unsafe { cell_ptr.add(1) as *const u16 };
-        
-        Ok(unsafe { core::slice::from_raw_parts(indices_ptr, count) })
     }
 }
 
-/// The complete route data, referenced directly from a byte slice.
-pub struct RouteData<'a> {
-    pub x0_cm: i32,
-    pub y0_cm: i32,
-    pub node_count: usize,
-    pub stop_count: usize,
-    nodes_ptr: *const RouteNode,
-    stops_ptr: *const Stop,
-    pub grid: SpatialGridView<'a>,
-    pub gaussian_lut: &'a [u8; 256],
-    pub logistic_lut: &'a [u8; 128],
-}
-
-impl<'a> RouteData<'a> {
-    /// Get a specific route node by index.
-    pub fn get_node(&self, index: usize) -> Option<RouteNode> {
-        if index >= self.node_count { return None; }
-        unsafe { Some(core::ptr::read_unaligned(self.nodes_ptr.add(index))) }
-    }
-
-    /// Get a specific stop by index.
-    pub fn get_stop(&self, index: usize) -> Option<Stop> {
-        if index >= self.stop_count { return None; }
-        unsafe { Some(core::ptr::read_unaligned(self.stops_ptr.add(index))) }
-    }
-
-    /// Zero-copy load of RouteData from bytes.
-    pub fn load(data: &'a [u8]) -> Result<Self, BusError> {
-        if data.len() < 17 + 4 {
-            return Err(BusError::InvalidLength);
-        }
-
-        let magic = u32::from_le_bytes(data[0..4].try_into().unwrap());
-        let version = u16::from_le_bytes(data[4..6].try_into().unwrap());
-        if magic != MAGIC { return Err(BusError::InvalidMagic); }
-        if version != VERSION { return Err(BusError::InvalidVersion); }
-
-        let node_count = u16::from_le_bytes(data[6..8].try_into().unwrap()) as usize;
-        let stop_count = data[8] as usize;
-        let x0_cm = i32::from_le_bytes(data[9..13].try_into().unwrap());
-        let y0_cm = i32::from_le_bytes(data[13..17].try_into().unwrap());
-
-        let received_crc = u32::from_le_bytes(data[data.len()-4..].try_into().unwrap());
-        let mut hasher = crc32fast::Hasher::new();
-        hasher.update(&data[..data.len()-4]);
-        if hasher.finalize() != received_crc {
-            return Err(BusError::ChecksumMismatch);
-        }
-
-        let mut offset = 17;
-
-        let nodes_size = node_count * size_of::<RouteNode>();
-        if data.len() < offset + nodes_size { return Err(BusError::InvalidLength); }
-        let nodes_ptr = data[offset..].as_ptr() as *const RouteNode;
-        offset += nodes_size;
-
-        let stops_size = stop_count * size_of::<Stop>();
-        if data.len() < offset + stops_size { return Err(BusError::InvalidLength); }
-        let stops_ptr = data[offset..].as_ptr() as *const Stop;
-        offset += stops_size;
-
-        if data.len() < offset + 12 { return Err(BusError::InvalidLength); }
-        let cols = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap());
-        let rows = u32::from_le_bytes(data[offset+4..offset+8].try_into().unwrap());
-        let grid_size_cm = i32::from_le_bytes(data[offset+8..offset+12].try_into().unwrap());
-        offset += 12;
-
-        let cell_count = (cols * rows) as usize;
-        let offsets_size = cell_count * 4;
-        if data.len() < offset + offsets_size { return Err(BusError::InvalidLength); }
-        let offsets_base = data[offset..].as_ptr();
-        offset += offsets_size;
-
-        let grid_data_start = offset;
-        let luts_start = data.len() - 388;
-        if luts_start < grid_data_start { return Err(BusError::InvalidLength); }
-        
-        let grid = SpatialGridView {
-            cols,
-            rows,
-            grid_size_cm,
-            offsets_base,
-            data_base: data[grid_data_start..].as_ptr(),
-            _marker: PhantomData,
-        };
-
-        let gaussian_lut = data[luts_start..luts_start+256].try_into().unwrap();
-        let logistic_lut = data[luts_start+256..luts_start+384].try_into().unwrap();
-
-        Ok(RouteData {
-            x0_cm,
-            y0_cm,
-            node_count,
-            stop_count,
-            nodes_ptr,
-            stops_ptr,
-            grid,
-            gaussian_lut,
-            logistic_lut,
-        })
-    }
-}
+// Compile-time assertion — fails if field reordering changes size
+const _: () = assert!(core::mem::size_of::<RouteNode>() == 52);
+const _: () = assert!(core::mem::size_of::<Stop>() == 12);
