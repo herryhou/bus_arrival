@@ -176,6 +176,47 @@ pub struct SpatialGrid {
     pub y0_cm: DistCm,
 }
 
+impl SpatialGrid {
+    /// Create an empty spatial grid
+    pub fn empty() -> Self {
+        SpatialGrid {
+            cells: vec![vec![]],
+            grid_size_cm: 10000,
+            cols: 0,
+            rows: 0,
+            x0_cm: 0,
+            y0_cm: 0,
+        }
+    }
+
+    /// Query grid for candidate segments around a point
+    pub fn query(&self, x_cm: DistCm, y_cm: DistCm) -> Vec<usize> {
+        if self.cols == 0 || self.rows == 0 {
+            return Vec::new();
+        }
+
+        let gx = ((x_cm - self.x0_cm) / self.grid_size_cm) as usize;
+        let gy = ((y_cm - self.y0_cm) / self.grid_size_cm) as usize;
+
+        let mut candidates = Vec::new();
+
+        // 3×3 neighborhood
+        for dy in 0..=2 {
+            for dx in 0..=2 {
+                let ny = (gy as i32 + dy as i32 - 1) as usize;
+                let nx = (gx as i32 + dx as i32 - 1) as usize;
+
+                if ny < self.rows as usize && nx < self.cols as usize {
+                    let idx = ny * (self.cols as usize) + nx;
+                    candidates.extend_from_slice(&self.cells[idx]);
+                }
+            }
+        }
+
+        candidates
+    }
+}
+
 /// Dead-reckoning state for GPS outage compensation.
 #[derive(Debug, Clone)]
 pub struct DrState {

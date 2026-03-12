@@ -1,5 +1,6 @@
 mod route_data;
 mod nmea;
+mod grid;
 
 use std::env;
 use std::path::PathBuf;

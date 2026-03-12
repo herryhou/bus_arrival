@@ -5,6 +5,8 @@ use std::io::{self, Read};
 use std::fs::File;
 use std::path::Path;
 
+use crate::grid::build_spatial_grid;
+
 pub const MAGIC: u32 = 0x42555341;
 pub const VERSION: u16 = 1;
 
@@ -91,19 +93,13 @@ pub fn load_route_data(path: &Path) -> Result<RouteData, io::Error> {
     }
 
     // TODO: Read CRC32 and verify
-    // TODO: Build spatial grid from nodes (Task 7)
+    // Build spatial grid from nodes (Task 7)
+    let grid = build_spatial_grid(&nodes, &grid_origin);
 
     Ok(RouteData {
         nodes,
         stops,
         grid_origin,
-        grid: SpatialGrid {
-            cells: vec![],
-            grid_size_cm: 10000,
-            cols: 0,
-            rows: 0,
-            x0_cm: 0,
-            y0_cm: 0,
-        },
+        grid,
     })
 }
