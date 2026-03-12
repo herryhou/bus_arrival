@@ -110,3 +110,44 @@ fn test_terminal_stops() {
     assert_eq!(last_stop.corridor_start_cm, last_stop.progress_cm - 8000);
     assert_eq!(last_stop.corridor_end_cm, last_stop.progress_cm + 4000);
 }
+
+#[test]
+fn test_isolated_stop_guaranteed_closest() {
+    // --- GIVEN ---
+    // A straight 1km route
+    let mut route_points = Vec::new();
+    for i in 0..101 {
+        route_points.push(vec![25.0 + (i as f64 * 0.00009), 121.0]); // ~10m steps
+    }
+    
+    let route_json = serde_json::json!({
+        "route_points": route_points
+    }).to_string();
+
+    // Stop at 500m but 100m off-route (far from any point)
+    let stops_json = r#"{"stops": [{"lat": 25.0045, "lon": 121.001}]}"#;
+
+    let route_file = NamedTempFile::new().unwrap();
+    let stops_file = NamedTempFile::new().unwrap();
+    let output_file = NamedTempFile::new().unwrap();
+
+    fs::write(route_file.path(), route_json).unwrap();
+    fs::write(stops_file.path(), stops_json).unwrap();
+
+    // --- WHEN ---
+    Command::cargo_bin("preprocessor").unwrap()
+        .arg(route_file.path())
+        .arg(stops_file.path())
+        .arg(output_file.path())
+        .assert()
+        .success();
+
+    let bin_data = fs::read(output_file.path()).unwrap();
+    let route_data = RouteData::load(&bin_data).expect("Should load");
+
+    // --- THEN ---
+    // Without the "guaranteed closest" rule, this stop would have 0 protected points
+    // and Douglas-Peucker (epsilon=7m) would leave only 2 points for the 1km line.
+    // With the rule, there should be at least 3 points (start, end, and the anchor point).
+    assert!(route_data.node_count >= 3);
+}

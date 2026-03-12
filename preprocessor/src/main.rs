@@ -68,18 +68,34 @@ fn main() {
     for stop in &stops_input.stops {
         let (sx, sy) = coord::latlon_to_cm_relative(stop.lat, stop.lon, lat_avg);
         
+        let mut closest_idx = 0;
+        let mut min_dist2 = i64::MAX;
+        let mut found_within_radius = false;
+
         for (i, p) in route_pts_cm.iter().enumerate() {
             let dx = p.0 - sx as i64;
             let dy = p.1 - sy as i64;
             let d2 = dx*dx + dy*dy;
+            
+            if d2 < min_dist2 {
+                min_dist2 = d2;
+                closest_idx = i;
+            }
+
             if d2 <= protection_radius_cm2 {
                 protected_indices.push(i);
+                found_within_radius = true;
             }
+        }
+
+        // Guarantee at least the closest point is protected even if > 30m away
+        if !found_within_radius {
+            protected_indices.push(closest_idx);
         }
     }
     protected_indices.sort_unstable();
     protected_indices.dedup();
-    println!("Protected {} points near stops", protected_indices.len());
+    println!("Protected {} points near stops (ensured at least 1 per stop)", protected_indices.len());
 
     // 3. Simplify route (Douglas-Peucker + Curve/Stop/Length Protection)
     let epsilon_general = 700.0; // 7m
