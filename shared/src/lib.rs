@@ -370,12 +370,177 @@ impl GpsPoint {
     }
 }
 
+/// 1D Kalman filter state for route progress estimation.
+///
+/// # Memory Layout (8 bytes total)
+///
+/// ```text
+/// Offset  Field    Type      Size
+/// ------  -------  --------  ----
+/// 0       s_cm     DistCm    4
+/// 4       v_cms    SpeedCms  4
+/// ------                      ----
+/// TOTAL                      8
+/// ```
+///
+/// # Purpose
+/// Implements a 1D Kalman filter for tracking route progress (distance along route)
+/// with fixed-point arithmetic suitable for embedded systems. The filter combines:
+/// - **Prediction step**: Uses velocity estimate to predict next position
+/// - **Update step**: Incorporates GPS measurements with adaptive gains
+///
+/// # Fixed-Point Design
+/// Uses integer arithmetic with division by 256 for Kalman gains:
+/// - `Ks = 51/256 ≈ 0.20`: Position gain (varies with HDOP)
+/// - `Kv = 77/256 ≈ 0.30`: Velocity gain (fixed)
+///
+/// # HDOP-Adaptive Filtering
+/// The position gain (Ks) adapts to GPS quality (HDOP):
+/// - **HDOP ≤ 2.0**: Ks = 77/256 ≈ 0.30 (high trust in GPS)
+/// - **HDOP ≤ 3.0**: Ks = 51/256 ≈ 0.20 (moderate trust)
+/// - **HDOP ≤ 5.0**: Ks = 26/256 ≈ 0.10 (low trust)
+/// - **HDOP > 5.0**: Ks = 13/256 ≈ 0.05 (very low trust)
+///
+/// # Field Descriptions
+/// - `s_cm`: Route progress estimate in centimeters from route origin
+/// - `v_cms`: Speed estimate in centimeters per second
+///
+/// # Example
+/// ```rust
+/// # use shared::KalmanState;
+/// let mut state = KalmanState::new();
+/// // Initial GPS measurement at 100m with 5 m/s speed
+/// state.update(10000, 500); // z=10000cm, v=500cm/s
+/// // Subsequent measurement with HDOP 2.5 (×10 = 25)
+/// state.update_adaptive(10100, 500, 25);
+/// ```
+///
+/// # Embedded Compatibility
+/// - `#[repr(C)]` ensures stable layout across platforms
+/// - No padding required (2× i32 = 8 bytes, naturally aligned)
+/// - Fixed-point arithmetic avoids floating-point operations
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct KalmanState {
+    /// Route progress estimate (cm from route origin)
+    pub s_cm: DistCm,
+
+    /// Speed estimate (cm/s)
+    pub v_cms: SpeedCms,
+}
+
+impl KalmanState {
+    /// Creates a new KalmanState with initial estimates at zero.
+    ///
+    /// # Returns
+    ///
+    /// A KalmanState with:
+    /// - `s_cm`: 0 (at route origin)
+    /// - `v_cms`: 0 (stationary)
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use shared::KalmanState;
+    /// let state = KalmanState::new();
+    /// assert_eq!(state.s_cm, 0);
+    /// assert_eq!(state.v_cms, 0);
+    /// ```
+    pub fn new() -> Self {
+        KalmanState { s_cm: 0, v_cms: 0 }
+    }
+
+    /// Fixed-point Kalman filter update with default gains.
+    ///
+    /// Uses fixed Kalman gains: Ks = 51/256 ≈ 0.20, Kv = 77/256 ≈ 0.30
+    ///
+    /// # Algorithm
+    /// 1. Predict: `s_pred = s_cm + v_cms`
+    /// 2. Update position: `s_cm = s_pred + Ks * (z_cm - s_pred)`
+    /// 3. Update velocity: `v_cms = v_cms + Kv * (v_gps_cms - v_cms)`
+    ///
+    /// # Parameters
+    /// - `z_cm`: GPS measurement of route progress (cm)
+    /// - `v_gps_cms`: GPS speed measurement (cm/s)
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use shared::KalmanState;
+    /// let mut state = KalmanState::new();
+    /// state.update(10000, 500); // GPS at 100m, 5 m/s
+    /// assert!(state.s_cm > 0);
+    /// assert!(state.v_cms > 0);
+    /// ```
+    pub fn update(&mut self, z_cm: DistCm, v_gps_cms: SpeedCms) {
+        let s_pred = self.s_cm + self.v_cms;
+        let v_pred = self.v_cms;
+        self.s_cm = s_pred + (51 * (z_cm - s_pred)) / 256;
+        self.v_cms = v_pred + (77 * (v_gps_cms - v_pred)) / 256;
+    }
+
+    /// HDOP-adaptive Kalman filter update.
+    ///
+    /// Adapts position gain (Ks) based on GPS quality (HDOP), while keeping
+    /// velocity gain fixed at Kv = 77/256 ≈ 0.30.
+    ///
+    /// # Parameters
+    /// - `z_cm`: GPS measurement of route progress (cm)
+    /// - `v_gps_cms`: GPS speed measurement (cm/s)
+    /// - `hdop_x10`: HDOP × 10 (e.g., HDOP 1.5 → hdop_x10 = 15)
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use shared::KalmanState;
+    /// let mut state = KalmanState::new();
+    /// // High quality GPS (HDOP 1.2)
+    /// state.update_adaptive(10000, 500, 12);
+    /// // Low quality GPS (HDOP 6.0)
+    /// state.update_adaptive(10100, 500, 60);
+    /// ```
+    pub fn update_adaptive(&mut self, z_cm: DistCm, v_gps_cms: SpeedCms, hdop_x10: u16) {
+        let ks = Self::ks_from_hdop(hdop_x10);
+        let s_pred = self.s_cm + self.v_cms;
+        let v_pred = self.v_cms;
+        self.s_cm = s_pred + (ks * (z_cm - s_pred)) / 256;
+        self.v_cms = v_pred + (77 * (v_gps_cms - v_pred)) / 256;
+    }
+
+    /// Computes position Kalman gain from HDOP value.
+    ///
+    /// # Parameters
+    /// - `hdop_x10`: HDOP × 10 (e.g., HDOP 2.5 → hdop_x10 = 25)
+    ///
+    /// # Returns
+    ///
+    /// Kalman gain numerator (divide by 256 for actual gain):
+    /// - **HDOP ≤ 2.0**: 77 (gain ≈ 0.30)
+    /// - **HDOP ≤ 3.0**: 51 (gain ≈ 0.20)
+    /// - **HDOP ≤ 5.0**: 26 (gain ≈ 0.10)
+    /// - **HDOP > 5.0**: 13 (gain ≈ 0.05)
+    ///
+    /// # Note
+    ///
+    /// This is a private helper function used internally by `update_adaptive`.
+    /// The adaptive gain behavior is tested through `update_adaptive`.
+    fn ks_from_hdop(hdop_x10: u16) -> i32 {
+        match hdop_x10 {
+            0..=20 => 77,   // HDOP ≤ 2.0 → Ks ≈ 0.30
+            21..=30 => 51,  // HDOP ≤ 3.0 → Ks ≈ 0.20
+            31..=50 => 26,  // HDOP ≤ 5.0 → Ks ≈ 0.10
+            _ => 13,        // HDOP > 5.0 → Ks ≈ 0.05
+        }
+    }
+}
+
 const _: () = {
     // Compile-time assertions for struct sizes
     let _ = [(); 52 - std::mem::size_of::<RouteNode>()];
     let _ = [(); 12 - std::mem::size_of::<Stop>()];
     let _ = [(); 8 - std::mem::size_of::<GridOrigin>()];
     let _ = [(); 32 - std::mem::size_of::<GpsPoint>()];
+    let _ = [(); 8 - std::mem::size_of::<KalmanState>()];
 };
 
 #[cfg(test)]
@@ -648,5 +813,101 @@ mod tests {
             24,
             "has_fix should be at offset 24"
         );
+    }
+
+    #[test]
+    fn kalmanstate_size() {
+        // Verify KalmanState is exactly 8 bytes
+        assert_eq!(
+            std::mem::size_of::<KalmanState>(),
+            8,
+            "KalmanState should be exactly 8 bytes"
+        );
+        // Natural alignment for i32 fields
+        assert_eq!(
+            std::mem::align_of::<KalmanState>(),
+            4,
+            "KalmanState should have 4-byte alignment"
+        );
+    }
+
+    #[test]
+    fn kalmanstate_field_offsets() {
+        // Verify field offsets match the documented layout
+        use std::mem::offset_of;
+
+        assert_eq!(
+            offset_of!(KalmanState, s_cm),
+            0,
+            "s_cm should be at offset 0"
+        );
+        assert_eq!(
+            offset_of!(KalmanState, v_cms),
+            4,
+            "v_cms should be at offset 4"
+        );
+    }
+
+    #[test]
+    fn kalman_initial_state() {
+        let state = KalmanState::new();
+        assert_eq!(state.s_cm, 0);
+        assert_eq!(state.v_cms, 0);
+    }
+
+    #[test]
+    fn kalman_update_basic() {
+        let mut state = KalmanState::new();
+        state.update(10000, 500); // z=10000cm, v=500cm/s
+        assert!(state.s_cm > 0);
+        assert!(state.v_cms > 0);
+    }
+
+    #[test]
+    fn kalman_smoothing() {
+        let mut state = KalmanState::new();
+
+        // Initialize filter at a known state
+        state.s_cm = 10000;
+        state.v_cms = 500;
+
+        // Simulate consistent measurements
+        // Raw GPS: 10500 (prediction + measurement)
+        // Filtered: should be somewhere between prediction and measurement
+        let s_before = state.s_cm;
+        state.update(10500, 500);
+
+        // The update combines prediction (s_cm + v_cms = 10500) with measurement (10500)
+        // So result should be close to 10500 but smoothed
+        assert!(state.s_cm > s_before, "State should increase");
+        assert!(state.s_cm <= 10500, "State should not exceed measurement");
+    }
+
+    #[test]
+    fn kalman_hdop_adaptive() {
+        // Test that HDOP-adaptive update uses different gains
+        let mut state1 = KalmanState::new();
+        let mut state2 = KalmanState::new();
+        let mut state3 = KalmanState::new();
+
+        // Initialize both at same state
+        state1.s_cm = 10000;
+        state1.v_cms = 500;
+        state2.s_cm = 10000;
+        state2.v_cms = 500;
+        state3.s_cm = 10000;
+        state3.v_cms = 500;
+
+        // Apply same measurement with different HDOP values
+        // Prediction = 10000 + 500 = 10500
+        // Measurement = 11000 (different from prediction to see gain effect)
+        state1.update_adaptive(11000, 500, 15); // HDOP 1.5 - high trust (Ks = 77)
+        state2.update_adaptive(11000, 500, 25); // HDOP 2.5 - medium trust (Ks = 51)
+        state3.update_adaptive(11000, 500, 60); // HDOP 6.0 - low trust (Ks = 13)
+
+        // Higher HDOP (lower quality) should result in less aggressive update
+        // State with low trust should stay closer to prediction (10500) than state with high trust
+        assert!(state3.s_cm < state2.s_cm, "Low trust should filter more (Ks=13 vs Ks=51)");
+        assert!(state2.s_cm < state1.s_cm, "Medium trust should filter less than high trust (Ks=51 vs Ks=77)");
     }
 }
