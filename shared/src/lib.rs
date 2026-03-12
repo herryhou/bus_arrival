@@ -235,6 +235,30 @@ impl DrState {
     }
 }
 
+/// Arrival detection FSM states for Phase 3 runtime.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FsmState {
+    /// Normal tracking — outside any arrival corridor
+    Tracking,
+    /// Inside corridor — monitoring for arrival
+    Approaching,
+    /// Arrival confirmed — waiting for departure
+    Arrived,
+}
+
+/// Arrival event emitted by the detector.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ArrivalEvent {
+    /// Stop index in the route
+    pub stop_idx: u16,
+    /// FSM state after processing this event
+    pub state: FsmState,
+    /// Confidence score (0..255)
+    pub confidence: Prob8,
+}
+
 // Compile-time assertion — fails if field reordering changes size
 const _: () = assert!(core::mem::size_of::<RouteNode>() == 52);
 const _: () = assert!(core::mem::size_of::<Stop>() == 12);
