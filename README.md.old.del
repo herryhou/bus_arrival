@@ -1,0 +1,340 @@
+# bus-arrival
+
+GPS 公車到站偵測系統 — Embedded Rust 實作，適用於 Raspberry Pi Pico 2（RP2350）。
+
+[![platform](https://img.shields.io/badge/platform-RP2350-orange)](https://www.raspberrypi.com/products/rp2350/)
+[![language](https://img.shields.io/badge/language-Rust%20no__std-b7410e)](https://www.rust-lang.org/)
+[![accuracy](https://img.shields.io/badge/accuracy-%E2%89%A597%25-green)]()
+
+---
+
+## 目錄
+
+- [系統概覽](#系統概覽)
+- [硬體需求](#硬體需求)
+- [快速開始](#快速開始)
+- [專案結構](#專案結構)
+- [離線預處理](#離線預處理)
+- [Firmware 編譯與燒錄](#firmware-編譯與燒錄)
+- [測試](#測試)
+- [模擬工具](#模擬工具)
+- [效能指標](#效能指標)
+- [參數調校](#參數調校)
+
+---
+
+## 系統概覽
+
+以 GPS 訊號判定公車是否到站，完整 pipeline 分三個階段：
+
+```
+【離線預處理】PC 執行一次，產物燒錄至 Flash
+  原始路線 Polyline
+    ↓ ① Polyline 簡化（Douglas-Peucker）
+    ↓ ② Route Linearization（累積距離 + 幾何係數預算）
+    ↓ ③ Spatial Grid Index
+  → route_data.bin（~34 KB）
+
+【定位 Pipeline】1 Hz，GPS loop
+  GPS Input
+    ↓ ④ Heading-Constrained Map Matching
+    ↓ ⑤ Segment Projection
+    ↓ ⑥ Speed Constraint Filter（跳點拒絕）
+    ↓ ⑦ 1D Kalman Filter
+    ↓ ⑧ Dead-Reckoning（GPS 斷訊補償）
+  → ŝ(t), v̂(t)
+
+【到站判定】1 Hz，GPS loop
+  ŝ(t), v̂(t)
+    ↓ ⑨  Stop Corridor Filter
+    ↓ ⑩  Stop Probability Model（四特徵 Bayesian 融合）
+    ↓ ⑪  Stop State Machine
+    ↓ ⑫  Stop Index Recovery（斷訊/重啟後自動修復）
+  → ARRIVED event
+```
+
+**設計原則：** 以語義整數型別（`cm`、`0.01°`、`cm/s`）取代浮點運算，避免無 FPU 平台的效能懲罰。所有幾何係數離線預算後存入 Flash，runtime 零重算。
+
+---
+
+## 硬體需求
+
+| 元件 | 規格 |
+|------|------|
+| MCU | Raspberry Pi Pico 2（RP2350） |
+| GPS 模組 | 任何輸出標準 NMEA 0183 的模組（1 Hz） |
+| 接線 | GPS TX → Pico UART0 RX（GPIO 1） |
+
+---
+
+## 快速開始
+
+### 環境安裝
+
+```bash
+# 1. 安裝 Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# 2. 加入 RP2350 編譯目標
+rustup target add thumbv8m.main-none-eabihf
+
+# 3. 安裝燒錄工具
+cargo install probe-rs --features cli
+
+# 4. 安裝離線預處理依賴（Node.js >= 18）
+# 無需 npm install，preprocessor 與模擬工具均為 pure Node.js
+```
+
+### 首次執行流程
+
+```bash
+# Step 1：準備路線資料
+cp examples/route_example.json route.json
+# （或自行編輯 route.json，格式見下方說明）
+
+# Step 2：離線預處理，產生 route_data.bin
+cargo run -p preprocessor -- route.json firmware/out/route_data.bin
+
+# Step 3：編譯並燒錄 firmware
+cargo build --release -p firmware
+probe-rs run --chip RP2350 target/thumbv8m.main-none-eabihf/release/firmware
+```
+
+---
+
+## 專案結構
+
+```
+bus-arrival/
+├── firmware/               # no_std 嵌入式 crate（RP2350）
+│   ├── build.rs            # 編譯期生成 Gaussian / Logistic LUT
+│   ├── memory.x            # RP2350 記憶體佈局
+│   └── src/
+│       ├── main.rs
+│       ├── types.rs        # 語義整數型別別名
+│       ├── lut.rs          # LUT 查表函式
+│       ├── route_data.rs   # Flash XIP 資料存取
+│       ├── pipeline/       # 模組 ④–⑧
+│       └── arrival/        # 模組 ⑨–⑫
+├── preprocessor/           # std host 工具（離線預處理）
+│   └── src/
+│       ├── simplify.rs     # 模組 ①
+│       ├── linearize.rs    # 模組 ②
+│       ├── grid_index.rs   # 模組 ③
+│       └── pack.rs         # 序列化 → route_data.bin
+├── shared/                 # firmware + preprocessor 共用型別
+│   └── src/lib.rs          # RouteNode, Stop, GridIndex
+└── tools/
+    ├── gen_nmea.js         # NMEA 模擬器（含真實誤差模型）
+    ├── replay.js           # GPS log 回放 + 準確率計算
+    └── calibrate.py        # 到站概率模型權重離線調校
+```
+
+---
+
+## 離線預處理
+
+### route.json 格式
+
+```json
+{
+  "route_points": [
+    [25.0478, 121.5170],
+    [25.0485, 121.5188],
+    [25.0500, 121.5210]
+  ],
+  "stops": [1, 5, 10],
+  "env_zones": [
+    { "fromIdx": 3, "toIdx": 6, "env": "urban_canyon" }
+  ],
+  "traffic_lights": [2, 7]
+}
+```
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `route_points` | `[lat, lon][]` | 路線節點座標（WGS84） |
+| `stops` | `number[]` | 站點對應的 route_points 索引 |
+| `env_zones` | 物件陣列 | 各路段的 GPS 訊號環境（可選） |
+| `traffic_lights` | `number[]` | 有紅綠燈的路段索引（可選） |
+
+`env` 可選值：`open` / `suburban` / `urban` / `urban_canyon` / `tunnel`
+
+### 執行預處理
+
+```bash
+cargo run -p preprocessor -- route.json firmware/out/route_data.bin
+
+# 預期輸出：
+# 節點數：642
+# Flash 大小：33.8 KB
+# CRC32：OK
+```
+
+---
+
+## Firmware 編譯與燒錄
+
+```bash
+# Debug 版（含 defmt 日誌輸出）
+cargo build -p firmware
+
+# Release 版（部署用）
+cargo build --release -p firmware
+
+# 燒錄（需連接 probe）
+probe-rs run --chip RP2350 \
+  target/thumbv8m.main-none-eabihf/release/firmware
+
+# 即時查看 defmt 日誌
+probe-rs attach --chip RP2350 \
+  target/thumbv8m.main-none-eabihf/release/firmware
+```
+
+---
+
+## 測試
+
+### 單元測試（無需硬體）
+
+```bash
+# 所有 crate
+cargo test --workspace
+
+# 個別 crate
+cargo test -p firmware
+cargo test -p preprocessor
+cargo test -p shared
+```
+
+### GPS log 回放測試
+
+```bash
+# 1. 先產生模擬 NMEA log（或使用真實 log）
+node tools/gen_nmea.js --scenario normal
+
+# 2. 回放並計算準確率
+node tools/replay.js --nmea test.nmea --ground-truth ground_truth.json
+```
+
+輸出範例：
+
+```
+場景：normal
+總到站事件：48
+True Positive：47   (97.9%)
+False Positive：1   (2.1%)
+False Negative：1   (2.1%)
+F1-score：0.979
+平均到站延遲：1.2 s
+```
+
+### 驗收標準
+
+| 測試場景 | 通過標準 |
+|---------|---------|
+| 一般到站（GPS 良好） | TP Rate ≥ 97% |
+| 誤觸發率 | FP Rate ≤ 2% |
+| 近距離相鄰站（間距 < 120 m） | 正確率 ≥ 95% |
+| 城市峽谷（HDOP > 4） | 正確率 ≥ 90% |
+| GPS 斷訊 10 秒後恢復 | 站序正確，< 2 s 同步 |
+
+---
+
+## 模擬工具
+
+### gen_nmea.js — NMEA 模擬器
+
+產生帶有真實誤差特性的 NMEA 測試資料：
+
+```bash
+node tools/gen_nmea.js [選項]
+```
+
+| 選項 | 預設值 | 說明 |
+|------|--------|------|
+| `--route` | `route.json` | 路線資料檔案 |
+| `--scenario` | `normal` | 誤差場景 |
+| `--out-nmea` | `test.nmea` | NMEA 輸出路徑 |
+| `--out-gt` | `ground_truth.json` | 到站標注輸出路徑 |
+
+**`--scenario` 可選值：**
+
+| 值 | 說明 |
+|----|------|
+| `normal` | 一般市區行駛 |
+| `drift` | 城市峽谷持續漂移（雜訊 ~30 m） |
+| `jump` | 路線中段注入 ~100 m 跳點 |
+| `outage` | 路線中段 GPS 斷訊 3 秒 |
+
+**誤差模型特性：**
+
+- GPS 雜訊：AR(1) 自相關過程（非獨立高斯），模擬真實 multipath 特性
+- HDOP：依環境動態輸出（開闊 1.2 / 市區 2.5 / 峽谷 4.5）
+- 速度曲線：加減速模型 + 靠站減速 + 停靠停留
+- 紅燈等候：週期性停等模型
+- 輸出語句：`$GPRMC` + `$GPGGA`（含 HDOP）
+
+**批次執行所有場景：**
+
+```bash
+for scenario in normal drift jump outage; do
+  node tools/gen_nmea.js --scenario $scenario \
+    --out-nmea test_${scenario}.nmea \
+    --out-gt   gt_${scenario}.json
+done
+```
+
+---
+
+## 效能指標
+
+| 指標 | 目標 | 備註 |
+|------|------|------|
+| 到站判定準確率 | ≥ 97% | 城市環境，GPS 誤差 ±30 m |
+| CPU 使用率 | < 8% | @150 MHz，1 Hz，無 FPU |
+| SRAM 佔用（runtime） | < 1 KB | 路線資料存 Flash |
+| Flash 佔用（路線資料） | ~34 KB | 含幾何係數與 LUT |
+| 每次 GPS 更新耗時 | < 1.5 ms | 完整 pipeline |
+| GPS 斷訊容忍時間 | 10 s | Dead-Reckoning 補償 |
+| GPS 恢復後同步時間 | < 2 s | soft correction（2/10 加權） |
+
+---
+
+## 參數調校
+
+### 修改核心參數
+
+核心參數集中於 `firmware/src/pipeline/` 與 `firmware/src/arrival/` 各模組的常數定義。主要參數：
+
+```rust
+// speed_filter.rs
+const V_MAX_CMS: i32 = 1667;  // 最大車速（60 km/h）
+const SIGMA_GPS: i32 = 2000;  // GPS 雜訊裕度（20 m）
+
+// kalman.rs
+const KS_NUM: i32 = 51;       // Kalman Gain Ks 分子（51/256 ≈ 0.20）
+const KV_NUM: i32 = 77;       // Kalman Gain Kv 分子（77/256 ≈ 0.30）
+
+// corridor.rs
+const L_PRE_CM:  i32 = 8_000; // 廊道前置寬度（80 m）
+const L_POST_CM: i32 = 4_000; // 廊道後置寬度（40 m）
+
+// probability.rs
+const THETA_ARRIVAL: u8 = 191; // 到站概率閾值（75%）
+const W1: u32 = 13;            // 距離差權重
+const W2: u32 =  6;            // 速度權重
+const W3: u32 = 10;            // 進度誤差權重
+const W4: u32 =  3;            // 停留時間權重
+```
+
+### 到站概率模型權重調校
+
+收集 ≥ 200 筆真實事件後執行 Grid Search：
+
+```bash
+python3 tools/calibrate.py --events arrival_events.json
+# 輸出：Best weights: (13, 6, 10, 3), F1=0.981
+```
+
+完整參數列表見 [開發文檔](docs/rust_dev_guide.md)。

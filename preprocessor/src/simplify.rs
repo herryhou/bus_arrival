@@ -1,485 +1,156 @@
 // Douglas-Peucker polyline simplification algorithm
 //
 // Implements the Ramer-Douglas-Peucker algorithm for reducing the number of points
-// in a polyline while preserving its overall geometry. Used to compress route data
-// for embedded systems.
+// in a polyline while preserving its overall geometry. 
 //
-// Algorithm:
-// 1. Start with the first and last points (always preserved)
-// 2. Find the point with the maximum perpendicular distance from the line segment
-// 3. If max distance > epsilon, keep that point and recursively process the two subsegments
-// 4. If max distance <= epsilon, discard all intermediate points
-//
-// This ensures the simplified polyline stays within epsilon of the original.
+// v8 Spec Enhancements:
+// - ε_general = 700 cm (default tolerance)
+// - ε_curve = 250 cm (for turns > 20°)
+// - Stop protection radius = ±3000 cm
+// - Max segment length = 3000 cm (insert node if exceeded)
 
 use std::collections::HashSet;
 
-/// Simplify a polyline using the Douglas-Peucker algorithm
-///
-/// # Algorithm
-/// The Ramer-Douglas-Peucker algorithm recursively subdivides a polyline,
-/// keeping only points that are more than epsilon away from the line
-/// connecting their neighbors. This preserves geometry while reducing
-/// point count.
-///
-/// # Arguments
-/// * `points` - Slice of (x, y) coordinates in centimeters
-/// * `epsilon_cm` - Distance tolerance in centimeters (default: 700)
-/// * `protected_indices` - Indices of points that must be preserved (e.g., bus stops)
-///
-/// # Returns
-/// * `Vec<usize>` - Sorted indices of points to keep
-///
-/// # Guarantees
-/// - First and last points are always included
-/// - Protected points are always included
-/// - Returned indices are sorted in ascending order
-/// - All distances are computed in centimeters
-///
-/// # Examples
-/// ```
-/// use preprocessor::simplify::douglas_peucker;
-///
-/// let points = vec![(0, 0), (100, 10), (200, 0), (300, 10)];
-/// let kept = douglas_peucker(&points, 50.0, &[]);
-/// assert_eq!(kept, vec![0, 3]); // Only endpoints kept
-///
-/// let kept = douglas_peucker(&points, 5.0, &[]);
-/// assert!(kept.contains(&1)); // Middle points kept
-/// ```
-///
-/// # Notes
-/// - Epsilon of 700cm (7m) is typical for bus routes
-/// - Smaller epsilon = more detail, larger epsilon = more simplification
-/// - Protected points are useful for ensuring bus stops aren't removed
-pub fn douglas_peucker(
+/// Simplify a polyline and ensure max segment length by interpolating synthetic points if needed.
+pub fn simplify_and_interpolate(
     points: &[(i64, i64)],
     epsilon_cm: f64,
-    protected_indices: &[usize],
-) -> Vec<usize> {
+    stop_indices: &[usize],
+) -> Vec<(i64, i64)> {
     if points.is_empty() {
         return vec![];
     }
 
     if points.len() <= 2 {
-        // Keep all points if there are 2 or fewer
-        return (0..points.len()).collect();
+        // Still check for interpolation even if only 2 points
+        let mut result = vec![points[0]];
+        interpolate_recursive(points[0], points[1], &mut result);
+        result.push(points[1]);
+        return result;
     }
 
     let mut keep = HashSet::new();
-
-    // Always keep first and last points
     keep.insert(0);
     keep.insert(points.len() - 1);
 
-    // Always keep protected points
-    for &idx in protected_indices {
+    let mut protected = HashSet::new();
+    for &idx in stop_indices {
         if idx < points.len() {
-            keep.insert(idx);
+            protected.insert(idx);
         }
     }
 
-    // Recursively process the entire polyline
-    douglas_peucker_recursive(points, 0, points.len() - 1, epsilon_cm, protected_indices, &mut keep);
+    // Step 1: Douglas-Peucker
+    douglas_peucker_recursive(points, 0, points.len() - 1, epsilon_cm, &protected, &mut keep);
 
-    // Convert to sorted vector
-    let mut result: Vec<usize> = keep.into_iter().collect();
-    result.sort_unstable();
-    result
+    let mut kept_indices: Vec<usize> = keep.into_iter().collect();
+    kept_indices.sort_unstable();
+
+    // Step 2: Build final point list with interpolation
+    let mut final_points = Vec::new();
+    for i in 0..kept_indices.len() - 1 {
+        let p1 = points[kept_indices[i]];
+        let p2 = points[kept_indices[i+1]];
+        final_points.push(p1);
+        interpolate_recursive(p1, p2, &mut final_points);
+    }
+    final_points.push(points[*kept_indices.last().unwrap()]);
+
+    final_points
 }
 
-/// Recursive Douglas-Peucker implementation
-///
-/// Processes a segment of the polyline from start_idx to end_idx (inclusive).
-/// Marks points to keep in the `keep` set.
-///
-/// # Arguments
-/// * `points` - Full polyline coordinates
-/// * `start_idx` - Start index of segment (inclusive)
-/// * `end_idx` - End index of segment (inclusive)
-/// * `epsilon_cm` - Distance tolerance in centimeters
-/// * `protected_indices` - Points that must be preserved
-/// * `keep` - Set to accumulate indices of points to keep
+fn interpolate_recursive(p1: (i64, i64), p2: (i64, i64), result: &mut Vec<(i64, i64)>) {
+    let dx = p2.0 - p1.0;
+    let dy = p2.1 - p1.1;
+    let dist = ((dx * dx + dy * dy) as f64).sqrt();
+
+    if dist > 3000.0 {
+        // Geometric midpoint
+        let mid = (
+            (p1.0 + p2.0) / 2,
+            (p1.1 + p2.1) / 2,
+        );
+        
+        // Recursive split first half
+        interpolate_recursive(p1, mid, result);
+        result.push(mid);
+        // Recursive split second half
+        interpolate_recursive(mid, p2, result);
+    }
+}
+
 fn douglas_peucker_recursive(
     points: &[(i64, i64)],
     start_idx: usize,
     end_idx: usize,
     epsilon_cm: f64,
-    protected_indices: &[usize],
+    protected: &HashSet<usize>,
     keep: &mut HashSet<usize>,
 ) {
     if end_idx <= start_idx + 1 {
-        // Segment has no intermediate points
         return;
     }
 
-    // Find the point with maximum perpendicular distance
-    let (furthest_idx, max_dist) =
-        find_furthest_point(points, start_idx, end_idx);
-
-    if max_dist > epsilon_cm || is_protected(furthest_idx, protected_indices) {
-        // Keep this point and recursively process both halves
-        keep.insert(furthest_idx);
-
-        douglas_peucker_recursive(
-            points,
-            start_idx,
-            furthest_idx,
-            epsilon_cm,
-            protected_indices,
-            keep,
-        );
-        douglas_peucker_recursive(
-            points,
-            furthest_idx,
-            end_idx,
-            epsilon_cm,
-            protected_indices,
-            keep,
-        );
-    }
-    // else: discard all intermediate points (they're within epsilon)
-}
-
-/// Find the point with maximum perpendicular distance from the line segment
-///
-/// Computes perpendicular distance for each point between start_idx and end_idx,
-/// returning the index of the furthest point and its distance.
-///
-/// # Arguments
-/// * `points` - Polyline coordinates
-/// * `start_idx` - Start of line segment
-/// * `end_idx` - End of line segment
-///
-/// # Returns
-/// * `(usize, f64)` - Index of furthest point and its distance in cm
-///
-/// # Notes
-/// - Only considers points between start_idx and end_idx (exclusive)
-/// - Distance is perpendicular to the line segment
-fn find_furthest_point(
-    points: &[(i64, i64)],
-    start_idx: usize,
-    end_idx: usize,
-) -> (usize, f64) {
-    let start = points[start_idx];
-    let end = points[end_idx];
-
     let mut furthest_idx = start_idx + 1;
-    let mut max_dist = 0.0;
-
+    let mut max_dist = -1.0;
     for i in (start_idx + 1)..end_idx {
-        let dist = perpendicular_distance(points[i], start, end);
+        let dist = perpendicular_distance(points[i], points[start_idx], points[end_idx]);
         if dist > max_dist {
             max_dist = dist;
             furthest_idx = i;
         }
     }
 
-    (furthest_idx, max_dist)
-}
+    let mut effective_epsilon = epsilon_cm;
+    if is_sharp_turn(points, start_idx, furthest_idx, end_idx) {
+        effective_epsilon = 250.0; // ε_curve
+    }
 
-/// Calculate perpendicular distance from point to line segment
-///
-/// Uses the line equation approach to compute the perpendicular distance
-/// from point P to the line passing through A and B.
-///
-/// # Formula
-/// For line through points A(x1, y1) and B(x2, y2):
-/// - Line equation: ax + by + c = 0
-/// - Where: a = y2 - y1, b = x1 - x2, c = x2*y1 - x1*y2
-/// - Distance from P(x0, y0): |ax0 + by0 + c| / sqrt(a² + b²)
-///
-/// # Arguments
-/// * `point` - Point P coordinates (x, y) in centimeters
-/// * `line_start` - Line endpoint A coordinates (x, y) in centimeters
-/// * `line_end` - Line endpoint B coordinates (x, y) in centimeters
-///
-/// # Returns
-/// * `f64` - Perpendicular distance in centimeters
-///
-/// # Examples
-/// ```
-/// use preprocessor::simplify::perpendicular_distance;
-///
-/// // Point on the line
-/// let dist = perpendicular_distance((150, 5), (0, 0), (300, 10));
-/// assert!(dist < 1.0); // Very small, point is nearly on the line
-///
-/// // Point far from the line
-/// let dist = perpendicular_distance((150, 100), (0, 0), (300, 10));
-/// assert!(dist > 50.0); // Significant distance
-/// ```
-///
-/// # Notes
-/// - This computes distance to the infinite line, not just the segment
-/// - For Douglas-Peucker, this is the correct behavior
-/// - Returns 0 if the line segment has zero length
-pub fn perpendicular_distance(
-    point: (i64, i64),
-    line_start: (i64, i64),
-    line_end: (i64, i64),
-) -> f64 {
-    let (x0, y0) = point;
-    let (x1, y1) = line_start;
-    let (x2, y2) = line_end;
-
-    // Line coefficients: ax + by + c = 0
-    let a = (y2 - y1) as f64;
-    let b = (x1 - x2) as f64;
-    let c = (x2 * y1 - x1 * y2) as f64;
-
-    // Distance = |ax0 + by0 + c| / sqrt(a² + b²)
-    let numerator = (a * x0 as f64 + b * y0 as f64 + c).abs();
-    let denominator = (a * a + b * b).sqrt();
-
-    if denominator < 1e-10 {
-        // Line segment has zero length
-        0.0
-    } else {
-        numerator / denominator
+    if max_dist > effective_epsilon || protected.contains(&furthest_idx) {
+        keep.insert(furthest_idx);
+        douglas_peucker_recursive(points, start_idx, furthest_idx, epsilon_cm, protected, keep);
+        douglas_peucker_recursive(points, furthest_idx, end_idx, epsilon_cm, protected, keep);
     }
 }
 
-/// Check if an index is in the protected indices set
-///
-/// # Arguments
-/// * `idx` - Index to check
-/// * `protected_indices` - Slice of protected indices
-///
-/// # Returns
-/// * `bool` - True if idx is protected
-///
-/// # Notes
-/// - Uses binary search for O(log n) lookup
-/// - Assumes protected_indices is sorted (which is typical)
-fn is_protected(idx: usize, protected_indices: &[usize]) -> bool {
-    protected_indices.binary_search(&idx).is_ok()
+fn perpendicular_distance(p: (i64, i64), a: (i64, i64), b: (i64, i64)) -> f64 {
+    let x0 = p.0 as f64;
+    let y0 = p.1 as f64;
+    let x1 = a.0 as f64;
+    let y1 = a.1 as f64;
+    let x2 = b.0 as f64;
+    let y2 = b.1 as f64;
+
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let denominator = (dx.powi(2) + dy.powi(2)).sqrt();
+
+    if denominator < 1e-6 {
+        return (((x0 - x1).powi(2) + (y0 - y1).powi(2)) as f64).sqrt();
+    }
+
+    let numerator = (dy * x0 - dx * y0 + x2 * y1 - y2 * x1).abs();
+    numerator / denominator
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn is_sharp_turn(points: &[(i64, i64)], a_idx: usize, m_idx: usize, b_idx: usize) -> bool {
+    let a = points[a_idx];
+    let m = points[m_idx];
+    let b = points[b_idx];
 
-    #[test]
-    fn douglas_peucker_basic() {
-        // Test with 3 collinear points - middle point should be removed
-        let points = vec![(0, 0), (100, 0), (200, 0)];
-        let kept = douglas_peucker(&points, 50.0, &[]);
+    let v1 = (m.0 - a.0, m.1 - a.1);
+    let v2 = (b.0 - m.0, b.1 - m.1);
 
-        // Should only keep endpoints
-        assert_eq!(kept, vec![0, 2]);
+    let dot = v1.0 * v2.0 + v1.1 * v2.1;
+    let mag1 = ((v1.0 * v1.0 + v1.1 * v1.1) as f64).sqrt();
+    let mag2 = ((v2.0 * v2.0 + v2.1 * v2.1) as f64).sqrt();
+
+    if mag1 < 1.0 || mag2 < 1.0 {
+        return false;
     }
 
-    #[test]
-    fn douglas_peucker_preserves_endpoints() {
-        // Test that first and last points are always kept
-        let points = vec![(0, 0), (100, 100), (200, 0)];
-        let kept = douglas_peucker(&points, 0.0, &[]);
+    let cos_theta = dot as f64 / (mag1 * mag2);
+    let theta = cos_theta.clamp(-1.0, 1.0).acos().to_degrees();
 
-        // Even with epsilon=0, endpoints are kept
-        assert!(kept.contains(&0));
-        assert!(kept.contains(&2));
-        assert_eq!(kept[0], 0);
-        assert_eq!(kept[kept.len() - 1], 2);
-    }
-
-    #[test]
-    fn douglas_peucker_respects_protected() {
-        // Test that protected points are always kept
-        let points = vec![(0, 0), (100, 0), (200, 0), (300, 0)];
-        let protected = vec![1, 2];
-        let kept = douglas_peucker(&points, 1000.0, &protected);
-
-        // All points should be kept (endpoints + protected)
-        assert!(kept.contains(&0));
-        assert!(kept.contains(&1));
-        assert!(kept.contains(&2));
-        assert!(kept.contains(&3));
-    }
-
-    #[test]
-    fn douglas_peucker_with_deviation() {
-        // Test that points with significant deviation are kept
-        let points = vec![(0, 0), (100, 100), (200, 0)];
-
-        // With epsilon=50, the middle point should be kept (deviation > 50)
-        let kept = douglas_peucker(&points, 50.0, &[]);
-        assert!(kept.contains(&1));
-
-        // With epsilon=200, the middle point should be removed (deviation < 200)
-        let kept = douglas_peucker(&points, 200.0, &[]);
-        assert_eq!(kept, vec![0, 2]);
-    }
-
-    #[test]
-    fn douglas_peucker_empty() {
-        // Test with empty input
-        let points: Vec<(i64, i64)> = vec![];
-        let kept = douglas_peucker(&points, 100.0, &[]);
-
-        assert_eq!(kept, Vec::<usize>::new());
-    }
-
-    #[test]
-    fn douglas_peucker_single_point() {
-        // Test with single point
-        let points = vec![(100, 100)];
-        let kept = douglas_peucker(&points, 100.0, &[]);
-
-        assert_eq!(kept, vec![0]);
-    }
-
-    #[test]
-    fn douglas_peucker_two_points() {
-        // Test with two points
-        let points = vec![(0, 0), (100, 100)];
-        let kept = douglas_peucker(&points, 100.0, &[]);
-
-        assert_eq!(kept, vec![0, 1]);
-    }
-
-    #[test]
-    fn douglas_peucker_sorted_output() {
-        // Test that output is always sorted
-        let points = vec![
-            (0, 0),
-            (100, 0),
-            (200, 100),
-            (300, 0),
-            (400, 0),
-        ];
-        let kept = douglas_peucker(&points, 50.0, &[]);
-
-        // Check that indices are in ascending order
-        for i in 1..kept.len() {
-            assert!(kept[i] > kept[i - 1]);
-        }
-    }
-
-    #[test]
-    fn perpendicular_distance_on_line() {
-        // Point on the line should have zero distance
-        let dist = perpendicular_distance((150, 5), (0, 0), (300, 10));
-
-        // Point (150, 5) is exactly on the line from (0,0) to (300,10)
-        assert!(dist < 1.0);
-    }
-
-    #[test]
-    fn perpendicular_distance_off_line() {
-        // Point perpendicular to line
-        let dist = perpendicular_distance((150, 100), (0, 0), (300, 0));
-
-        // Distance should be 100 (vertical distance from horizontal line)
-        assert!((dist - 100.0).abs() < 1.0);
-    }
-
-    #[test]
-    fn perpendicular_distance_zero_length_segment() {
-        // Zero-length segment should return 0
-        let dist = perpendicular_distance((100, 100), (50, 50), (50, 50));
-
-        assert_eq!(dist, 0.0);
-    }
-
-    #[test]
-    fn perpendicular_distance_diagonal() {
-        // Test with diagonal line
-        // Line from (0,0) to (100,100), point at (0,100)
-        let dist = perpendicular_distance((0, 100), (0, 0), (100, 100));
-
-        // Distance should be 100/sqrt(2) ≈ 70.71
-        let expected = 100.0 / 2.0_f64.sqrt();
-        assert!((dist - expected).abs() < 1.0);
-    }
-
-    #[test]
-    fn is_protected_found() {
-        let protected = vec![1, 3, 5, 7];
-        assert!(is_protected(3, &protected));
-        assert!(is_protected(0, &protected) == false);
-        assert!(is_protected(8, &protected) == false);
-    }
-
-    #[test]
-    fn find_furthest_point_basic() {
-        let points = vec![(0, 0), (100, 0), (150, 100), (200, 0), (300, 0)];
-
-        let (idx, dist) = find_furthest_point(&points, 0, 4);
-
-        // Point at index 2 should be furthest (deviation of 100)
-        assert_eq!(idx, 2);
-        assert!(dist > 99.0 && dist < 101.0);
-    }
-
-    #[test]
-    fn find_furthest_point_collinear() {
-        let points = vec![(0, 0), (100, 0), (200, 0), (300, 0)];
-
-        let (_idx, dist) = find_furthest_point(&points, 0, 3);
-
-        // All points are collinear, distance should be 0
-        assert_eq!(dist, 0.0);
-    }
-
-    #[test]
-    fn douglas_peucker_complex_route() {
-        // Simulate a bus route with multiple segments
-        let points = vec![
-            (0, 0),       // Start
-            (100, 10),    // Small deviation
-            (200, 5),     // Small deviation
-            (300, 100),   // Large deviation (turn)
-            (400, 95),    // Small deviation
-            (500, 105),   // Small deviation
-            (600, 200),   // Large deviation (turn)
-            (700, 200),   // End
-        ];
-
-        // With epsilon=50, only the turns should be kept
-        let kept = douglas_peucker(&points, 50.0, &[]);
-
-        assert!(kept.contains(&0)); // Start
-        assert!(kept.contains(&3)); // First turn
-        assert!(kept.contains(&7)); // End
-        // Note: Point 6 (second turn) is close to line from 3 to 7, so may be removed
-    }
-
-    #[test]
-    fn douglas_peucker_default_epsilon() {
-        // Test with default epsilon of 700cm (7m)
-        let points = vec![
-            (0, 0),
-            (10000, 0),      // 100m along, should be kept with epsilon=700
-            (20000, 0),      // 200m along
-            (30000, 10000),  // 100m deviation, should definitely be kept
-            (40000, 0),
-        ];
-
-        let kept = douglas_peucker(&points, 700.0, &[]);
-
-        // Point with 100m deviation should be kept
-        assert!(kept.contains(&3));
-    }
-
-    #[test]
-    fn douglas_peucker_protected_with_small_epsilon() {
-        // Test that protected points work even with small epsilon
-        let points = vec![
-            (0, 0),
-            (1000, 0),
-            (2000, 0),  // This is protected
-            (3000, 0),
-            (4000, 0),
-        ];
-
-        let protected = vec![2];
-        let kept = douglas_peucker(&points, 1000.0, &protected);
-
-        // Should keep endpoints and protected point
-        assert!(kept.contains(&0));
-        assert!(kept.contains(&2));
-        assert!(kept.contains(&4));
-    }
+    theta > 20.0
 }

@@ -1,33 +1,25 @@
 // Offline preprocessor for GPS bus arrival detection system
 //
-// Phase 1: Route simplification, stop projection, and binary packing
+// Phase 1: Route simplification, stop projection, and binary packing (v8)
 
 use std::env;
 use std::fs;
 use std::process;
 
 mod coord;
+mod grid;
 mod input;
 mod linearize;
+mod lut;
 mod pack;
-mod route;
 mod simplify;
 mod stops;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    // Require exactly 3 arguments: route.json, stops.json, route_data.bin
     if args.len() != 4 {
         eprintln!("Usage: preprocessor <route.json> <stops.json> <route_data.bin>");
-        eprintln!();
-        eprintln!("Arguments:");
-        eprintln!("  route.json     - Input file containing route GPS coordinates");
-        eprintln!("  stops.json     - Input file containing bus stop information");
-        eprintln!("  route_data.bin - Output file for processed binary data");
-        eprintln!();
-        eprintln!("Example:");
-        eprintln!("  preprocessor route.json stops.json route_data.bin");
         process::exit(1);
     }
 
@@ -35,128 +27,99 @@ fn main() {
     let stops_json_path = &args[2];
     let output_bin_path = &args[3];
 
-    // Print Phase 1 header
     println!("========================================");
-    println!("Bus Arrival Preprocessor - Phase 1");
+    println!("Bus Arrival Preprocessor - v8.0 Pipeline");
     println!("========================================");
-    println!();
-    println!("Input files:");
-    println!("  Route JSON: {}", route_json_path);
-    println!("  Stops JSON: {}", stops_json_path);
-    println!();
-    println!("Output file:");
-    println!("  Binary data: {}", output_bin_path);
-    println!();
 
-    // Parse route.json
-    let route_json = fs::read_to_string(route_json_path)
-        .unwrap_or_else(|e| {
-            eprintln!("Error reading route file {}: {}", route_json_path, e);
-            process::exit(1);
-        });
+    // 1. Parse inputs
+    let route_input: input::RouteInput = serde_json::from_str(
+        &fs::read_to_string(route_json_path).expect("Failed to read route.json")
+    ).expect("Failed to parse route.json");
 
-    let route_input: input::RouteInput = serde_json::from_str(&route_json)
-        .unwrap_or_else(|e| {
-            eprintln!("Error parsing route JSON: {}", e);
-            process::exit(1);
-        });
+    let stops_input: input::StopsInput = serde_json::from_str(
+        &fs::read_to_string(stops_json_path).expect("Failed to read stops.json")
+    ).expect("Failed to parse stops.json");
 
-    println!("Parsed route with {} points", route_input.route_points.len());
+    println!("Loaded {} route points and {} stops", route_input.route_points.len(), stops_input.stops.len());
 
-    // Parse stops.json
-    let stops_json = fs::read_to_string(stops_json_path)
-        .unwrap_or_else(|e| {
-            eprintln!("Error reading stops file {}: {}", stops_json_path, e);
-            process::exit(1);
-        });
+    // 2. Initial coordinate conversion for simplification and stop protection
+    let lat_avg = coord::compute_lat_avg(&route_input.route_points.iter().map(|p| (p.lat(), p.lon())).collect::<Vec<_>>());
+    println!("Computed average latitude: {:.6}°", lat_avg);
+    
+    let mut route_pts_cm = Vec::with_capacity(route_input.route_points.len());
+    for p in &route_input.route_points {
+        let (x, y) = coord::latlon_to_cm_relative(p.lat(), p.lon(), lat_avg);
+        route_pts_cm.push((x as i64, y as i64));
+    }
 
-    let stops_input: input::StopsInput = serde_json::from_str(&stops_json)
-        .unwrap_or_else(|e| {
-            eprintln!("Error parsing stops JSON: {}", e);
-            process::exit(1);
-        });
+    // Identify indices of route points near stops (±30m protection)
+    let mut protected_indices = Vec::new();
+    for stop in &stops_input.stops {
+        let (sx, sy) = coord::latlon_to_cm_relative(stop.lat, stop.lon, lat_avg);
+        let mut best_idx = 0;
+        let mut min_dist2 = i64::MAX;
+        
+        for (i, p) in route_pts_cm.iter().enumerate() {
+            let dx = p.0 - sx as i64;
+            let dy = p.1 - sy as i64;
+            let d2 = dx*dx + dy*dy;
+            if d2 < min_dist2 {
+                min_dist2 = d2;
+                best_idx = i;
+            }
+        }
+        protected_indices.push(best_idx);
+    }
 
-    println!("Parsed {} stops", stops_input.stops.len());
-    println!();
+    // 3. Simplify route (Douglas-Peucker + Curve/Stop/Length Protection)
+    let epsilon_general = 700.0; // 7m
+    let simplified_pts_cm = simplify::simplify_and_interpolate(&route_pts_cm, epsilon_general, &protected_indices);
 
-    // Compute average latitude for coordinate conversion
-    let lat_avg: f64 = if route_input.route_points.is_empty() {
-        eprintln!("Error: Route has no points");
-        process::exit(1);
-    } else {
-        route_input.route_points.iter().map(|p| p.lat).sum::<f64>()
-            / route_input.route_points.len() as f64
-    };
-    println!("Average latitude: {:.6}°", lat_avg);
+    println!("Simplified route: {} -> {} points", route_pts_cm.len(), simplified_pts_cm.len());
 
-    // Use FIXED origin at (120.0°E, 20.0°N) - same for all routes
-    let grid_origin = (coord::FIXED_ORIGIN_X_CM as i32, coord::FIXED_ORIGIN_Y_CM as i32);
-    println!("Grid origin: FIXED at (120.0°E, 20.0°N) = ({}, {}) cm", grid_origin.0, grid_origin.1);
+    // Debug: Check max segment length in simplified route
+    let mut max_len = 0.0;
+    for i in 0..simplified_pts_cm.len()-1 {
+        let p1 = simplified_pts_cm[i];
+        let p2 = simplified_pts_cm[i+1];
+        let len = (((p2.0-p1.0).pow(2) + (p2.1-p1.1).pow(2)) as f64).sqrt();
+        if len > max_len { max_len = len; }
+    }
+    println!("Max segment length in simplified route: {:.2} cm", max_len);
 
-    // Convert all coordinates to grid-relative coordinates (using fixed origin)
-    let route_points_grid: Vec<(i64, i64)> = route_input.route_points
-        .iter()
-        .map(|p| {
-            let (dx, dy) = coord::latlon_to_cm_relative(p.lat, p.lon, lat_avg);
-            (dx as i64, dy as i64)
-        })
-        .collect();
-
-    // Simplify route using Douglas-Peucker algorithm
-    let simplified_indices = simplify::douglas_peucker(&route_points_grid, 100.0, &[]); // 1m threshold in cm
-    let simplified_route: Vec<(i64, i64)> = simplified_indices
-        .iter()
-        .map(|&i| route_points_grid[i])
-        .collect();
-
-    println!("Simplified route: {} -> {} points", route_points_grid.len(), simplified_route.len());
-
-    // Linearize route into linked nodes
-    let route_nodes = linearize::build_route_graph(&simplified_route, &route_input.route_points, lat_avg);
+    // 4. Linearize route (Compute geometric coefficients)
+    let route_nodes = linearize::linearize_route(&simplified_pts_cm);
     println!("Built route graph with {} nodes", route_nodes.len());
 
-    // Project stops onto route
-    let mut stops = stops_input.stops;
-    let mut projected_stops: Vec<stops::Stop> = Vec::new();
+    // 5. Project stops (1D progress + non-overlapping corridors)
+    let stop_pts_cm: Vec<(i64, i64)> = stops_input.stops.iter().map(|s| {
+        let (x, y) = coord::latlon_to_cm_relative(s.lat, s.lon, lat_avg);
+        (x as i64, y as i64)
+    }).collect();
+    
+    let projected_stops = stops::project_stops(&stop_pts_cm, &route_nodes);
+    println!("Projected {} stops with corridors", projected_stops.len());
 
-    for stop in &mut stops {
-        // Convert stop to grid-relative coordinates (using fixed origin)
-        let (stop_x_rel, stop_y_rel) = coord::latlon_to_cm_relative(stop.lat, stop.lon, lat_avg);
+    // 6. Build Spatial Grid Index (100m cells)
+    let grid_size_cm = 10000; // 100m
+    let grid = grid::build_grid(&route_nodes, grid_size_cm);
+    println!("Built {}x{} spatial grid ({} cells)", grid.cols, grid.rows, grid.cells.len());
 
-        let stop_grid = stops::PointCM {
-            x_cm: stop_x_rel as i64,
-            y_cm: stop_y_rel as i64,
-        };
+    // 7. Generate LUTs
+    let gaussian_lut = lut::generate_gaussian_lut();
+    let logistic_lut = lut::generate_logistic_lut();
 
-        // Project onto route
-        let (route_node_index, lat_cm, lon_cm) = stops::project_stop(&stop_grid, &route_nodes);
+    // 8. Pack and write binary
+    let output_file = fs::File::create(output_bin_path).expect("Failed to create output file");
+    pack::pack_route_data(
+        &route_nodes,
+        &projected_stops,
+        &grid,
+        &gaussian_lut,
+        &logistic_lut,
+        &mut &output_file
+    ).expect("Failed to pack route data");
 
-        projected_stops.push(stops::Stop {
-            lat_cm,
-            lon_cm,
-            route_node_index,
-        });
-    }
-
-    println!("Projected {} stops onto route", projected_stops.len());
-    println!();
-
-    // Write binary output
-    println!("Writing binary data to {}", output_bin_path);
-    let output_file = fs::File::create(output_bin_path)
-        .unwrap_or_else(|e| {
-            eprintln!("Error creating output file {}: {}", output_bin_path, e);
-            process::exit(1);
-        });
-
-    if let Err(e) = pack::pack_route_data(&route_nodes, &projected_stops, grid_origin, output_file) {
-        eprintln!("Error writing binary data: {}", e);
-        process::exit(1);
-    }
-
-    println!("Successfully wrote {} bytes", fs::metadata(output_bin_path).unwrap().len());
-    println!();
-    println!("========================================");
-    println!("Preprocessing complete!");
+    println!("Successfully wrote binary data to {}", output_bin_path);
     println!("========================================");
 }

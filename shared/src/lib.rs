@@ -3,7 +3,14 @@
 // These type aliases provide domain-specific meaning to primitive types,
 // making the code more self-documenting and preventing unit errors.
 
+/// Magic bytes for route_data.bin: "BUSA" (BUS Arrival)
+pub const MAGIC: u32 = 0x42555341;
+
+/// Format version
+pub const VERSION: u16 = 1;
+
 /// Distance in centimeters.
+
 ///
 /// # Range
 /// - i32::MIN to i32::MAX (-2,147,483,648 to 2,147,483,647 cm)
