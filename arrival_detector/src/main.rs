@@ -1,5 +1,6 @@
 mod input;
 mod corridor;
+mod probability;
 
 use std::env;
 use std::path::PathBuf;
