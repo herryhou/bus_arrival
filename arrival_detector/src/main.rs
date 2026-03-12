@@ -1,3 +1,5 @@
+mod input;
+
 use std::env;
 use std::path::PathBuf;
 
