@@ -1,4 +1,5 @@
 mod input;
+mod corridor;
 
 use std::env;
 use std::path::PathBuf;
