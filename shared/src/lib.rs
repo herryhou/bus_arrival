@@ -3,6 +3,18 @@
 //! All physical quantities use semantic integer types to prevent unit confusion
 //! and enable zero-cost runtime behavior on no_std targets.
 
+/// Earth's radius in centimeters
+pub const EARTH_R_CM: f64 = 637_100_000.0;
+
+/// Fixed origin longitude in degrees (120.0°E)
+pub const FIXED_ORIGIN_LON_DEG: f64 = 120.0;
+
+/// Fixed origin latitude in degrees (20.0°N)
+pub const FIXED_ORIGIN_LAT_DEG: f64 = 20.0;
+
+/// Average latitude for projection (Taiwan: 25.0°N)
+pub const PROJECTION_LAT_AVG: f64 = 25.0;
+
 pub mod binfile;
 
 /// Distance in centimeters.
@@ -106,6 +118,7 @@ pub struct GridOrigin {
 /// Parsed GPS data from NMEA sentences.
 #[derive(Debug, Clone)]
 pub struct GpsPoint {
+    pub timestamp: u64, // seconds since epoch
     pub lat: f64,
     pub lon: f64,
     pub heading_cdeg: HeadCdeg,
@@ -117,6 +130,7 @@ pub struct GpsPoint {
 impl GpsPoint {
     pub fn new() -> Self {
         GpsPoint {
+            timestamp: 0,
             lat: 0.0,
             lon: 0.0,
             heading_cdeg: 0,
@@ -133,11 +147,12 @@ impl GpsPoint {
 pub struct KalmanState {
     pub s_cm: DistCm,
     pub v_cms: SpeedCms,
+    pub last_seg_idx: usize,
 }
 
 impl KalmanState {
     pub fn new() -> Self {
-        KalmanState { s_cm: 0, v_cms: 0 }
+        KalmanState { s_cm: 0, v_cms: 0, last_seg_idx: 0 }
     }
 
     pub fn update(&mut self, z_cm: DistCm, v_gps_cms: SpeedCms) {
@@ -235,28 +250,32 @@ impl DrState {
     }
 }
 
-/// Arrival detection FSM states for Phase 3 runtime.
-#[repr(C)]
+/// Stop state machine states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FsmState {
-    /// Normal tracking — outside any arrival corridor
-    Tracking,
-    /// Inside corridor — monitoring for arrival
+    /// Bus is approaching stop (in corridor, not yet close)
     Approaching,
-    /// Arrival confirmed — waiting for departure
-    Arrived,
+    /// Bus is in arrival zone (close to stop)
+    Arriving,
+    /// Bus has arrived (confirmed stop)
+    AtStop,
+    /// Bus has departed (moved past stop)
+    Departed,
 }
 
-/// Arrival event emitted by the detector.
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
+/// Arrival event emitted when bus reaches a stop
+#[derive(Debug, Clone)]
 pub struct ArrivalEvent {
-    /// Stop index in the route
-    pub stop_idx: u16,
-    /// FSM state after processing this event
-    pub state: FsmState,
-    /// Confidence score (0..255)
-    pub confidence: Prob8,
+    /// GPS update timestamp (seconds since epoch)
+    pub time: u64,
+    /// Stop index that was arrived at
+    pub stop_idx: u8,
+    /// Route progress at arrival (cm)
+    pub s_cm: DistCm,
+    /// Speed at arrival (cm/s)
+    pub v_cms: SpeedCms,
+    /// Arrival probability that triggered
+    pub probability: Prob8,
 }
 
 // Compile-time assertion — fails if field reordering changes size
