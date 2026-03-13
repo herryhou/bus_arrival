@@ -12,6 +12,9 @@ pub const FIXED_ORIGIN_LON_DEG: f64 = 120.0;
 /// Fixed origin latitude in degrees (20.0°N)
 pub const FIXED_ORIGIN_LAT_DEG: f64 = 20.0;
 
+/// Fixed origin Y coordinate in centimeters
+pub const FIXED_ORIGIN_Y_CM: i64 = 222389853; // R_CM * (20.0 * PI / 180.0)
+
 /// Average latitude for projection (Taiwan: 25.0°N)
 pub const PROJECTION_LAT_AVG: f64 = 25.0;
 
@@ -47,28 +50,34 @@ pub type Dist2 = i64;
 /// ```text
 /// offset  0: len2_cm2     i64   8 bytes  (|P[i+1]-P[i]|², cm²)
 /// offset  8: line_c       i64   8 bytes  (= -(A·x₀ + B·y₀))
-/// offset 16: x_cm         i32   4 bytes
-/// offset 20: y_cm         i32   4 bytes
-/// offset 24: cum_dist_cm  i32   4 bytes
-/// offset 28: dx_cm        i32   4 bytes  (segment vector x)
-/// offset 32: dy_cm        i32   4 bytes  (segment vector y)
-/// offset 36: seg_len_cm   i32   4 bytes  (offline sqrt, not used runtime)
-/// offset 40: line_a       i32   4 bytes  (= -dy)
-/// offset 44: line_b       i32   4 bytes  (= dx)
-/// offset 48: heading_cdeg i16   2 bytes
-/// offset 50: _pad         i16   2 bytes
+/// offset 16: heading_cdeg i16   2 bytes
+/// offset 18: _pad         i16   2 bytes
+/// offset 20: x_cm         i32   4 bytes
+/// offset 24: y_cm         i32   4 bytes
+/// offset 28: cum_dist_cm  i32   4 bytes
+/// offset 32: dx_cm        i32   4 bytes  (segment vector x)
+/// offset 36: dy_cm        i32   4 bytes  (segment vector y)
+/// offset 40: seg_len_cm   i32   4 bytes  (offline sqrt, not used runtime)
+/// offset 44: line_a       i32   4 bytes  (= -dy)
+/// offset 48: line_b       i32   4 bytes  (= dx)
 /// total: 52 bytes (no padding gaps)
 /// ```
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct RouteNode {
-    // ── i64 fields first ──────────────────────────────────────────
+    // ── i64 fields first (8-byte aligned) ──────────────────────────
     /// Squared segment length: |P[i+1] - P[i]|² in cm²
     pub len2_cm2: Dist2,
     /// Line constant: -(line_a × x₀ + line_b × y₀)
     pub line_c: Dist2,
 
-    // ── i32 fields ────────────────────────────────────────────────
+    // ── i16 fields (2-byte aligned) ────────────────────────────────
+    /// Segment heading in 0.01° (e.g., 9000 = 90°)
+    pub heading_cdeg: HeadCdeg,
+    /// Padding to align struct size
+    pub _pad: i16,
+
+    // ── i32 fields (4-byte aligned) ────────────────────────────────
     /// X coordinate (relative to grid origin) in cm
     pub x_cm: DistCm,
     /// Y coordinate (relative to grid origin) in cm
@@ -85,13 +94,8 @@ pub struct RouteNode {
     pub line_a: DistCm,
     /// Line coefficient B: = dx_cm (for distance calculation)
     pub line_b: DistCm,
-
-    // ── i16 fields ────────────────────────────────────────────────
-    /// Segment heading in 0.01° (e.g., 9000 = 90°)
-    pub heading_cdeg: HeadCdeg,
-    /// Padding to align struct size
-    pub _pad: i16,
 }
+
 
 /// Bus stop with precomputed corridor boundaries.
 #[repr(C)]

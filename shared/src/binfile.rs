@@ -231,3 +231,58 @@ pub fn pack_route_data(
     output.write_all(&buffer).map_err(|_| BusError::IoError)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pack_and_load() {
+        let nodes = vec![];
+        let stops = vec![];
+        let grid = SpatialGrid {
+            cells: vec![],
+            grid_size_cm: 10000,
+            cols: 0,
+            rows: 0,
+            x0_cm: 100,
+            y0_cm: 200,
+        };
+        let mut buffer = Vec::new();
+        pack_route_data(&nodes, &stops, &grid, &[0u8; 256], &[0u8; 128], &mut buffer).unwrap();
+
+        let loaded = RouteData::load(&buffer).unwrap();
+        assert_eq!(loaded.x0_cm, 100);
+        assert_eq!(loaded.y0_cm, 200);
+        assert_eq!(loaded.node_count, 0);
+    }
+
+    #[test]
+    fn test_crc_mismatch() {
+        let mut buffer = Vec::new();
+        let grid = SpatialGrid {
+            cells: vec![],
+            grid_size_cm: 10000,
+            cols: 0,
+            rows: 0,
+            x0_cm: 0,
+            y0_cm: 0,
+        };
+        pack_route_data(&[], &[], &grid, &[0u8; 256], &[0u8; 128], &mut buffer).unwrap();
+
+        // Corrupt one byte of data (not the CRC itself)
+        buffer[10] ^= 0xFF;
+
+        let result = RouteData::load(&buffer);
+        assert_eq!(result.err(), Some(BusError::ChecksumMismatch));
+    }
+
+    #[test]
+    fn test_invalid_magic() {
+        let buffer = vec![0u8; 100];
+        let result = RouteData::load(&buffer);
+        assert_eq!(result.err(), Some(BusError::InvalidMagic));
+    }
+}
+
+

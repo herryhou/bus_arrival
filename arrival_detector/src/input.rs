@@ -32,6 +32,7 @@ pub fn parse_input(path: &std::path::Path) -> impl Iterator<Item=InputRecord> {
             time: rec.time,
             s_cm: rec.s_cm,
             v_cms: rec.v_cms,
-            valid: rec.status == "valid",
+            valid: rec.status == "valid" || rec.status == "dr_outage",
         })
+
 }
