@@ -3,6 +3,9 @@
 //! All physical quantities use semantic integer types to prevent unit confusion
 //! and enable zero-cost runtime behavior on no_std targets.
 
+#[cfg(feature = "serde")]
+use serde::Serialize;
+
 /// Earth's radius in centimeters
 pub const EARTH_R_CM: f64 = 637_100_000.0;
 
@@ -255,6 +258,7 @@ impl DrState {
 }
 
 /// Stop state machine states
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FsmState {
     /// Bus is approaching stop (in corridor, not yet close)

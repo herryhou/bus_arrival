@@ -5,7 +5,8 @@ edition.workspace = true
 
 [features]
 default = ["std"]
-std = ["crc32fast/std"]
+std = ["crc32fast/std", "serde"]
 
 [dependencies]
+serde = { workspace = true, optional = true, features = ["derive"] }
 crc32fast = { workspace = true, default-features = false }
