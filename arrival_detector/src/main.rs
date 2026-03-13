@@ -1,35 +1,40 @@
-mod input;
-mod corridor;
-mod probability;
-mod state_machine;
-mod recovery;
-mod output;
-
 use std::env;
 use std::path::PathBuf;
 use std::fs::File;
-use std::io::{BufWriter, Read};
+use std::io::{BufWriter, Read, Write};
 
 use shared::binfile::RouteData;
 use shared::{ArrivalEvent, FsmState};
-use state_machine::StopState;
+use arrival_detector::state_machine::StopState;
+use arrival_detector::{input, corridor, probability, recovery, output, trace};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 4 {
-        eprintln!("Usage: arrival_detector <input.jsonl> <route_data.bin> <output.jsonl>");
+    // Parse arguments: <input.jsonl> <route_data.bin> <output.jsonl> [--trace <trace.jsonl>]
+    if args.len() != 4 && args.len() != 6 {
+        eprintln!("Usage: arrival_detector <input.jsonl> <route_data.bin> <output.jsonl> [--trace <trace.jsonl>]");
+        std::process::exit(1);
+    }
+
+    let enable_trace = args.len() == 6 && args[4] == "--trace";
+    if args.len() == 6 && !enable_trace {
+        eprintln!("Error: expected --trace as 4th argument");
         std::process::exit(1);
     }
 
     let input_path = PathBuf::from(&args[1]);
     let route_path = PathBuf::from(&args[2]);
     let output_path = PathBuf::from(&args[3]);
+    let trace_path = enable_trace.then(|| PathBuf::from(&args[5]));
 
     println!("Phase 3: Arrival Detection");
     println!("  Input:  {}", input_path.display());
     println!("  Route:  {}", route_path.display());
     println!("  Output: {}", output_path.display());
+    if let Some(ref tp) = trace_path {
+        println!("  Trace:  {}", tp.display());
+    }
     println!();
 
     // Load route data
@@ -53,6 +58,7 @@ fn main() {
     let mut current_stop_idx = 0u8;
 
     let mut output_writer = BufWriter::new(File::create(&output_path).expect("Failed to create output file"));
+    let mut trace_writer = trace_path.map(|p| BufWriter::new(File::create(&p).expect("Failed to create trace file")));
 
     // Pre-compute LUTs (Note: we use the ones from route_data if available, 
     // but here we use the builder functions for simplicity as per spec)
@@ -68,19 +74,25 @@ fn main() {
         }
 
         // Check for GPS jump - trigger recovery
-        if (record.s_cm - last_s_cm).abs() > 20000 {
-            if let Some(new_idx) = recovery::find_stop_index(
-                record.s_cm, &stops, current_stop_idx
-            ) {
-                // If we jumped significantly, reset states for intervening stops
-                // (simplified: just update current index)
-                current_stop_idx = new_idx as u8;
-            }
+        let gps_jump = (record.s_cm - last_s_cm).abs() > 20000;
+        let recovery_idx = if gps_jump {
+            recovery::find_stop_index(record.s_cm, &stops, current_stop_idx)
+        } else {
+            None
+        };
+
+        if let Some(new_idx) = recovery_idx {
+            // If we jumped significantly, reset states for intervening stops
+            // (simplified: just update current index)
+            current_stop_idx = new_idx as u8;
         }
         last_s_cm = record.s_cm;
 
         // Find active stops (corridor filter)
         let active_indices = corridor::find_active_stops(record.s_cm, &stops);
+
+        // Track which stops arrived this frame for trace output
+        let mut arrived_this_frame: Vec<u8> = Vec::new();
 
         for &stop_idx in &active_indices {
             let stop = &stops[stop_idx];
@@ -116,8 +128,56 @@ fn main() {
                 output::write_event(&mut output_writer, &event).expect("Failed to write arrival event");
                 arrivals += 1;
                 current_stop_idx = state.index;
+                arrived_this_frame.push(state.index);
             }
         }
+
+        // Write trace record if enabled
+        if let Some(ref mut tw) = trace_writer {
+            let stop_states: Vec<trace::StopTraceState> = active_indices
+                .iter()
+                .map(|&idx| {
+                    let stop = &stops[idx];
+                    let state = &stop_states[idx];
+                    let features = probability::compute_feature_scores(
+                        record.s_cm,
+                        record.v_cms,
+                        stop,
+                        state.dwell_time_s,
+                        &gaussian_lut,
+                        &logistic_lut,
+                    );
+                    trace::StopTraceState {
+                        stop_idx: idx as u8,
+                        distance_cm: record.s_cm - stop.progress_cm,
+                        fsm_state: state.fsm_state,
+                        dwell_time_s: state.dwell_time_s,
+                        probability: probability::arrival_probability(
+                            record.s_cm,
+                            record.v_cms,
+                            stop,
+                            state.dwell_time_s,
+                            &gaussian_lut,
+                            &logistic_lut,
+                        ),
+                        features,
+                        just_arrived: arrived_this_frame.contains(&(idx as u8)),
+                    }
+                })
+                .collect();
+
+            let trace_record = trace::TraceRecord {
+                time: record.time,
+                s_cm: record.s_cm,
+                v_cms: record.v_cms,
+                active_stops: active_indices.iter().map(|&i| i as u8).collect(),
+                stop_states,
+                gps_jump,
+                recovery_idx: recovery_idx.map(|i| i as u8),
+            };
+            trace::write_trace_record(tw, &trace_record).expect("Failed to write trace record");
+        }
+
         processed += 1;
     }
 

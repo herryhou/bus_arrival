@@ -1,6 +1,7 @@
 //! 4-feature Bayesian arrival probability model
 
 use shared::{DistCm, SpeedCms, Prob8};
+use crate::trace::FeatureScores;
 
 /// Normalized Gaussian LUT: exp(-x²/2)
 /// Index i = (x / sigma) * 64. Range [0, 4.0).
@@ -60,6 +61,34 @@ pub fn arrival_probability(
     // Weighted sum: (13p₁ + 6p₂ + 10p₃ + 3p₄) / 32
     // Weights: 0.40625, 0.1875, 0.3125, 0.09375 (Approx 4:2:3:1)
     ((13 * p1 + 6 * p2 + 10 * p3 + 3 * p4) / 32) as u8
+}
+
+/// Compute individual feature scores for trace output
+pub fn compute_feature_scores(
+    s_cm: DistCm,
+    v_cms: SpeedCms,
+    stop: &shared::Stop,
+    dwell_time_s: u16,
+    gaussian_lut: &[u8; 256],
+    logistic_lut: &[u8; 128],
+) -> FeatureScores {
+    // Feature 1: Distance likelihood (sigma_d = 2750 cm)
+    let d_cm = (s_cm - stop.progress_cm).abs();
+    let idx1 = ((d_cm as i64 * 64) / 2750).min(255) as usize;
+    let p1 = gaussian_lut[idx1];
+
+    // Feature 2: Speed likelihood (near 0 → higher, v_stop = 200 cm/s)
+    let idx2 = (v_cms / 10).max(0).min(127) as usize;
+    let p2 = logistic_lut[idx2];
+
+    // Feature 3: Progress difference likelihood (sigma_p = 2000 cm)
+    let idx3 = ((d_cm as i64 * 64) / 2000).min(255) as usize;
+    let p3 = gaussian_lut[idx3];
+
+    // Feature 4: Dwell time likelihood (T_ref = 10s)
+    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u8;
+
+    FeatureScores { p1, p2, p3, p4 }
 }
 
 #[cfg(test)]
