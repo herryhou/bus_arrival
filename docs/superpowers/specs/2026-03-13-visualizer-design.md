@@ -91,27 +91,22 @@ bus_arrival/
 
 A new `--trace` flag for `arrival_detector` that emits detailed debugging state.
 
-#### CLI Interface
+**IMPORTANT:** The Rust trace feature must be implemented BEFORE the visualizer can be built. This is a prerequisite dependency.
 
-```bash
-# Normal mode: just arrivals
-cargo run --bin arrival_detector -- input.jsonl route_data.bin output.jsonl
-
-# Trace mode: full debugging info
-cargo run --bin arrival_detector -- input.jsonl route_data.bin output.jsonl --trace trace.jsonl
-```
-
-#### Trace Record Format
+#### Implementation: `arrival_detector/src/trace.rs`
 
 ```rust
 // arrival_detector/src/trace.rs
 
 use serde::Serialize;
 use shared::{DistCm, SpeedCms, Prob8, FsmState};
+use std::io::{BufWriter, Write};
 
+/// Trace record for debugging visualization
 #[derive(Serialize)]
+#[serde(tag = "fsm_state")]  // Ensures consistent serialization
 pub struct TraceRecord {
-    /// Input: GPS timestamp
+    /// Input: GPS timestamp (seconds since epoch)
     pub time: u64,
 
     /// Input: Route progress (cm)
@@ -140,8 +135,8 @@ pub struct StopTraceState {
     /// Distance to stop (cm)
     pub distance_cm: DistCm,
 
-    /// Current FSM state
-    pub fsm_state: FsmState,
+    /// FSM state serialized as string
+    pub fsm_state: &'static str,  // "Approaching" | "Arriving" | "AtStop" | "Departed"
 
     /// Dwell time (seconds)
     pub dwell_time_s: u16,
@@ -163,14 +158,160 @@ pub struct FeatureScores {
     pub p3: u8,  // Progress likelihood (Gaussian)
     pub p4: u8,  // Dwell time likelihood (Linear)
 }
+
+/// Write a trace record to the output file
+pub fn write_trace_record<W: Write>(
+    output: &mut BufWriter<W>,
+    record: &TraceRecord,
+) -> std::io::Result<()> {
+    let json = serde_json::to_string(record)?;
+    writeln!(output, "{}", json)
+}
+
+/// Convert FsmState to string for consistent serialization
+pub fn fsm_state_as_string(state: FsmState) -> &'static str {
+    match state {
+        FsmState::Approaching => "Approaching",
+        FsmState::Arriving => "Arriving",
+        FsmState::AtStop => "AtStop",
+        FsmState::Departed => "Departed",
+    }
+}
+```
+
+#### Implementation: Modified `arrival_detector/src/main.rs`
+
+Add trace output support to the main loop:
+
+```rust
+use std::env;
+use std::fs::File;
+use std::io::{BufWriter, Read};
+use arrival_detector::trace::{TraceRecord, StopTraceState, FeatureScores, write_trace_record, fsm_state_as_string};
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    // Check for --trace flag
+    let mut trace_path: Option<PathBuf> = None;
+    let mut input_idx = 1;
+    for i in 1..args.len() {
+        if args[i] == "--trace" && i + 1 < args.len() {
+            trace_path = Some(PathBuf::from(&args[i + 1]));
+            input_idx = if i > 1 { 1 } else { 3 };
+            break;
+        }
+    }
+
+    let input_path = PathBuf::from(&args[input_idx]);
+    let route_path = PathBuf::from(&args[input_idx + 1]);
+    let output_path = PathBuf::from(&args[input_idx + 2]);
+
+    // Open trace file if specified
+    let mut trace_writer: Option<BufWriter<File>> = trace_path.map(|p| {
+        BufWriter::new(File::create(&p).expect("Failed to create trace file"))
+    });
+
+    // ... existing route loading and initialization ...
+
+    for record in input::parse_input(&input_path) {
+        if !record.valid {
+            continue;
+        }
+
+        // ... existing GPS jump and corridor filter logic ...
+
+        // Build trace record if trace output enabled
+        let trace_record = if let Some(ref mut tw) = trace_writer {
+            let stop_trace_states: Vec<StopTraceState> = active_indices.iter()
+                .map(|&idx| {
+                    let stop = &stops[idx];
+                    let state = &stop_states[idx];
+
+                    // Compute probability (same logic as main loop)
+                    let prob = probability::arrival_probability(
+                        record.s_cm, record.v_cms, stop,
+                        state.dwell_time_s, &gaussian_lut, &logistic_lut,
+                    );
+
+                    // Re-compute feature scores for trace
+                    let d_cm = (record.s_cm - stop.progress_cm).abs();
+                    let idx1 = ((d_cm as i64 * 64) / 2750).min(255) as usize;
+                    let p1 = gaussian_lut[idx1];
+                    let idx2 = (record.v_cms / 10).max(0).min(127) as usize;
+                    let p2 = logistic_lut[idx2];
+                    let idx3 = ((d_cm as i64 * 64) / 2000).min(255) as usize;
+                    let p3 = gaussian_lut[idx3];
+                    let p4 = ((state.dwell_time_s as u32) * 255 / 10).min(255) as u8;
+
+                    StopTraceState {
+                        stop_idx: idx as u8,
+                        distance_cm: d_cm,
+                        fsm_state: fsm_state_as_string(state.fsm_state),
+                        dwell_time_s: state.dwell_time_s,
+                        probability: prob,
+                        features: FeatureScores { p1, p2, p3, p4 },
+                        just_arrived: false,  // Will be set below if arrival occurs
+                    }
+                })
+                .collect();
+
+            Some(TraceRecord {
+                time: record.time,
+                s_cm: record.s_cm,
+                v_cms: record.v_cms,
+                active_stops: active_indices.iter().map(|&i| i as u8).collect(),
+                stop_states: stop_trace_states,
+                gps_jump: false,  // Will be set below
+                recovery_idx: None,  // Will be set below
+            })
+        } else {
+            None
+        };
+
+        // ... existing state machine update logic ...
+
+        // Write trace record after state updates
+        if let (Some(mut tw), Some(mut tr)) = (trace_writer.as_mut(), trace_record) {
+            // Update trace with actual state changes
+            tr.gps_jump = (record.s_cm - last_s_cm).abs() > 20000;
+            tr.recovery_idx = /* recovery logic */ None;
+
+            // Update just_arrived flags based on actual arrivals
+            for (i, &stop_idx) in active_indices.iter().enumerate() {
+                let state = &stop_states[stop_idx];
+                tr.stop_states[i].just_arrived = /* check if just arrived */ false;
+            }
+
+            write_trace_record(&mut tw, &tr).expect("Failed to write trace");
+        }
+
+        processed += 1;
+    }
+
+    // Flush trace writer
+    if let Some(mut tw) = trace_writer {
+        tw.flush().expect("Failed to flush trace file");
+    }
+}
+```
+
+#### CLI Interface
+
+```bash
+# Normal mode: just arrivals
+cargo run --bin arrival_detector -- input.jsonl route_data.bin output.jsonl
+
+# Trace mode: full debugging info
+cargo run --bin arrival_detector -- input.jsonl route_data.bin output.jsonl --trace trace.jsonl
 ```
 
 #### Output Format
 
-Each line in `trace.jsonl` is a JSON-encoded `TraceRecord`:
+Each line in `trace.jsonl` is a JSON-encoded `TraceRecord` with fsm_state as string:
 
 ```json
-{"time": 1768214400, "s_cm": 12345, "v_cms": 150, "active_stops": [0, 1], "stop_states": [...], "gps_jump": false, "recovery_idx": null}
+{"time":1768214400,"s_cm":12345,"v_cms":150,"active_stops":[0,1],"stop_states":[{"stop_idx":0,"distance_cm":500,"fsm_state":"Arriving","dwell_time_s":5,"probability":200,"features":{"p1":180,"p2":220,"p3":190,"p4":120},"just_arrived":false}],"gps_jump":false,"recovery_idx":null}
 ```
 
 ### Visualizer Side: Data Parsing
@@ -180,6 +321,27 @@ Each line in `trace.jsonl` is a JSON-encoded `TraceRecord`:
 ```typescript
 // visualizer/src/lib/types.ts
 
+// Matches RouteNode from shared/src/lib.rs (52 bytes, #[repr(C, packed)])
+export interface RouteNode {
+    // i64 fields (8 bytes each, offset 0-16)
+    len2_cm2: bigint;          // Squared segment length (cm²)
+    line_c: bigint;            // Line constant: -(line_a × x₀ + line_b × y₀)
+
+    // i16 fields (2 bytes each, offset 16-20)
+    heading_cdeg: number;      // Segment heading in 0.01°
+    _pad: number;              // Padding for alignment
+
+    // i32 fields (4 bytes each, offset 20-52)
+    x_cm: number;              // X coordinate (relative to grid origin) in cm
+    y_cm: number;              // Y coordinate (relative to grid origin) in cm
+    cum_dist_cm: number;       // Cumulative distance from route start in cm
+    dx_cm: number;             // Segment vector X: x[i+1] - x[i] in cm
+    dy_cm: number;             // Segment vector Y: y[i+1] - y[i] in cm
+    seg_len_cm: number;        // Segment length in cm (offline sqrt)
+    line_a: number;            // Line coefficient A: = -dy
+    line_b: number;            // Line coefficient B: = dx
+}
+
 export interface RouteData {
     version: number;
     grid_origin: { x0_cm: number; y0_cm: number };
@@ -187,19 +349,11 @@ export interface RouteData {
     stops: Stop[];
 }
 
-export interface RouteNode {
-    x_cm: number;
-    y_cm: number;
-    cum_dist_cm: number;
-    heading_cdeg: number;
-    dx_cm: number;
-    dy_cm: number;
-}
-
+// Matches Stop from shared/src/lib.rs (12 bytes, #[repr(C)])
 export interface Stop {
-    progress_cm: number;
-    corridor_start_cm: number;
-    corridor_end_cm: number;
+    progress_cm: number;       // Position along route in cm
+    corridor_start_cm: number; // progress_cm - 8000 cm (80m before stop)
+    corridor_end_cm: number;   // progress_cm + 4000 cm (40m after stop)
 }
 
 export interface TraceRecord {
@@ -225,6 +379,21 @@ export interface StopTraceState {
         p4: number;
     };
     just_arrived: boolean;
+}
+
+// Parse errors
+export class RouteDataError extends Error {
+    constructor(message: string, public offset?: number) {
+        super(message);
+        this.name = 'RouteDataError';
+    }
+}
+
+export class TraceDataError extends Error {
+    constructor(message: string, public line?: number) {
+        super(message);
+        this.name = 'TraceDataError';
+    }
 }
 ```
 
@@ -410,23 +579,282 @@ App (+page.svelte)
 
 ## Implementation Details
 
+### Binary File Parsing: `route_data.bin`
+
+The binary format is defined in `shared/src/binfile.rs` and `shared/src/lib.rs`. Parsing requires careful handling of packed structs and endianness.
+
+#### Binary Format Structure
+
+```
+Offset  Size    Field
+------  ----    -----
+0       4       Magic bytes (0x0210) + version (1)
+4       4       CRC32 checksum (of rest of file)
+8       4       Grid origin x0_cm (i32, little-endian)
+12      4       Grid origin y0_cm (i32, little-endian)
+16      4       Node count (u32, little-endian)
+20      4       Stop count (u32, little-endian)
+24      -       Nodes array (52 bytes each, packed)
+-       -       Stops array (12 bytes each, packed)
+-       -       Spatial grid data (variable)
+```
+
+#### Parser Implementation
+
+```typescript
+// visualizer/src/lib/parsers/routeData.ts
+
+import { RouteData, RouteNode, Stop, RouteDataError } from '$lib/types';
+
+const MAGIC: number = 0x0210;
+const NODE_SIZE: number = 52;  // Verified at compile time in Rust
+const STOP_SIZE: number = 12;
+
+// CRC32 table for validation (standard polynomial 0xEDB88320)
+const CRC_TABLE: number[] = new Array(256);
+for (let i = 0; i < 256; i++) {
+    let crc = i;
+    for (let j = 0; j < 8; j++) {
+        crc = (crc >>> 1) ^ ((crc & 1) ? 0xEDB88320 : 0);
+    }
+    CRC_TABLE[i] = crc;
+}
+
+function crc32(data: Uint8Array): number {
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < data.length; i++) {
+        crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ data[i]) & 0xFF];
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+export async function parseRouteData(file: File): Promise<RouteData> {
+    const buffer = await file.arrayBuffer();
+    const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer);
+
+    // Verify magic and version
+    const magicVersion = view.getUint16(0, true);  // little-endian
+    if (magicVersion !== MAGIC) {
+        throw new RouteDataError(`Invalid magic: expected 0x${MAGIC.toString(16)}, got 0x${magicVersion.toString(16)}`);
+    }
+
+    const version = view.getUint16(2, true);
+    if (version !== 1) {
+        throw new RouteDataError(`Unsupported version: ${version}`);
+    }
+
+    // Verify CRC32
+    const storedCrc = view.getUint32(4, true);
+    const dataCrc = crc32(bytes.subarray(8));  // CRC covers everything after offset 8
+    if (storedCrc !== dataCrc) {
+        throw new RouteDataError(`CRC mismatch: expected 0x${storedCrc.toString(16)}, got 0x${dataCrc.toString(16)}`);
+    }
+
+    // Read header
+    let offset = 8;
+    const x0_cm = view.getInt32(offset, true);
+    const y0_cm = view.getInt32(offset + 4, true);
+    offset += 8;
+
+    const nodeCount = view.getUint32(offset, true);
+    const stopCount = view.getUint32(offset + 4, true);
+    offset += 8;
+
+    // Parse nodes (52 bytes each, packed)
+    const nodes: RouteNode[] = [];
+    for (let i = 0; i < nodeCount; i++) {
+        // RouteNode has i64 fields which need special handling in JS
+        // We read them as two i32 values and combine
+        const len2_low = view.getUint32(offset, true);
+        const len2_high = view.getInt32(offset + 4, true);
+        const len2_cm2 = (BigInt(len2_high) << 32n) | BigInt(len2_low);
+
+        const line_c_low = view.getUint32(offset + 8, true);
+        const line_c_high = view.getInt32(offset + 12, true);
+        const line_c = (BigInt(line_c_high) << 32n) | BigInt(line_c_low);
+
+        const heading_cdeg = view.getInt16(offset + 16, true);
+        const _pad = view.getInt16(offset + 18, true);
+
+        const x_cm = view.getInt32(offset + 20, true);
+        const y_cm = view.getInt32(offset + 24, true);
+        const cum_dist_cm = view.getInt32(offset + 28, true);
+        const dx_cm = view.getInt32(offset + 32, true);
+        const dy_cm = view.getInt32(offset + 36, true);
+        const seg_len_cm = view.getInt32(offset + 40, true);
+        const line_a = view.getInt32(offset + 44, true);
+        const line_b = view.getInt32(offset + 48, true);
+
+        nodes.push({
+            len2_cm2, line_c,
+            heading_cdeg, _pad,
+            x_cm, y_cm, cum_dist_cm,
+            dx_cm, dy_cm, seg_len_cm,
+            line_a, line_b
+        });
+
+        offset += NODE_SIZE;
+    }
+
+    // Parse stops (12 bytes each)
+    const stops: Stop[] = [];
+    for (let i = 0; i < stopCount; i++) {
+        const progress_cm = view.getInt32(offset, true);
+        const corridor_start_cm = view.getInt32(offset + 4, true);
+        const corridor_end_cm = view.getInt32(offset + 8, true);
+
+        stops.push({ progress_cm, corridor_start_cm, corridor_end_cm });
+        offset += STOP_SIZE;
+    }
+
+    // Note: Spatial grid parsing omitted for brevity
+    // Can be added if needed for map grid visualization
+
+    return {
+        version,
+        grid_origin: { x0_cm, y0_cm },
+        nodes,
+        stops
+    };
+}
+```
+
+### Trace File Parsing: `trace.jsonl`
+
+```typescript
+// visualizer/src/lib/parsers/traceData.ts
+
+import { TraceRecord, StopTraceState, TraceDataError } from '$lib/types';
+
+export async function parseTraceFile(file: File): Promise<TraceRecord[]> {
+    const text = await file.text();
+    const lines = text.split('\n').filter(line => line.trim());
+    const records: TraceRecord[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        try {
+            const obj = JSON.parse(lines[i]);
+            records.push({
+                time: obj.time,
+                s_cm: obj.s_cm,
+                v_cms: obj.v_cms,
+                active_stops: obj.active_stops,
+                stop_states: obj.stop_states.map((s: any) => ({
+                    stop_idx: s.stop_idx,
+                    distance_cm: s.distance_cm,
+                    fsm_state: validateFsmState(s.fsm_state),
+                    dwell_time_s: s.dwell_time_s,
+                    probability: s.probability,
+                    features: s.features,
+                    just_arrived: s.just_arrived
+                })),
+                gps_jump: obj.gps_jump,
+                recovery_idx: obj.recovery_idx
+            });
+        } catch (e) {
+            throw new TraceDataError(`Failed to parse line ${i + 1}: ${e}`, i + 1);
+        }
+    }
+
+    return records;
+}
+
+function validateFsmState(value: string): 'Approaching' | 'Arriving' | 'AtStop' | 'Departed' {
+    const valid = ['Approaching', 'Arriving', 'AtStop', 'Departed'];
+    if (!valid.includes(value)) {
+        throw new TraceDataError(`Invalid fsm_state: ${value}`);
+    }
+    return value as any;
+}
+```
+
 ### Coordinate Projection
 
-Route data is stored in grid coordinates (cm). Must convert to lat/lon for Leaflet.
+**IMPORTANT:** Use the grid origin from the binary file, not hardcoded constants. The projection MUST match the Rust code exactly.
+
+**IMPORTANT:** Use the grid origin from the binary file, not hardcoded constants. The projection MUST match the Rust code exactly.
 
 ```typescript
 // visualizer/src/lib/utils/projection.ts
 
-const ORIGIN_LAT_DEG = 20.0;
-const ORIGIN_LON_DEG = 120.0;
-const EARTH_R_CM = 637_100_000.0;
-const PROJECTION_LAT_AVG = 25.0;
+// Constants MUST match shared/src/lib.rs exactly
+const EARTH_R_CM: number = 637_100_000.0;
+const PROJECTION_LAT_AVG: number = 25.0;
 
-export function gridToLatLng(x_cm: number, y_cm: number): [number, number] {
-    const lat = (y_cm / EARTH_R_CM) * (180 / Math.PI) + ORIGIN_LAT_DEG;
+// Default origin from Rust (used for validation)
+const DEFAULT_ORIGIN_LAT_DEG: number = 20.0;
+const DEFAULT_ORIGIN_LON_DEG: number = 120.0;
+
+/**
+ * Convert grid coordinates (cm) to lat/lon for Leaflet.
+ *
+ * Uses the inverse of the projection in shared/src/lib.rs:
+ *   x_cm = R * cos(lat_avg) * (lon - lon_0) * pi/180
+ *   y_cm = R * (lat - lat_0) * pi/180
+ *
+ * @param x_cm - Grid X coordinate in cm (relative to grid origin)
+ * @param y_cm - Grid Y coordinate in cm (relative to grid origin)
+ * @param origin - Grid origin from route_data.bin {x0_cm, y0_cm}
+ * @returns [lat, lon] in degrees
+ */
+export function gridToLatLng(
+    x_cm: number,
+    y_cm: number,
+    origin: { x0_cm: number; y0_cm: number }
+): [number, number] {
+    // The grid origin in the binary file is in cm, relative to (lat_0, lon_0)
+    // We need to convert it to lat/lon first, then apply the grid offset
+
+    // Convert grid origin to lat/lon (inverse of forward projection)
+    const origin_lat = (origin.y0_cm / EARTH_R_CM) * (180 / Math.PI) + DEFAULT_ORIGIN_LAT_DEG;
+    const origin_lon = (origin.x0_cm / (EARTH_R_CM * Math.cos(PROJECTION_LAT_AVG * Math.PI / 180)))
+                       * (180 / Math.PI) + DEFAULT_ORIGIN_LON_DEG;
+
+    // Now convert the point (x_cm, y_cm) to lat/lon relative to origin
+    const lat = (y_cm / EARTH_R_CM) * (180 / Math.PI) + origin_lat;
     const lon = (x_cm / (EARTH_R_CM * Math.cos(PROJECTION_LAT_AVG * Math.PI / 180)))
-                * (180 / Math.PI) + ORIGIN_LON_DEG;
+                * (180 / Math.PI) + origin_lon;
+
     return [lat, lon];
+}
+
+/**
+ * Project entire route nodes to lat/lng for Leaflet polyline.
+ */
+export function projectRoute(
+    nodes: RouteNode[],
+    origin: { x0_cm: number; y0_cm: number }
+): Array<[number, number]> {
+    return nodes.map(node => gridToLatLng(node.x_cm, node.y_cm, origin));
+}
+
+/**
+ * Project stop position to lat/lng for Leaflet marker.
+ */
+export function projectStop(
+    stop: Stop,
+    nodes: RouteNode[],
+    origin: { x0_cm: number; y0_cm: number }
+): [number, number] {
+    // Find nearest node to stop progress_cm
+    const node = findNearestNode(stop.progress_cm, nodes);
+    // Approximate: use node's lat/lon (could interpolate for more accuracy)
+    return gridToLatLng(node.x_cm, node.y_cm, origin);
+}
+
+function findNearestNode(progress_cm: number, nodes: RouteNode[]): RouteNode {
+    // Binary search for closest cumulative distance
+    let left = 0, right = nodes.length - 1;
+    while (left < right) {
+        const mid = Math.floor((left + right) / 2);
+        if (nodes[mid].cum_dist_cm < progress_cm) {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    return nodes[left];
 }
 ```
 
@@ -463,22 +891,316 @@ isPlaying.subscribe(($isPlaying) => {
 
 ---
 
-## Validation Criteria
+### Error Handling Strategy
 
-- [ ] Loads and parses `route_data.bin` correctly
-- [ ] Loads and parses `trace.jsonl` correctly
-- [ ] Map displays route polyline and stop markers
-- [ ] Stop markers change color based on FSM state
-- [ ] Timeline charts show progress, velocity, probability
-- [ ] Playhead is draggable and syncs all views
-- [ ] Playback controls work (play, pause, speed)
-- [ ] Feature breakdown shows individual scores
-- [ ] FSM inspector shows all stops with state history
-- [ ] Performance acceptable for 10k+ trace records
+The visualizer must handle errors gracefully and provide clear feedback to users.
+
+#### File Validation
+
+```typescript
+// visualizer/src/lib/parsers/validation.ts
+
+export async function validateFiles(
+    routeFile: File,
+    traceFile: File
+): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+
+    // Check file sizes (reject unreasonably large files)
+    const MAX_ROUTE_SIZE = 10 * 1024 * 1024;  // 10 MB
+    const MAX_TRACE_SIZE = 500 * 1024 * 1024; // 500 MB
+
+    if (routeFile.size > MAX_ROUTE_SIZE) {
+        errors.push(`Route file too large: ${(routeFile.size / 1024 / 1024).toFixed(1)} MB`);
+    }
+    if (traceFile.size > MAX_TRACE_SIZE) {
+        errors.push(`Trace file too large: ${(traceFile.size / 1024 / 1024).toFixed(1)} MB`);
+    }
+
+    // Check file extensions
+    if (!routeFile.name.endsWith('.bin')) {
+        errors.push('Route file must be .bin');
+    }
+    if (!traceFile.name.endsWith('.jsonl')) {
+        errors.push('Trace file must be .jsonl');
+    }
+
+    return { valid: errors.length === 0, errors };
+}
+```
+
+#### Parsing Error Recovery
+
+```typescript
+// In component with error handling
+
+let loadError: string | null = null;
+let loadProgress = 0;
+
+async function loadFiles() {
+    loadError = null;
+    loadProgress = 0;
+
+    try {
+        // Validate first
+        const validation = await validateFiles(routeFile!, traceFile!);
+        if (!validation.valid) {
+            loadError = validation.errors.join('; ');
+            return;
+        }
+
+        // Parse with progress indication
+        const [route, trace] = await Promise.all([
+            parseRouteDataWithProgress(routeFile!, p => loadProgress = p * 0.3),
+            parseTraceFileWithProgress(traceFile!, p => loadProgress = 30 + p * 0.7)
+        ]);
+
+        routeData.set(route);
+        traceData.set(trace);
+        currentFrame.set(0);
+    } catch (e) {
+        loadError = e instanceof RouteDataError || e instanceof TraceDataError
+            ? e.message
+            : 'Failed to load files';
+    }
+}
+```
+
+#### User Feedback
+
+```svelte
+<!-- Header.svelte with error display -->
+
+{#if $loadError}
+    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+        <strong>Error:</strong> {$loadError}
+    </div>
+{/if}
+
+{#if loadProgress > 0 && loadProgress < 100}
+    <div class="w-full bg-gray-200 rounded-full h-2.5">
+        <div class="bg-blue-600 h-2.5 rounded-full" style="width: {loadProgress}%"></div>
+    </div>
+{/if}
+```
 
 ---
 
-## Future Enhancements
+### Performance & Data Strategy
+
+#### Data Volume Considerations
+
+Real-world GPS data volumes:
+- 1 update/second = 86,400 records/day
+- Typical 8-hour bus run = 28,800 records
+- Trace.jsonl size ≈ 100 bytes/record = 2.9 MB for 8 hours
+
+#### Optimizations for Large Datasets
+
+**1. Chunked Loading**
+```typescript
+// Load trace data in chunks for progressive rendering
+export async function parseTraceInChunks(
+    file: File,
+    chunkSize: number = 5000,
+    onChunk: (records: TraceRecord[]) => void
+): Promise<TraceRecord[]> {
+    const text = await file.text();
+    const lines = text.split('\n');
+    const allRecords: TraceRecord[] = [];
+
+    for (let i = 0; i < lines.length; i += chunkSize) {
+        const chunk = lines.slice(i, i + chunkSize);
+        const records = chunk
+            .filter(line => line.trim())
+            .map(line => JSON.parse(line));
+        allRecords.push(...records);
+        onChunk(records);
+    }
+
+    return allRecords;
+}
+```
+
+**2. Timeline Windowing**
+```typescript
+// Only render chart data for visible time window
+export const visibleTraceData = derived(
+    [traceData, timelineWindow],
+    ([$traceData, $window]) => {
+        if (!$traceData) return [];
+        return $traceData.slice($window.start, $window.end);
+    }
+);
+```
+
+**3. Web Worker for Parsing**
+```typescript
+// visualizer/src/lib/workers/parser.worker.ts
+
+self.onmessage = (e) => {
+    const { file } = e.data;
+    // Parse in worker thread to avoid blocking UI
+    const records = parseTraceFileSync(file);
+    self.postMessage({ records });
+};
+```
+
+**4. Memory Limits**
+- Warn user if file > 100 MB
+- Offer to load only first N records for preview
+- Implement memory monitoring and cleanup
+
+---
+
+### Testing Strategy
+
+#### Unit Tests
+- Binary parser with valid/invalid files
+- Projection accuracy against Rust output
+- Trace parser with malformed JSON
+
+#### Integration Tests
+- Load sample data and verify all views render
+- Playback controls function correctly
+- Synchronized state updates
+
+#### Performance Tests
+- Load time for 10k, 50k, 100k records
+- Playback frame rate at 1x, 2x, 5x speed
+- Memory usage over time
+
+---
+
+## Validation Criteria
+
+### Prerequisites (Rust Side)
+- [ ] `arrival_detector` emits `trace.jsonl` with `--trace` flag
+- [ ] Trace records include all required fields
+- [ ] FSM state serializes as string ("Approaching", "Arriving", "AtStop", "Departed")
+- [ ] Feature scores (p1-p4) computed and included in trace
+
+### Visualizer (Frontend)
+- [ ] Loads and parses `route_data.bin` correctly with CRC validation
+- [ ] Loads and parses `trace.jsonl` correctly with error recovery
+- [ ] Map displays route polyline from binary nodes
+- [ ] Stop markers display and change color based on FSM state
+- [ ] Timeline charts show progress, velocity, probability over time
+- [ ] Playhead is draggable and syncs all views (map, charts, breakdown, FSM)
+- [ ] Playback controls work (play, pause, step, speed)
+- [ ] Feature breakdown shows individual scores for selected stop
+- [ ] FSM inspector shows all stops with state history
+- [ ] Performance acceptable for 50k+ trace records (typical 8-hour run)
+- [ ] File upload shows progress and error messages
+- [ ] Coordinate projection matches Rust code exactly
+
+### Testing
+- [ ] Unit tests for binary parser
+- [ ] Unit tests for trace parser
+- [ ] Integration test with sample data
+- [ ] Performance benchmark with 50k records
+
+---
+
+## Prerequisites & Dependencies
+
+### Rust Dependencies (to add)
+
+```toml
+# arrival_detector/Cargo.toml
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+```
+
+### Node.js Dependencies
+
+```json
+{
+  "name": "bus-arrival-visualizer",
+  "version": "0.1.0",
+  "type": "module",
+  "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.0",
+    "@sveltejs/kit": "^2.0.0",
+    "@sveltejs/vite-plugin-svelte": "^3.0.0",
+    "svelte": "^4.2.0",
+    "svelte-check": "^3.6.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0",
+    "tailwindcss": "^3.4.0"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.0",
+    "leaflet": "^1.9.0"
+  }
+}
+```
+
+### Build Tools
+- Node.js 18+
+- Rust 1.70+ (for trace generation)
+- Modern web browser (Chrome, Firefox, Safari, Edge)
+
+---
+
+## Deployment
+
+### Build Instructions
+
+```bash
+cd visualizer
+npm install
+npm run build
+```
+
+The static adapter will produce optimized files in `visualizer/build/`.
+
+### Hosting Requirements
+
+**Fully static** - Can be hosted anywhere:
+- GitHub Pages
+- Netlify
+- Vercel
+- Local file system (`file://`)
+- Any static web server
+
+No server-side processing required.
+
+### Build Output Structure
+
+```
+visualizer/build/
+├── _app/
+│   ├── immutable/
+│   │   ├── assets/     # JS, CSS chunks
+│   │   └── nodes/      # Component code
+│   └── version.json    # Cache busting
+└── index.html          # Entry point
+```
+
+### Sample Data Generation
+
+```bash
+# Generate trace file from NMEA input
+cd /Users/herry/project/pico2w/bus_arrival
+
+# 1. Run preprocessor to create route_data.bin
+cargo run --bin preprocessor -- tools/data/TY_225_stops.csv test.nmea route_data.bin
+
+# 2. Run simulator to create Phase 2 output
+cargo run --bin simulator -- test.nmea route_data.bin phase2.jsonl
+
+# 3. Run arrival detector with trace
+cargo run --bin arrival_detector -- phase2.jsonl route_data.bin arrivals.jsonl --trace trace.jsonl
+
+# 4. Copy files to visualizer static folder
+cp route_data.bin visualizer/static/samples/
+cp trace.jsonl visualizer/static/samples/
+```
+
+---
 
 - Export current view as image
 - Share playback state via URL (deep linking)
