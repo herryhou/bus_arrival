@@ -24,7 +24,27 @@ GPS-based bus arrival detection system for RP2350 microcontroller with web-based
 
 ## Quick Start
 
-### Generate Test Data Files
+### Pre-generated Test Data
+
+The project includes working test data for immediate visualizer testing:
+
+| File | Description |
+|------|-------------|
+| `route_test.bin` | Binary route data with 3 stops |
+| `phase2_test.jsonl` | GPS localization output (197 records) |
+| `trace_test.jsonl` | Full detector trace for visualizer (197 records) |
+| `arrivals_test.jsonl` | Detected arrival events (3 arrivals) |
+
+**Test Data Summary:**
+- 3 stops at positions: 300m, 600m, 900m
+- Bus travels 950m along route
+- All 3 stops detected with probability 246/255 (96%)
+
+To use with the visualizer, upload:
+- `route_test.bin`
+- `trace_test.jsonl`
+
+### Generate Custom Test Data Files
 
 The visualizer requires two input files:
 
