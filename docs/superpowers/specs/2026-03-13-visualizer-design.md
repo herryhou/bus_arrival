@@ -1257,10 +1257,67 @@ self.onmessage = (e) => {
 ## Validation Criteria
 
 ### Prerequisites (Rust Side)
+
+**IMPORTANT:** The existing `arrival_detector` code has several bugs that must be fixed before generating trace files. The visualizer displays the actual algorithm behavior, so these issues affect visualization correctness.
+
+#### Required Rust Code Fixes
+
+**1. State Machine: Missing Skip-Stop Transition (`arrival_detector/src/state_machine.rs`)**
+
+*Current Issue:* No transition from `Arriving` to `Departed` when bus drives past stop without stopping.
+
+*Fix Required:*
+```rust
+FsmState::Arriving => {
+    if d_to_stop < 3000 && v_cms < 56 && probability > 191 {
+        self.fsm_state = FsmState::AtStop;
+        self.dwell_time_s += 1;
+        return true;
+    }
+    // ADD: Handle skip-stop scenario
+    if d_to_stop > 4000 && s_cm > stop_progress {
+        self.fsm_state = FsmState::Departed;
+    }
+    self.dwell_time_s += 1;
+}
+```
+
+**2. Recovery Logic: Incorrect Sorting (`arrival_detector/src/recovery.rs`)**
+
+*Current Issue:* Sort uses `a.0.cmp(&b.0)` which prioritizes backward progress (lower index).
+
+*Fix Required:*
+```rust
+// Sort by distance ASC (closer is better), then index DESC (forward progress)
+candidates.sort_by(|a, b| {
+    a.1.cmp(&b.1)  // Distance: closer first
+        .then_with(|| b.0.cmp(&a.0))  // Index: higher first (forward progress)
+});
+```
+
+**3. Main Loop: Pre-allocate States (`arrival_detector/src/main.rs`)**
+
+*Current Issue:* Dynamic `stop_states` resizing inside loop is fragile.
+
+*Fix Required:*
+```rust
+// BEFORE the loop, pre-allocate for all stops
+let mut stop_states: Vec<StopState> = (0..route_data.stop_count)
+    .map(|i| StopState::new(i as u8))
+    .collect();
+
+// Remove the dynamic while loop inside the for loop
+```
+
+#### Trace Output Requirements
+
+- [ ] Above fixes applied to `arrival_detector` code
 - [ ] `arrival_detector` emits `trace.jsonl` with `--trace` flag
 - [ ] Trace records include all required fields
 - [ ] FSM state serializes as string ("Approaching", "Arriving", "AtStop", "Departed")
 - [ ] Feature scores (p1-p4) computed and included in trace
+
+### Visualizer (Frontend)
 
 ### Visualizer (Frontend)
 - [ ] Loads and parses `route_data.bin` correctly with CRC validation
@@ -1384,7 +1441,31 @@ cp trace.jsonl visualizer/static/samples/
 
 ---
 
-- Export current view as image
+## Data Format Notes
+
+### LUT Indexing
+
+The current probability implementation uses direct distance indexing for simplicity:
+
+```rust
+// Current: Direct distance indexing
+let idx1 = ((d_cm as i64 * 64) / 2750).min(255) as usize;
+```
+
+The Tech Report Section 3.4 describes normalized indexing `(d/σ)` for better accuracy across parameter ranges. For the visualizer, the current implementation is sufficient since we're displaying the actual Rust code's behavior. If you update the LUT indexing in production, update the trace output accordingly.
+
+### Visualizer as Debugging Tool
+
+**Important:** The visualizer displays exactly what the Rust code computes. If the Rust code has bugs (like the missing skip-stop transition before fixes), the visualizer will show that behavior. This is intentional - the visualizer is designed to expose algorithmic issues for debugging.
+
+When viewing trace data:
+- Check for stops stuck in `Arriving` state → indicates skip-stop bug
+- Check recovery jumps → indicates incorrect sorting
+- These behaviors become visible through the visualization
+
+---
+
+## Future Enhancements
 - Share playback state via URL (deep linking)
 - Compare multiple runs side-by-side
 - Add/export annotations
