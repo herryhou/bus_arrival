@@ -269,18 +269,113 @@ fn main() {
             None
         };
 
-        // ... existing state machine update logic ...
+        // Check for GPS jump - trigger recovery
+        let gps_jump_detected = (record.s_cm - last_s_cm).abs() > 20000;
+        let recovery_result: Option<u8> = if gps_jump_detected {
+            recovery::find_stop_index(record.s_cm, &stops, current_stop_idx)
+                .map(|idx| {
+                    current_stop_idx = idx as u8;
+                    idx as u8
+                })
+        } else {
+            None
+        };
+        last_s_cm = record.s_cm;
 
-        // Write trace record after state updates
+        // Find active stops (corridor filter)
+        let active_indices = corridor::find_active_stops(record.s_cm, &stops);
+
+        // Build trace record AFTER state initialization, BEFORE updates
+        let mut trace_record = trace_writer.as_ref().map(|_| {
+            let stop_trace_states: Vec<StopTraceState> = active_indices.iter()
+                .map(|&idx| {
+                    let stop = &stops[idx];
+                    let state = &stop_states[idx];
+
+                    // Compute probability (same as main loop)
+                    let prob = probability::arrival_probability(
+                        record.s_cm, record.v_cms, stop,
+                        state.dwell_time_s, &gaussian_lut, &logistic_lut,
+                    );
+
+                    // Compute feature scores
+                    let d_cm = (record.s_cm - stop.progress_cm).abs();
+                    let idx1 = ((d_cm as i64 * 64) / 2750).min(255) as usize;
+                    let p1 = gaussian_lut[idx1];
+                    let idx2 = (record.v_cms / 10).max(0).min(127) as usize;
+                    let p2 = logistic_lut[idx2];
+                    let idx3 = ((d_cm as i64 * 64) / 2000).min(255) as usize;
+                    let p3 = gaussian_lut[idx3];
+                    let p4 = ((state.dwell_time_s as u32) * 255 / 10).min(255) as u8;
+
+                    StopTraceState {
+                        stop_idx: idx as u8,
+                        distance_cm: d_cm,
+                        fsm_state: fsm_state_as_string(state.fsm_state),
+                        dwell_time_s: state.dwell_time_s,
+                        probability: prob,
+                        features: FeatureScores { p1, p2, p3, p4 },
+                        just_arrived: false,  // Will update below if arrival occurs
+                    }
+                })
+                .collect();
+
+            TraceRecord {
+                time: record.time,
+                s_cm: record.s_cm,
+                v_cms: record.v_cms,
+                active_stops: active_indices.iter().map(|&i| i as u8).collect(),
+                stop_states: stop_trace_states,
+                gps_jump: gps_jump_detected,
+                recovery_idx: recovery_result,
+            }
+        });
+
+        // Now process each active stop and update state machines
+        let mut arrivals_this_frame: Vec<u8> = Vec::new();
+
+        for &stop_idx in &active_indices {
+            let stop = &stops[stop_idx];
+            let state = &mut stop_states[stop_idx];
+
+            // Handle re-entry after departure
+            if state.fsm_state == FsmState::Departed {
+                if state.can_reactivate(record.s_cm, stop.progress_cm) {
+                    state.reset();
+                }
+            }
+
+            // Compute probability
+            let prob = probability::arrival_probability(
+                record.s_cm, record.v_cms, stop,
+                state.dwell_time_s, &gaussian_lut, &logistic_lut,
+            );
+
+            // Update state machine and detect arrival
+            if state.update(record.s_cm, record.v_cms, stop.progress_cm, prob) {
+                // Just arrived!
+                arrivals_this_frame.push(state.index);
+
+                let event = ArrivalEvent {
+                    time: record.time,
+                    stop_idx: state.index,
+                    s_cm: record.s_cm,
+                    v_cms: record.v_cms,
+                    probability: prob,
+                };
+                output::write_event(&mut output_writer, &event).expect("Failed to write arrival event");
+                arrivals += 1;
+                current_stop_idx = state.index;
+            }
+        }
+
+        // Write trace record after state updates (now we know which stops arrived)
         if let (Some(mut tw), Some(mut tr)) = (trace_writer.as_mut(), trace_record) {
-            // Update trace with actual state changes
-            tr.gps_jump = (record.s_cm - last_s_cm).abs() > 20000;
-            tr.recovery_idx = /* recovery logic */ None;
-
-            // Update just_arrived flags based on actual arrivals
-            for (i, &stop_idx) in active_indices.iter().enumerate() {
-                let state = &stop_states[stop_idx];
-                tr.stop_states[i].just_arrived = /* check if just arrived */ false;
+            // Update just_arrived flags for stops that arrived this frame
+            for arrived_idx in &arrivals_this_frame {
+                if let Some(trace_state) = tr.stop_states.iter_mut().find(|s| s.stop_idx == *arrived_idx) {
+                    trace_state.just_arrived = true;
+                }
             }
 
             write_trace_record(&mut tw, &tr).expect("Failed to write trace");
@@ -708,8 +803,28 @@ export async function parseRouteData(file: File): Promise<RouteData> {
         offset += STOP_SIZE;
     }
 
-    // Note: Spatial grid parsing omitted for brevity
-    // Can be added if needed for map grid visualization
+    // Spatial grid parsing (optional - skip if not needed for visualization)
+    // The grid data is after the stops array. We calculate its offset by reading
+    // the grid metadata that follows the stops.
+    //
+    // Grid format (from shared/src/binfile.rs):
+    //   - grid_size_cm: u32
+    //   - cols: u32
+    //   - rows: u32
+    //   - x0_cm: i32
+    //   - y0_cm: i32
+    //   - cells: variable (list of lists, flattened)
+    //
+    // For the visualizer, we typically don't need the spatial grid since
+    // we're not doing map matching - just displaying pre-computed results.
+    // We skip parsing it here to keep the parser simple.
+    //
+    // If you need the grid data for advanced visualizations:
+    // const grid_size_cm = view.getUint32(offset, true);
+    // const cols = view.getUint32(offset + 4, true);
+    // const rows = view.getUint32(offset + 8, true);
+    // offset += 12;
+    // ... parse cells ...
 
     return {
         version,
@@ -831,30 +946,97 @@ export function projectRoute(
 
 /**
  * Project stop position to lat/lng for Leaflet marker.
+ *
+ * Uses linear interpolation between nodes for accuracy.
+ * Stops are typically between route nodes, so we find the
+ * segment containing the stop and interpolate.
+ *
+ * @param stop - Stop with progress_cm along route
+ * @param nodes - Route nodes from binary file
+ * @param origin - Grid origin from route_data.bin
+ * @returns [lat, lon] in degrees
  */
 export function projectStop(
     stop: Stop,
     nodes: RouteNode[],
     origin: { x0_cm: number; y0_cm: number }
 ): [number, number] {
-    // Find nearest node to stop progress_cm
-    const node = findNearestNode(stop.progress_cm, nodes);
-    // Approximate: use node's lat/lon (could interpolate for more accuracy)
-    return gridToLatLng(node.x_cm, node.y_cm, origin);
+    // Find the segment containing this stop's progress
+    const segment = findSegmentForProgress(stop.progress_cm, nodes);
+    if (!segment) {
+        // Fallback: use nearest node
+        const node = findNearestNode(stop.progress_cm, nodes);
+        return gridToLatLng(node.x_cm, node.y_cm, origin);
+    }
+
+    // Interpolate position along the segment
+    const { startNode, endNode, offsetAlongSegment } = segment;
+
+    // Linear interpolation in grid coordinates
+    const t = offsetAlongSegment / (endNode.cum_dist_cm - startNode.cum_dist_cm);
+    const x_cm = startNode.x_cm + t * (endNode.x_cm - startNode.x_cm);
+    const y_cm = startNode.y_cm + t * (endNode.y_cm - startNode.y_cm);
+
+    return gridToLatLng(x_cm, y_cm, origin);
 }
 
-function findNearestNode(progress_cm: number, nodes: RouteNode[]): RouteNode {
-    // Binary search for closest cumulative distance
+/**
+ * Find the route segment containing a given progress distance.
+ *
+ * Returns the start/end nodes and offset from the start node.
+ */
+function findSegmentForProgress(
+    progress_cm: number,
+    nodes: RouteNode[]
+): { startNode: RouteNode; endNode: RouteNode; offsetAlongSegment: number } | null {
+    // Binary search for the segment
     let left = 0, right = nodes.length - 1;
+
     while (left < right) {
-        const mid = Math.floor((left + right) / 2);
-        if (nodes[mid].cum_dist_cm < progress_cm) {
-            left = mid + 1;
+        const mid = Math.floor((left + right + 1) / 2);
+        if (nodes[mid].cum_dist_cm <= progress_cm) {
+            left = mid;
         } else {
-            right = mid;
+            right = mid - 1;
         }
     }
-    return nodes[left];
+
+    // left is now the index of the node at or before the stop
+    if (left >= nodes.length - 1) {
+        // Stop is at or past the last node
+        return null;
+    }
+
+    const startNode = nodes[left];
+    const endNode = nodes[left + 1];
+    const offsetAlongSegment = progress_cm - startNode.cum_dist_cm;
+
+    return { startNode, endNode, offsetAlongSegment };
+}
+
+/**
+ * Find the nearest node to a progress distance.
+ * Used as fallback when segment finding fails.
+ */
+function findNearestNode(progress_cm: number, nodes: RouteNode[]): RouteNode {
+    let left = 0, right = nodes.length - 1;
+    while (left < right) {
+        const mid = Math.floor((left + right + 1) / 2);
+        if (nodes[mid].cum_dist_cm <= progress_cm) {
+            left = mid;
+        } else {
+            right = mid - 1;
+        }
+    }
+
+    // Check which of left or left+1 is closer
+    if (left >= nodes.length - 1) return nodes[left];
+    if (left === 0) return nodes[0];
+
+    const distLeft = Math.abs(progress_cm - nodes[left].cum_dist_cm);
+    const distNext = Math.abs(progress_cm - nodes[left + 1].cum_dist_cm);
+
+    return distNext < distLeft ? nodes[left + 1] : nodes[left];
 }
 ```
 
