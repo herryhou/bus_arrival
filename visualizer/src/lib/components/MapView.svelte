@@ -3,6 +3,7 @@
 	import type { RouteData } from '$lib/types';
 	import { getRouteGeometry, getStopPositions } from '$lib/parsers/routeData';
 	import { projectCmToLatLon } from '$lib/parsers/projection';
+	import maplibregl from 'maplibre-gl';
 	import 'maplibre-gl/dist/maplibre-gl.css';
 
 	interface Props {
@@ -21,17 +22,37 @@
 
 	let mapContainer: HTMLDivElement;
 	let map: maplibregl.Map | null = null;
+	let mapLoaded = false;
 	let routeSourceId = 'route';
 	let stopsSourceId = 'stops';
 	let busSourceId = 'bus';
 
 	onMount(() => {
-		// Initialize map
+		// Initialize map with OSM raster tiles (more reliable)
 		const [initialLat, initialLon] = [25.0, 121.0]; // Taiwan center
 
 		map = new maplibregl.Map({
 			container: mapContainer,
-			style: 'https://demotiles.maplibre.org/style.json', // Basic OSM style
+			style: {
+				version: 8,
+				sources: {
+					'osm-tiles': {
+						type: 'raster',
+						tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+						tileSize: 256,
+						attribution: '© OpenStreetMap contributors'
+					}
+				},
+				layers: [
+					{
+						id: 'osm-tiles',
+						type: 'raster',
+						source: 'osm-tiles',
+						minzoom: 0,
+						maxzoom: 19
+					}
+				]
+			},
 			center: [initialLon, initialLat],
 			zoom: 13,
 			antialias: true
@@ -39,6 +60,7 @@
 
 		map.on('load', () => {
 			if (!map) return;
+			mapLoaded = true;
 
 			// Add route line
 			const routeGeo = getRouteGeometry(routeData, projectCmToLatLon);
@@ -158,7 +180,7 @@
 
 	// Update bus position when it changes
 	$effect(() => {
-		if (!map || !busPosition) return;
+		if (!map || !busPosition || !mapLoaded) return;
 
 		const [lat, lon] = projectCmToLatLon(busPosition.x_cm, busPosition.y_cm);
 
@@ -200,7 +222,7 @@
 
 	// Highlight selected stop
 	$effect(() => {
-		if (!map) return;
+		if (!map || !mapLoaded) return;
 
 		if (selectedStop !== null) {
 			map.setPaintProperty('stops-circle', 'circle-radius', [
