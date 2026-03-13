@@ -79,7 +79,7 @@ impl NmeaState {
 
     fn parse_gga(&mut self, parts: &[&str]) -> Option<GpsPoint> {
         // $GPGGA,123519,v,ddmm.mm,s,dddmm.mm,a,xx,yy,z.z,h.h,M*hh
-        if parts.len() < 7 {
+        if parts.len() < 9 {
             return None;
         }
 
@@ -90,12 +90,15 @@ impl NmeaState {
 
         let lat = parse_lat(parts[2], parts[3])?;
         let lon = parse_lon(parts[4], parts[5])?;
+        let hdop: f64 = parts[8].parse().unwrap_or(99.0);
 
         self.point.lat = lat;
         self.point.lon = lon;
+        self.point.hdop_x10 = (hdop * 10.0).round() as u16;
         self.point.has_fix = true;
 
-        None
+        // GGA alone is enough to complete the point
+        Some(std::mem::replace(&mut self.point, GpsPoint::new()))
     }
 }
 

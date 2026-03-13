@@ -265,7 +265,7 @@ function addNoiseMeters([lat, lon], noiseLat, noiseLon) {
 
 function nmeaChecksum(sentence) {
   let cs = 0;
-  for (let i = 1; i < sentence.length; i++) cs ^= sentence.charCodeAt(i);
+  for (let i = 0; i < sentence.length; i++) cs ^= sentence.charCodeAt(i);
   return cs.toString(16).toUpperCase().padStart(2, '0');
 }
 
