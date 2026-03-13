@@ -50,7 +50,7 @@ impl StopState {
                 self.dwell_time_s += 1;
             }
             FsmState::Arriving => {
-                if d_to_stop < 3000 && v_cms < 56 && probability > 191 {
+                if d_to_stop < 3000 && v_cms < 56 && probability > crate::probability::THETA_ARRIVAL {
                     self.fsm_state = FsmState::AtStop;
                     self.dwell_time_s += 1;
                     return true;  // Just arrived!
