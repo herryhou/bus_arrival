@@ -11,7 +11,7 @@
 **Tech Stack:**
 - Rust: serde, serde_json (for trace serialization)
 - SvelteKit with static adapter
-- TypeScript, Leaflet (maps), Chart.js (charts), Tailwind CSS
+- TypeScript, MapLibre GL JS (maps), Chart.js (charts), Tailwind CSS
 
 ---
 
@@ -98,17 +98,19 @@ visualizer/
 Run: `cat shared/Cargo.toml`
 Expected: Verify current dependencies
 
-- [ ] **Step 2: Add serde as optional dependency**
+- [ ] **Step 2: Add serde as optional dependency with derive feature**
 
 ```toml
 [dependencies]
-serde = { workspace = true, optional = true }
+serde = { workspace = true, optional = true, features = ["derive"] }
 crc32fast = { workspace = true, default-features = false }
 
 [features]
 default = ["std"]
 std = ["crc32fast/std", "serde"]  # Add serde to std feature
 ```
+
+**Note:** Explicitly adding `features = ["derive"]` ensures the Serialize derive macro is available.
 
 - [ ] **Step 3: Verify workspace has serde**
 
@@ -189,8 +191,8 @@ pub struct StopTraceState {
     /// Distance to stop (cm)
     pub distance_cm: DistCm,
 
-    /// FSM state as string for consistent JSON serialization
-    pub fsm_state: &'static str,
+    /// FSM state - using FsmState directly lets serde handle serialization
+    pub fsm_state: FsmState,
 
     /// Dwell time (seconds)
     pub dwell_time_s: u16,
@@ -221,17 +223,9 @@ pub fn write_trace_record<W: Write>(
     let json = serde_json::to_string(record)?;
     writeln!(output, "{}", json)
 }
-
-/// Convert FsmState to string for consistent JSON serialization
-pub fn fsm_state_as_string(state: FsmState) -> &'static str {
-    match state {
-        FsmState::Approaching => "Approaching",
-        FsmState::Arriving => "Arriving",
-        FsmState::AtStop => "AtStop",
-        FsmState::Departed => "Departed",
-    }
-}
 ```
+
+**Note:** Using `FsmState` directly with serde's `Serialize` derive produces cleaner JSON and eliminates the need for manual string conversion functions. Serde will serialize the enum variants as their string names automatically.
 
 - [ ] **Step 2: Verify module compiles**
 
@@ -385,7 +379,7 @@ git commit -m "feat(arrival_detector): add --trace flag CLI parsing"
 **Files:**
 - Modify: `arrival_detector/src/main.rs`
 
-**Note:** This approach computes probability twice (once for trace, once for main loop). This is acceptable for debug-only trace mode as it keeps the code simple and isolated from the main detection logic. The main loop's computation is the critical path; trace computation is additional overhead only when `--trace` is enabled.
+**Note:** This approach computes probability ONCE per active stop and reuses it for both trace and state update. This avoids code duplication while ensuring consistency between trace output and actual algorithm behavior.
 
 - [ ] **Step 1: Add trace imports to top of main.rs**
 
@@ -394,7 +388,7 @@ Add to existing imports:
 ```rust
 use arrival_detector::state_machine::StopState;
 use arrival_detector::{input, corridor, probability, recovery, output, trace};
-use arrival_detector::trace::{TraceRecord, StopTraceState, FeatureScores, write_trace_record, fsm_state_as_string};
+use arrival_detector::trace::{TraceRecord, StopTraceState, FeatureScores, write_trace_record};
 ```
 
 - [ ] **Step 2: Build trace record in main loop**
@@ -418,38 +412,60 @@ last_s_cm = record.s_cm;
 // Find active stops (corridor filter)
 let active_indices = corridor::find_active_stops(record.s_cm, &stops);
 
-// Build trace record BEFORE state updates
+// Pre-compute probability and features for all active stops
+// We do this ONCE to avoid duplication between trace and state updates
+struct CalculatedState {
+    stop_idx: usize,
+    prob: Prob8,
+    features: FeatureScores,
+    distance_cm: DistCm,
+    pre_update_fsm_state: FsmState,
+    dwell_time_s: u16,
+}
+
+let calculated_states: Vec<CalculatedState> = active_indices.iter()
+    .map(|&idx| {
+        let stop = &stops[idx];
+        let state = &stop_states[idx];
+
+        // Compute probability ONCE
+        let prob = probability::arrival_probability(
+            record.s_cm, record.v_cms, stop,
+            state.dwell_time_s, &gaussian_lut, &logistic_lut,
+        );
+
+        // Compute feature scores
+        let d_cm = (record.s_cm - stop.progress_cm).abs();
+        let idx1 = ((d_cm as i64 * 64) / 2750).min(255) as usize;
+        let p1 = gaussian_lut[idx1];
+        let idx2 = (record.v_cms / 10).max(0).min(127) as usize;
+        let p2 = logistic_lut[idx2];
+        let idx3 = ((d_cm as i64 * 64) / 2000).min(255) as usize;
+        let p3 = gaussian_lut[idx3];
+        let p4 = ((state.dwell_time_s as u32) * 255 / 10).min(255) as u8;
+
+        CalculatedState {
+            stop_idx: idx,
+            prob,
+            features: FeatureScores { p1, p2, p3, p4 },
+            distance_cm: d_cm,
+            pre_update_fsm_state: state.fsm_state,
+            dwell_time_s: state.dwell_time_s,
+        }
+    })
+    .collect();
+
+// Build trace record with pre-update state
 let mut trace_record: Option<TraceRecord> = trace_writer.as_ref().map(|_| {
-    let stop_trace_states: Vec<StopTraceState> = active_indices.iter()
-        .map(|&idx| {
-            let stop = &stops[idx];
-            let state = &stop_states[idx];
-
-            // Compute probability (same as main loop)
-            let prob = probability::arrival_probability(
-                record.s_cm, record.v_cms, stop,
-                state.dwell_time_s, &gaussian_lut, &logistic_lut,
-            );
-
-            // Compute feature scores
-            let d_cm = (record.s_cm - stop.progress_cm).abs();
-            let idx1 = ((d_cm as i64 * 64) / 2750).min(255) as usize;
-            let p1 = gaussian_lut[idx1];
-            let idx2 = (record.v_cms / 10).max(0).min(127) as usize;
-            let p2 = logistic_lut[idx2];
-            let idx3 = ((d_cm as i64 * 64) / 2000).min(255) as usize;
-            let p3 = gaussian_lut[idx3];
-            let p4 = ((state.dwell_time_s as u32) * 255 / 10).min(255) as u8;
-
-            StopTraceState {
-                stop_idx: idx as u8,
-                distance_cm: d_cm,
-                fsm_state: fsm_state_as_string(state.fsm_state),
-                dwell_time_s: state.dwell_time_s,
-                probability: prob,
-                features: FeatureScores { p1, p2, p3, p4 },
-                just_arrived: false,  // Will update below if arrival occurs
-            }
+    let stop_trace_states: Vec<StopTraceState> = calculated_states.iter()
+        .map(|cs| StopTraceState {
+            stop_idx: cs.stop_idx as u8,
+            distance_cm: cs.distance_cm,
+            fsm_state: cs.pre_update_fsm_state,  // Use FsmState directly, serde handles serialization
+            dwell_time_s: cs.dwell_time_s,
+            probability: cs.prob,
+            features: cs.features,
+            just_arrived: false,  // Will update below if arrival occurs
         })
         .collect();
 
@@ -465,11 +481,12 @@ let mut trace_record: Option<TraceRecord> = trace_writer.as_ref().map(|_| {
 });
 
 // Now process each active stop and update state machines
+// Use the PRE-COMPUTED probability values for consistency
 let mut arrivals_this_frame: Vec<u8> = Vec::new();
 
-for &stop_idx in &active_indices {
-    let stop = &stops[stop_idx];
-    let state = &mut stop_states[stop_idx];
+for cs in &calculated_states {
+    let stop = &stops[cs.stop_idx];
+    let state = &mut stop_states[cs.stop_idx];
 
     // Handle re-entry after departure
     if state.fsm_state == FsmState::Departed {
@@ -478,14 +495,8 @@ for &stop_idx in &active_indices {
         }
     }
 
-    // Compute probability
-    let prob = probability::arrival_probability(
-        record.s_cm, record.v_cms, stop,
-        state.dwell_time_s, &gaussian_lut, &logistic_lut,
-    );
-
-    // Update state machine and detect arrival
-    if state.update(record.s_cm, record.v_cms, stop.progress_cm, prob) {
+    // Update state machine with PRE-COMPUTED probability
+    if state.update(record.s_cm, record.v_cms, stop.progress_cm, cs.prob) {
         // Just arrived!
         arrivals_this_frame.push(state.index);
 
@@ -494,7 +505,7 @@ for &stop_idx in &active_indices {
             stop_idx: state.index,
             s_cm: record.s_cm,
             v_cms: record.v_cms,
-            probability: prob,
+            probability: cs.prob,
         };
         output::write_event(&mut output_writer, &event).expect("Failed to write arrival event");
         arrivals += 1;
@@ -663,7 +674,10 @@ export default config;
 
 - [ ] **Step 4: Install dependencies**
 
-Run: `npm install leaflet chart.js`
+**Note:** Using MapLibre GL JS instead of Leaflet for better vector rendering performance and native bearing support.
+
+Run: `npm install maplibre-gl chart-js`
+Run: `npm install -D @types/maplibre-gl`
 Run: `npm install -D tailwindcss postcss autoprefixer`
 Run: `npx tailwindcss init -p`
 
@@ -703,8 +717,12 @@ git commit -m "feat(visualizer): initialize SvelteKit project"
 **Files:**
 - Create: `visualizer/src/lib/types.ts`
 
-- [ ] **Step 1: Write types.ts** (See spec for complete interface definitions)
+**Note on FsmState:**
+- Rust now derives `Serialize` on `FsmState` (via Task 0)
+- Serde serializes enum variants as their string names ("Approaching", "Arriving", etc.)
+- TypeScript interface should use: `fsm_state: 'Approaching' | 'Arriving' | 'AtStop' | 'Departed'`
 
+- [ ] **Step 1: Write types.ts** (See design spec for complete interface definitions)
 - [ ] **Step 2: Commit**
 
 ```bash
@@ -729,7 +747,16 @@ git commit -m "feat(visualizer): add TypeScript types"
 **Files:**
 - Create: `visualizer/src/lib/parsers/routeData.ts`
 
-- [ ] **Step 1: Write binary parser** (See spec for complete implementation)
+**Important Notes:**
+- **Binary Layout:** RouteNode is `#[repr(C, packed)]` in Rust (52 bytes total)
+- **Offset 0-7:** len2_cm2 (i64) - read as Uint32 low + Int32 high, combine to BigInt
+- **Offset 8-15:** line_c (i64) - same treatment
+- **Offset 16-17:** heading_cdeg (i16, little-endian)
+- **Offset 18-19:** _pad (i16)
+- **Offset 20+:** i32 fields (x_cm, y_cm, cum_dist_cm, etc.) - little-endian
+- **Byte Order:** Rust uses `to_le_bytes()`, so DataView must use `littleEndian: true`
+
+- [ ] **Step 1: Write binary parser** (See design spec: `docs/superpowers/specs/2026-03-13-visualizer-design.md` section "Binary File Parsing")
 - [ ] **Step 2: Write unit test**
 - [ ] **Step 3: Commit**
 
@@ -745,7 +772,17 @@ git commit -m "feat(visualizer): add binary route data parser"
 **Files:**
 - Create: `visualizer/src/lib/utils/projection.ts`
 
-- [ ] **Step 1: Write projection utilities** (See spec)
+**Important Notes:**
+- **Constants MUST match `shared/src/lib.rs` exactly:**
+  - `FIXED_ORIGIN_LON_DEG = 120.0`
+  - `FIXED_ORIGIN_LAT_DEG = 20.0`
+  - `EARTH_R_CM = 637_100_000.0`
+  - `PROJECTION_LAT_AVG = 25.0`
+- **Inverse projection formula:**
+  - `lat = y_cm / EARTH_R_CM * (180/π) + FIXED_ORIGIN_LAT_DEG`
+  - `lon = x_cm / (EARTH_R_CM * cos(PROJECTION_LAT_AVG * π/180)) * (180/π) + FIXED_ORIGIN_LON_DEG`
+
+- [ ] **Step 1: Write projection utilities** (See design spec for complete implementation)
 - [ ] **Step 2: Commit**
 
 ```bash
@@ -797,7 +834,13 @@ git commit -m "feat(visualizer): add trace file parser"
 - Create: `visualizer/src/lib/components/MapView.svelte`
 - Create: `visualizer/src/lib/components/ControlPanel.svelte`
 
-- [ ] **Step 1: Write each component** (See spec for details)
+**Note for MapView.svelte:**
+- Use MapLibre GL JS (not Leaflet) for better vector rendering
+- Initialize map with: `new maplibregl.Map({ container: 'map', style: 'https://demotiles.maplibre.org/style.json' })`
+- Add route as GeoJSON line source
+- Add stops as circle layer with color-coded FSM states
+
+- [ ] **Step 1: Write each component** (See design spec for component details)
 - [ ] **Step 2: Commit each**
 
 ---
