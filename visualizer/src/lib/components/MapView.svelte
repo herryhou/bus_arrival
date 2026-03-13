@@ -5,10 +5,19 @@
 	import { projectCmToLatLon } from '$lib/parsers/projection';
 	import 'maplibre-gl/dist/maplibre-gl.css';
 
-	export let routeData: RouteData;
-	export let busPosition: { x_cm: number; y_cm: number } | null = null;
-	export let selectedStop: number | null = null;
-	export let onStopClick: (stopIndex: number) => void = () => {};
+	interface Props {
+		routeData: RouteData;
+		busPosition?: { x_cm: number; y_cm: number } | null;
+		selectedStop?: number | null;
+		onStopClick?: (stopIndex: number) => void;
+	}
+
+	let {
+		routeData,
+		busPosition = null,
+		selectedStop = null,
+		onStopClick = () => {}
+	}: Props = $props();
 
 	let mapContainer: HTMLDivElement;
 	let map: maplibregl.Map | null = null;
