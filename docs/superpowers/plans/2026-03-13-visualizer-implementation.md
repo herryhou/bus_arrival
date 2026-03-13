@@ -613,3 +613,246 @@ head -n 1 trace.jsonl | jq
 ```
 
 ---
+
+## Chunk 2: SvelteKit Project Setup
+
+**Goal:** Initialize the visualizer as a SvelteKit project with static adapter.
+
+---
+
+### Task 1: Initialize SvelteKit Project
+
+**Files:**
+- Create: `visualizer/` directory structure
+
+- [ ] **Step 1: Create SvelteKit project**
+
+Run from project root:
+```bash
+cd /Users/herry/project/pico2w/bus_arrival
+npx create-svelte-kit@latest visualizer
+# Select: Skeleton project, TypeScript, ESLint, Prettier
+cd visualizer
+npm install
+```
+
+- [ ] **Step 2: Install static adapter**
+
+Run: `npm install -D @sveltejs/adapter-static`
+
+- [ ] **Step 3: Configure static adapter**
+
+Edit `svelte.config.js`:
+```javascript
+import adapter from '@sveltejs/adapter-static';
+
+/** @type {import('@sveltejs/kit').Config} */
+const config = {
+    kit: {
+        adapter: adapter({
+            pages: 'build',
+            assets: 'build',
+            fallback: 'index.html',
+            strict: true
+        })
+    }
+};
+
+export default config;
+```
+
+- [ ] **Step 4: Install dependencies**
+
+Run: `npm install leaflet chart.js`
+Run: `npm install -D tailwindcss postcss autoprefixer`
+Run: `npx tailwindcss init -p`
+
+- [ ] **Step 5: Configure Tailwind**
+
+Edit `tailwind.config.js`:
+```javascript
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ['./src/**/*.{html,js,svelte,ts}'],
+  theme: { extend: {} },
+  plugins: [],
+};
+```
+
+- [ ] **Step 6: Add Tailwind to app.css**
+
+Edit `src/app.css`:
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+html, body { @apply h-full w-full margin-0 padding-0; }
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add visualizer/
+git commit -m "feat(visualizer): initialize SvelteKit project"
+```
+
+---
+
+### Task 2: Create TypeScript Types
+
+**Files:**
+- Create: `visualizer/src/lib/types.ts`
+
+- [ ] **Step 1: Write types.ts** (See spec for complete interface definitions)
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add visualizer/src/lib/types.ts
+git commit -m "feat(visualizer): add TypeScript types"
+```
+
+---
+
+**Chunk 2 Complete:** SvelteKit project initialized.
+
+---
+
+## Chunk 3: Parsers & Utilities
+
+**Goal:** Implement binary file parser and coordinate projection.
+
+---
+
+### Task 1: Implement routeData.ts Parser
+
+**Files:**
+- Create: `visualizer/src/lib/parsers/routeData.ts`
+
+- [ ] **Step 1: Write binary parser** (See spec for complete implementation)
+- [ ] **Step 2: Write unit test**
+- [ ] **Step 3: Commit**
+
+```bash
+git add visualizer/src/lib/parsers/routeData.ts
+git commit -m "feat(visualizer): add binary route data parser"
+```
+
+---
+
+### Task 2: Implement Coordinate Projection
+
+**Files:**
+- Create: `visualizer/src/lib/utils/projection.ts`
+
+- [ ] **Step 1: Write projection utilities** (See spec)
+- [ ] **Step 2: Commit**
+
+```bash
+git add visualizer/src/lib/utils/projection.ts
+git commit -m "feat(visualizer): add coordinate projection"
+```
+
+---
+
+### Task 3: Implement traceData.ts Parser
+
+**Files:**
+- Create: `visualizer/src/lib/parsers/traceData.ts`
+
+- [ ] **Step 1: Write trace parser** (See spec)
+- [ ] **Step 2: Commit**
+
+```bash
+git add visualizer/src/lib/parsers/traceData.ts
+git commit -m "feat(visualizer): add trace file parser"
+```
+
+---
+
+**Chunk 3 Complete:** Parsers and utilities implemented.
+
+---
+
+## Chunk 4: State & Components
+
+**Goal:** Create Svelte stores and core UI components.
+
+---
+
+### Task 1: Create Svelte Stores
+
+**Files:**
+- Create: `visualizer/src/lib/stores/data.ts`
+
+- [ ] **Step 1: Write stores** (See spec)
+- [ ] **Step 2: Commit**
+
+---
+
+### Task 2: Create Components
+
+**Files:**
+- Create: `visualizer/src/lib/components/Header.svelte`
+- Create: `visualizer/src/lib/components/MapView.svelte`
+- Create: `visualizer/src/lib/components/ControlPanel.svelte`
+
+- [ ] **Step 1: Write each component** (See spec for details)
+- [ ] **Step 2: Commit each**
+
+---
+
+### Task 3: Create Main Page
+
+**Files:**
+- Modify: `visualizer/src/routes/+page.svelte`
+
+- [ ] **Step 1: Write main page** (See spec)
+- [ ] **Step 2: Test locally:** `npm run dev`
+- [ ] **Step 3: Commit**
+
+---
+
+**Chunk 4 Complete:** State management and UI components implemented.
+
+---
+
+## Chunk 5: Build & Deploy
+
+**Goal:** Build static files and verify.
+
+---
+
+- [ ] **Step 1: Build for production**
+
+Run: `npm run build`
+
+- [ ] **Step 2: Test static build**
+
+Run: `npx serve visualizer/build`
+
+- [ ] **Step 3: Generate sample data**
+
+```bash
+cd /Users/herry/project/pico2w/bus_arrival
+cargo run --bin simulator -- test.nmea route_data.bin phase2.jsonl
+cargo run --bin arrival_detector -- phase2.jsonl route_data.bin arrivals.jsonl --trace trace.jsonl
+cp route_data.bin trace.jsonl visualizer/static/samples/
+```
+
+- [ ] **Step 4: Final commit**
+
+```bash
+git add visualizer/
+git commit -m "feat(visualizer): complete implementation"
+```
+
+---
+
+## Implementation Complete!
+
+**Usage:**
+1. Generate trace: `cargo run --bin arrival_detector -- phase2.jsonl route_data.bin arrivals.jsonl --trace trace.jsonl`
+2. Open visualizer, load `route_data.bin` and `trace.jsonl`
+3. Use controls to step through GPS updates
+
