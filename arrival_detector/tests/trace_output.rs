@@ -12,6 +12,7 @@ fn test_trace_serialization_valid_json() {
         lon: 121.28645,
         s_cm: 10000,
         v_cms: 500,
+        heading_cdeg: Some(-950), // 350.5° converted to -950 cdeg
         active_stops: vec![0, 1],
         stop_states: vec![
             StopTraceState {
