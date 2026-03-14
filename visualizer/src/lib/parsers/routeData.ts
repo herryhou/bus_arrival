@@ -24,13 +24,15 @@
  * offset  8: corridor_end_cm    u32   4 bytes
  *
  * File layout (v8 format):
- * - Header (17 bytes):
+ * - Header (28 bytes):
  *   - MAGIC: u32 (0x42555341 = "BUSA")
  *   - VERSION: u16 (1)
  *   - node_count: u16
  *   - stop_count: u8
+ *   - padding: u8[3] (for 4-byte alignment)
  *   - x0_cm: i32
  *   - y0_cm: i32
+ *   - lat_avg_deg: f64 (average latitude for projection)
  * - Nodes array: node_count × 52 bytes
  * - Stops array: stop_count × 12 bytes
  * - Grid data (cols, rows, grid_size_cm, offsets, cells)
@@ -42,7 +44,7 @@ import type { RouteData, RouteNode, Stop, GridOrigin } from '$lib/types';
 
 const ROUTE_NODE_SIZE = 52;
 const STOP_SIZE = 12;
-const HEADER_SIZE_V8 = 17; // MAGIC(4) + VERSION(2) + node_count(2) + stop_count(1) + x0_cm(4) + y0_cm(4)
+const HEADER_SIZE_V8 = 28; // + lat_avg_deg(8) for total of 28 bytes
 const MAGIC = 0x42555341; // "BUSA" in little-endian
 const VERSION = 1;
 
@@ -127,11 +129,22 @@ export function parseRouteData(buffer: ArrayBuffer): RouteData {
 	const stop_count = dataView.getUint8(offset);
 	offset += 1;
 
+	// Skip 3 padding bytes for alignment
+	offset += 3;
+
 	// Read origin coordinates
 	const x0_cm = dataView.getInt32(offset, true);
 	offset += 4;
 	const y0_cm = dataView.getInt32(offset, true);
 	offset += 4;
+
+	// Read average latitude for projection (f64 / little-endian)
+	const lat_avg_deg_bytes = new DataView(new ArrayBuffer(8));
+	for (let i = 0; i < 8; i++) {
+		lat_avg_deg_bytes.setUint8(i, dataView.getUint8(offset + i));
+	}
+	const lat_avg_deg = dataView.getFloat64(offset, true);
+	offset += 8;
 
 	// Parse grid origin
 	const grid_origin: GridOrigin = { x0_cm, y0_cm };
@@ -157,6 +170,7 @@ export function parseRouteData(buffer: ArrayBuffer): RouteData {
 		node_count,
 		stop_count,
 		grid_origin,
+		lat_avg_deg,
 		nodes,
 		stops,
 		crc32: 0 // Not parsed in v8 format
@@ -199,12 +213,60 @@ export async function loadRouteData(file: File | string): Promise<RouteData> {
  */
 export function getRouteGeometry(
 	routeData: RouteData,
-	projectCmToLatLon: (x_cm: number, y_cm: number) => [number, number]
+	projectCmToLatLon: (x_cm: number, y_cm: number, lat_avg_deg: number) => [number, number]
 ): number[][] {
 	return routeData.nodes.map((node) => {
-		const [lat, lon] = projectCmToLatLon(node.x_cm, node.y_cm);
+		// Nodes are stored as absolute coordinates (from fixed origin 120E, 20N)
+		// grid_origin is just the minimum for spatial indexing, don't add it!
+		const [lat, lon] = projectCmToLatLon(node.x_cm, node.y_cm, routeData.lat_avg_deg);
 		return [lon, lat]; // GeoJSON uses [lon, lat] order
 	});
+}
+
+/**
+ * Get interpolated bus position and heading based on route progress
+ * 
+ * @param progress_cm - Bus progress along route in cm
+ * @param routeData - Parsed route data
+ * @returns Object with interpolated x_cm, y_cm, and heading_cdeg
+ */
+export function getInterpolatedBusState(
+	progress_cm: number,
+	routeData: RouteData
+): { x_cm: number; y_cm: number; heading_cdeg: number } {
+	const nodes = routeData.nodes;
+	if (nodes.length === 0) return { x_cm: 0, y_cm: 0, heading_cdeg: 0 };
+
+	// Find the segment containing the progress_cm
+	let left = 0;
+	let right = nodes.length - 1;
+
+	while (left < right) {
+		const mid = Math.floor((left + right + 1) / 2);
+		if (nodes[mid].cum_dist_cm <= progress_cm) {
+			left = mid;
+		} else {
+			right = mid - 1;
+		}
+	}
+
+	const startNode = nodes[left];
+	if (left === nodes.length - 1) {
+		return { x_cm: startNode.x_cm, y_cm: startNode.y_cm, heading_cdeg: startNode.heading_cdeg };
+	}
+
+	const endNode = nodes[left + 1];
+	const seg_len = endNode.cum_dist_cm - startNode.cum_dist_cm;
+
+	if (seg_len <= 0) {
+		return { x_cm: startNode.x_cm, y_cm: startNode.y_cm, heading_cdeg: startNode.heading_cdeg };
+	}
+
+	const t = (progress_cm - startNode.cum_dist_cm) / seg_len;
+	const x_cm = startNode.x_cm + t * (endNode.x_cm - startNode.x_cm);
+	const y_cm = startNode.y_cm + t * (endNode.y_cm - startNode.y_cm);
+
+	return { x_cm, y_cm, heading_cdeg: startNode.heading_cdeg };
 }
 
 /**
@@ -218,7 +280,7 @@ export function getRouteGeometry(
  */
 export function getStopPositions(
 	routeData: RouteData,
-	projectCmToLatLon: (x_cm: number, y_cm: number) => [number, number]
+	projectCmToLatLon: (x_cm: number, y_cm: number, lat_avg_deg: number) => [number, number]
 ): Array<{ index: number; lon: number; lat: number; progress_cm: number }> {
 	// We need to interpolate stop positions from the route nodes
 	// For now, return the stop progress_cm and approximate position from nearest node
@@ -235,7 +297,8 @@ export function getStopPositions(
 			}
 		}
 
-		const [lat, lon] = projectCmToLatLon(nearestNode.x_cm, nearestNode.y_cm);
+		// Nodes are stored as absolute coordinates
+		const [lat, lon] = projectCmToLatLon(nearestNode.x_cm, nearestNode.y_cm, routeData.lat_avg_deg);
 		return { index, lon, lat, progress_cm: stop.progress_cm };
 	});
 }

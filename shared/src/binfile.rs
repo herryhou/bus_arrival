@@ -46,10 +46,15 @@ impl<'a> SpatialGridView<'a> {
         let offset_ptr = unsafe { self.offsets_base.add(idx * 4) as *const u32 };
         let start_offset = unsafe { core::ptr::read_unaligned(offset_ptr) } as usize;
         
-        let cell_ptr = unsafe { self.data_base.add(start_offset) };
-        let count = unsafe { *cell_ptr } as usize;
-        let indices_ptr = unsafe { cell_ptr.add(1) as *const u16 };
+        let cell_ptr = unsafe { self.data_base.add(start_offset) as *const u16 };
+        // First u16 is the count
+        let count = unsafe { core::ptr::read_unaligned(cell_ptr) } as usize;
+        let indices_ptr = unsafe { cell_ptr.add(1) };
         
+        // slice::from_raw_parts still requires alignment for the type.
+        // If the base pointer is not aligned, we must use a different approach or 
+        // ensure alignment during packing.
+        // For now, we'll assume the caller provides an aligned buffer.
         Ok(unsafe { core::slice::from_raw_parts(indices_ptr, count) })
     }
 }
@@ -58,6 +63,8 @@ impl<'a> SpatialGridView<'a> {
 pub struct RouteData<'a> {
     pub x0_cm: i32,
     pub y0_cm: i32,
+    /// Average latitude for projection (computed from route points)
+    pub lat_avg_deg: f64,
     pub node_count: usize,
     pub stop_count: usize,
     nodes_ptr: *const RouteNode,
@@ -82,7 +89,7 @@ impl<'a> RouteData<'a> {
 
     /// Zero-copy load of RouteData from bytes.
     pub fn load(data: &'a [u8]) -> Result<Self, BusError> {
-        if data.len() < 17 + 4 {
+        if data.len() < 28 + 4 {
             return Err(BusError::InvalidLength);
         }
 
@@ -93,8 +100,10 @@ impl<'a> RouteData<'a> {
 
         let node_count = u16::from_le_bytes(data[6..8].try_into().unwrap()) as usize;
         let stop_count = data[8] as usize;
-        let x0_cm = i32::from_le_bytes(data[9..13].try_into().unwrap());
-        let y0_cm = i32::from_le_bytes(data[13..17].try_into().unwrap());
+        // data[9..12] is padding
+        let x0_cm = i32::from_le_bytes(data[12..16].try_into().unwrap());
+        let y0_cm = i32::from_le_bytes(data[16..20].try_into().unwrap());
+        let lat_avg_deg = f64::from_le_bytes(data[20..28].try_into().unwrap());
 
         let received_crc = u32::from_le_bytes(data[data.len()-4..].try_into().unwrap());
         let mut hasher = crc32fast::Hasher::new();
@@ -103,7 +112,7 @@ impl<'a> RouteData<'a> {
             return Err(BusError::ChecksumMismatch);
         }
 
-        let mut offset = 17;
+        let mut offset = 28;
 
         let nodes_size = node_count * size_of::<RouteNode>();
         if data.len() < offset + nodes_size { return Err(BusError::InvalidLength); }
@@ -146,6 +155,7 @@ impl<'a> RouteData<'a> {
         Ok(RouteData {
             x0_cm,
             y0_cm,
+            lat_avg_deg,
             node_count,
             stop_count,
             nodes_ptr,
@@ -158,19 +168,20 @@ impl<'a> RouteData<'a> {
 }
 
 /// Pack route data into binary format.
-/// 
+///
 /// This function is intended for use in the preprocessor (requires std).
 #[cfg(feature = "std")]
 pub fn pack_route_data(
     route_nodes: &[RouteNode],
     stops: &[Stop],
     grid: &SpatialGrid,
+    lat_avg_deg: f64,
     gaussian_lut: &[u8],
     logistic_lut: &[u8],
     output: &mut impl std::io::Write,
 ) -> Result<(), BusError> {
     use std::io::Write;
-    
+
     let mut buffer = Vec::new();
     let node_count = route_nodes.len() as u16;
     let stop_count = stops.len() as u8;
@@ -179,8 +190,10 @@ pub fn pack_route_data(
     buffer.write_all(&VERSION.to_le_bytes()).map_err(|_| BusError::IoError)?;
     buffer.write_all(&node_count.to_le_bytes()).map_err(|_| BusError::IoError)?;
     buffer.write_all(&stop_count.to_le_bytes()).map_err(|_| BusError::IoError)?;
+    buffer.write_all(&[0u8; 3]).map_err(|_| BusError::IoError)?; // Padding for 4-byte alignment
     buffer.write_all(&grid.x0_cm.to_le_bytes()).map_err(|_| BusError::IoError)?;
     buffer.write_all(&grid.y0_cm.to_le_bytes()).map_err(|_| BusError::IoError)?;
+    buffer.write_all(&lat_avg_deg.to_le_bytes()).map_err(|_| BusError::IoError)?; // Average latitude for projection
 
     for node in route_nodes {
         let bytes = unsafe {
@@ -205,8 +218,8 @@ pub fn pack_route_data(
     
     for cell in &grid.cells {
         offsets.push(index_data.len() as u32);
-        let count = (cell.len().min(255)) as u8;
-        index_data.push(count);
+        let count = (cell.len().min(65535)) as u16;
+        index_data.write_all(&count.to_le_bytes()).map_err(|_| BusError::IoError)?;
         for &seg_idx in cell {
             index_data.write_all(&(seg_idx as u16).to_le_bytes()).map_err(|_| BusError::IoError)?;
         }
@@ -249,11 +262,13 @@ mod tests {
             y0_cm: 200,
         };
         let mut buffer = Vec::new();
-        pack_route_data(&nodes, &stops, &grid, &[0u8; 256], &[0u8; 128], &mut buffer).unwrap();
+        let lat_avg_deg = 25.0;
+        pack_route_data(&nodes, &stops, &grid, lat_avg_deg, &[0u8; 256], &[0u8; 128], &mut buffer).unwrap();
 
         let loaded = RouteData::load(&buffer).unwrap();
         assert_eq!(loaded.x0_cm, 100);
         assert_eq!(loaded.y0_cm, 200);
+        assert_eq!(loaded.lat_avg_deg, 25.0);
         assert_eq!(loaded.node_count, 0);
     }
 
@@ -268,7 +283,7 @@ mod tests {
             x0_cm: 0,
             y0_cm: 0,
         };
-        pack_route_data(&[], &[], &grid, &[0u8; 256], &[0u8; 128], &mut buffer).unwrap();
+        pack_route_data(&[], &[], &grid, 25.0, &[0u8; 256], &[0u8; 128], &mut buffer).unwrap();
 
         // Corrupt one byte of data (not the CRC itself)
         buffer[10] ^= 0xFF;

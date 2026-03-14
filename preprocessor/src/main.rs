@@ -141,6 +141,7 @@ fn main() {
         &route_nodes,
         &projected_stops,
         &grid,
+        lat_avg,
         &gaussian_lut,
         &logistic_lut,
         &mut &output_file

@@ -30,6 +30,12 @@ export function parseTraceJsonl(content: string): TraceData {
 			if (typeof record.time !== 'number') {
 				throw new Error(`Line ${i + 1}: missing or invalid 'time' field`);
 			}
+			if (typeof record.lat !== 'number') {
+				throw new Error(`Line ${i + 1}: missing or invalid 'lat' field`);
+			}
+			if (typeof record.lon !== 'number') {
+				throw new Error(`Line ${i + 1}: missing or invalid 'lon' field`);
+			}
 			if (typeof record.s_cm !== 'number') {
 				throw new Error(`Line ${i + 1}: missing or invalid 's_cm' field`);
 			}

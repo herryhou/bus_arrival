@@ -53,10 +53,16 @@ export interface StopTraceState {
 export interface TraceRecord {
 	/** GPS timestamp (seconds since epoch) */
 	time: number;
+	/** Latitude */
+	lat: number;
+	/** Longitude */
+	lon: number;
 	/** Route progress (cm) */
 	s_cm: number;
 	/** Velocity (cm/s) */
 	v_cms: number;
+	/** Heading in 0.01 degrees (0-35999) */
+	heading_cdeg?: number;
 	/** Active stop indices (corridor filter) */
 	active_stops: number[];
 	/** Per-stop detailed state (only for active stops) */
@@ -86,9 +92,9 @@ export interface RouteNode {
 	heading_cdeg: number;
 	/** Padding */
 	_pad: number;
-	/** X coordinate (relative to grid origin) in cm */
+	/** X coordinate (absolute, from fixed origin 120°E, 20°N) in cm */
 	x_cm: number;
-	/** Y coordinate (relative to grid origin) in cm */
+	/** Y coordinate (absolute, from fixed origin 120°E, 20°N) in cm */
 	y_cm: number;
 	/** Cumulative distance from route start in cm */
 	cum_dist_cm: number;
@@ -130,6 +136,8 @@ export interface RouteData {
 	stop_count: number;
 	/** Grid origin */
 	grid_origin: GridOrigin;
+	/** Average latitude for projection (computed from route) */
+	lat_avg_deg: number;
 	/** Route nodes array */
 	nodes: RouteNode[];
 	/** Bus stops array */

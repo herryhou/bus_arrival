@@ -11,6 +11,7 @@ pub fn pack_v8_route_data(
     route_nodes: &[RouteNode],
     stops: &[Stop],
     grid: &SpatialGrid,
+    lat_avg_deg: f64,
     gaussian_lut: &[u8],
     logistic_lut: &[u8],
     output: &mut impl Write,
@@ -19,6 +20,7 @@ pub fn pack_v8_route_data(
         route_nodes,
         stops,
         grid,
+        lat_avg_deg,
         gaussian_lut,
         logistic_lut,
         output

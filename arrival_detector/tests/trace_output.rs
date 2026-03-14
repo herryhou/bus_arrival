@@ -8,6 +8,8 @@ fn test_trace_serialization_valid_json() {
     // Verify TraceRecord serializes to valid JSON with FsmState
     let record = TraceRecord {
         time: 1234567890,
+        lat: 25.00425,
+        lon: 121.28645,
         s_cm: 10000,
         v_cms: 500,
         active_stops: vec![0, 1],
