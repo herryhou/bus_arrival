@@ -52,10 +52,19 @@ impl NmeaState {
         let speed_knots: f64 = parts[7].parse().unwrap_or(0.0);
         let heading_deg: f64 = parts[8].parse().unwrap_or(0.0);
 
+        // Convert NMEA heading (0-360°) to HeadCdeg range (-18000 to 18000)
+        // to avoid overflow for headings > 180°
+        let heading_cdeg = (heading_deg * 100.0).round() as i32;
+        let heading_cdeg = if heading_cdeg > 18000 {
+            heading_cdeg - 36000
+        } else {
+            heading_cdeg
+        };
+
         self.point.lat = lat;
         self.point.lon = lon;
         self.point.speed_cms = knots_to_cms(speed_knots);
-        self.point.heading_cdeg = (heading_deg * 100.0).round() as HeadCdeg;
+        self.point.heading_cdeg = heading_cdeg as HeadCdeg;
         self.point.has_fix = true;
 
         None // Not complete yet (need HDOP)
@@ -202,10 +211,11 @@ mod tests {
     fn parse_gga_valid() {
         let mut state = NmeaState::new();
         let result = state.parse_sentence("$GPGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*4B");
-        assert!(result.is_none()); // GGA alone doesn't complete the point
-        assert!(state.point.has_fix);
-        assert!((state.point.lat - 25.004303333333333).abs() < 1e-10);
-        assert!((state.point.lon - 121.28649666666667).abs() < 1e-10);
+        assert!(result.is_some()); // GGA alone completes the point
+        let point = result.unwrap();
+        assert!(point.has_fix);
+        assert!((point.lat - 25.004303333333333).abs() < 1e-10);
+        assert!((point.lon - 121.28649666666667).abs() < 1e-10);
     }
 
     #[test]
