@@ -5,21 +5,21 @@ GPS-based bus arrival detection system for RP2350 microcontroller with web-based
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────────┐     ┌─────────────┐
-│ NMEA Log    │────▶│ Simulator    │────▶│ Arrival         │────▶│ Arrivals    │
-│ (GPS data)  │     │ (Phase 2)    │     │ Detector        │     │ Output     │
-└─────────────┘     └──────────────┘     │ (Phase 3)       │     └─────────────┘
-                                          │                 │
-                                          │ ┌─────────────┐ │
-                                          │ │ Trace Output │ │
-                                          │ └─────────────┘ │
-                                          └─────────────────┘
-                                                 │
-                                                 ▼
-                                          ┌─────────────┐
-                                          │ Visualizer  │
-                                          │ (Web UI)    │
-                                          └─────────────┘
+┌─────────────┐     ┌──────────────┐     ┌──────────────────┐     ┌─────────────┐
+│ NMEA Log    │────▶│ Simulator    │────▶│ Arrival_Detector │────▶│ Arrivals    │
+│ (GPS data)  │     │ (Phase 2)    │     │                  │     │ Output      │
+└─────────────┘     └──────────────┘     │ (Phase 3)        │     └─────────────┘
+                                         │                  │
+                                         │ ┌──────────────┐ │
+                                         │ │ Trace Output │ │
+                                         │ └──────────────┘ │
+                                         └──────────────────┘
+                                                   │
+                                                   ▼
+                                            ┌─────────────┐
+                                            │ Visualizer  │
+                                            │ (Web UI)    │
+                                            └─────────────┘
 ```
 
 ## Quick Start
@@ -51,11 +51,27 @@ The visualizer requires two input files:
 1. **`route_data.bin`** - Binary route data with precomputed coefficients
 2. **`trace.jsonl`** - Debug trace from arrival detector with internal state
 
+
+
+#### Step 0: Prepare GeoJSON Files
+Create `route.json` and `stops.json` in `tools/data/` with your desired route and stop configurations.
+
+**Important:** Use separate `route.json` (contains route_points) and `stops.json` (contains stop lat/lon coordinates). The route.json should NOT include a stops array.
+
+Example:
+
+```bash
+# Generate NMEA with stops from separate stops.json file
+node ./tools/gen_nmea/gen_nmea.js generate --route ./tools/data/ty225_route.json --stops ./tools/data/ty225_stops.json --scenario normal --out_nmea ty225.nmea --out_gt ty225_gt.json
+```
+
+**Note:** The `--stops` parameter is required when your route.json doesn't include a stops array. This is the recommended approach for better separation of concerns.
+
 #### Step 1: Generate `route_data.bin`
 
 ```bash
 # From GeoJSON files (route and stops)
-cargo run -p preprocessor -- tools/data/route.json tools/data/stops.json route_data.bin
+cargo run -p preprocessor -- tools/data/ty225_route.json tools/data/ty225_stops.json ty225.bin
 ```
 
 **Output:**
@@ -73,7 +89,7 @@ Wrote route_data.bin (13908 bytes)
 
 ```bash
 # From GPS NMEA log
-cargo run -p simulator -- test.nmea route_data.bin phase2.jsonl
+cargo run -p simulator -- ty225.nmea ty225.bin ty225.jsonl
 ```
 
 **Output:**
