@@ -29,8 +29,13 @@ const GENERATE_SCHEMA = {
   "properties": {
     "route": {
       "type": "string",
-      "description": "Path to route JSON file containing route_points and stops",
+      "description": "Path to route JSON file containing route_points",
       "default": "route.json"
+    },
+    "stops": {
+      "type": "string",
+      "description": "Path to stops JSON file with lat/lon coordinates (optional, uses route.stops if not provided)",
+      "default": null
     },
     "scenario": {
       "type": "string",
@@ -123,6 +128,21 @@ function parseArgs(argv) {
       return args;
     }
 
+    if (arg === '--route') {
+      args.route = argv[++i];
+      continue;
+    }
+
+    if (arg === '--stops') {
+      args.stops = argv[++i];
+      continue;
+    }
+
+    if (arg === '--out_nmea') {
+      args.out_nmea = argv[++i];
+      continue;
+    }
+
     // Check for global flags first
     if (arg === '--json') {
       globalFlags.json = true;
@@ -177,6 +197,7 @@ function parseArgs(argv) {
     // Legacy flag support for backwards compatibility (before any command)
     switch (arg) {
       case '--route':
+      case '--stops':
       case '--scenario':
       case '--out-nmea':
       case '--out-gt':
@@ -193,26 +214,26 @@ function parseArgs(argv) {
 // ─── 常數 / 場景設定 ─────────────────────────────────────────────────────────
 
 const SCENARIOS = {
-  normal:  { hdop: 3.5, sigmaM: 18, sats: 8,  jump: false, outage: false, canyon: false },
-  drift:   { hdop: 7.0, sigmaM: 35, sats: 5,  jump: false, outage: false, canyon: true  },
-  jump:    { hdop: 3.5, sigmaM: 18, sats: 8,  jump: true,  outage: false, canyon: false },
-  outage:  { hdop: 3.5, sigmaM: 18, sats: 8,  jump: false, outage: true,  canyon: false },
+  normal: { hdop: 3.5, sigmaM: 18, sats: 8, jump: false, outage: false, canyon: false },
+  drift: { hdop: 7.0, sigmaM: 35, sats: 5, jump: false, outage: false, canyon: true },
+  jump: { hdop: 3.5, sigmaM: 18, sats: 8, jump: true, outage: false, canyon: false },
+  outage: { hdop: 3.5, sigmaM: 18, sats: 8, jump: false, outage: true, canyon: false },
 };
 
-const CRUISE_KMH   = 28;
-const MAX_KMH      = 50;
-const ACCEL_MS2    = 1.2;
-const DECEL_MS2    = 1.8;
+const CRUISE_KMH = 28;
+const MAX_KMH = 50;
+const ACCEL_MS2 = 1.2;
+const DECEL_MS2 = 1.8;
 const STOP_DWELL_S = 8;
 const SIGNAL_CYCLE = 30;      // 號誌週期（秒）
-const SLOW_START   = 0.60;    // 接近站點的路段中，從 60% 開始降速
-const SLOW_RATIO   = 0.30;    // 降速目標為巡航速度的 30%
+const SLOW_START = 0.60;    // 接近站點的路段中，從 60% 開始降速
+const SLOW_RATIO = 0.30;    // 降速目標為巡航速度的 30%
 
-const AR1_ALPHA    = 0.7;     // AR(1) 自相關係數
-const DRIFT_DECAY  = 0.98;    // 漂移均值回歸係數
-const EARTH_R      = 6_371_000;
+const AR1_ALPHA = 0.7;     // AR(1) 自相關係數
+const DRIFT_DECAY = 0.98;    // 漂移均值回歸係數
+const EARTH_R = 6_371_000;
 
-const BASE_TS      = 1_700_000_000;
+const BASE_TS = 1_700_000_000;
 
 // ─── 數學 / 地理工具 ─────────────────────────────────────────────────────────
 
@@ -223,7 +244,7 @@ function haversine([lat1, lon1], [lat2, lon2]) {
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
   const a = Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return 2 * EARTH_R * Math.asin(Math.sqrt(a));
 }
 
@@ -231,16 +252,16 @@ function bearing([lat1, lon1], [lat2, lon2]) {
   const dLon = toRad(lon2 - lon1);
   const y = Math.sin(dLon) * Math.cos(toRad(lat2));
   const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
-            Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+    Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
 function movePoint([lat, lon], brng, dist) {
-  const d  = dist / EARTH_R;
-  const b  = toRad(brng);
+  const d = dist / EARTH_R;
+  const b = toRad(brng);
   const φ1 = toRad(lat), λ1 = toRad(lon);
   const φ2 = Math.asin(Math.sin(φ1) * Math.cos(d) +
-                       Math.cos(φ1) * Math.sin(d) * Math.cos(b));
+    Math.cos(φ1) * Math.sin(d) * Math.cos(b));
   const λ2 = λ1 + Math.atan2(
     Math.sin(b) * Math.sin(d) * Math.cos(φ1),
     Math.cos(d) - Math.sin(φ1) * Math.sin(φ2));
@@ -256,7 +277,7 @@ function randn() {
 
 /** 以公尺為單位施加南北 + 東西偏移 */
 function addNoiseMeters([lat, lon], noiseLat, noiseLon) {
-  const [lat2, lon2] = movePoint([lat, lon], 0,   noiseLat);
+  const [lat2, lon2] = movePoint([lat, lon], 0, noiseLat);
   const [lat3, lon3] = movePoint([lat2, lon2], 90, noiseLon);
   return [lat3, lon3];
 }
@@ -270,16 +291,16 @@ function nmeaChecksum(sentence) {
 }
 
 function formatDDMM(deg, isLat) {
-  const abs  = Math.abs(deg);
-  const d    = Math.floor(abs);
-  const m    = (abs - d) * 60;
+  const abs = Math.abs(deg);
+  const d = Math.floor(abs);
+  const m = (abs - d) * 60;
   const mStr = m.toFixed(4).padStart(7, '0');
   const dStr = isLat ? String(d).padStart(2, '0') : String(d).padStart(3, '0');
   return `${dStr}${mStr}`;
 }
 
 function tsToNmeaTime(ts) {
-  const d  = new Date(ts * 1000);
+  const d = new Date(ts * 1000);
   const hh = String(d.getUTCHours()).padStart(2, '0');
   const mm = String(d.getUTCMinutes()).padStart(2, '0');
   const ss = String(d.getUTCSeconds()).padStart(2, '0');
@@ -287,7 +308,7 @@ function tsToNmeaTime(ts) {
 }
 
 function tsToNmeaDate(ts) {
-  const d  = new Date(ts * 1000);
+  const d = new Date(ts * 1000);
   const dd = String(d.getUTCDate()).padStart(2, '0');
   const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
   const yy = String(d.getUTCFullYear()).slice(-2);
@@ -295,20 +316,20 @@ function tsToNmeaDate(ts) {
 }
 
 function makeGPRMC(ts, lat, lon, speedKnots, brng) {
-  const NS   = lat >= 0 ? 'N' : 'S';
-  const EW   = lon >= 0 ? 'E' : 'W';
+  const NS = lat >= 0 ? 'N' : 'S';
+  const EW = lon >= 0 ? 'E' : 'W';
   const body = `GPRMC,${tsToNmeaTime(ts)},A,${formatDDMM(lat, true)},${NS},` +
-               `${formatDDMM(lon, false)},${EW},${speedKnots.toFixed(1)},` +
-               `${brng.toFixed(1)},${tsToNmeaDate(ts)},,`;
+    `${formatDDMM(lon, false)},${EW},${speedKnots.toFixed(1)},` +
+    `${brng.toFixed(1)},${tsToNmeaDate(ts)},,`;
   return `$${body}*${nmeaChecksum(body)}`;
 }
 
 function makeGPGGA(ts, lat, lon, hdop, sats) {
-  const NS   = lat >= 0 ? 'N' : 'S';
-  const EW   = lon >= 0 ? 'E' : 'W';
+  const NS = lat >= 0 ? 'N' : 'S';
+  const EW = lon >= 0 ? 'E' : 'W';
   const body = `GPGGA,${tsToNmeaTime(ts)},${formatDDMM(lat, true)},${NS},` +
-               `${formatDDMM(lon, false)},${EW},1,${String(sats).padStart(2, '0')},` +
-               `${hdop.toFixed(1)},10.0,M,0.0,M,,`;
+    `${formatDDMM(lon, false)},${EW},1,${String(sats).padStart(2, '0')},` +
+    `${hdop.toFixed(1)},10.0,M,0.0,M,,`;
   return `$${body}*${nmeaChecksum(body)}`;
 }
 
@@ -317,11 +338,11 @@ function makeGPGGA(ts, lat, lon, hdop, sats) {
 class AR1Noise {
   constructor(sigma) {
     this.sigma = sigma;
-    this.prev  = 0;
+    this.prev = 0;
     this.drift = 0;
   }
   next() {
-    this.prev  = AR1_ALPHA * this.prev + Math.sqrt(1 - AR1_ALPHA ** 2) * randn() * this.sigma;
+    this.prev = AR1_ALPHA * this.prev + Math.sqrt(1 - AR1_ALPHA ** 2) * randn() * this.sigma;
     this.drift = DRIFT_DECAY * this.drift + (1 - DRIFT_DECAY) * randn() * this.sigma * 0.5;
     return this.prev + this.drift;
   }
@@ -329,17 +350,38 @@ class AR1Noise {
 
 // ─── 路線前處理 ──────────────────────────────────────────────────────────────
 
+/**
+ * Find the closest route point index for each stop
+ * @param {Array} stops - Array of {lat, lon} stop objects
+ * @param {Array} routePoints - Array of [lat, lon] route points
+ * @returns {Array} - Array of route point indices closest to each stop
+ */
+function findStopIndices(stops, routePoints) {
+  return stops.map(stop => {
+    let minDist = Infinity;
+    let minIdx = 0;
+    for (let i = 0; i < routePoints.length; i++) {
+      const dist = haversine([stop.lat, stop.lon], routePoints[i]);
+      if (dist < minDist) {
+        minDist = dist;
+        minIdx = i;
+      }
+    }
+    return minIdx;
+  });
+}
+
 function buildSegments(routePoints, stops, lights) {
-  const stopSet  = new Set(stops);
+  const stopSet = new Set(stops);
   const lightSet = new Set(lights || []);
   return routePoints.slice(0, -1).map((from, i) => {
     const to = routePoints[i + 1];
     return {
       from,
       to,
-      dist:        haversine(from, to),
-      bearing:     bearing(from, to),
-      stopBefore:  stopSet.has(i + 1),
+      dist: haversine(from, to),
+      bearing: bearing(from, to),
+      stopBefore: stopSet.has(i + 1),
       lightBefore: lightSet.has(i + 1),
     };
   });
@@ -348,7 +390,7 @@ function buildSegments(routePoints, stops, lights) {
 // ─── 速度工具 ────────────────────────────────────────────────────────────────
 
 const CRUISE_MS = CRUISE_KMH / 3.6;
-const MAX_MS    = MAX_KMH / 3.6;
+const MAX_MS = MAX_KMH / 3.6;
 
 function dwellSeconds() {
   return Math.max(2, Math.min(Math.round(STOP_DWELL_S + randn() * 3), STOP_DWELL_S + 10));
@@ -358,7 +400,7 @@ function dwellSeconds() {
 
 function simulate(route, cfg) {
   const { route_points, stops, traffic_lights } = route;
-  const segs      = buildSegments(route_points, stops, traffic_lights || []);
+  const segs = buildSegments(route_points, stops, traffic_lights || []);
   const totalDist = segs.reduce((s, g) => s + g.dist, 0);
 
   const { hdop, sigmaM, sats } = cfg;
@@ -366,17 +408,17 @@ function simulate(route, cfg) {
   const noiseE = new AR1Noise(sigmaM);
 
   const jumpDistTarget = totalDist * 0.30;
-  let   jumpInjected   = false;
+  let jumpInjected = false;
 
   const OUTAGE_SEG_START = 15;
-  const OUTAGE_SEG_END   = 17;
+  const OUTAGE_SEG_END = 17;
 
-  const nmeaLines   = [];
+  const nmeaLines = [];
   const groundTruth = [];
 
-  let ts            = BASE_TS;
+  let ts = BASE_TS;
   let travelledDist = 0;
-  let stopSeqIdx    = 0;
+  let stopSeqIdx = 0;
 
   // 輸出一秒靜止訊號的輔助函式
   const emitStatic = (pos, brng, outage) => {
@@ -389,9 +431,9 @@ function simulate(route, cfg) {
   };
 
   for (let si = 0; si < segs.length; si++) {
-    const seg         = segs[si];
-    const isOutage    = cfg.outage && si >= OUTAGE_SEG_START && si <= OUTAGE_SEG_END;
-    const prevSeg     = si > 0 ? segs[si - 1] : null;
+    const seg = segs[si];
+    const isOutage = cfg.outage && si >= OUTAGE_SEG_START && si <= OUTAGE_SEG_END;
+    const prevSeg = si > 0 ? segs[si - 1] : null;
 
     // ── 在本段起點處理停靠 / 紅燈 ───────────────────────────────────────────
     if (prevSeg && (prevSeg.stopBefore || prevSeg.lightBefore)) {
@@ -408,28 +450,28 @@ function simulate(route, cfg) {
 
     // ── 行駛本段 ─────────────────────────────────────────────────────────────
     const willSlow = seg.stopBefore || seg.lightBefore;
-    let traveled   = 0;
-    let speedMs    = CRUISE_MS * 0.4;
+    let traveled = 0;
+    let speedMs = CRUISE_MS * 0.4;
 
     while (traveled < seg.dist) {
       const remaining = seg.dist - traveled;
-      const progress  = traveled / seg.dist;
+      const progress = traveled / seg.dist;
 
       // 目標速度
       let targetMs;
       if (willSlow && progress >= SLOW_START) {
         const blend = (progress - SLOW_START) / (1 - SLOW_START);
-        targetMs    = CRUISE_MS * (1 - blend) + CRUISE_MS * SLOW_RATIO * blend;
+        targetMs = CRUISE_MS * (1 - blend) + CRUISE_MS * SLOW_RATIO * blend;
       } else {
         targetMs = Math.min(CRUISE_MS + randn() * 1.5, MAX_MS);
       }
       targetMs = Math.max(0.5, targetMs);
 
       if (speedMs < targetMs) speedMs = Math.min(speedMs + ACCEL_MS2, targetMs);
-      else                    speedMs = Math.max(speedMs - DECEL_MS2, targetMs);
+      else speedMs = Math.max(speedMs - DECEL_MS2, targetMs);
 
       const step = Math.min(speedMs, remaining);
-      traveled      += step;
+      traveled += step;
       travelledDist += step;
 
       // 插值座標
@@ -496,6 +538,7 @@ COMMANDS:
 GENERATE OPTIONS:
   --json-payload '{"route":"path","scenario":"normal"}'    Structured JSON input (recommended for agents)
   --route <path>                                           Route JSON file (default: route.json)
+  --stops <path>                                           Stops JSON file with lat/lon (optional, uses route.stops if not provided)
   --scenario <name>                                        Scenario: normal, drift, jump, outage (default: normal)
   --out-nmea <path>                                        NMEA output file (default: test.nmea)
   --out-gt <path>                                          Ground truth output file (default: ground_truth.json)
@@ -576,13 +619,33 @@ function cmdGenerate(args) {
     exitError(2, `Cannot read route file "${args.route}": ${e.message}`);
   }
 
+  // Load stops from separate file if provided
+  if (args.stops) {
+    let stopsData;
+    try {
+      const stopsContent = fs.readFileSync(args.stops, 'utf8');
+      stopsData = JSON.parse(stopsContent);
+      if (globalFlags.verbose) logs.push(`Loaded stops from ${args.stops}`);
+    } catch (e) {
+      exitError(2, `Cannot read stops file "${args.stops}": ${e.message}`);
+    }
+
+    // Find closest route points for each stop
+    if (!Array.isArray(stopsData.stops)) {
+      exitError(1, 'stops file must contain a "stops" array');
+    }
+
+    route.stops = findStopIndices(stopsData.stops, route.route_points);
+    if (globalFlags.verbose) logs.push(`Mapped ${stopsData.stops.length} stops to route point indices: ${route.stops.slice(0, 5).join(', ')}...`);
+  }
+
   // Validate route structure
   const validationErrors = [];
   if (!Array.isArray(route.route_points) || route.route_points.length < 2) {
     validationErrors.push('route_points must be an array with at least 2 points');
   }
   if (!Array.isArray(route.stops)) {
-    validationErrors.push('Missing required field: stops');
+    validationErrors.push('Missing required field: stops (use --stops file or include stops array in route.json)');
   }
   if (validationErrors.length > 0) {
     exitError(1, 'Route validation failed', validationErrors);
