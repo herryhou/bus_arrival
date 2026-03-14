@@ -39,8 +39,8 @@ pub fn find_best_segment_restricted(
     }
 
     // 3. Fallback: Full grid query
-    let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
-    let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
+    let gx = (gps_x / route_data.grid.grid_size_cm) as u32;
+    let gy = (gps_y / route_data.grid.grid_size_cm) as u32;
 
     // Search 3x3 grid neighborhood
     for dy in 0..=2 {
@@ -149,6 +149,12 @@ pub fn project_to_route(
 
 /// Convert lat/lon to relative cm coordinates
 pub fn latlon_to_cm_relative(lat: f64, lon: f64, offset_x_cm: i64, offset_y_cm: i64) -> (DistCm, DistCm) {
+    let (ax, ay) = latlon_to_cm_absolute(lat, lon);
+    ((ax as i64 - offset_x_cm) as DistCm, (ay as i64 - offset_y_cm) as DistCm)
+}
+
+/// Convert lat/lon to absolute cm coordinates (relative to fixed origin 120E, 20N)
+pub fn latlon_to_cm_absolute(lat: f64, lon: f64) -> (DistCm, DistCm) {
     use shared::{EARTH_R_CM, PROJECTION_LAT_AVG, FIXED_ORIGIN_LON_DEG};
 
 
@@ -166,5 +172,5 @@ pub fn latlon_to_cm_relative(lat: f64, lon: f64, offset_x_cm: i64, offset_y_cm: 
     let dx_cm = (x_abs - x0_abs).round() as i64;
     let dy_cm = (y_abs - y0_abs).round() as i64;
 
-    ((dx_cm - offset_x_cm) as DistCm, (dy_cm - offset_y_cm) as DistCm)
+    (dx_cm as DistCm, dy_cm as DistCm)
 }

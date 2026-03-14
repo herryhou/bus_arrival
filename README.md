@@ -55,17 +55,13 @@ The visualizer requires two input files:
 
 #### Step 0: Prepare GeoJSON Files
 Create `route.json` and `stops.json` in `tools/data/` with your desired route and stop configurations.
-
-**Important:** Use separate `route.json` (contains route_points) and `stops.json` (contains stop lat/lon coordinates). The route.json should NOT include a stops array.
+`route.json` (contains route_points) and `stops.json` (contains stop lat/lon coordinates).
 
 Example:
 
 ```bash
-# Generate NMEA with stops from separate stops.json file
 node ./tools/gen_nmea/gen_nmea.js generate --route ./tools/data/ty225_route.json --stops ./tools/data/ty225_stops.json --scenario normal --out_nmea ty225.nmea --out_gt ty225_gt.json
 ```
-
-**Note:** The `--stops` parameter is required when your route.json doesn't include a stops array. This is the recommended approach for better separation of concerns.
 
 #### Step 1: Generate `route_data.bin`
 

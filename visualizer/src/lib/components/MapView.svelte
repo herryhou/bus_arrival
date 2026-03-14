@@ -8,7 +8,7 @@
 
 	interface Props {
 		routeData: RouteData;
-		busPosition?: { x_cm: number; y_cm: number } | null;
+		busPosition?: { lat: number; lon: number; heading?: number } | null;
 		selectedStop?: number | null;
 		onStopClick?: (stopIndex: number) => void;
 	}
@@ -54,12 +54,28 @@
 				]
 			},
 			center: [initialLon, initialLat],
-			zoom: 13,
-			antialias: true
+			zoom: 13
 		});
 
-		map.on('load', () => {
+		map.on('load', async () => {
 			if (!map) return;
+
+			// Add custom arrow icon for bus
+			const svgArrow = `
+				<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+					<circle cx="20" cy="20" r="18" fill="#22c55e" stroke="white" stroke-width="3"/>
+					<path d="M20 5 L32 30 L20 22 L8 30 Z" fill="white"/>
+				</svg>
+			`;
+			const blob = new Blob([svgArrow], { type: 'image/svg+xml' });
+			const url = URL.createObjectURL(blob);
+			const image = await new Promise<HTMLImageElement>((resolve) => {
+				const img = new Image();
+				img.onload = () => resolve(img);
+				img.src = url;
+			});
+			map.addImage('bus-arrow', image);
+			
 			mapLoaded = true;
 
 			// Add route line
@@ -93,7 +109,7 @@
 
 			// Add stops
 			const stops = getStopPositions(routeData, projectCmToLatLon);
-			const stopFeatures = stops.map((stop) => ({
+			const stopFeatures: any[] = stops.map((stop) => ({
 				type: 'Feature',
 				properties: {
 					index: stop.index,
@@ -182,12 +198,14 @@
 	$effect(() => {
 		if (!map || !busPosition || !mapLoaded) return;
 
-		const [lat, lon] = projectCmToLatLon(busPosition.x_cm, busPosition.y_cm);
+		const { lat, lon } = busPosition;
 
 		if (map.getSource(busSourceId)) {
 			(map.getSource(busSourceId) as maplibregl.GeoJSONSource).setData({
 				type: 'Feature',
-				properties: {},
+				properties: {
+					rotation: busPosition.heading || 0
+				},
 				geometry: {
 					type: 'Point',
 					coordinates: [lon, lat]
@@ -198,7 +216,9 @@
 				type: 'geojson',
 				data: {
 					type: 'Feature',
-					properties: {},
+					properties: {
+						rotation: busPosition.heading || 0
+					},
 					geometry: {
 						type: 'Point',
 						coordinates: [lon, lat]
@@ -208,13 +228,15 @@
 
 			map.addLayer({
 				id: 'bus-marker',
-				type: 'circle',
+				type: 'symbol',
 				source: busSourceId,
-				paint: {
-					'circle-radius': 12,
-					'circle-color': '#22c55e',
-					'circle-stroke-width': 3,
-					'circle-stroke-color': '#ffffff'
+				layout: {
+					'icon-image': 'bus-arrow',
+					'icon-size': 0.8,
+					'icon-rotate': ['get', 'rotation'],
+					'icon-allow-overlap': true,
+					'icon-ignore-placement': true,
+					'icon-rotation-alignment': 'map'
 				}
 			});
 		}

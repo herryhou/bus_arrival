@@ -168,8 +168,11 @@ fn main() {
 
             let trace_record = trace::TraceRecord {
                 time: record.time,
+                lat: record.lat,
+                lon: record.lon,
                 s_cm: record.s_cm,
                 v_cms: record.v_cms,
+                heading_cdeg: record.heading_cdeg,
                 active_stops: active_indices.iter().map(|&i| i as u8).collect(),
                 stop_states,
                 gps_jump,

@@ -55,6 +55,9 @@ impl StopState {
                     self.dwell_time_s += 1;
                     return true;  // Just arrived!
                 }
+                if d_to_stop > 4000 && s_cm > stop_progress {
+                    self.fsm_state = FsmState::Departed;
+                }
                 self.dwell_time_s += 1;
             }
             FsmState::AtStop => {

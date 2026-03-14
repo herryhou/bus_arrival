@@ -10,343 +10,210 @@
 	let { traceData, selectedStop = null, currentTime }: Props = $props();
 
 	// Find the trace record closest to current time
-	function getCurrentRecord() {
+	const currentRecord = $derived.by(() => {
 		return traceData.find((r) => r.time === currentTime)
 			?? traceData.reduce((closest, record) => {
 				return Math.abs(record.time - currentTime) < Math.abs(closest.time - currentTime)
 					? record
 					: closest;
 			}, traceData[0]);
-	}
+	});
 
 	// Get the stop state for the selected stop at current time
-	function getStopState() {
-		const currentRecord = getCurrentRecord();
+	const stopState = $derived.by(() => {
 		return selectedStop !== null && currentRecord
 			? currentRecord.stop_states.find((s) => s.stop_idx === selectedStop)
 			: null;
-	}
+	});
 
-	// Get state transition history for selected stop
-	function getStateHistory() {
-		if (selectedStop === null) return [];
-		return traceData
-			.filter((r) => r.stop_states.some((s) => s.stop_idx === selectedStop))
-			.map((r) => {
-				const state = r.stop_states.find((s) => s.stop_idx === selectedStop)!;
-				return {
-					time: r.time,
-					state: state.fsm_state,
-					justArrived: state.just_arrived
-				};
-			});
-	}
-
-	// Find state transitions
-	function getTransitions() {
-		const history = getStateHistory();
-		return history.filter((entry, i) => {
-			if (i === 0) return true;
-			return entry.state !== history[i - 1].state || entry.justArrived;
-		});
-	}
-
-	// FSM state color mapping
 	const stateColors: Record<FsmState, string> = {
-		Approaching: 'bg-blue-500',
-		Arriving: 'bg-amber-500',
-		AtStop: 'bg-green-500',
-		Departed: 'bg-gray-500'
+		Approaching: '#3b82f6',
+		Arriving: '#f59e0b',
+		AtStop: '#22c55e',
+		Departed: '#6b7280'
 	};
 
-	const stateDescriptions: Record<FsmState, string> = {
-		Approaching: 'Bus is in corridor, approaching stop',
-		Arriving: 'Bus is close to stop, high arrival probability',
-		AtStop: 'Bus has arrived and is at stop',
-		Departed: 'Bus has moved past the stop'
+	const states: FsmState[] = ['Approaching', 'Arriving', 'AtStop', 'Departed'];
+	
+	// Coordinates for SVG state diagram
+	const stateNodes = {
+		Approaching: { x: 50, y: 30 },
+		Arriving: { x: 150, y: 30 },
+		AtStop: { x: 150, y: 100 },
+		Departed: { x: 50, y: 100 }
 	};
 
-	// Format dwell time
 	function formatDwellTime(seconds: number): string {
 		if (seconds < 60) return `${seconds}s`;
 		const mins = Math.floor(seconds / 60);
 		const secs = seconds % 60;
 		return `${mins}m ${secs}s`;
 	}
-
-	// Format distance
-	function formatDistance(cm: number): string {
-		if (Math.abs(cm) < 100) return `${cm} cm`;
-		const meters = (cm / 100).toFixed(1);
-		return `${meters} m`;
-	}
 </script>
 
 <div class="inspector-container">
-	{#if getStopState()}
-		{@const stopState = getStopState()}
-		{@const currentRecord = getCurrentRecord()}
-		<!-- Current State -->
-		<div class="state-card">
-			<h3 class="card-title">Current State - Stop {selectedStop}</h3>
-
-			<div class="state-display">
-				<div class="state-indicator {stateColors[stopState.fsm_state]}"></div>
-				<div class="state-info">
-					<div class="state-name">{stopState.fsm_state}</div>
-					<div class="state-desc">{stateDescriptions[stopState.fsm_state]}</div>
-				</div>
-			</div>
-
-			{#if stopState.just_arrived}
-				<div class="arrival-badge">
-					<span class="arrival-icon">🚌</span> Just Arrived!
-				</div>
-			{/if}
-		</div>
-
-		<!-- Metrics -->
-		<div class="metrics-grid">
-			<div class="metric-card">
-				<div class="metric-label">Distance to Stop</div>
-				<div class="metric-value">{formatDistance(stopState.distance_cm)}</div>
-				<div class="metric-hint">
-					{stopState.distance_cm < 0 ? 'Past stop' : stopState.distance_cm < 500 ? 'Very close' : 'Approaching'}
-				</div>
-			</div>
-
-			<div class="metric-card">
-				<div class="metric-label">Dwell Time</div>
-				<div class="metric-value">{formatDwellTime(stopState.dwell_time_s)}</div>
-				<div class="metric-hint">
-					{stopState.dwell_time_s > 0 ? 'Time since arrival' : 'Not at stop yet'}
-				</div>
-			</div>
-
-			<div class="metric-card">
-				<div class="metric-label">Arrival Probability</div>
-				<div class="metric-value">{stopState.probability}/255</div>
-				<div class="metric-hint">
-					{stopState.probability > 191 ? 'Above threshold' : 'Below threshold'}
-				</div>
-			</div>
-
-			<div class="metric-card">
-				<div class="metric-label">Speed</div>
-				<div class="metric-value">{getCurrentRecord().v_cms} cm/s</div>
-				<div class="metric-hint">
-					{getCurrentRecord().v_cms < 50 ? 'Stopped' : getCurrentRecord().v_cms < 200 ? 'Slow' : 'Moving'}
-				</div>
+	{#if stopState}
+		<div class="inspector-header">
+			<h3>FSM Inspector: Stop {selectedStop}</h3>
+			<div class="status-pill {stopState.fsm_state.toLowerCase()}">
+				{stopState.fsm_state}
 			</div>
 		</div>
 
-		<!-- State Transitions -->
-		<div class="transitions-card">
-			<h3 class="card-title">State Transitions</h3>
-			<div class="transitions-list">
-				{#each getTransitions() as entry}
-					<div class="transition-item">
-						<div class="transition-time">
-							{new Date(entry.time * 1000).toLocaleTimeString()}
-						</div>
-						<div class="transition-state">
-							<span class="transition-dot {stateColors[entry.state]}"></span>
-							{entry.state}
-							{#if entry.justArrived}
-								<span class="arrival-tag">ARRIVED</span>
-							{/if}
-						</div>
-					</div>
+		<!-- SVG State Diagram -->
+		<div class="diagram-card">
+			<svg viewBox="0 0 200 130">
+				<!-- Transitions -->
+				<defs>
+					<marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orientation="auto" markerUnits="strokeWidth">
+						<path d="M0,0 L0,6 L9,3 z" fill="#444" />
+					</marker>
+					<marker id="arrow-active" markerWidth="10" markerHeight="10" refX="8" refY="3" orientation="auto" markerUnits="strokeWidth">
+						<path d="M0,0 L0,6 L9,3 z" fill="#3b82f6" />
+					</marker>
+				</defs>
+
+				<!-- Node connections -->
+				<line x1="80" y1="30" x2="120" y2="30" stroke="#444" marker-end="url(#arrow)" />
+				<line x1="150" y1="50" x2="150" y2="80" stroke="#444" marker-end="url(#arrow)" />
+				<line x1="120" y1="100" x2="80" y2="100" stroke="#444" marker-end="url(#arrow)" />
+				
+				<!-- Skip transition (Arriving -> Departed) -->
+				<path d="M 130 45 Q 100 65 70 85" fill="none" stroke="#444" marker-end="url(#arrow)" />
+
+				{#each Object.entries(stateNodes) as [name, pos]}
+					<g transform="translate({pos.x}, {pos.y})">
+						<circle 
+							r="20" 
+							fill={stopState.fsm_state === name ? stateColors[name as FsmState] : '#1a1a1a'} 
+							stroke={stopState.fsm_state === name ? '#fff' : '#444'}
+							stroke-width="2"
+							class="state-node"
+						/>
+						<text 
+							y="35" 
+							text-anchor="middle" 
+							font-size="8" 
+							fill={stopState.fsm_state === name ? '#fff' : '#888'}
+							class="state-label"
+						>
+							{name}
+						</text>
+						{#if stopState.fsm_state === name}
+							<circle r="24" fill="none" stroke={stateColors[name as FsmState]} stroke-width="1" opacity="0.5">
+								<animate attributeName="r" from="20" to="28" dur="1.5s" repeatCount="indefinite" />
+								<animate attributeName="opacity" from="0.5" to="0" dur="1.5s" repeatCount="indefinite" />
+							</circle>
+						{/if}
+					</g>
 				{/each}
+			</svg>
+		</div>
+
+		<div class="metrics-list">
+			<div class="metric-row">
+				<span class="label">Dwell Time</span>
+				<span class="value">{formatDwellTime(stopState.dwell_time_s)}</span>
+			</div>
+			<div class="metric-row">
+				<span class="label">Distance</span>
+				<span class="value">{Math.round(stopState.distance_cm / 100)}m</span>
+			</div>
+			<div class="metric-row">
+				<span class="label">Just Arrived</span>
+				<span class="value {stopState.just_arrived ? 'yes' : 'no'}">{stopState.just_arrived ? 'TRUE' : 'FALSE'}</span>
 			</div>
 		</div>
 	{:else}
-		<div class="empty-state">
-			<p>Select a stop to see state machine details</p>
+		<div class="empty-inspector">
+			<p>Select a stop on the map or via the active list to inspect its FSM state.</p>
 		</div>
 	{/if}
 </div>
 
 <style>
 	.inspector-container {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-		padding: 1rem;
-		background-color: #f9fafb;
+		background-color: #1e1e1e;
+		border: 1px solid #333;
 		border-radius: 0.5rem;
+		padding: 1rem;
 		height: 100%;
-		overflow-y: auto;
+		font-family: 'JetBrains Mono', 'Monaco', monospace;
 	}
 
-	.state-card {
-		background-color: white;
-		border-radius: 0.375rem;
-		padding: 1rem;
-		box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
-	}
-
-	.card-title {
-		font-size: 0.875rem;
-		font-weight: 600;
-		color: #374151;
-		margin-bottom: 0.75rem;
-	}
-
-	.state-display {
+	.inspector-header {
 		display: flex;
+		justify-content: space-between;
 		align-items: center;
-		gap: 1rem;
+		margin-bottom: 1rem;
+		border-bottom: 1px solid #333;
+		padding-bottom: 0.5rem;
 	}
 
-	.state-indicator {
-		width: 3rem;
-		height: 3rem;
-		border-radius: 50%;
-		flex-shrink: 0;
-	}
-
-	.state-info {
-		flex: 1;
-	}
-
-	.state-name {
-		font-size: 1.125rem;
-		font-weight: 700;
-		color: #111827;
-	}
-
-	.state-desc {
-		font-size: 0.875rem;
-		color: #6b7280;
-		margin-top: 0.25rem;
-	}
-
-	.arrival-badge {
-		margin-top: 1rem;
-		padding: 0.5rem 1rem;
-		background-color: #dcfce7;
-		color: #166534;
-		border-radius: 0.375rem;
-		font-weight: 600;
-		text-align: center;
-	}
-
-	.arrival-icon {
-		margin-right: 0.5rem;
-	}
-
-	.metrics-grid {
-		display: grid;
-		grid-template-columns: repeat(2, 1fr);
-		gap: 0.75rem;
-	}
-
-	.metric-card {
-		background-color: white;
-		border-radius: 0.375rem;
-		padding: 0.75rem;
-		box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
-	}
-
-	.metric-label {
+	.inspector-header h3 {
 		font-size: 0.75rem;
-		color: #6b7280;
-		margin-bottom: 0.25rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: #888;
+		margin: 0;
 	}
 
-	.metric-value {
-		font-size: 1.125rem;
-		font-weight: 700;
-		color: #111827;
+	.status-pill {
+		font-size: 0.65rem;
+		padding: 2px 8px;
+		border-radius: 10px;
+		font-weight: bold;
+		text-transform: uppercase;
 	}
 
-	.metric-hint {
-		font-size: 0.75rem;
-		color: #9ca3af;
-		margin-top: 0.25rem;
-	}
+	.approaching { background-color: #3b82f6; color: white; }
+	.arriving { background-color: #f59e0b; color: white; }
+	.atstop { background-color: #22c55e; color: white; }
+	.departed { background-color: #6b7280; color: white; }
 
-	.transitions-card {
-		background-color: white;
-		border-radius: 0.375rem;
+	.diagram-card {
+		background-color: #000;
+		border: 1px solid #333;
+		border-radius: 0.25rem;
 		padding: 1rem;
-		box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+		margin-bottom: 1rem;
 	}
 
-	.transitions-list {
+	.state-node {
+		transition: fill 0.3s, stroke 0.3s;
+	}
+
+	.state-label {
+		font-weight: bold;
+	}
+
+	.metrics-list {
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
-		max-height: 200px;
-		overflow-y: auto;
 	}
 
-	.transition-item {
+	.metric-row {
+		display: flex;
+		justify-content: space-between;
+		font-size: 0.8rem;
+		padding-bottom: 0.25rem;
+		border-bottom: 1px solid #222;
+	}
+
+	.metric-row .label { color: #666; }
+	.metric-row .value { color: #eee; font-weight: bold; }
+	.metric-row .value.yes { color: #22c55e; }
+	.metric-row .value.no { color: #444; }
+
+	.empty-inspector {
+		height: 100%;
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
-		padding: 0.5rem;
-		background-color: #f3f4f6;
-		border-radius: 0.25rem;
-	}
-
-	.transition-time {
-		font-size: 0.75rem;
-		color: #6b7280;
-		min-width: 80px;
-	}
-
-	.transition-state {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		font-size: 0.875rem;
-		font-weight: 500;
-		color: #374151;
-	}
-
-	.transition-dot {
-		width: 0.75rem;
-		height: 0.75rem;
-		border-radius: 50%;
-	}
-
-	.arrival-tag {
-		font-size: 0.625rem;
-		padding: 0.125rem 0.375rem;
-		background-color: #dcfce7;
-		color: #166534;
-		border-radius: 0.25rem;
-		font-weight: 600;
-	}
-
-	.empty-state {
-		background-color: white;
-		border-radius: 0.375rem;
-		padding: 2rem;
-		box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+		justify-content: center;
 		text-align: center;
-	}
-
-	.empty-state p {
-		color: #9ca3af;
-		font-size: 0.875rem;
-	}
-
-	.bg-blue-500 {
-		background-color: #3b82f6;
-	}
-
-	.bg-amber-500 {
-		background-color: #f59e0b;
-	}
-
-	.bg-green-500 {
-		background-color: #22c55e;
-	}
-
-	.bg-gray-500 {
-		background-color: #6b7280;
+		color: #555;
+		font-size: 0.8rem;
+		padding: 2rem;
 	}
 </style>

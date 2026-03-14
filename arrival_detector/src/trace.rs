@@ -1,7 +1,7 @@
 //! Trace record emission for debugging visualization
 
 use serde::Serialize;
-use shared::{DistCm, SpeedCms, Prob8, FsmState};
+use shared::{DistCm, SpeedCms, Prob8, FsmState, HeadCdeg};
 use std::io::{BufWriter, Write};
 
 /// Trace record for debugging visualization
@@ -10,11 +10,21 @@ pub struct TraceRecord {
     /// Input: GPS timestamp (seconds since epoch)
     pub time: u64,
 
+    /// Input: Latitude
+    pub lat: f64,
+
+    /// Input: Longitude
+    pub lon: f64,
+
     /// Input: Route progress (cm)
     pub s_cm: DistCm,
 
     /// Input: Velocity (cm/s)
     pub v_cms: SpeedCms,
+
+    /// Input: Heading (hundredths of degrees, -18000 to 18000)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_cdeg: Option<HeadCdeg>,
 
     /// Corridor filter: which stops are active
     pub active_stops: Vec<u8>,

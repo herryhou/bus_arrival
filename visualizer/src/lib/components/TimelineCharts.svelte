@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import type { TraceData, StopTraceState } from '$lib/types';
-	import { Chart, type ChartConfiguration, type ChartType } from 'chart.js/auto';
+	import type { TraceData } from '$lib/types';
+	import { Chart, type ChartConfiguration } from 'chart.js/auto';
 
 	interface Props {
 		traceData: TraceData;
@@ -18,288 +18,144 @@
 	}: Props = $props();
 
 	let chartContainer: HTMLDivElement;
-	let speedChart: Chart | null = null;
-	let probabilityChart: Chart | null = null;
-	let distanceChart: Chart | null = null;
+	let mainChart: Chart | null = null;
 
-	// FSM state colors
-	const stateColors: Record<string, string> = {
-		Approaching: '#3b82f6', // blue
-		Arriving: '#f59e0b', // amber
-		AtStop: '#22c55e', // green
-		Departed: '#6b7280' // gray
-	};
+	function updateChart() {
+		if (!mainChart) return;
 
-	// Compute filtered data and arrays
-	function getFilteredData() {
-		return selectedStop !== null
+		const data = selectedStop !== null
 			? traceData.filter((record) => record.active_stops.includes(selectedStop!))
 			: traceData;
-	}
 
-	function getTimeLabels(data: typeof traceData) {
-		return data.map((r) => new Date(r.time * 1000).toLocaleTimeString());
-	}
+		const timeLabels = data.map((r) => new Date(r.time * 1000).toLocaleTimeString([], { hour12: false }));
+		
+		mainChart.data.labels = timeLabels;
+		mainChart.data.datasets[0].data = data.map(r => r.v_cms);
+		
+		if (selectedStop !== null) {
+			mainChart.data.datasets[1].data = data.map(r => {
+				const s = r.stop_states.find(ss => ss.stop_idx === selectedStop);
+				return s ? s.probability : 0;
+			});
+			mainChart.data.datasets[1].hidden = false;
+		} else {
+			mainChart.data.datasets[1].hidden = true;
+		}
 
-	function getSpeedData(data: typeof traceData) {
-		return data.map((r) => r.v_cms);
-	}
-
-	function getProbabilityData(data: typeof traceData) {
-		return selectedStop !== null
-			? data.map((r) => {
-					const state = r.stop_states.find((s) => s.stop_idx === selectedStop);
-					return state?.probability ?? 0;
-				})
-			: [];
-	}
-
-	function getDistanceData(data: typeof traceData) {
-		return selectedStop !== null
-			? data.map((r) => {
-					const state = r.stop_states.find((s) => s.stop_idx === selectedStop);
-					return state?.distance_cm ?? 0;
-				})
-			: [];
+		mainChart.update('none');
 	}
 
 	onMount(() => {
-		const filteredData = getFilteredData();
-		const timeLabels = getTimeLabels(filteredData);
-		const speedData = getSpeedData(filteredData);
+		const ctx = document.createElement('canvas');
+		chartContainer.appendChild(ctx);
 
-		// Speed chart
-		const speedConfig: ChartConfiguration = {
+		const config: ChartConfiguration = {
 			type: 'line',
 			data: {
-				labels: timeLabels,
+				labels: [],
 				datasets: [
 					{
 						label: 'Speed (cm/s)',
-						data: speedData,
+						data: [],
 						borderColor: '#3b82f6',
 						backgroundColor: 'rgba(59, 130, 246, 0.1)',
+						borderWidth: 1.5,
+						pointRadius: 0,
 						tension: 0.1,
-						fill: true
+						fill: true,
+						yAxisID: 'y'
+					},
+					{
+						label: 'Probability (0-255)',
+						data: [],
+						borderColor: '#22c55e',
+						backgroundColor: 'rgba(34, 197, 94, 0.1)',
+						borderWidth: 1.5,
+						pointRadius: 0,
+						tension: 0.1,
+						fill: true,
+						yAxisID: 'y1',
+						hidden: true
 					}
 				]
 			},
 			options: {
 				responsive: true,
 				maintainAspectRatio: false,
+				animation: false,
+				interaction: {
+					intersect: false,
+					mode: 'index'
+				},
 				plugins: {
 					legend: {
-						display: true
+						display: true,
+						labels: { color: '#888', font: { size: 10, family: 'JetBrains Mono' } }
 					},
 					tooltip: {
-						intersect: false,
-						mode: 'index'
+						backgroundColor: '#1a1a1a',
+						titleColor: '#fff',
+						bodyColor: '#ccc',
+						borderColor: '#333',
+						borderWidth: 1
 					}
 				},
 				scales: {
 					x: {
-						display: true,
-						title: {
-							display: true,
-							text: 'Time'
-						}
+						ticks: { color: '#444', font: { size: 9 } },
+						grid: { color: '#222' }
 					},
 					y: {
+						type: 'linear',
 						display: true,
-						title: {
-							display: true,
-							text: 'Speed (cm/s)'
-						}
+						position: 'left',
+						ticks: { color: '#3b82f6', font: { size: 9 } },
+						grid: { color: '#222' },
+						title: { display: true, text: 'Speed', color: '#3b82f6', font: { size: 10 } }
+					},
+					y1: {
+						type: 'linear',
+						display: true,
+						position: 'right',
+						min: 0,
+						max: 255,
+						ticks: { color: '#22c55e', font: { size: 9 } },
+						grid: { drawOnChartArea: false },
+						title: { display: true, text: 'Prob', color: '#22c55e', font: { size: 10 } }
 					}
 				},
 				onClick: (event, elements) => {
 					if (elements.length > 0) {
 						const index = elements[0].index;
-						onTimeChange(filteredData[index].time);
+						const data = selectedStop !== null
+							? traceData.filter((record) => record.active_stops.includes(selectedStop!))
+							: traceData;
+						onTimeChange(data[index].time);
 					}
 				}
 			}
 		};
 
-		speedChart = new Chart(document.createElement('canvas'), speedConfig);
-		chartContainer.querySelector('.speed-chart-container')?.appendChild(speedChart.canvas);
+		mainChart = new Chart(ctx, config);
+		updateChart();
+	});
 
-		// Probability chart (only when stop is selected)
-		if (selectedStop !== null) {
-			const probabilityData = getProbabilityData(filteredData);
-			const probConfig: ChartConfiguration = {
-				type: 'line',
-				data: {
-					labels: timeLabels,
-					datasets: [
-						{
-							label: 'Arrival Probability',
-							data: probabilityData,
-							borderColor: '#22c55e',
-							backgroundColor: 'rgba(34, 197, 94, 0.1)',
-							tension: 0.1,
-							fill: true
-						}
-					]
-				},
-				options: {
-					responsive: true,
-					maintainAspectRatio: false,
-					plugins: {
-						legend: {
-							display: true
-						},
-						tooltip: {
-							intersect: false,
-							mode: 'index'
-						}
-					},
-					scales: {
-						x: {
-							display: true,
-							title: {
-								display: true,
-								text: 'Time'
-							}
-						},
-						y: {
-							display: true,
-							min: 0,
-							max: 255,
-							title: {
-								display: true,
-								text: 'Probability (0-255)'
-							}
-						}
-					},
-					onClick: (event, elements) => {
-						if (elements.length > 0) {
-							const index = elements[0].index;
-							onTimeChange(filteredData[index].time);
-						}
-					}
-				}
-			};
-
-			probabilityChart = new Chart(document.createElement('canvas'), probConfig);
-			chartContainer.querySelector('.probability-chart-container')?.appendChild(probabilityChart.canvas);
-		}
-
-		// Distance chart (only when stop is selected)
-		if (selectedStop !== null) {
-			const distanceData = getDistanceData(filteredData);
-			const distConfig: ChartConfiguration = {
-				type: 'line',
-				data: {
-					labels: timeLabels,
-					datasets: [
-						{
-							label: 'Distance to Stop (cm)',
-							data: distanceData,
-							borderColor: '#ef4444',
-							backgroundColor: 'rgba(239, 68, 68, 0.1)',
-							tension: 0.1,
-							fill: true
-						}
-					]
-				},
-				options: {
-					responsive: true,
-					maintainAspectRatio: false,
-					plugins: {
-						legend: {
-							display: true
-						},
-						tooltip: {
-							intersect: false,
-							mode: 'index'
-						}
-					},
-					scales: {
-						x: {
-							display: true,
-							title: {
-								display: true,
-								text: 'Time'
-							}
-						},
-						y: {
-							display: true,
-							title: {
-								display: true,
-								text: 'Distance (cm)'
-							}
-						}
-					},
-					onClick: (event, elements) => {
-						if (elements.length > 0) {
-							const index = elements[0].index;
-							onTimeChange(filteredData[index].time);
-						}
-					}
-				}
-			};
-
-			distanceChart = new Chart(document.createElement('canvas'), distConfig);
-			chartContainer.querySelector('.distance-chart-container')?.appendChild(distanceChart.canvas);
-		}
+	$effect(() => {
+		updateChart();
 	});
 
 	onDestroy(() => {
-		speedChart?.destroy();
-		probabilityChart?.destroy();
-		distanceChart?.destroy();
+		mainChart?.destroy();
 	});
 </script>
 
-<div class="charts-container" bind:this={chartContainer}>
-	<!-- Speed chart (always shown) -->
-	<div class="chart-wrapper">
-		<h3 class="chart-title">Speed Over Time</h3>
-		<div class="speed-chart-container chart-canvas"></div>
-	</div>
-
-	{#if selectedStop !== null}
-		<!-- Probability chart (when stop selected) -->
-		<div class="chart-wrapper">
-			<h3 class="chart-title">Arrival Probability (Stop {selectedStop})</h3>
-			<div class="probability-chart-container chart-canvas"></div>
-		</div>
-
-		<!-- Distance chart (when stop selected) -->
-		<div class="chart-wrapper">
-			<h3 class="chart-title">Distance to Stop (Stop {selectedStop})</h3>
-			<div class="distance-chart-container chart-canvas"></div>
-		</div>
-	{/if}
-</div>
+<div class="charts-container" bind:this={chartContainer}></div>
 
 <style>
 	.charts-container {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-		padding: 1rem;
-		background-color: #f9fafb;
-		border-radius: 0.5rem;
-	}
-
-	.chart-wrapper {
-		background-color: white;
-		border-radius: 0.375rem;
-		padding: 1rem;
-		box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
-	}
-
-	.chart-title {
-		font-size: 0.875rem;
-		font-weight: 600;
-		color: #374151;
-		margin-bottom: 0.5rem;
-	}
-
-	.chart-canvas {
-		height: 200px;
 		width: 100%;
+		height: 100%;
+		background-color: #0a0a0a;
+		padding: 0.5rem 1rem;
 	}
 </style>
