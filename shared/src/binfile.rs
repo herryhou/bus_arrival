@@ -87,6 +87,13 @@ impl<'a> RouteData<'a> {
         unsafe { Some(core::ptr::read_unaligned(self.stops_ptr.add(index))) }
     }
 
+    /// Get all stops as a Vec (for iteration/corridor filter computation).
+    pub fn stops(&self) -> Vec<Stop> {
+        (0..self.stop_count)
+            .filter_map(|i| self.get_stop(i))
+            .collect()
+    }
+
     /// Zero-copy load of RouteData from bytes.
     pub fn load(data: &'a [u8]) -> Result<Self, BusError> {
         if data.len() < 28 + 4 {

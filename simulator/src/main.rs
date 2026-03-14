@@ -53,9 +53,10 @@ fn main() {
     for line in reader.lines() {
         let line = line.expect("Failed to read line");
 
-        if let Some(gps) = nmea_state.parse_sentence(&line) {
+        if let Some(mut gps) = nmea_state.parse_sentence(&line) {
+            gps.timestamp = time;
             let result = kalman::process_gps_update(&mut kalman, &mut dr, &gps, &route_data, time, is_first_fix);
-            output::write_output(&mut output_writer, time, &result).expect("Failed to write output");
+            output::write_output(&mut output_writer, time, gps.lat, gps.lon, gps.heading_cdeg, &result, &route_data).expect("Failed to write output");
             processed += 1;
             
             if is_first_fix {
