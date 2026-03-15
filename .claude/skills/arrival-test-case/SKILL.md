@@ -1,7 +1,7 @@
 ---
 name: arrival-test-case
 description: when user asks to "create test case for bus arrival", "generate NMEA test data", "create heading overflow test", "build GPS simulation test". Provides workflow for creating and validating test cases for the bus arrival detection system.
-version: 0.2.0
+version: 0.3.0
 ---
 
 # Arrival Detection Test Case Creation
@@ -215,15 +215,23 @@ cargo run -p preprocessor -- test_data/test_name_route.json test_data/test_name_
 
 ### Missing Arrivals (detected < ground truth)
 
+**Arrival Detection Conditions (v2.0+):**
+- Distance to stop < 50m (5000 cm)
+- Probability > 191 (THETA_ARRIVAL)
+- Speed threshold was REMOVED (no longer checked)
+
 **Possible causes:**
-1. Short dwell times (< 5s) may be missed
-2. High speed through stop (check v_cms in simulator output)
-3. GPS noise causing position jumps
+1. Bus never enters 50m corridor
+2. GPS noise causing position jumps (affects probability)
+3. Bus stops too far past stop (> 50m)
 
 **Debug:**
 ```bash
-# Check speed at stop location
-jq -r 'select(.active_stops | index(STOP_IDX)) | {time, s_cm, v_cms}' test_data/test_name_sim.jsonl
+# Check distance and probability at stop
+jq -r 'select(.active_stops | index(STOP_IDX)) | {s_cm, stop_states}' test_data/test_name_sim.jsonl
+
+# Check probability threshold (should exceed 191)
+jq -r 'select(.active_stops | index(STOP_IDX)) | .stop_states[0].probability' test_data/test_name_sim.jsonl
 ```
 
 ## Common Issues

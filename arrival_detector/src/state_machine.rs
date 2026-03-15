@@ -32,10 +32,17 @@ impl StopState {
     }
 
     /// Update state and return true if just arrived
+    ///
+    /// Arrival is triggered when:
+    /// - Distance to stop < 50m (5000 cm)
+    /// - Probability > THETA_ARRIVAL (191)
+    ///
+    /// Note: Speed threshold was removed to accommodate buses that stop
+    /// slightly past the stop location due to GPS noise or urban constraints.
     pub fn update(
         &mut self,
         s_cm: DistCm,
-        v_cms: SpeedCms,
+        _v_cms: SpeedCms,
         stop_progress: DistCm,
         probability: Prob8,
     ) -> bool {
@@ -50,7 +57,7 @@ impl StopState {
                 self.dwell_time_s += 1;
             }
             FsmState::Arriving => {
-                if d_to_stop < 3000 && v_cms < 56 && probability > crate::probability::THETA_ARRIVAL {
+                if d_to_stop < 5000 && probability > crate::probability::THETA_ARRIVAL {
                     self.fsm_state = FsmState::AtStop;
                     self.dwell_time_s += 1;
                     return true;  // Just arrived!
@@ -100,8 +107,8 @@ mod tests {
         state.update(6000, 100, stop_progress, 100);
         assert_eq!(state.fsm_state, FsmState::Arriving);
 
-        // At stop (trigger!)
-        let arrived = state.update(10050, 20, stop_progress, 200);
+        // At stop (trigger!) - distance < 50m, probability > 191
+        let arrived = state.update(14050, 100, stop_progress, 200);
         assert!(arrived);
         assert_eq!(state.fsm_state, FsmState::AtStop);
 
