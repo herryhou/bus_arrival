@@ -185,8 +185,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 <!-- visualizer/src/lib/components/LinearRouteWidget.svelte -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import type { RouteData } from '$lib/types';
-	import type { FsmState } from '$lib/types';
+	import type { RouteData, FsmState } from '$lib/types';
 	import { FSM_STATE_COLORS } from '$lib/constants/fsmColors';
 
 	interface Props {
@@ -206,7 +205,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 
 	// Canvas dimensions
 	let width = $state(0);
-	let height = $state(60);
+	let height = $state(80);
 
 	// Constants for rendering
 	const PADDING = { left: 20, right: 20 };
@@ -458,8 +457,9 @@ Find the import section (around lines 1-8) and add:
 
 ```typescript
 import { FSM_STATE_COLORS } from '$lib/constants/fsmColors';
-import { getStopLatLon, projectCmToLatLon } from '$lib/parsers/routeData';
-import type { GridOrigin } from '$lib/types';
+import { getStopLatLon } from '$lib/parsers/routeData';
+import { projectCmToLatLon } from '$lib/parsers/projection';
+import type { FsmState } from '$lib/types';
 ```
 
 - [ ] **Step 2: Add utility functions after imports (before Props interface)**
@@ -502,7 +502,7 @@ interface Props {
 	onStopClick?: (stopIndex: number) => void;
 	highlightedEvent?: {
 		stopIdx: number;
-		state: import('$lib/types').FsmState;
+		state: FsmState;
 		time: number;
 	} | null;
 }
@@ -862,80 +862,49 @@ map.on('click', (e) => {
 });
 ```
 
-- [ ] **Step 4: Add Escape key handler in onMount**
+- [ ] **Step 4: Add Escape key handler**
 
-Find the onMount callback (around line 30) and add the keyboard handler at the end of the onMount callback (before the return statement):
+First, add a module-level variable to store the handler (find the variable declarations section around line 23, after `let mapLoaded`):
+
+```typescript
+let handleKeyDownRef: ((e: KeyboardEvent) => void) | null = null;
+```
+
+Then, in the onMount callback (around line 30), add the keyboard handler at the end before the return statement:
 
 ```typescript
 // Add Escape key handler for clearing highlight
-	const handleKeyDown = (e: KeyboardEvent) => {
-		if (e.key === 'Escape' && onClearHighlight) {
-			onClearHighlight();
-		}
-	};
-	document.addEventListener('keydown', handleKeyDown);
-
-	return () => {
-		if (map) {
-			map.remove();
-			map = null;
-		}
-		document.removeEventListener('keydown', handleKeyDown); // NEW
-	};
+handleKeyDownRef = (e: KeyboardEvent) => {
+	if (e.key === 'Escape' && onClearHighlight) {
+		onClearHighlight();
+	}
+};
+document.addEventListener('keydown', handleKeyDownRef);
 ```
 
-Wait, the existing return statement already removes the map. Let me update the return statement:
+Finally, update the onDestroy callback (around line 270) to also remove the event listener:
 
-Actually, looking at the existing code, the return is in a separate cleanup. Let me modify the onDestroy instead. Find the onDestroy (around line 270) and update it:
-
+Find:
 ```typescript
 onDestroy(() => {
 	if (map) {
 		map.remove();
 		map = null;
 	}
-	document.removeEventListener('keydown', handleKeyDown);
 });
 ```
 
-Wait, that's not right either. The onDestroy is already there. I need to add the event listener cleanup to the existing onDestroy.
-
-Actually, the cleanup should happen in the return from onMount. Let me re-read the existing code structure first.
-
-The existing code has:
+Change to:
 ```typescript
-onMount(() => {
-	// ... map initialization ...
-	return () => {
-		if (map) {
-			map.remove();
-			map = null;
-		}
-	};
-});
-```
-
-So I need to update the return statement to also remove the event listener:
-
-```typescript
-onMount(() => {
-	// ... existing map initialization ...
-
-	// Add Escape key handler for clearing highlight
-	const handleKeyDown = (e: KeyboardEvent) => {
-		if (e.key === 'Escape' && onClearHighlight) {
-			onClearHighlight();
-		}
-	};
-	document.addEventListener('keydown', handleKeyDown);
-
-	return () => {
-		if (map) {
-			map.remove();
-			map = null;
-		}
-		document.removeEventListener('keydown', handleKeyDown);
-	};
+onDestroy(() => {
+	if (map) {
+		map.remove();
+		map = null;
+	}
+	if (handleKeyDownRef) {
+		document.removeEventListener('keydown', handleKeyDownRef);
+		handleKeyDownRef = null;
+	}
 });
 ```
 
@@ -991,11 +960,13 @@ Find the button element (around line 88) and update the onclick handler:
 	class="event-item {event.type.toLowerCase()}"
 	onclick={() => {
 		onSeek(event.time);
-		if (event.stopIdx !== undefined && event.state) {
+		// For ARRIVAL events, state is AtStop; for TRANSITION, use the recorded state
+		const eventState = event.state || (event.type === 'ARRIVAL' ? 'AtStop' : undefined);
+		if (event.stopIdx !== undefined && eventState) {
 			onEventClick?.({
 				time: event.time,
 				stopIdx: event.stopIdx,
-				state: event.state
+				state: eventState
 			});
 		}
 	}}
