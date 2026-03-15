@@ -87,7 +87,23 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 **Files:**
 - Modify: `visualizer/src/lib/parsers/routeData.ts` (add after line 304)
 
-- [ ] **Step 1: Add getStopLatLon function**
+- [ ] **Step 1: Update imports at top of routeData.ts**
+
+Find the import section at the top of the file (around line 1-3) and ensure `projectCmToLatLon` is imported:
+
+The existing import should be:
+```typescript
+import type { RouteData, RouteNode, Stop, GridOrigin } from '$lib/types';
+```
+
+Add this import if it's not already there:
+```typescript
+import { projectCmToLatLon } from '$lib/parsers/projection';
+```
+
+If the import already exists, you can skip this step.
+
+- [ ] **Step 2: Add getStopLatLon function**
 
 Add this function after `getStopPositions` (after line 304):
 
@@ -150,14 +166,12 @@ function projectCmToLatLonFromOrigin(
 }
 ```
 
-Note: You'll need to add `projectCmToLatLon` to the imports if it's not already imported. Check the import section at the top of the file.
-
-- [ ] **Step 2: Verify file compiles**
+- [ ] **Step 3: Verify file compiles**
 
 Run: `cd visualizer && npm run check`
 Expected: No TypeScript errors
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add visualizer/src/lib/parsers/routeData.ts
@@ -508,8 +522,6 @@ interface Props {
 }
 ```
 
-Note: We use `import('$lib/types').FsmState` because we can't import types at the top level in Svelte components.
-
 - [ ] **Step 4: Update props destructuring**
 
 Find the destructuring line (around line 16-20) and update it:
@@ -824,7 +836,7 @@ interface Props {
 	onStopClick?: (stopIndex: number) => void;
 	highlightedEvent?: {
 		stopIdx: number;
-		state: import('$lib/types').FsmState;
+		state: FsmState;
 		time: number;
 	} | null;
 	onClearHighlight?: () => void; // NEW
