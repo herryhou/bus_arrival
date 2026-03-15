@@ -5,19 +5,50 @@
 	import { projectCmToLatLon } from '$lib/parsers/projection';
 	import maplibregl from 'maplibre-gl';
 	import 'maplibre-gl/dist/maplibre-gl.css';
+	import { FSM_STATE_COLORS } from '$lib/constants/fsmColors';
+	import { getStopLatLon } from '$lib/parsers/routeData';
+	import type { FsmState } from '$lib/types';
+
+	// Constants for 50m circles
+	const EARTH_RADIUS = 6378137; // meters
+	const STOP_RADIUS_M = 50; // 50 meters
+
+	/**
+	 * Convert meters to pixels at a given latitude and zoom level
+	 * Used for MapLibre GL circle radius calculations
+	 */
+	function metersToPixels(meters: number, lat: number, zoom: number): number {
+		const latRad = lat * Math.PI / 180;
+		const metersPerPixel = EARTH_RADIUS * Math.cos(latRad) / (256 * Math.pow(2, zoom));
+		return meters / metersPerPixel;
+	}
+
+	/**
+	 * Get stop lat/lon by interpolating along route nodes
+	 * Wrapper for getStopLatLon that handles the grid_origin parameter
+	 */
+	function getStopPosition(stopProgressCm: number, routeData: RouteData): [number, number] | null {
+		return getStopLatLon(stopProgressCm, routeData);
+	}
 
 	interface Props {
 		routeData: RouteData;
 		busPosition?: { lat: number; lon: number; heading?: number } | null;
 		selectedStop?: number | null;
 		onStopClick?: (stopIndex: number) => void;
+		highlightedEvent?: {
+			stopIdx: number;
+			state: FsmState;
+			time: number;
+		} | null;
 	}
 
 	let {
 		routeData,
 		busPosition = null,
 		selectedStop = null,
-		onStopClick = () => {}
+		onStopClick = () => {},
+		highlightedEvent = null
 	}: Props = $props();
 
 	let mapContainer: HTMLDivElement;
@@ -26,6 +57,7 @@
 	let routeSourceId = 'route';
 	let stopsSourceId = 'stops';
 	let busSourceId = 'bus';
+	let currentPanTarget = $state<number | null>(null);
 
 	onMount(() => {
 		// Initialize map with OSM raster tiles (more reliable)
