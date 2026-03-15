@@ -40,6 +40,7 @@
  * - CRC32: u32 = 4 bytes
  */
 
+import { projectCmToLatLon } from '$lib/parsers/projection';
 import type { RouteData, RouteNode, Stop, GridOrigin } from '$lib/types';
 
 const ROUTE_NODE_SIZE = 52;
@@ -301,4 +302,61 @@ export function getStopPositions(
 		const [lat, lon] = projectCmToLatLon(nearestNode.x_cm, nearestNode.y_cm, routeData.lat_avg_deg);
 		return { index, lon, lat, progress_cm: stop.progress_cm };
 	});
+}
+
+/**
+ * Get interpolated lat/lon for a stop by progress_cm
+ *
+ * Finds the route segment containing the stop and interpolates
+ * the position along that segment.
+ *
+ * @param stopProgressCm - Stop's progress_cm value
+ * @param routeData - Parsed route data
+ * @returns [lat, lon] or null if stop cannot be interpolated
+ */
+export function getStopLatLon(
+	stopProgressCm: number,
+	routeData: RouteData
+): [number, number] | null {
+	const nodes = routeData.nodes;
+	if (nodes.length < 2) return null;
+
+	// Find the segment containing this stop
+	for (let i = 0; i < routeData.nodes.length - 1; i++) {
+		const node = routeData.nodes[i];
+		const nextNode = routeData.nodes[i + 1];
+
+		if (stopProgressCm >= node.cum_dist_cm && stopProgressCm <= nextNode.cum_dist_cm) {
+			// Interpolate between nodes
+			const seg_len = nextNode.cum_dist_cm - node.cum_dist_cm;
+			if (seg_len <= 0) {
+				// Fallback to start node
+				const [lat, lon] = projectCmToLatLonFromOrigin(node.x_cm, node.y_cm, routeData);
+				return [lat, lon];
+			}
+
+			const t = (stopProgressCm - node.cum_dist_cm) / seg_len;
+			const x_cm = node.x_cm + t * (nextNode.x_cm - node.x_cm);
+			const y_cm = node.y_cm + t * (nextNode.y_cm - node.y_cm);
+
+			// Project to lat/lon
+			return projectCmToLatLonFromOrigin(x_cm, y_cm, routeData);
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Helper to project cm to lat/lon using route data's grid_origin and lat_avg_deg
+ * This is needed because projectCmToLatLon doesn't take grid_origin parameter
+ */
+function projectCmToLatLonFromOrigin(
+	x_cm: number,
+	y_cm: number,
+	routeData: RouteData
+): [number, number] {
+	// projectCmToLatLon expects coordinates relative to fixed origin (120E, 20N)
+	// Nodes are already stored as absolute coordinates, so we pass them directly
+	return projectCmToLatLon(x_cm, y_cm, routeData.lat_avg_deg);
 }
