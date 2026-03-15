@@ -2,11 +2,29 @@ use shared::{DrState, GpsPoint, KalmanState, RouteNode};
 use simulator::kalman::{process_gps_update, ProcessResult};
 use simulator::route_data::RouteData;
 
-// A single straight segment of 100m north, with a start node at (0,0) and end node at (0,10000cm).
+// A single straight segment of 100m north.
+// Uses ABSOLUTE coordinates from fixed origin (120°E, 20°N).
 fn setup_test_route_data() -> (Vec<u8>, i32, i32) {
     let mut nodes = Vec::new();
-    let start_x = 1000000;
-    let start_y = 1000000;
+
+    // Calculate absolute coordinates for a Taiwan location (25°N, 121°E)
+    use shared::{EARTH_R_CM, FIXED_ORIGIN_LON_DEG, FIXED_ORIGIN_Y_CM};
+
+    const BASE_LAT: f64 = 25.0;
+    const BASE_LON: f64 = 121.0;
+    let lat_avg_rad = BASE_LAT.to_radians();
+    let cos_lat = lat_avg_rad.cos();
+
+    // Convert base lat/lon to absolute cm coordinates
+    let lon_rad = BASE_LON.to_radians();
+    let lat_rad = BASE_LAT.to_radians();
+    let x_abs = EARTH_R_CM as f64 * lon_rad * cos_lat;
+    let y_abs = EARTH_R_CM as f64 * lat_rad;
+    let x0_abs = (FIXED_ORIGIN_LON_DEG.to_radians() * EARTH_R_CM as f64) * cos_lat;
+    let y0_abs = FIXED_ORIGIN_Y_CM as f64;
+
+    let start_x = (x_abs - x0_abs).round() as i32;
+    let start_y = (y_abs - y0_abs).round() as i32;
 
     // Segment 0: 100m North
     let line_a = -10000;
