@@ -13,39 +13,40 @@ fn setup_test_route_with_stop() -> (Vec<u8>, i32, i32) {
     let start_y = 1000000;
 
     // Create a 200m route with a stop at 100m
-    // Segment 0: 100m North
-    let line_a = -10000;
+    // Segment 0: 200m North
+    let line_a = -20000;
     let line_b = 0;
     nodes.push(RouteNode {
-        len2_cm2: 10000 * 10000,
-        line_c: -((line_a as i64 * 0) + (line_b as i64 * 0)),
+        len2_cm2: 20000 * 20000,
+        line_c: -((line_a as i64 * start_x as i64) + (line_b as i64 * start_y as i64)),
         heading_cdeg: 0,
         _pad: 0,
-        x_cm: 0,
-        y_cm: 0,
+        x_cm: start_x,
+        y_cm: start_y,
         cum_dist_cm: 0,
         dx_cm: 0,
-        dy_cm: 10000,
-        seg_len_cm: 10000,
+        dy_cm: 20000,
+        seg_len_cm: 20000,
         line_a,
         line_b,
     });
 
-    // Segment 1: 100m North
+    // End node
     nodes.push(RouteNode {
-        len2_cm2: 10000 * 10000,
+        len2_cm2: 0,
         line_c: 0,
         heading_cdeg: 0,
         _pad: 0,
-        x_cm: 0,
-        y_cm: 10000,
-        cum_dist_cm: 10000,
+        x_cm: start_x,
+        y_cm: start_y + 20000,
+        cum_dist_cm: 20000,
         dx_cm: 0,
-        dy_cm: 10000,
-        seg_len_cm: 10000,
-        line_a,
-        line_b,
+        dy_cm: 0,
+        seg_len_cm: 0,
+        line_a: 0,
+        line_b: 0,
     });
+
 
     // End node
     nodes.push(RouteNode {
@@ -94,10 +95,10 @@ fn lat_from_y(y_cm: i32) -> f64 {
     FIXED_ORIGIN_LAT_DEG + (y_cm as f64 / EARTH_R_CM).to_degrees()
 }
 
-fn lon_from_x(x_cm: i32) -> f64 {
-    use shared::{EARTH_R_CM, FIXED_ORIGIN_LON_DEG, PROJECTION_LAT_AVG};
+fn lon_from_x(x_cm: i32, lat_avg_deg: f64) -> f64 {
+    use shared::{EARTH_R_CM, FIXED_ORIGIN_LON_DEG};
     FIXED_ORIGIN_LON_DEG
-        + (x_cm as f64 / (EARTH_R_CM * PROJECTION_LAT_AVG.to_radians().cos())).to_degrees()
+        + (x_cm as f64 / (EARTH_R_CM * lat_avg_deg.to_radians().cos())).to_degrees()
 }
 
 #[test]
@@ -123,7 +124,7 @@ fn test_active_stops_when_in_corridor() {
     gps.has_fix = true;
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y + 1000);
-    gps.lon = lon_from_x(start_x);
+    gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
     gps.heading_cdeg = 0;
     gps.speed_cms = 1000;
 
@@ -197,32 +198,33 @@ fn test_active_stops_with_multiple_stops() {
     let start_y = 1000000;
 
     // Create a 300m route with stops at 100m, 200m
-    for i in 0..3 {
-        let line_a = -10000;
-        let line_b = 0;
-        nodes.push(RouteNode {
-            len2_cm2: 10000 * 10000,
-            line_c: -((line_a as i64 * 0) + (line_b as i64 * 0)),
-            heading_cdeg: 0,
-            _pad: 0,
-            x_cm: 0,
-            y_cm: (i * 10000) as i32,
-            cum_dist_cm: (i * 10000) as i32,
-            dx_cm: 0,
-            dy_cm: 10000,
-            seg_len_cm: 10000,
-            line_a,
-            line_b,
-        });
-    }
+    // Segment 0: 200m North
+    let line_a = -20000;
+    let line_b = 0;
+    nodes.push(RouteNode {
+        len2_cm2: 20000 * 20000,
+        line_c: -((line_a as i64 * start_x as i64) + (line_b as i64 * start_y as i64)),
+        heading_cdeg: 0,
+        _pad: 0,
+        x_cm: start_x,
+        y_cm: start_y,
+        cum_dist_cm: 0,
+        dx_cm: 0,
+        dy_cm: 20000,
+        seg_len_cm: 20000,
+        line_a,
+        line_b,
+    });
+
+    // End node
     nodes.push(RouteNode {
         len2_cm2: 0,
         line_c: 0,
         heading_cdeg: 0,
         _pad: 0,
-        x_cm: 0,
-        y_cm: 30000,
-        cum_dist_cm: 30000,
+        x_cm: start_x,
+        y_cm: start_y + 20000,
+        cum_dist_cm: 20000,
         dx_cm: 0,
         dy_cm: 0,
         seg_len_cm: 0,

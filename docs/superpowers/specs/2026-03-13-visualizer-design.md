@@ -895,7 +895,7 @@ function validateFsmState(value: string): 'Approaching' | 'Arriving' | 'AtStop' 
 
 // Constants MUST match shared/src/lib.rs exactly
 const EARTH_R_CM: number = 637_100_000.0;
-const PROJECTION_LAT_AVG: number = 25.0;
+const PROJECTION_LAT_AVG: number = routeData.lat_avg_deg; // From route_data.bin Header
 
 // Default origin from Rust (used for validation)
 const DEFAULT_ORIGIN_LAT_DEG: number = 20.0;

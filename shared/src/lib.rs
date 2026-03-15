@@ -18,9 +18,6 @@ pub const FIXED_ORIGIN_LAT_DEG: f64 = 20.0;
 /// Fixed origin Y coordinate in centimeters
 pub const FIXED_ORIGIN_Y_CM: i64 = 222389853; // R_CM * (20.0 * PI / 180.0)
 
-/// Average latitude for projection (Taiwan: 25.0°N)
-pub const PROJECTION_LAT_AVG: f64 = 25.0;
-
 pub mod binfile;
 
 /// Distance in centimeters.

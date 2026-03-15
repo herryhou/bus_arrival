@@ -777,7 +777,7 @@ git commit -m "feat(visualizer): add binary route data parser"
   - `FIXED_ORIGIN_LON_DEG = 120.0`
   - `FIXED_ORIGIN_LAT_DEG = 20.0`
   - `EARTH_R_CM = 637_100_000.0`
-  - `PROJECTION_LAT_AVG = 25.0`
+  - `PROJECTION_LAT_AVG = routeData.lat_avg_deg` (from binary)
 - **Inverse projection formula:**
   - `lat = y_cm / EARTH_R_CM * (180/π) + FIXED_ORIGIN_LAT_DEG`
   - `lon = x_cm / (EARTH_R_CM * cos(PROJECTION_LAT_AVG * π/180)) * (180/π) + FIXED_ORIGIN_LON_DEG`

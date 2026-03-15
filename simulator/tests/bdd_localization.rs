@@ -13,11 +13,11 @@ fn setup_test_route_data() -> (Vec<u8>, i32, i32) {
     let line_b = 0;
     nodes.push(RouteNode {
         len2_cm2: 10000 * 10000,
-        line_c: -((line_a as i64 * 0) + (line_b as i64 * 0)),
+        line_c: -((line_a as i64 * start_x as i64) + (line_b as i64 * start_y as i64)),
         heading_cdeg: 0,
         _pad: 0,
-        x_cm: 0,
-        y_cm: 0,
+        x_cm: start_x,
+        y_cm: start_y,
         cum_dist_cm: 0,
         dx_cm: 0,
         dy_cm: 10000,
@@ -32,8 +32,8 @@ fn setup_test_route_data() -> (Vec<u8>, i32, i32) {
         line_c: 0,
         heading_cdeg: 0,
         _pad: 0,
-        x_cm: 0,
-        y_cm: 10000,
+        x_cm: start_x,
+        y_cm: start_y + 10000,
         cum_dist_cm: 10000,
         dx_cm: 0,
         dy_cm: 0,
@@ -73,10 +73,10 @@ fn lat_from_y(y_cm: i32) -> f64 {
     FIXED_ORIGIN_LAT_DEG + (y_cm as f64 / EARTH_R_CM).to_degrees()
 }
 
-fn lon_from_x(x_cm: i32) -> f64 {
-    use shared::{EARTH_R_CM, FIXED_ORIGIN_LON_DEG, PROJECTION_LAT_AVG};
+fn lon_from_x(x_cm: i32, lat_avg_deg: f64) -> f64 {
+    use shared::{EARTH_R_CM, FIXED_ORIGIN_LON_DEG};
     FIXED_ORIGIN_LON_DEG
-        + (x_cm as f64 / (EARTH_R_CM * PROJECTION_LAT_AVG.to_radians().cos())).to_degrees()
+        + (x_cm as f64 / (EARTH_R_CM * lat_avg_deg.to_radians().cos())).to_degrees()
 }
 
 fn scenario_normal_forward_movement(route_data: &RouteData, start_x: i32, start_y: i32) {
@@ -88,7 +88,7 @@ fn scenario_normal_forward_movement(route_data: &RouteData, start_x: i32, start_
     gps.has_fix = true;
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y);
-    gps.lon = lon_from_x(start_x);
+    gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
     gps.heading_cdeg = 0;
     gps.speed_cms = 1000; // 10m/s
 
@@ -138,7 +138,7 @@ fn scenario_handle_gps_jump(route_data: &RouteData, start_x: i32, start_y: i32) 
     gps.has_fix = true;
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y);
-    gps.lon = lon_from_x(start_x);
+    gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
     process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
 
     // When: A huge GPS jump (500m North) occurs.
@@ -163,7 +163,7 @@ fn scenario_handle_gps_outage_with_dr(route_data: &RouteData, start_x: i32, star
     gps.has_fix = true;
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y);
-    gps.lon = lon_from_x(start_x);
+    gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
     gps.speed_cms = 1000;
     process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
 

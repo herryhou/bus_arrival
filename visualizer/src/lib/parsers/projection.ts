@@ -17,10 +17,6 @@ export const FIXED_ORIGIN_LAT_DEG = 20.0;
 // Fixed origin Y coordinate in centimeters (R_CM * (20.0 * PI / 180.0))
 export const FIXED_ORIGIN_Y_CM = 222_389_853;
 
-// Default average latitude for projection (Taiwan: 25.0°N)
-// NOTE: Use lat_avg from route_data.bin for accurate projection
-export const DEFAULT_PROJECTION_LAT_AVG = 25.0;
-
 /**
  * Convert degrees to radians
  */
@@ -38,7 +34,7 @@ function toRadians(degrees: number): number {
  * @param lat_avg_deg - Average latitude for projection (from route data)
  * @returns [x_cm, y_cm] coordinates relative to fixed origin
  */
-export function projectLatLonToCm(lat: number, lon: number, lat_avg_deg: number = DEFAULT_PROJECTION_LAT_AVG): [number, number] {
+export function projectLatLonToCm(lat: number, lon: number, lat_avg_deg: number): [number, number] {
 	const avg_lat_rad = toRadians(lat_avg_deg);
 	const lon_rad = toRadians(lon);
 	const lat_rad = toRadians(lat);
@@ -62,7 +58,7 @@ export function projectLatLonToCm(lat: number, lon: number, lat_avg_deg: number 
  * @param lat_avg_deg - Average latitude for projection (from route data)
  * @returns [lat, lon] in degrees
  */
-export function projectCmToLatLon(x_cm: number, y_cm: number, lat_avg_deg: number = DEFAULT_PROJECTION_LAT_AVG): [number, number] {
+export function projectCmToLatLon(x_cm: number, y_cm: number, lat_avg_deg: number): [number, number] {
 	const avg_lat_rad = toRadians(lat_avg_deg);
 
 	// Inverse formulas

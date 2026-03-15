@@ -43,12 +43,12 @@ pub fn process_gps_update(
         None => 1, // First fix
     };
 
-    // 2. Convert GPS to relative coordinates
-    let (gps_x, gps_y) = crate::map_match::latlon_to_cm_relative(
+    // 2. Convert GPS to absolute coordinates (relative to fixed origin 120E, 20N)
+    // Route nodes are stored as absolute coordinates, so GPS must also be absolute
+    let (gps_x, gps_y) = crate::map_match::latlon_to_cm_absolute_with_lat_avg(
         gps.lat,
         gps.lon,
-        route_data.x0_cm as i64,
-        route_data.y0_cm as i64,
+        route_data.lat_avg_deg,
     );
 
     // 3. Map matching
