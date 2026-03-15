@@ -214,10 +214,10 @@ function parseArgs(argv) {
 // ─── 常數 / 場景設定 ─────────────────────────────────────────────────────────
 
 const SCENARIOS = {
-  normal: { hdop: 3.5, sigmaM: 18, sats: 8, jump: false, outage: false, canyon: false },
-  drift: { hdop: 7.0, sigmaM: 35, sats: 5, jump: false, outage: false, canyon: true },
-  jump: { hdop: 3.5, sigmaM: 18, sats: 8, jump: true, outage: false, canyon: false },
-  outage: { hdop: 3.5, sigmaM: 18, sats: 8, jump: false, outage: true, canyon: false },
+  normal: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: false, outage: false, canyon: false },
+  drift: { hdop: 7.0, sigmaM: 35, sigmaHeading: 15.0, sats: 5, jump: false, outage: false, canyon: true },
+  jump: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: true, outage: false, canyon: false },
+  outage: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: false, outage: true, canyon: false },
 };
 
 const CRUISE_KMH = 28;
@@ -403,9 +403,10 @@ function simulate(route, cfg) {
   const segs = buildSegments(route_points, stops, traffic_lights || []);
   const totalDist = segs.reduce((s, g) => s + g.dist, 0);
 
-  const { hdop, sigmaM, sats } = cfg;
+  const { hdop, sigmaM, sigmaHeading, sats } = cfg;
   const noiseN = new AR1Noise(sigmaM);
   const noiseE = new AR1Noise(sigmaM);
+  const noiseHeading = new AR1Noise(sigmaHeading);
 
   const jumpDistTarget = totalDist * 0.30;
   let jumpInjected = false;
@@ -424,7 +425,9 @@ function simulate(route, cfg) {
   const emitStatic = (pos, brng, outage) => {
     if (!outage) {
       const [nl, no] = addNoiseMeters(pos, noiseN.next(), noiseE.next());
-      nmeaLines.push(makeGPRMC(ts, nl, no, 0, brng));
+      // Add heading noise even when stationary (GPS receivers still report heading)
+      const noisyBearing = (brng + noiseHeading.next() + 360) % 360;
+      nmeaLines.push(makeGPRMC(ts, nl, no, 0, noisyBearing));
       nmeaLines.push(makeGPGGA(ts, nl, no, hdop, sats));
     }
     ts++;
@@ -487,7 +490,9 @@ function simulate(route, cfg) {
 
       if (!isOutage) {
         const [nl, no] = addNoiseMeters([lat, lon], noiseN.next(), noiseE.next());
-        nmeaLines.push(makeGPRMC(ts, nl, no, speedMs * 1.94384, seg.bearing));
+        // Add heading noise to the segment bearing, normalize to 0-360 range
+        const noisyBearing = (seg.bearing + noiseHeading.next() + 360) % 360;
+        nmeaLines.push(makeGPRMC(ts, nl, no, speedMs * 1.94384, noisyBearing));
         nmeaLines.push(makeGPGGA(ts, nl, no, hdop, sats));
       }
       ts++;
@@ -551,8 +556,8 @@ GLOBAL FLAGS:
   --force                   Skip confirmation prompts (currently: none)
 
 SCENARIOS:
-  normal    HDOP=3.5, σ=18m, 8 sats, no anomalies
-  drift     HDOP=7.0, σ=35m, 5 sats, urban canyon drift
+  normal    HDOP=3.5, σ(pos)=18m, σ(heading)=5°, 8 sats, no anomalies
+  drift     HDOP=7.0, σ(pos)=35m, σ(heading)=15°, 5 sats, urban canyon drift
   jump      Normal GPS, but with 100m+ position jump at 30% distance
   outage    GPS signal outage on segments 15-17
 

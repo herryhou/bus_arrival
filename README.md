@@ -35,6 +35,12 @@ The project includes working test data for immediate visualizer testing:
 | `trace_test.jsonl` | Full detector trace for visualizer (197 records) |
 | `arrivals_test.jsonl` | Detected arrival events (3 arrivals) |
 
+
+### To manually verify the fixes work:
+  1. Generate trace: cargo run -p simulator -- ty225.nmea ty225.bin ty225.jsonl
+  2. Run arrival detector: cargo run -p arrival_detector -- ty225.jsonl ty225.bin ty225_arrivals.jsonl --trace ty225_trace.jsonl
+  3. Visualize: Use ty225_trace.jsonl (not ty225.jsonl) in the visualizer to see events
+
 **Test Data Summary:**
 - 3 stops at positions: 300m, 600m, 900m
 - Bus travels 950m along route

@@ -1,0 +1,8 @@
+{
+  "stops": [
+    {"lat": 24.9940, "lon": 121.0040, "name": "Stop 1 - South Station"},
+    {"lat": 24.9990, "lon": 121.0090, "name": "Stop 2 - Central"},
+    {"lat": 25.0040, "lon": 121.0140, "name": "Stop 3 - North Park"},
+    {"lat": 25.0090, "lon": 121.0190, "name": "Stop 4 - Terminal"}
+  ]
+}

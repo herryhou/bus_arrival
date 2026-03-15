@@ -3,7 +3,6 @@
 Cargo.lock
 
 # IDEs and OS
-/.claude
 /.worktrees
 .DS_Store
 .vscode/
@@ -27,6 +26,8 @@ tools/data/stops.json
 *.swp
 .playwright-cli/
 .playwright-test/
+settings.local.json
+test_data/
 
 # Debug/test files (generated during development)
 check_nmea*

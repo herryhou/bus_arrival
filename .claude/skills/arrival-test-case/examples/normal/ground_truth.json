@@ -1,0 +1,26 @@
+[
+  {
+    "stop_idx": 0,
+    "seg_idx": 4,
+    "timestamp": 1700000089,
+    "dwell_s": 9
+  },
+  {
+    "stop_idx": 1,
+    "seg_idx": 9,
+    "timestamp": 1700000209,
+    "dwell_s": 8
+  },
+  {
+    "stop_idx": 2,
+    "seg_idx": 14,
+    "timestamp": 1700000328,
+    "dwell_s": 5
+  },
+  {
+    "stop_idx": 3,
+    "seg_idx": 19,
+    "timestamp": 1700000444,
+    "dwell_s": 9
+  }
+]

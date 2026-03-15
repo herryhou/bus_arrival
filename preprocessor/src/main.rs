@@ -117,19 +117,19 @@ fn main() {
     let route_nodes = linearize::linearize_route(&simplified_pts_cm);
     println!("Built route graph with {} nodes", route_nodes.len());
 
-    // 5. Project stops (1D progress + non-overlapping corridors)
+    // 5. Build Spatial Grid Index (100m cells)
+    let grid_size_cm = 10000; // 100m
+    let grid = grid::build_grid(&route_nodes, grid_size_cm);
+    println!("Built {}x{} spatial grid ({} cells)", grid.cols, grid.rows, grid.cells.len());
+
+    // 6. Project stops (1D progress + non-overlapping corridors)
     let stop_pts_cm: Vec<(i64, i64)> = stops_input.stops.iter().map(|s| {
         let (x, y) = coord::latlon_to_cm_relative(s.lat, s.lon, lat_avg);
         (x as i64, y as i64)
     }).collect();
-    
+
     let projected_stops = stops::project_stops(&stop_pts_cm, &route_nodes);
     println!("Projected {} stops with corridors", projected_stops.len());
-
-    // 6. Build Spatial Grid Index (100m cells)
-    let grid_size_cm = 10000; // 100m
-    let grid = grid::build_grid(&route_nodes, grid_size_cm);
-    println!("Built {}x{} spatial grid ({} cells)", grid.cols, grid.rows, grid.cells.len());
 
     // 7. Generate LUTs
     let gaussian_lut = lut::generate_gaussian_lut();
