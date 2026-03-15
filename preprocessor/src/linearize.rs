@@ -98,7 +98,9 @@ pub fn linearize_route(nodes_cm: &[(i64, i64)]) -> Vec<RouteNode> {
         let line_c = -((line_a as i64 * x0) + (line_b as i64 * y0));
 
         // Heading in centidegrees (0.01° units)
-        let heading_rad = (dy_cm as f64).atan2(dx_cm as f64);
+        // Navigation bearing: 0° = North, 90° = East, measured clockwise
+        // Formula: atan2(dx, dy) where dx = eastward, dy = northward
+        let heading_rad = (dx_cm as f64).atan2(dy_cm as f64);
         let heading_cdeg = (heading_rad.to_degrees() * 100.0).round() as i16;
 
         route.push(RouteNode {
