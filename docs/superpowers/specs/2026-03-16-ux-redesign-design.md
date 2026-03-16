@@ -35,7 +35,7 @@ grid-template-columns: 2.5fr 1.5fr 1fr;  /* Map bigger, sidebar smaller */
 - **Lab Panel** (1.5fr): ProbabilityScope + FsmInspector — unchanged size
 - **Sidebar Panel** (1fr): NEW CompactSidebar — merged Events + Stops
 - **Linear Route** (full width): LinearRouteWidget — unchanged
-- **Footer** (180px, was 250px): Timeline — speed chart removed
+- **Footer** (180px, was 250px): Timeline — speed chart removed. Height breakdown: ~40px playback bar + ~60px time/slider + ~20px shortcuts hint + ~60px margin = ~180px total
 
 ### Visual Layout
 
@@ -115,7 +115,7 @@ interface Props {
 - Flex column layout with each section `flex: 1` for 50/50 split
 - `min-height: 0` to allow proper shrinking
 - Section headers sticky with count badges
-- Shared scroll within each section
+- Each section scrolls independently with its own scrollbar
 
 ### Timeline.svelte
 
@@ -125,11 +125,12 @@ Replaces TimelineCharts.svelte with a simpler, keyboard-friendly timeline.
 ```typescript
 interface Props {
   traceData: TraceData;
-  selectedStop?: number | null;
   currentTime: number;
   onTimeChange?: (time: number) => void;
 }
 ```
+
+Note: `selectedStop` removed from props (not needed for simple playback controls).
 
 **Features:**
 - Play/pause button
@@ -142,6 +143,7 @@ interface Props {
   - Arrow Left: Seek -5 seconds
   - Arrow Right: Seek +5 seconds
   - ?: Show help modal (optional)
+  - **Ignore when**: File input elements are focused (during data load phase)
 
 **No Chart.js dependency** — Uses native HTML/CSS only.
 
@@ -208,13 +210,15 @@ interface Props {
 
 **Interaction:**
 - Click to select stop (updates `selectedStop` state)
-- Active stop highlighted with distinct background
+- **Selected stop**: User-clicked stop, shown with cyan border (#06b6d4) + darker background
+- **Active stop**: Bus is currently at/near this stop (based on FSM state), shown with colored left border
 - Selected stop triggers detailed view in Lab Panel
 
 ### Lab Panel Behavior
 
 **When no stop selected:**
 - Show empty state: "Select a stop from the sidebar to see detailed analysis"
+- Note: AllStopsInspector is fully moved to CompactSidebar — Lab Panel no longer shows it
 
 **When stop selected:**
 - Show ProbabilityScope (probability gauge visualization)
@@ -277,6 +281,8 @@ function getEventTypeLabel(type: string): string {
     case 'ARRIVAL': return 'ARR';
     case 'TRANSITION': return 'TRN';
     case 'DEPARTURE': return 'DEP';
+    case 'JUMP': return 'JMP';
+    case 'RECOVERY': return 'REC';
     default: return type.substring(0, 3);
   }
 }
@@ -290,6 +296,8 @@ function getEventTypeColor(type: string): string {
     case 'ARRIVAL': return '#22c55e';
     case 'TRANSITION': return '#eab308';
     case 'DEPARTURE': return '#6b7280';
+    case 'JUMP': return '#ef4444';
+    case 'RECOVERY': return '#f59e0b';
     default: return '#888';
   }
 }
@@ -299,14 +307,15 @@ function getEventTypeColor(type: string): string {
 
 ```typescript
 function formatEventTime(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleTimeString([], {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  }).substring(0, 8); // HH:MM:SS
+  const date = new Date(seconds * 1000);
+  const hh = String(Math.floor(date.getHours() / 1) % 24).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
 }
 ```
+
+Note: This uses locale-independent formatting to ensure consistent HH:MM:SS output across browsers.
 
 ## Acceptance Criteria
 
@@ -327,6 +336,8 @@ function formatEventTime(seconds: number): string {
 - ✓ All original details visible: stop #, state, prob, distance, dwell, features
 - ✓ Smaller fonts (0.6-0.7rem) and tighter spacing (0.4rem gaps)
 - ✓ Click selects stop and shows details in Lab Panel
+- ✓ Selected stop shown with cyan border + darker background
+- ✓ Active stop (bus nearby) shown with colored left border
 - ✓ Just arrived badge visible and animated
 
 ### Event Log (Compact)
@@ -354,6 +365,7 @@ function formatEventTime(seconds: number): string {
 
 ### Integration
 - ✓ Selecting a stop in sidebar shows ProbabilityScope + FsmInspector in Lab Panel
+- ✓ When no stop selected, Lab Panel shows empty state (AllStopsInspector moved to sidebar only)
 - ✓ Clicking event seeks timeline and highlights on map
 - ✓ Map still receives `highlightedEvent` for event markers
 - ✓ LinearRouteWidget still displays bus position
@@ -372,8 +384,7 @@ function formatEventTime(seconds: number): string {
 9. Verify selected stop is highlighted in stop list
 10. Verify all stop details are visible (prob, distance, dwell, features)
 11. Test playback with speed selector
-12. Verify keyboard shortcuts don't trigger when focusing inputs
-13. Test responsive behavior at narrow widths (< 1200px)
+12. Verify keyboard shortcuts don't trigger when focusing file inputs during data load
 
 ## Migration Notes
 
