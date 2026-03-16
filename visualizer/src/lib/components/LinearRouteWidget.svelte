@@ -171,6 +171,10 @@
 
 	// Re-render when dependencies change
 	$effect(() => {
+		// Track reactive dependencies
+		busProgress;
+		routeData;
+		highlightedEvent;
 		render();
 	});
 
