@@ -4,9 +4,10 @@
 	interface Props {
 		traceData: TraceData;
 		onSeek: (time: number) => void;
+		onEventClick?: (info: { time: number; stopIdx?: number; state?: FsmState }) => void;
 	}
 
-	let { traceData, onSeek }: Props = $props();
+	let { traceData, onSeek, onEventClick }: Props = $props();
 
 	type EventType = 'JUMP' | 'RECOVERY' | 'TRANSITION' | 'ARRIVAL';
 
@@ -85,7 +86,20 @@
 
 	<div class="log-container">
 		{#each events as event}
-			<button class="event-item {event.type.toLowerCase()}" onclick={() => onSeek(event.time)}>
+			<button
+				class="event-item {event.type.toLowerCase()}"
+				onclick={() => {
+					onSeek(event.time);
+					const eventState = event.state || (event.type === 'ARRIVAL' ? 'AtStop' : undefined);
+					if (event.stopIdx !== undefined && eventState) {
+						onEventClick?.({
+							time: event.time,
+							stopIdx: event.stopIdx,
+							state: eventState
+						});
+					}
+				}}
+			>
 				<div class="event-meta">
 					<span class="event-time">{formatTime(event.time)}</span>
 					<span class="event-badge">{event.type}</span>
