@@ -1,12 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import MapView from '$lib/components/MapView.svelte';
-	import TimelineCharts from '$lib/components/TimelineCharts.svelte';
 	import FsmInspector from '$lib/components/FsmInspector.svelte';
 	import ProbabilityScope from '$lib/components/ProbabilityScope.svelte';
-	import EventLog from '$lib/components/EventLog.svelte';
-	import AllStopsInspector from '$lib/components/AllStopsInspector.svelte';
+	import CompactSidebar from '$lib/components/CompactSidebar.svelte';
 	import LinearRouteWidget from '$lib/components/LinearRouteWidget.svelte';
+	import Timeline from '$lib/components/Timeline.svelte';
 	import type { RouteData, TraceData, FsmState } from '$lib/types';
 	import { loadRouteData, getInterpolatedBusState } from '$lib/parsers/routeData';
 	import { loadTraceFile, getTraceTimeRange } from '$lib/parsers/trace';
@@ -232,20 +231,25 @@
 							<div class="spacer"></div>
 							<FsmInspector {traceData} {selectedStop} {currentTime} />
 						{:else}
-							<!-- Show all stops by default -->
-							{#if currentRecord && traceData}
-								<AllStopsInspector {traceData} {currentTime} v_cms={currentRecord.v_cms} />
-							{/if}
+							<!-- Empty state when no stop selected -->
+							<div class="empty-lab">
+								<div class="lab-icon">🔬</div>
+								<p>Select a stop from the sidebar to see detailed analysis</p>
+							</div>
 						{/if}
 					</div>
 				</section>
 
-				<!-- Right: Event Feed -->
-				<section class="panel feed-panel">
-					{#if traceData}
-						<EventLog
+				<!-- Right: Compact Sidebar -->
+				<section class="panel sidebar-panel">
+					{#if traceData && currentRecord}
+						<CompactSidebar
 							{traceData}
+							{currentTime}
+							v_cms={currentRecord.v_cms}
+							{selectedStop}
 							onSeek={handleSeek}
+							onStopSelect={(idx) => selectedStop = idx}
 							onEventClick={handleEventClick}
 						/>
 					{/if}
@@ -265,48 +269,17 @@
 
 			<!-- Bottom: Timeline & Playback -->
 			<footer class="dashboard-footer">
-				<div class="playback-bar">
-					<div class="playback-controls">
-						<button class="play-pause" onclick={() => isPlaying = !isPlaying}>
-							{isPlaying ? '⏸' : '▶'}
-						</button>
-						<select bind:value={playbackSpeed} class="speed-select">
-							<option value={1}>1x</option>
-							<option value={2}>2x</option>
-							<option value={5}>5x</option>
-							<option value={10}>10x</option>
-						</select>
-					</div>
-
-					<div class="time-info">
-						<span class="current">{formatTime(currentTime)}</span>
-						<span class="sep">/</span>
-						<span class="total">{formatTime(timeMax)}</span>
-					</div>
-					
-					<div class="slider-wrapper">
-						<input
-							type="range"
-							min="0"
-							max="100"
-							step="0.01"
-							bind:value={currentTimePercent}
-							oninput={handleSliderChange}
-							class="time-slider"
-						/>
-					</div>
-				</div>
-
-				<div class="charts-area">
-					{#if traceData}
-						<TimelineCharts
-							{traceData}
-							{selectedStop}
-							{currentTime}
-							onTimeChange={handleSeek}
-						/>
-					{/if}
-				</div>
+				{#if traceData}
+					<Timeline
+						{traceData}
+						{currentTime}
+						{isPlaying}
+						playbackSpeed={playbackSpeed}
+						onTimeChange={handleSeek}
+						onTogglePlay={() => isPlaying = !isPlaying}
+						onSpeedChange={(speed) => playbackSpeed = speed}
+					/>
+				{/if}
 			</footer>
 		</div>
 	{/if}
@@ -401,7 +374,7 @@
 	.dashboard-grid {
 		flex: 1;
 		display: grid;
-		grid-template-columns: 1.5fr 1.5fr 1fr;
+		grid-template-columns: 2.5fr 1.5fr 1fr;  /* CHANGED from 1.5fr 1.5fr 1fr */
 		grid-template-rows: 1fr auto;
 		gap: 1px;
 		background-color: #333;
@@ -414,6 +387,10 @@
 		grid-column: 1 / -1;
 		height: 80px;
 		min-height: 80px;
+	}
+
+	.sidebar-panel {
+		overflow: hidden;
 	}
 
 	.lab-scroll {
@@ -438,78 +415,22 @@
 		padding: 2rem;
 	}
 
-	.lab-icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.3; }
+	.lab-icon {
+		font-size: 2rem;
+		margin-bottom: 0.5rem;
+		opacity: 0.5;
+	}
+
+	.empty-lab p {
+		margin: 0;
+		font-size: 0.8rem;
+	}
 
 	.dashboard-footer {
-		height: 250px;
+		height: 180px;  /* CHANGED from 250px */
 		background-color: #0a0a0a;
 		border-top: 1px solid #333;
 		display: flex;
 		flex-direction: column;
 	}
-
-	.playback-bar {
-		padding: 0.5rem 1rem;
-		display: flex;
-		align-items: center;
-		gap: 1.5rem;
-		background-color: #111;
-		border-bottom: 1px solid #222;
-	}
-
-	.playback-controls {
-		display: flex;
-		gap: 0.5rem;
-		align-items: center;
-	}
-
-	.play-pause {
-		background-color: #3b82f6;
-		border: none;
-		color: white;
-		width: 30px;
-		height: 30px;
-		border-radius: 50%;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 0.8rem;
-	}
-
-	.speed-select {
-		background-color: #222;
-		color: #fff;
-		border: 1px solid #444;
-		border-radius: 4px;
-		font-size: 0.75rem;
-		padding: 2px 4px;
-	}
-
-	.time-info { font-size: 0.75rem; display: flex; gap: 0.5rem; min-width: 150px; }
-	.time-info .current { color: #fff; font-weight: bold; }
-	.time-info .sep { color: #444; }
-	.time-info .total { color: #666; }
-
-	.slider-wrapper { flex: 1; }
-	.time-slider {
-		width: 100%;
-		height: 4px;
-		background: #333;
-		border-radius: 2px;
-		appearance: none;
-		outline: none;
-	}
-
-	.time-slider::-webkit-slider-thumb {
-		appearance: none;
-		width: 12px;
-		height: 12px;
-		background: #3b82f6;
-		border-radius: 50%;
-		cursor: pointer;
-		box-shadow: 0 0 5px rgba(59, 130, 246, 0.5);
-	}
-
-	.charts-area { flex: 1; min-height: 0; }
 </style>
