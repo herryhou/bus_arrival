@@ -182,7 +182,7 @@
 			<span class="event-count">{eventCount} events</span>
 		</div>
 		<div class="section-content">
-			{#each events as event (event.time)}
+			{#each events as event (event.index)}
 				<div
 					class="event-row {event.index % 2 === 0 ? 'odd' : 'even'}"
 					class:current={isEventAtCurrentTime(event.time)}
@@ -220,7 +220,7 @@
 			<span class="stops-count">{stopCount} active</span>
 		</div>
 	<div class="section-content">
-			{#each allStopStates as stopState (stopState)}
+			{#each allStopStates as stopState}
 				<div
 					class="stop-card-compact"
 					class:selected={selectedStop === stopState.stop_idx}
