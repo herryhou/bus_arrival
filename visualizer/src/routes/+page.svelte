@@ -242,11 +242,11 @@
 
 				<!-- Right: Compact Sidebar -->
 				<section class="panel sidebar-panel">
-					{#if traceData && currentRecord}
+					{#if traceData}
 						<CompactSidebar
 							{traceData}
 							{currentTime}
-							v_cms={currentRecord.v_cms}
+							v_cms={currentRecord?.v_cms ?? 0}
 							{selectedStop}
 							onSeek={handleSeek}
 							onStopSelect={(idx) => selectedStop = idx}
@@ -379,9 +379,10 @@
 		gap: 1px;
 		background-color: #333;
 		min-height: 0;
+		overflow: hidden;
 	}
 
-	.panel { background-color: #0a0a0a; overflow: hidden; position: relative; }
+	.panel { background-color: #0a0a0a; overflow: hidden; position: relative; min-height: 0; }
 
 	.linear-route-panel {
 		grid-column: 1 / -1;

@@ -641,6 +641,7 @@ function cmdGenerate(args) {
     }
 
     route.stops = findStopIndices(stopsData.stops, route.route_points);
+    console.log(route.stops);
     if (globalFlags.verbose) logs.push(`Mapped ${stopsData.stops.length} stops to route point indices: ${route.stops.slice(0, 5).join(', ')}...`);
   }
 
