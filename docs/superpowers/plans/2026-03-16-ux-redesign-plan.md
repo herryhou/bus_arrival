@@ -1143,6 +1143,12 @@ Find the `.empty-lab` rule (around line 430) and ensure the styles include the i
 		padding: 2rem;
 	}
 
+	.lab-icon {
+		font-size: 2rem;
+		margin-bottom: 0.5rem;
+		opacity: 0.5;
+	}
+
 	.empty-lab p {
 		margin: 0;
 		font-size: 0.8rem;
