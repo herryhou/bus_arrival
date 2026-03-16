@@ -219,8 +219,8 @@
 			<h4>All Stops Monitor</h4>
 			<span class="stops-count">{stopCount} active</span>
 		</div>
-		<div class="section-content">
-			{#each allStopStates as stopState (stopState.stop_idx)}
+	<div class="section-content">
+			{#each allStopStates as stopState (stopState)}
 				<div
 					class="stop-card-compact"
 					class:selected={selectedStop === stopState.stop_idx}
