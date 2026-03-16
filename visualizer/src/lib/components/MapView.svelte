@@ -16,10 +16,13 @@
 	/**
 	 * Convert meters to pixels at a given latitude and zoom level
 	 * Used for MapLibre GL circle radius calculations
+	 * Based on Web Mercator projection: each tile is 256px, 2^zoom tiles wide
 	 */
 	function metersToPixels(meters: number, lat: number, zoom: number): number {
 		const latRad = lat * Math.PI / 180;
-		const metersPerPixel = EARTH_RADIUS * Math.cos(latRad) / (256 * Math.pow(2, zoom));
+		// Meters per pixel = (Earth circumference * cos(lat)) / (256 * 2^zoom)
+		const earthCircumference = 2 * Math.PI * EARTH_RADIUS;
+		const metersPerPixel = (earthCircumference * Math.cos(latRad)) / (256 * Math.pow(2, zoom));
 		return meters / metersPerPixel;
 	}
 
