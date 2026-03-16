@@ -142,7 +142,7 @@
 			context.font = 'bold 15px JetBrains Mono, Monaco, monospace';
 			context.textAlign = 'center';
 			context.textBaseline = 'bottom';
-			context.fillText(`#${index}`, x, routeY - LAYOUT.stopLabelOffset);
+			context.fillText(`#${index + 1}`, x, routeY - LAYOUT.stopLabelOffset);
 
 			// Highlight ring
 			if (isHighlighted && highlightedEvent) {
@@ -219,7 +219,7 @@
 				// Stop number
 				context.font = 'bold 15px JetBrains Mono, Monaco, monospace';
 				context.fillStyle = color;
-				context.fillText(`Stop #${highlightedEvent.stopIdx}`, x, eventY);
+				context.fillText(`Stop #${highlightedEvent.stopIdx + 1}`, x, eventY);
 
 				// State
 				context.font = '14px JetBrains Mono, Monaco, monospace';
@@ -282,7 +282,7 @@
 
 				context.font = '12px JetBrains Mono, Monaco, monospace';
 				context.fillStyle = distance < 50000 ? '#22c55e' : '#cbd5e0'; // Green if < 500m
-				context.fillText(`#${index} ${direction} ${distanceKm}km`, rightX, y);
+				context.fillText(`#${index + 1} ${direction} ${distanceKm}km`, rightX, y);
 			});
 		}
 	}

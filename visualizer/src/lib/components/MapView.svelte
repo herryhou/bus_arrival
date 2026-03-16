@@ -164,6 +164,7 @@
 				type: 'Feature',
 				properties: {
 					index: stop.index,
+					label: `${stop.index + 1}`, // 1-indexed for display
 					progress_cm: stop.progress_cm
 				},
 				geometry: {
@@ -249,7 +250,7 @@
 				type: 'symbol',
 				source: stopsSourceId,
 				layout: {
-					'text-field': ['get', 'index'],
+					'text-field': ['get', 'label'],
 					'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
 					'text-size': 12,
 					'text-anchor': 'top',

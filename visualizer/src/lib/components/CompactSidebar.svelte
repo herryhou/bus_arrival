@@ -204,7 +204,7 @@
 						{getEventTypeLabel(event.type)}
 					</span>
 					{#if event.stopIdx !== undefined}
-						<span class="event-stop">#{event.stopIdx}</span>
+						<span class="event-stop">#{event.stopIdx + 1}</span>
 					{/if}
 					{#if event.state}
 						<span class="event-state" style="color: {FSM_STATE_COLORS[event.state]};">
@@ -238,7 +238,7 @@
 				>
 					<!-- Header: Stop # + State -->
 					<div class="stop-card-header">
-						<span class="stop-index">#{stopState.stop_idx}</span>
+						<span class="stop-index">#{stopState.stop_idx + 1}</span>
 						<span class="stop-state-badge" style="color: {FSM_STATE_COLORS[stopState.fsm_state]};">
 							{stopState.fsm_state}
 						</span>
