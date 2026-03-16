@@ -61,7 +61,6 @@ Add these functions after the interfaces:
 		switch (type) {
 			case 'ARRIVAL': return 'ARR';
 			case 'TRANSITION': return 'TRN';
-			case 'DEPARTURE': return 'DEP';
 			case 'JUMP': return 'JMP';
 			case 'RECOVERY': return 'REC';
 			default: return type.substring(0, 3);
@@ -73,7 +72,6 @@ Add these functions after the interfaces:
 		switch (type) {
 			case 'ARRIVAL': return '#22c55e';
 			case 'TRANSITION': return '#eab308';
-			case 'DEPARTURE': return '#6b7280';
 			case 'JUMP': return '#ef4444';
 			case 'RECOVERY': return '#f59e0b';
 			default: return '#888';
