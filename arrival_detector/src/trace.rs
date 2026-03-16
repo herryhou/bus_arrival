@@ -62,7 +62,7 @@ pub struct StopTraceState {
     pub just_arrived: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct FeatureScores {
     pub p1: u8,  // Distance likelihood (Gaussian)
     pub p2: u8,  // Speed likelihood (Logistic)

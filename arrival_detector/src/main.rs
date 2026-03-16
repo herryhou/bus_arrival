@@ -94,6 +94,15 @@ fn main() {
         // Track which stops arrived this frame for trace output
         let mut arrived_this_frame: Vec<u8> = Vec::new();
 
+        // Store decision probability and features for each active stop
+        // These must be calculated BEFORE state.update() modifies dwell_time_s
+        struct StopDecisionData {
+            stop_idx: u8,
+            probability: u8,
+            features: trace::FeatureScores,
+        }
+        let mut decision_data: Vec<StopDecisionData> = Vec::new();
+
         for &stop_idx in &active_indices {
             let stop = &stops[stop_idx];
             let state = &mut stop_states[stop_idx];
@@ -105,7 +114,8 @@ fn main() {
                 }
             }
 
-            // Compute probability
+            // Compute probability and features BEFORE state.update()
+            // These values are used for the state machine decision
             let prob = probability::arrival_probability(
                 record.s_cm,
                 record.v_cms,
@@ -115,7 +125,23 @@ fn main() {
                 &logistic_lut,
             );
 
-            // Update state machine
+            let features = probability::compute_feature_scores(
+                record.s_cm,
+                record.v_cms,
+                stop,
+                state.dwell_time_s,
+                &gaussian_lut,
+                &logistic_lut,
+            );
+
+            // Store for trace output (probability used for decision)
+            decision_data.push(StopDecisionData {
+                stop_idx: stop_idx as u8,
+                probability: prob,
+                features,
+            });
+
+            // Update state machine (may modify dwell_time_s)
             if state.update(record.s_cm, record.v_cms, stop.progress_cm, prob) {
                 // Just arrived!
                 let event = ArrivalEvent {
@@ -134,34 +160,21 @@ fn main() {
 
         // Write trace record if enabled
         if let Some(ref mut tw) = trace_writer {
-            let stop_states: Vec<trace::StopTraceState> = active_indices
+            let stop_states: Vec<trace::StopTraceState> = decision_data
                 .iter()
-                .map(|&idx| {
-                    let stop = &stops[idx];
-                    let state = &stop_states[idx];
-                    let features = probability::compute_feature_scores(
-                        record.s_cm,
-                        record.v_cms,
-                        stop,
-                        state.dwell_time_s,
-                        &gaussian_lut,
-                        &logistic_lut,
-                    );
+                .map(|dd| {
+                    let stop = &stops[dd.stop_idx as usize];
+                    let state = &stop_states[dd.stop_idx as usize];
                     trace::StopTraceState {
-                        stop_idx: idx as u8,
+                        stop_idx: dd.stop_idx,
                         distance_cm: record.s_cm - stop.progress_cm,
                         fsm_state: state.fsm_state,
                         dwell_time_s: state.dwell_time_s,
-                        probability: probability::arrival_probability(
-                            record.s_cm,
-                            record.v_cms,
-                            stop,
-                            state.dwell_time_s,
-                            &gaussian_lut,
-                            &logistic_lut,
-                        ),
-                        features,
-                        just_arrived: arrived_this_frame.contains(&(idx as u8)),
+                        // Use the probability that was actually used for decision
+                        probability: dd.probability,
+                        // Use the features that were actually used for decision
+                        features: dd.features.clone(),
+                        just_arrived: arrived_this_frame.contains(&dd.stop_idx),
                     }
                 })
                 .collect();
