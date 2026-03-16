@@ -469,7 +469,7 @@ Find and replace the entire stops section div (from `<div class="sidebar-section
 			{#each allStopStates as stopState (stopState.stop_idx)}
 				<div
 					class="stop-card-compact"
-					class:active={selectedStop === stopState.stop_idx}
+					class:selected={selectedStop === stopState.stop_idx}
 					style="border-left-color: {FSM_STATE_COLORS[stopState.fsm_state]};"
 					onclick={() => onStopSelect(stopState.stop_idx)}
 				>
@@ -503,7 +503,7 @@ Find and replace the entire stops section div (from `<div class="sidebar-section
 
 					<!-- Features inline -->
 					<div class="features-compact">
-						span>p₁:{stopState.features.p1}</span>
+						<span>p₁:{stopState.features.p1}</span>
 						<span>p₂:{stopState.features.p2}</span>
 						<span>p₃:{stopState.features.p3}</span>
 						<span>p₄:{stopState.features.p4}</span>
@@ -550,7 +550,7 @@ Add before the closing `</style>`:
 		background-color: #151515;
 	}
 
-	.stop-card-compact.active {
+	.stop-card-compact.selected {
 		background-color: #1a1a1a;
 		border-color: #06b6d4;
 		border-left-width: 4px;
