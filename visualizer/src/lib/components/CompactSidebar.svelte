@@ -58,6 +58,11 @@
 
 	// Helper: Check if event is at current time
 	const TIME_TOLERANCE_SECONDS = 1;
+
+	// Probability thresholds (0-255 range)
+	const PROB_HIGH_THRESHOLD = 191; // 75% of 255
+	const PROB_MED_THRESHOLD = 128; // 50% of 255
+
 	function isEventAtCurrentTime(eventTime: number): boolean {
 		return Math.abs(eventTime - currentTime) < TIME_TOLERANCE_SECONDS;
 	}
@@ -89,8 +94,8 @@
 
 	// Helper: Get probability color
 	function getProbColor(prob: number): string {
-		if (prob >= 191) return '#22c55e';
-		if (prob >= 128) return '#f59e0b';
+		if (prob >= PROB_HIGH_THRESHOLD) return '#22c55e';
+		if (prob >= PROB_MED_THRESHOLD) return '#f59e0b';
 		return '#ef4444';
 	}
 
@@ -165,12 +170,10 @@
 	});
 
 	// Derived: All stop states at current time
-	let allStopStates = $derived.by(() => {
-		return currentRecord?.stop_states ?? [];
-	});
+	let allStopStates = $derived(currentRecord?.stop_states ?? []);
 
 	// Derived: Stop count
-	let stopCount = $derived.by(() => allStopStates.length);
+	let stopCount = $derived(allStopStates.length);
 </script>
 
 <div class="compact-sidebar">
