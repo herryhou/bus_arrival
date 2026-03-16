@@ -411,6 +411,7 @@
 	.panel { background-color: #0a0a0a; overflow: hidden; position: relative; }
 
 	.linear-route-panel {
+		grid-column: 1 / -1;
 		height: 80px;
 		min-height: 80px;
 	}
