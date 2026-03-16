@@ -13,7 +13,10 @@
 		} | null;
 	}
 
-	let { routeData, busProgress, highlightedEvent = null }: Props = $props();
+	let { routeData, busProgress: busProgressProp, highlightedEvent = null }: Props = $props();
+
+	// Make props reactive by storing them in local state
+	let busProgress = $derived.by(() => busProgressProp);
 
 	let canvas: HTMLCanvasElement;
 	let ctx: CanvasRenderingContext2D | null = null;
