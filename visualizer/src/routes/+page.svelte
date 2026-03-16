@@ -5,7 +5,9 @@
 	import FsmInspector from '$lib/components/FsmInspector.svelte';
 	import ProbabilityScope from '$lib/components/ProbabilityScope.svelte';
 	import EventLog from '$lib/components/EventLog.svelte';
-	import type { RouteData, TraceData } from '$lib/types';
+	import AllStopsInspector from '$lib/components/AllStopsInspector.svelte';
+	import LinearRouteWidget from '$lib/components/LinearRouteWidget.svelte';
+	import type { RouteData, TraceData, FsmState } from '$lib/types';
 	import { loadRouteData, getInterpolatedBusState } from '$lib/parsers/routeData';
 	import { loadTraceFile, getTraceTimeRange } from '$lib/parsers/trace';
 
@@ -13,6 +15,14 @@
 	let traceData = $state<TraceData | null>(null);
 
 	let selectedStop = $state<number | null>(null);
+
+	let highlightedEvent = $state<{
+		stopIdx: number;
+		time: number;
+		state: FsmState;
+	} | null>(null);
+
+	let mapViewRef: { panToStop: (idx: number) => void } | null = null;
 	let currentTime = $state<number>(0);
 
 	let timeMin = $state<number>(0);
@@ -134,6 +144,21 @@
 		showUpload = true;
 		error = null;
 	}
+
+	function handleEventClick(info: { time: number; stopIdx?: number; state?: FsmState }) {
+		if (info.stopIdx !== undefined && info.state) {
+			highlightedEvent = {
+				stopIdx: info.stopIdx,
+				time: info.time,
+				state: info.state
+			};
+			mapViewRef?.panToStop(info.stopIdx);
+		}
+	}
+
+	function clearHighlight() {
+		highlightedEvent = null;
+	}
 </script>
 
 <div class="app-container dark">
@@ -190,7 +215,10 @@
 							{routeData}
 							{busPosition}
 							{selectedStop}
+							{highlightedEvent}
 							onStopClick={(idx) => selectedStop = idx}
+							onClearHighlight={clearHighlight}
+							bind:this={mapViewRef}
 						/>
 					{/if}
 				</section>
@@ -199,14 +227,15 @@
 				<section class="panel lab-panel">
 					<div class="lab-scroll">
 						{#if activeStopState && currentRecord && traceData}
+							<!-- Detailed view for selected stop -->
 							<ProbabilityScope stopState={activeStopState} v_cms={currentRecord.v_cms} />
 							<div class="spacer"></div>
 							<FsmInspector {traceData} {selectedStop} {currentTime} />
 						{:else}
-							<div class="empty-lab">
-								<div class="lab-icon">🔬</div>
-								<p>Select a stop on the map to inspect algorithm internals</p>
-							</div>
+							<!-- Show all stops by default -->
+							{#if currentRecord && traceData}
+								<AllStopsInspector {traceData} {currentTime} v_cms={currentRecord.v_cms} />
+							{/if}
 						{/if}
 					</div>
 				</section>
@@ -214,7 +243,11 @@
 				<!-- Right: Event Feed -->
 				<section class="panel feed-panel">
 					{#if traceData}
-						<EventLog {traceData} onSeek={handleSeek} />
+						<EventLog
+							{traceData}
+							onSeek={handleSeek}
+							onEventClick={handleEventClick}
+						/>
 					{/if}
 				</section>
 			</main>
