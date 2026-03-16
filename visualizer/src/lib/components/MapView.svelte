@@ -92,6 +92,12 @@
 			zoom: 13
 		});
 
+		// Add scale control
+		map.addControl(new maplibregl.ScaleControl({
+			maxWidth: 100,
+			unit: 'metric'
+		}));
+
 		map.on('load', async () => {
 			if (!map) return;
 			const mapRef = map;
