@@ -9,9 +9,9 @@
 	import { getStopLatLon } from '$lib/parsers/routeData';
 	import type { FsmState } from '$lib/types';
 
-	// Constants for stop accuracy circles (25m radius)
+	// Constants for stop arrival zone circles (50m radius)
 	const EARTH_RADIUS = 6378137; // meters
-	const STOP_RADIUS_M = 25; // 25 meters - bus stop accuracy zone
+	const STOP_RADIUS_M = 50; // 50 meters - arrival detection threshold
 
 	/**
 	 * Convert meters to pixels at a given latitude and zoom level
