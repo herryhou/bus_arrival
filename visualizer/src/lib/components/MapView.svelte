@@ -41,6 +41,7 @@
 			state: FsmState;
 			time: number;
 		} | null;
+		onClearHighlight?: () => void;
 	}
 
 	let {
@@ -48,7 +49,8 @@
 		busPosition = null,
 		selectedStop = null,
 		onStopClick = () => {},
-		highlightedEvent = null
+		highlightedEvent = null,
+		onClearHighlight = () => {}
 	}: Props = $props();
 
 	let mapContainer: HTMLDivElement;
@@ -58,6 +60,7 @@
 	let stopsSourceId = 'stops';
 	let busSourceId = 'bus';
 	let currentPanTarget = $state<number | null>(null);
+	let handleKeyDownRef: ((e: KeyboardEvent) => void) | null = null;
 
 	onMount(() => {
 		// Initialize map with OSM raster tiles (more reliable)
@@ -91,6 +94,7 @@
 
 		map.on('load', async () => {
 			if (!map) return;
+			const mapRef = map;
 
 			// Add custom arrow icon for bus
 			const svgArrow = `
@@ -106,13 +110,13 @@
 				img.onload = () => resolve(img);
 				img.src = url;
 			});
-			map.addImage('bus-arrow', image);
+			mapRef.addImage('bus-arrow', image);
 			
 			mapLoaded = true;
 
 			// Add route line
 			const routeGeo = getRouteGeometry(routeData, projectCmToLatLon);
-			map.addSource(routeSourceId, {
+			mapRef.addSource(routeSourceId, {
 				type: 'geojson',
 				data: {
 					type: 'Feature',
@@ -124,7 +128,7 @@
 				}
 			});
 
-			map.addLayer({
+			mapRef.addLayer({
 				id: 'route-line',
 				type: 'line',
 				source: routeSourceId,
@@ -153,7 +157,7 @@
 				}
 			}));
 
-			map.addSource(stopsSourceId, {
+			mapRef.addSource(stopsSourceId, {
 				type: 'geojson',
 				data: {
 					type: 'FeatureCollection',
@@ -161,7 +165,7 @@
 				}
 			});
 
-			map.addLayer({
+			mapRef.addLayer({
 				id: 'stops-circle',
 				type: 'circle',
 				source: stopsSourceId,
@@ -173,8 +177,59 @@
 				}
 			});
 
+			mapRef.addLayer({
+				id: 'stops-50m-circles',
+				type: 'circle',
+				source: stopsSourceId,
+				paint: {
+					'circle-radius': [
+						'interpolate',
+						['linear'],
+						['zoom'],
+						12, metersToPixels(STOP_RADIUS_M, routeData.lat_avg_deg, 12),
+						14, metersToPixels(STOP_RADIUS_M, routeData.lat_avg_deg, 14),
+						16, metersToPixels(STOP_RADIUS_M, routeData.lat_avg_deg, 16),
+						18, metersToPixels(STOP_RADIUS_M, routeData.lat_avg_deg, 18)
+					],
+					'circle-color': '#3b82f6',
+					'circle-opacity': 0.15,
+					'circle-stroke-width': 1,
+					'circle-stroke-color': '#3b82f6',
+					'circle-stroke-opacity': 0.3
+				}
+			});
+
+			mapRef.addSource('event-marker', {
+				type: 'geojson',
+				data: { type: 'FeatureCollection', features: [] }
+			});
+
+			mapRef.addLayer({
+				id: 'event-marker-pulse',
+				type: 'circle',
+				source: 'event-marker',
+				paint: {
+					'circle-radius': 20,
+					'circle-color': ['get', 'color'],
+					'circle-opacity': 0.3
+				}
+			});
+
+			mapRef.addLayer({
+				id: 'event-marker',
+				type: 'circle',
+				source: 'event-marker',
+				paint: {
+					'circle-radius': 12,
+					'circle-color': ['get', 'color'],
+					'circle-stroke-width': 3,
+					'circle-stroke-color': '#ffffff',
+					'circle-opacity': 1
+				}
+			});
+
 			// Add stop numbers
-			map.addLayer({
+			mapRef.addLayer({
 				id: 'stops-label',
 				type: 'symbol',
 				source: stopsSourceId,
@@ -193,19 +248,26 @@
 			});
 
 			// Add click handler for stops
-			map.on('click', 'stops-circle', (e) => {
+			mapRef.on('click', 'stops-circle', (e) => {
 				if (e.features && e.features[0]) {
 					const stopIndex = e.features[0].properties?.index as number;
 					onStopClick(stopIndex);
 				}
 			});
 
-			map.on('mouseenter', 'stops-circle', () => {
-				if (map) map.getCanvas().style.cursor = 'pointer';
+			mapRef.on('click', (e) => {
+				const features = mapRef.queryRenderedFeatures(e.point, { layers: ['stops-circle'] });
+				if (features.length === 0 && onClearHighlight) {
+					onClearHighlight();
+				}
 			});
 
-			map.on('mouseleave', 'stops-circle', () => {
-				if (map) map.getCanvas().style.cursor = '';
+			mapRef.on('mouseenter', 'stops-circle', () => {
+				mapRef.getCanvas().style.cursor = 'pointer';
+			});
+
+			mapRef.on('mouseleave', 'stops-circle', () => {
+				mapRef.getCanvas().style.cursor = '';
 			});
 
 			// Fit map to route bounds
@@ -214,9 +276,16 @@
 					(bounds, coord) => bounds.extend(coord as [number, number]),
 					new maplibregl.LngLatBounds(routeGeo[0] as [number, number], routeGeo[0] as [number, number])
 				);
-				map.fitBounds(bounds, { padding: 50 });
+				mapRef.fitBounds(bounds, { padding: 50 });
 			}
 		});
+
+		handleKeyDownRef = (e: KeyboardEvent) => {
+			if (e.key === 'Escape' && onClearHighlight) {
+				onClearHighlight();
+			}
+		};
+		document.addEventListener('keydown', handleKeyDownRef);
 
 		return () => {
 			if (map) {
@@ -274,6 +343,60 @@
 		}
 	});
 
+	$effect(() => {
+		if (!map || !mapLoaded) return;
+
+		if (!highlightedEvent) {
+			(map.getSource('event-marker') as maplibregl.GeoJSONSource).setData({
+				type: 'FeatureCollection',
+				features: []
+			});
+			return;
+		}
+
+		const stop = routeData.stops[highlightedEvent.stopIdx];
+		if (!stop) return;
+
+		const latLon = getStopPosition(stop.progress_cm, routeData);
+		if (!latLon) return;
+
+		const color = FSM_STATE_COLORS[highlightedEvent.state];
+
+		(map.getSource('event-marker') as maplibregl.GeoJSONSource).setData({
+			type: 'FeatureCollection',
+			features: [{
+				type: 'Feature',
+				properties: { color },
+				geometry: {
+					type: 'Point',
+					coordinates: [latLon[1], latLon[0]]
+				}
+			}]
+		});
+	});
+
+	export function panToStop(stopIdx: number) {
+		currentPanTarget = stopIdx;
+	}
+
+	$effect(() => {
+		if (!map || !mapLoaded || currentPanTarget === null) return;
+
+		const stop = routeData.stops[currentPanTarget];
+		if (!stop) return;
+
+		const latLon = getStopPosition(stop.progress_cm, routeData);
+		if (!latLon) return;
+
+		map.easeTo({
+			center: [latLon[1], latLon[0]],
+			zoom: 16,
+			duration: 500
+		});
+
+		currentPanTarget = null;
+	});
+
 	// Highlight selected stop
 	$effect(() => {
 		if (!map || !mapLoaded) return;
@@ -303,6 +426,10 @@
 		if (map) {
 			map.remove();
 			map = null;
+		}
+		if (handleKeyDownRef) {
+			document.removeEventListener('keydown', handleKeyDownRef);
+			handleKeyDownRef = null;
 		}
 	});
 </script>
