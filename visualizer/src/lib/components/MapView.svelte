@@ -12,18 +12,23 @@
 	// Constants for stop arrival zone circles (50m radius)
 	const EARTH_RADIUS = 6378137; // meters
 	const STOP_RADIUS_M = 50; // 50 meters - arrival detection threshold
+	const CIRCLE_SCALE_FACTOR = 1.6; // Empirical correction for MapLibre GL rendering
 
 	/**
-	 * Convert meters to pixels at a given latitude and zoom level
-	 * Used for MapLibre GL circle radius calculations
-	 * Based on Web Mercator projection: each tile is 256px, 2^zoom tiles wide
+	 * Convert meters to pixels for MapLibre GL circle radius
+	 *
+	 * Uses the standard formula: at zoom level z, 256 * 2^z pixels = Earth circumference
+	 * Circle radius scales by factor of 2 for each zoom level
 	 */
 	function metersToPixels(meters: number, lat: number, zoom: number): number {
+		// Base: at zoom 0, equator, 256 pixels = Earth circumference
+		// At latitude lat, adjust for cosine of latitude
 		const latRad = lat * Math.PI / 180;
-		// Meters per pixel = (Earth circumference * cos(lat)) / (256 * 2^zoom)
 		const earthCircumference = 2 * Math.PI * EARTH_RADIUS;
+		// At given zoom, pixels = 256 * 2^zoom
+		// Meters per pixel = (earthCircumference * cos(lat)) / (256 * 2^zoom)
 		const metersPerPixel = (earthCircumference * Math.cos(latRad)) / (256 * Math.pow(2, zoom));
-		return meters / metersPerPixel;
+		return (meters / metersPerPixel) * CIRCLE_SCALE_FACTOR;
 	}
 
 	/**
