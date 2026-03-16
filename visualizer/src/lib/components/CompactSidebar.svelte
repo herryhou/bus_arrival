@@ -317,6 +317,7 @@
 		border-radius: 2px;
 		background-color: rgba(0, 0, 0, 0.4);
 		flex-shrink: 0;
+		user-select: none;
 	}
 
 	.empty-events,
@@ -325,5 +326,6 @@
 		color: #555;
 		font-size: 0.7rem;
 		padding: 2rem;
+		user-select: none;
 	}
 </style>
