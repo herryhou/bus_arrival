@@ -127,15 +127,24 @@
 			// Stop events
 			record.stop_states.forEach((stop) => {
 				const lastState = lastStates.get(stop.stop_idx);
+
+				// Track if this stop has an arrival event in this record
+				const hasArrival = stop.just_arrived;
+
+				// Only log transition if NOT redundant with arrival
+				// (TRANSITION to AtStop is redundant when ARRIVAL also occurs)
 				if (lastState && lastState !== stop.fsm_state) {
-					log.push({
-						time: record.time,
-						type: 'TRANSITION',
-						message: `Stop ${stop.stop_idx}`,
-						stopIdx: stop.stop_idx,
-						state: stop.fsm_state,
-						index: index++
-					});
+					const isRedundant = hasArrival && stop.fsm_state === 'AtStop';
+					if (!isRedundant) {
+						log.push({
+							time: record.time,
+							type: 'TRANSITION',
+							message: `Stop ${stop.stop_idx}`,
+							stopIdx: stop.stop_idx,
+							state: stop.fsm_state,
+							index: index++
+						});
+					}
 				}
 				lastStates.set(stop.stop_idx, stop.fsm_state);
 

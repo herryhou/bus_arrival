@@ -9,9 +9,9 @@
 	import { getStopLatLon } from '$lib/parsers/routeData';
 	import type { FsmState } from '$lib/types';
 
-	// Constants for 50m circles
+	// Constants for stop accuracy circles (25m radius)
 	const EARTH_RADIUS = 6378137; // meters
-	const STOP_RADIUS_M = 50; // 50 meters
+	const STOP_RADIUS_M = 25; // 25 meters - bus stop accuracy zone
 
 	/**
 	 * Convert meters to pixels at a given latitude and zoom level
@@ -178,7 +178,7 @@
 			});
 
 			mapRef.addLayer({
-				id: 'stops-50m-circles',
+				id: 'stops-accuracy-circles',
 				type: 'circle',
 				source: stopsSourceId,
 				paint: {
@@ -397,7 +397,7 @@
 		currentPanTarget = null;
 	});
 
-	// Highlight selected stop
+	// Highlight selected stop and filter 50m circles
 	$effect(() => {
 		if (!map || !mapLoaded) return;
 
@@ -416,9 +416,13 @@
 				'#f59e0b',
 				'#ef4444'
 			]);
+			// Filter accuracy circles to only show selected stop
+			map.setFilter('stops-accuracy-circles', ['==', ['get', 'index'], selectedStop]);
 		} else {
 			map.setPaintProperty('stops-circle', 'circle-radius', 8);
 			map.setPaintProperty('stops-circle', 'circle-color', '#ef4444');
+			// Hide all accuracy circles when nothing selected
+			map.setFilter('stops-accuracy-circles', ['==', ['get', 'index'], -1]);
 		}
 	});
 
