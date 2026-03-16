@@ -82,6 +82,18 @@
 		}
 	}
 
+	// Helper: Format probability value (0-255) as padded string
+	function formatProb(value: number): string {
+		return Math.round(value).toString().padStart(3, '0');
+	}
+
+	// Helper: Get probability color
+	function getProbColor(prob: number): string {
+		if (prob >= 191) return '#22c55e';
+		if (prob >= 128) return '#f59e0b';
+		return '#ef4444';
+	}
+
 	// Derived: Events list
 	let events = $derived.by(() => {
 		const log: LogEvent[] = [];
@@ -143,6 +155,22 @@
 
 	// Derived: Event count
 	let eventCount = $derived.by(() => events.length);
+
+	// Derived: Current trace record
+	let currentRecord = $derived.by(() => {
+		if (traceData.length === 0) return null;
+		return traceData.reduce((prev, curr) =>
+			Math.abs(curr.time - currentTime) < Math.abs(prev.time - currentTime) ? curr : prev
+		);
+	});
+
+	// Derived: All stop states at current time
+	let allStopStates = $derived.by(() => {
+		return currentRecord?.stop_states ?? [];
+	});
+
+	// Derived: Stop count
+	let stopCount = $derived.by(() => allStopStates.length);
 </script>
 
 <div class="compact-sidebar">
