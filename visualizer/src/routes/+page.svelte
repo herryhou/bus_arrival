@@ -250,6 +250,17 @@
 						/>
 					{/if}
 				</section>
+
+				<!-- Linear Route Panel -->
+				<section class="panel linear-route-panel">
+					{#if routeData && currentRecord}
+						<LinearRouteWidget
+							{routeData}
+							busProgress={currentRecord.s_cm}
+							{highlightedEvent}
+						/>
+					{/if}
+				</section>
 			</main>
 
 			<!-- Bottom: Timeline & Playback -->
@@ -391,12 +402,18 @@
 		flex: 1;
 		display: grid;
 		grid-template-columns: 1.5fr 1.5fr 1fr;
+		grid-template-rows: 1fr auto;
 		gap: 1px;
 		background-color: #333;
 		min-height: 0;
 	}
 
 	.panel { background-color: #0a0a0a; overflow: hidden; position: relative; }
+
+	.linear-route-panel {
+		height: 80px;
+		min-height: 80px;
+	}
 
 	.lab-scroll {
 		height: 100%;
