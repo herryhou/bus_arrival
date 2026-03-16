@@ -32,7 +32,6 @@
 			case 'TRANSITION': return 'TRN';
 			case 'JUMP': return 'JMP';
 			case 'RECOVERY': return 'REC';
-			default: return type.substring(0, 3);
 		}
 	}
 
@@ -43,7 +42,6 @@
 			case 'TRANSITION': return '#eab308';
 			case 'JUMP': return '#ef4444';
 			case 'RECOVERY': return '#f59e0b';
-			default: return '#888';
 		}
 	}
 
@@ -412,11 +410,6 @@
 	}
 
 	/* Stop cards */
-	.stops-grid {
-		display: flex;
-		flex-direction: column;
-		gap: 0.4rem;
-	}
 
 	.stop-card-compact {
 		background-color: #111;
