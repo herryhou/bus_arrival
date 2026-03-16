@@ -58,15 +58,18 @@
 			switch (e.key) {
 				case ' ':
 					e.preventDefault();
+					e.stopPropagation();
 					// Toggle play/pause - call parent's callback
 					onTogglePlay();
 					break;
 				case 'ArrowLeft':
 					e.preventDefault();
+					e.stopPropagation();
 					handleSeek(Math.max(timeMin, currentTime - SEEK_AMOUNT));
 					break;
 				case 'ArrowRight':
 					e.preventDefault();
+					e.stopPropagation();
 					handleSeek(Math.min(timeMax, currentTime + SEEK_AMOUNT));
 					break;
 				case '?':

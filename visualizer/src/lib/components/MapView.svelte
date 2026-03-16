@@ -97,7 +97,8 @@
 				]
 			},
 			center: [initialLon, initialLat],
-			zoom: 13
+			zoom: 13,
+			keyboard: false // Disable built-in keyboard controls (app has its own)
 		});
 
 		// Add scale control

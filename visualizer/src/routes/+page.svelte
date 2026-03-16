@@ -261,6 +261,7 @@
 						<LinearRouteWidget
 							{routeData}
 							busProgress={currentRecord.s_cm}
+							busSpeed={currentRecord.v_cms}
 							{highlightedEvent}
 						/>
 					{/if}
@@ -386,8 +387,8 @@
 
 	.linear-route-panel {
 		grid-column: 1 / -1;
-		height: 140px;
-		min-height: 140px;
+		height: 200px;
+		min-height: 200px;
 	}
 
 	.sidebar-panel {
