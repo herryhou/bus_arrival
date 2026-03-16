@@ -675,6 +675,7 @@ Create the new Timeline component to replace TimelineCharts.
 
 ```svelte
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { TraceData } from '$lib/types';
 
 	interface Props {
@@ -873,8 +874,8 @@ Add after the `handleSeek` function:
 			switch (e.key) {
 				case ' ':
 					e.preventDefault();
-					// Toggle play/pause - emit event for parent to handle
-					dispatch('toggle-play', {});
+					// Toggle play/pause - call parent's callback
+					onTogglePlay();
 					break;
 				case 'ArrowLeft':
 					e.preventDefault();
@@ -886,7 +887,8 @@ Add after the `handleSeek` function:
 					break;
 				case '?':
 					e.preventDefault();
-					dispatch('show-help', {});
+					// Help modal - optional, can be added later
+					console.log('Keyboard shortcuts: Space=play/pause, Arrows=seek±5s');
 					break;
 			}
 		};
