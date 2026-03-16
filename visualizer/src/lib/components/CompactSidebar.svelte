@@ -57,8 +57,9 @@
 	}
 
 	// Helper: Check if event is at current time
+	const TIME_TOLERANCE_SECONDS = 1;
 	function isEventAtCurrentTime(eventTime: number): boolean {
-		return Math.abs(eventTime - currentTime) < 1;
+		return Math.abs(eventTime - currentTime) < TIME_TOLERANCE_SECONDS;
 	}
 
 	// Helper: Check if event is highlighted (clicked)
@@ -136,7 +137,8 @@
 			});
 		});
 
-		return log.sort((a, b) => a.time - b.time);
+		// traceData is already sorted by time, so events are in chronological order
+		return log;
 	});
 
 	// Derived: Event count
