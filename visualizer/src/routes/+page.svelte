@@ -386,8 +386,8 @@
 
 	.linear-route-panel {
 		grid-column: 1 / -1;
-		height: 80px;
-		min-height: 80px;
+		height: 120px;
+		min-height: 120px;
 	}
 
 	.sidebar-panel {
