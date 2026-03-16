@@ -1,11 +1,10 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
 	import type { RouteData, FsmState } from '$lib/types';
 	import { FSM_STATE_COLORS } from '$lib/constants/fsmColors';
 
 	interface Props {
 		routeData: RouteData;
-		busProgress: number; // Current s_cm from TraceRecord
+		busProgress: number;
 		highlightedEvent?: {
 			stopIdx: number;
 			state: FsmState;
@@ -14,47 +13,19 @@
 
 	let { routeData, busProgress: busProgressProp, highlightedEvent = null }: Props = $props();
 
-	// Make props reactive by storing them in local state
 	let busProgress = $derived.by(() => busProgressProp);
 
-	let canvas: HTMLCanvasElement;
-	let ctx: CanvasRenderingContext2D | null = null;
-	let resizeObserver: ResizeObserver | null = null;
-
-	// Canvas dimensions - increased height for split layout
-	let width = $state(0);
-	let height = $state(120); // Increased from 80 to 120
-
-	// Layout constants
-	const LAYOUT = {
-		topRowY: 35,        // Route line Y position
-		bottomRowY: 75,     // Scale line Y position
-		eventRowY: 100,     // Event info Y position
-		paddingX: 30,       // Horizontal padding
-		stopLabelOffset: 18 // Distance from line to stop number
-	};
-
-	// Calculate scale and max progress
+	// Calculate scale
 	const maxProgress = $derived.by(() => {
-		if (routeData.nodes.length === 0) return 100000; // 1km fallback
+		if (routeData.nodes.length === 0) return 100000;
 		return routeData.nodes[routeData.nodes.length - 1].cum_dist_cm;
 	});
 
-	const scale = $derived.by(() => {
-		const drawWidth = width - LAYOUT.paddingX * 2;
-		return maxProgress > 0 ? drawWidth / maxProgress : 1;
-	});
-
-	// Convert progress (cm) to canvas X coordinate
-	function progressToX(progressCm: number): number {
-		return LAYOUT.paddingX + Math.min(progressCm, maxProgress) * scale;
-	}
-
-	// Find current segment based on bus progress
-	function findSegment(progressCm: number): { start: number; end: number } | null {
+	// Find segment for bus highlight
+	const currentSegment = $derived.by(() => {
 		if (routeData.nodes.length < 2) return null;
-		if (progressCm < routeData.nodes[0].cum_dist_cm) return null;
-		if (progressCm >= routeData.nodes[routeData.nodes.length - 1].cum_dist_cm) {
+		if (busProgress < routeData.nodes[0].cum_dist_cm) return null;
+		if (busProgress >= routeData.nodes[routeData.nodes.length - 1].cum_dist_cm) {
 			const lastIdx = routeData.nodes.length - 2;
 			return {
 				start: routeData.nodes[lastIdx].cum_dist_cm,
@@ -65,223 +36,265 @@
 		for (let i = 0; i < routeData.nodes.length - 1; i++) {
 			const node = routeData.nodes[i];
 			const nextNode = routeData.nodes[i + 1];
-			if (progressCm >= node.cum_dist_cm && progressCm < nextNode.cum_dist_cm) {
+			if (busProgress >= node.cum_dist_cm && busProgress < nextNode.cum_dist_cm) {
 				return { start: node.cum_dist_cm, end: nextNode.cum_dist_cm };
 			}
 		}
 		return null;
-	}
-
-	// Render function
-	function render() {
-		if (!ctx || width === 0) return;
-
-		const context = ctx;
-
-		// Clear canvas
-		context.clearRect(0, 0, width, height);
-
-		// ========== TOP ROW: Route line with stops and bus ==========
-		const routeY = LAYOUT.topRowY;
-
-		// Draw base route line
-		context.strokeStyle = '#4a5568';
-		context.lineWidth = 3;
-		context.lineCap = 'round';
-		context.beginPath();
-		context.moveTo(LAYOUT.paddingX, routeY);
-		context.lineTo(width - LAYOUT.paddingX, routeY);
-		context.stroke();
-
-		// Draw current segment highlight (blue glow)
-		if (busProgress > 0) {
-			const segment = findSegment(busProgress);
-			if (segment) {
-				const x1 = progressToX(segment.start);
-				const x2 = progressToX(segment.end);
-
-				// Glow effect
-				context.shadowColor = '#3b82f6';
-				context.shadowBlur = 10;
-				context.strokeStyle = 'rgba(59, 130, 246, 0.8)';
-				context.lineWidth = 4;
-				context.beginPath();
-				context.moveTo(x1, routeY);
-				context.lineTo(x2, routeY);
-				context.stroke();
-				context.shadowBlur = 0; // Reset shadow
-			}
-		}
-
-		// Draw stop indicators
-		routeData.stops.forEach((stop, index) => {
-			const x = progressToX(stop.progress_cm);
-
-			// Vertical tick mark
-			context.strokeStyle = '#ef4444';
-			context.lineWidth = 2;
-			context.beginPath();
-			context.moveTo(x, routeY - 5);
-			context.lineTo(x, routeY + 5);
-			context.stroke();
-
-			// Stop number label - larger, clearer
-			context.fillStyle = '#fff';
-			context.font = 'bold 13px JetBrains Mono, Monaco, monospace';
-			context.textAlign = 'center';
-			context.textBaseline = 'bottom';
-			context.fillText(`#${index}`, x, routeY - LAYOUT.stopLabelOffset);
-		});
-
-		// Draw bus position (emoji)
-		const busX = progressToX(busProgress);
-		context.font = '18px serif';
-		context.textAlign = 'center';
-		context.textBaseline = 'middle';
-		context.fillText('🚌', busX, routeY);
-
-		// ========== BOTTOM ROW: Distance scale ==========
-		const scaleY = LAYOUT.bottomRowY;
-
-		// Draw scale line
-		context.strokeStyle = '#718096';
-		context.lineWidth = 2;
-		context.beginPath();
-		context.moveTo(LAYOUT.paddingX, scaleY);
-		context.lineTo(width - LAYOUT.paddingX, scaleY);
-		context.stroke();
-
-		// Draw scale ticks (every 500m for cleaner look)
-		const scaleIntervalCm = 50000; // 500m
-		for (let d = 0; d <= maxProgress; d += scaleIntervalCm) {
-			const x = progressToX(d);
-
-			// Tick mark
-			context.strokeStyle = '#718096';
-			context.lineWidth = 1;
-			context.beginPath();
-			context.moveTo(x, scaleY - 4);
-			context.lineTo(x, scaleY + 4);
-			context.stroke();
-
-			// Distance label - larger font
-			context.fillStyle = '#a0aec0';
-			context.font = '12px JetBrains Mono, Monaco, monospace';
-			context.textAlign = 'center';
-			context.textBaseline = 'top';
-			const km = (d / 100000).toFixed(1);
-			context.fillText(`${km}km`, x, scaleY + 8);
-		}
-
-		// ========== EVENT ROW: Highlighted event info ==========
-		if (highlightedEvent) {
-			const stop = routeData.stops[highlightedEvent.stopIdx];
-			if (stop) {
-				const eventY = LAYOUT.eventRowY;
-				const color = FSM_STATE_COLORS[highlightedEvent.state];
-
-				// Draw connecting line from stop to event text
-				const stopX = progressToX(stop.progress_cm);
-				context.strokeStyle = color;
-				context.lineWidth = 1;
-				context.setLineDash([4, 4]);
-				context.beginPath();
-				context.moveTo(stopX, routeY + LAYOUT.stopLabelOffset);
-				context.lineTo(stopX, eventY - 5);
-				context.stroke();
-				context.setLineDash([]); // Reset dash
-
-				// Event indicator circle on route
-				context.fillStyle = color;
-				context.beginPath();
-				context.arc(stopX, routeY, 6, 0, Math.PI * 2);
-				context.fill();
-				context.strokeStyle = '#fff';
-				context.lineWidth = 2;
-				context.stroke();
-
-				// Event info text
-				context.textAlign = 'center';
-				context.textBaseline = 'top';
-
-				// Stop number in color
-				context.font = 'bold 14px JetBrains Mono, Monaco, monospace';
-				context.fillStyle = color;
-				context.fillText(`Stop #${highlightedEvent.stopIdx}`, stopX, eventY);
-
-				// State below
-				context.font = '12px JetBrains Mono, Monaco, monospace';
-				context.fillStyle = '#e2e8f0';
-				context.fillText(`→ ${highlightedEvent.state}`, stopX, eventY + 16);
-			}
-		}
-	}
-
-	// Re-render when dependencies change
-	$effect(() => {
-		busProgress;
-		routeData;
-		highlightedEvent;
-		render();
 	});
 
-	// Handle canvas resize
-	onMount(() => {
-		ctx = canvas.getContext('2d');
-		if (!ctx) return;
-
-		// Initial size
-		updateSize();
-
-		// Observe resize
-		resizeObserver = new ResizeObserver(() => {
-			updateSize();
-		});
-		resizeObserver.observe(canvas);
-
-		return () => {
-			resizeObserver?.disconnect();
-		};
-	});
-
-	function updateSize() {
-		const rect = canvas.getBoundingClientRect();
-		width = rect.width;
-		height = rect.height;
-
-		// Update canvas resolution for high-DPI displays
-		const dpr = window.devicePixelRatio || 1;
-		canvas.width = rect.width * dpr;
-		canvas.height = rect.height * dpr;
-
-		if (ctx) {
-			ctx.scale(dpr, dpr);
-		}
-
-		render();
+	function getProgressPercent(progressCm: number): number {
+		return (progressCm / maxProgress) * 100;
 	}
 
-	onDestroy(() => {
-		resizeObserver?.disconnect();
+	// Generate scale markers
+	const scaleMarkers = $derived.by(() => {
+		const markers: { percent: number; label: string }[] = [];
+		const intervalCm = 50000; // 500m
+		for (let d = 0; d <= maxProgress; d += intervalCm) {
+			markers.push({
+				percent: getProgressPercent(d),
+				label: `${(d / 100000).toFixed(1)}km`
+			});
+		}
+		return markers;
 	});
 </script>
 
 <div class="linear-route-widget">
-	<canvas bind:this={canvas}></canvas>
+	<!-- Top row: Route line with stops and bus -->
+	<div class="route-row">
+		<div class="route-line-container">
+			<!-- Base line -->
+			<div class="route-line-base"></div>
+
+			<!-- Current segment highlight -->
+			{#if currentSegment}
+				<div
+					class="segment-highlight"
+					style="left: {getProgressPercent(currentSegment.start)}%; right: {100 - getProgressPercent(currentSegment.end)}%;"
+				></div>
+			{/if}
+
+			<!-- Stops -->
+			{#each routeData.stops as stop (stop.progress_cm)}
+				{@const percent = getProgressPercent(stop.progress_cm)}
+				{@const isHighlighted = highlightedEvent?.stopIdx === stop.index}
+				<div
+					class="stop-marker"
+					style="left: {percent}%;"
+					class:highlighted={isHighlighted}
+				>
+					<div class="stop-label">#{stop.index}</div>
+					<div class="stop-tick"></div>
+					{#if isHighlighted}
+						<div class="highlight-ring" style="background-color: {FSM_STATE_COLORS[highlightedEvent!.state]};"></div>
+					{/if}
+				</div>
+			{/each}
+
+			<!-- Bus position -->
+			<div class="bus-marker" style="left: {getProgressPercent(busProgress)}%;">
+				<div class="bus-emoji">🚌</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Middle row: Distance scale -->
+	<div class="scale-row">
+		{#each scaleMarkers as marker}
+			<div class="scale-marker" style="left: {marker.percent}%;">
+				<div class="scale-tick"></div>
+				<div class="scale-label">{marker.label}</div>
+			</div>
+		{/each}
+	</div>
+
+	<!-- Bottom row: Event info -->
+	{#if highlightedEvent}
+		{@const stop = routeData.stops[highlightedEvent.stopIdx]}
+		{#if stop}
+			{@const percent = getProgressPercent(stop.progress_cm)}
+			<div class="event-row" style="--event-color: {FSM_STATE_COLORS[highlightedEvent.state]};">
+				<div class="event-line" style="left: {percent}%;"></div>
+				<div class="event-info" style="left: {percent}%;">
+					<span class="event-stop">Stop #{highlightedEvent.stopIdx}</span>
+					<span class="event-arrow">→</span>
+					<span class="event-state">{highlightedEvent.state}</span>
+				</div>
+			</div>
+		{/if}
+	{/if}
 </div>
 
 <style>
 	.linear-route-widget {
 		width: 100%;
 		height: 100%;
+		padding: 1rem 1.5rem;
 		display: flex;
-		align-items: center;
-		justify-content: center;
+		flex-direction: column;
+		gap: 1.25rem;
+		background-color: #0a0a0a;
 	}
 
-	canvas {
+	/* Route row */
+	.route-row {
+		position: relative;
+		height: 40px;
+	}
+
+	.route-line-container {
+		position: relative;
 		width: 100%;
 		height: 100%;
-		display: block;
+	}
+
+	.route-line-base {
+		position: absolute;
+		top: 50%;
+		left: 0;
+		right: 0;
+		height: 3px;
+		background-color: #4a5568;
+		border-radius: 2px;
+		transform: translateY(-50%);
+	}
+
+	.segment-highlight {
+		position: absolute;
+		top: 50%;
+		height: 5px;
+		background-color: #3b82f6;
+		border-radius: 3px;
+		transform: translateY(-50%);
+		box-shadow: 0 0 10px rgba(59, 130, 246, 0.6);
+		z-index: 1;
+	}
+
+	/* Stop markers */
+	.stop-marker {
+		position: absolute;
+		top: 50%;
+		transform: translate(-50%, -50%);
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		pointer-events: none;
+	}
+
+	.stop-label {
+		font-size: 15px;
+		font-weight: bold;
+		font-family: 'JetBrains Mono', 'Monaco', monospace;
+		color: #ffffff;
+		margin-bottom: 8px;
+	}
+
+	.stop-tick {
+		width: 2px;
+		height: 14px;
+		background-color: #ef4444;
+	}
+
+	.highlight-ring {
+		position: absolute;
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		top: 50%;
+		transform: translateY(-50%);
+		border: 2px solid #ffffff;
+		z-index: 2;
+	}
+
+	/* Bus marker */
+	.bus-marker {
+		position: absolute;
+		top: 50%;
+		transform: translate(-50%, -50%);
+		z-index: 10;
+	}
+
+	.bus-emoji {
+		font-size: 20px;
+		line-height: 1;
+	}
+
+	/* Scale row */
+	.scale-row {
+		position: relative;
+		height: 30px;
+		border-top: 2px solid #718096;
+	}
+
+	.scale-marker {
+		position: absolute;
+		top: 0;
+		transform: translateX(-50%);
+	}
+
+	.scale-tick {
+		width: 2px;
+		height: 8px;
+		background-color: #718096;
+		margin: 0 auto;
+	}
+
+	.scale-label {
+		margin-top: 6px;
+		font-size: 13px;
+		font-family: 'JetBrains Mono', 'Monaco', monospace;
+		color: #cbd5e0;
+		text-align: center;
+		white-space: nowrap;
+	}
+
+	/* Event row */
+	.event-row {
+		position: relative;
+		height: 28px;
+		--event-color: #3b82f6;
+	}
+
+	.event-line {
+		position: absolute;
+		top: 0;
+		width: 2px;
+		height: 100%;
+		background-image: linear-gradient(to bottom, var(--event-color) 50%, transparent 50%);
+		background-size: 2px 8px;
+		background-repeat: repeat-y;
+		transform: translateX(-50%);
+		opacity: 0.7;
+	}
+
+	.event-info {
+		position: absolute;
+		top: 50%;
+		transform: translate(-50%, -50%);
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		white-space: nowrap;
+	}
+
+	.event-stop {
+		font-size: 15px;
+		font-weight: bold;
+		font-family: 'JetBrains Mono', 'Monaco', monospace;
+		color: var(--event-color);
+	}
+
+	.event-arrow {
+		font-size: 14px;
+		color: #a0aec0;
+	}
+
+	.event-state {
+		font-size: 14px;
+		font-family: 'JetBrains Mono', 'Monaco', monospace;
+		color: #e2e8f0;
+		font-weight: 500;
 	}
 </style>
