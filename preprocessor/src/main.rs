@@ -15,19 +15,27 @@ mod pack;
 mod simplify;
 mod stops;
 
-use stops::{validate_stop_sequence, project_stops_validated};
+use stops::{validate_stop_sequence, project_stops_validated, project_stops};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 4 {
-        eprintln!("Usage: preprocessor <route.json> <stops.json> <route_data.bin>");
+    // Check for --skip-validation flag (for loop routes with legitimate backtracking)
+    let skip_validation = args.iter().any(|a| a == "--skip-validation");
+
+    let expected_args = if skip_validation { 5 } else { 4 };
+    if args.len() != expected_args {
+        eprintln!("Usage: preprocessor [--skip-validation] <route.json> <stops.json> <route_data.bin>");
+        eprintln!("");
+        eprintln!("Options:");
+        eprintln!("  --skip-validation    Skip monotonicity validation (for loop routes)");
+        eprintln!("                       Use only when route has legitimate backtracking");
         process::exit(1);
     }
 
-    let route_json_path = &args[1];
-    let stops_json_path = &args[2];
-    let output_bin_path = &args[3];
+    let route_json_path = if skip_validation { &args[2] } else { &args[1] };
+    let stops_json_path = if skip_validation { &args[3] } else { &args[2] };
+    let output_bin_path = if skip_validation { &args[4] } else { &args[3] };
 
     println!("========================================");
     println!("Bus Arrival Preprocessor - v8.3 Pipeline");
@@ -119,71 +127,77 @@ fn main() {
     let route_nodes = linearize::linearize_route(&simplified_pts_cm);
     println!("Built route graph with {} nodes", route_nodes.len());
 
-    // 5. Build Spatial Grid Index (100m cells)
-    let grid_size_cm = 10000; // 100m
-    let grid = grid::build_grid(&route_nodes, grid_size_cm);
-    println!("Built {}x{} spatial grid ({} cells)", grid.cols, grid.rows, grid.cells.len());
-
     // 6. Build Spatial Grid Index (100m cells)
     let grid_size_cm = 10000; // 100m
     let mut grid = grid::build_grid(&route_nodes, grid_size_cm);
     println!("Built {}x{} spatial grid ({} cells)", grid.cols, grid.rows, grid.cells.len());
 
-    // 7. Stop projection with validation and retry loop
+    // 7. Stop projection with validation (or skip for loop routes)
     let stop_pts_cm: Vec<(i64, i64)> = stops_input.stops.iter().map(|s| {
         let (x, y) = coord::latlon_to_cm_relative(s.lat, s.lon, lat_avg);
         (x as i64, y as i64)
     }).collect();
 
-    let mut epsilon_current = 700.0;
-    let mut simplified_pts_cm_current = simplified_pts_cm.clone();
-    let max_retries = 3;
-    let mut retry_count = 0;
-    let mut route_nodes = route_nodes.clone(); // Mutable for retry loop
+    let projected_stops = if skip_validation {
+        // Skip validation - use old projection method for loop routes
+        println!("[VALIDATION SKIPPED --skip-validation flag]");
+        println!("  Using legacy projection (stops will be sorted by progress)");
+        println!("  WARNING: Stop order may not match input order for loop routes");
+        project_stops(&stop_pts_cm, &route_nodes)
+    } else {
+        // Normal path with validation and retry loop
+        let mut epsilon_current = 700.0;
+        let mut simplified_pts_cm_current = simplified_pts_cm.clone();
+        let max_retries = 3;
+        let mut retry_count = 0;
+        let mut route_nodes = route_nodes.clone(); // Mutable for retry loop
 
-    let projected_stops = loop {
-        let validation = validate_stop_sequence(&stop_pts_cm, &route_nodes, &grid);
+        loop {
+            let validation = validate_stop_sequence(&stop_pts_cm, &route_nodes, &grid);
 
-        match &validation.reversal_info {
-            None => {
-                // Success!
-                println!("[VALIDATION PASS]");
-                for (i, progress) in validation.progress_values.iter().enumerate() {
-                    println!("  Stop {:03}: progress={} cm", i + 1, progress);
+            match &validation.reversal_info {
+                None => {
+                    // Success!
+                    println!("[VALIDATION PASS]");
+                    for (i, progress) in validation.progress_values.iter().enumerate() {
+                        println!("  Stop {:03}: progress={} cm", i + 1, progress);
+                    }
+                    println!("✓ All {} stops validated - monotonic sequence confirmed", validation.progress_values.len());
+
+                    let stops = project_stops_validated(&validation.progress_values, &stops_input);
+                    break stops;
                 }
-                println!("✓ All {} stops validated - monotonic sequence confirmed", validation.progress_values.len());
+                Some(info) => {
+                    retry_count += 1;
+                    let next_epsilon = if retry_count >= max_retries || epsilon_current / 2.0 < 100.0 {
+                        eprintln!("ERROR: Reversal persists after {} attempts", retry_count);
+                        eprintln!("  At stop {}: {} < {} cm",
+                                 info.stop_index, info.problem_progress, info.previous_progress);
+                        eprintln!("  This usually indicates:");
+                        eprintln!("    1. Input stop order does not match route geometry");
+                        eprintln!("    2. Route has self-intersection or loop-back (common in loop routes)");
+                        eprintln!("");
+                        eprintln!("  For loop routes with legitimate backtracking, use:");
+                        eprintln!("    preprocessor --skip-validation <route.json> <stops.json> <output.bin>");
+                        process::exit(1);
+                    } else {
+                        epsilon_current / 2.0
+                    };
 
-                let stops = project_stops_validated(&validation.progress_values, &stops_input);
-                break stops;
-            }
-            Some(info) => {
-                retry_count += 1;
-                let next_epsilon = if retry_count >= max_retries || epsilon_current / 2.0 < 100.0 {
-                    eprintln!("ERROR: Reversal persists after {} attempts", retry_count);
-                    eprintln!("  At stop {}: {} < {} cm",
+                    println!("! Reversal at stop {}: {} < {} cm",
                              info.stop_index, info.problem_progress, info.previous_progress);
-                    eprintln!("  This usually indicates:");
-                    eprintln!("    1. Input stop order does not match route geometry");
-                    eprintln!("    2. Route has self-intersection or loop-back");
-                    eprintln!("  Please verify stops.json matches the actual bus route direction");
-                    process::exit(1);
-                } else {
-                    epsilon_current / 2.0
-                };
+                    println!("  Retrying with ε={} cm (attempt {}/{})",
+                             next_epsilon, retry_count, max_retries);
 
-                println!("! Reversal at stop {}: {} < {} cm",
-                         info.stop_index, info.problem_progress, info.previous_progress);
-                println!("  Retrying with ε={} cm (attempt {}/{})",
-                         next_epsilon, retry_count, max_retries);
-
-                epsilon_current = next_epsilon;
-                simplified_pts_cm_current = simplify::simplify_and_interpolate(
-                    &route_pts_cm,
-                    epsilon_current,
-                    &protected_indices,
-                );
-                route_nodes = linearize::linearize_route(&simplified_pts_cm_current);
-                grid = grid::build_grid(&route_nodes, grid_size_cm);
+                    epsilon_current = next_epsilon;
+                    simplified_pts_cm_current = simplify::simplify_and_interpolate(
+                        &route_pts_cm,
+                        epsilon_current,
+                        &protected_indices,
+                    );
+                    route_nodes = linearize::linearize_route(&simplified_pts_cm_current);
+                    grid = grid::build_grid(&route_nodes, grid_size_cm);
+                }
             }
         }
     };
