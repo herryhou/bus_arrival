@@ -4,7 +4,7 @@
 // Ensures corridors don't overlap with minimum separation constraints.
 
 pub mod validation;
-pub use validation::{ValidationResult, ReversalInfo};
+pub use validation::{ValidationResult, ReversalInfo, validate_stop_sequence};
 
 use shared::{RouteNode, Stop};
 
