@@ -4,8 +4,10 @@
 // - Segment vectors (dx_cm, dy_cm)
 // - Squared and actual segment lengths
 // - Cumulative distances along route
-// - Line equation coefficients (ax + by + c = 0)
 // - Heading directions in centidegrees
+//
+// Note: Line equation coefficients (ax + by + c = 0) were removed in v8.2
+// as runtime uses dot-product projection instead. This saves 16 bytes per node.
 
 use shared::RouteNode;
 
@@ -20,11 +22,7 @@ use shared::RouteNode;
 /// 2. Compute squared length: len2 = dx² + dy² (as i64 to prevent overflow)
 /// 3. Compute actual length: seg_len = sqrt(len2) (for offline use)
 /// 4. Update cumulative distance: cum_dist[i+1] = cum_dist[i] + seg_len
-/// 5. Compute line coefficients:
-///    - line_a = -dy
-///    - line_b = dx
-///    - line_c = -(line_a × x[i] + line_b × y[i]) (as i64)
-/// 6. Compute heading: heading = atan2(dy, dx) × 100 (in 0.01° units)
+/// 5. Compute heading: heading = atan2(dx, dy) × 100 (in 0.01° units)
 ///
 /// # Arguments
 /// * `nodes_cm` - Slice of (x, y) coordinates in centimeters
@@ -42,13 +40,10 @@ pub fn linearize_route(nodes_cm: &[(i64, i64)]) -> Vec<RouteNode> {
             x_cm: nodes_cm[0].0 as i32,
             y_cm: nodes_cm[0].1 as i32,
             len2_cm2: 0,
-            line_c: 0,
             cum_dist_cm: 0,
             dx_cm: 0,
             dy_cm: 0,
             seg_len_cm: 0,
-            line_a: 0,
-            line_b: 0,
             heading_cdeg: 0,
             _pad: 0,
         }];
@@ -66,13 +61,10 @@ pub fn linearize_route(nodes_cm: &[(i64, i64)]) -> Vec<RouteNode> {
                 x_cm: x0 as i32,
                 y_cm: y0 as i32,
                 len2_cm2: 0,
-                line_c: 0,
                 cum_dist_cm,
                 dx_cm: 0,
                 dy_cm: 0,
                 seg_len_cm: 0,
-                line_a: 0,
-                line_b: 0,
                 heading_cdeg: 0,
                 _pad: 0,
             });
@@ -91,12 +83,6 @@ pub fn linearize_route(nodes_cm: &[(i64, i64)]) -> Vec<RouteNode> {
         // Actual length (sqrt for offline use)
         let seg_len_cm = (len2_cm2 as f64).sqrt().round() as i32;
 
-        // Line coefficients: ax + by + c = 0
-        // where a = -dy, b = dx, c = -(a*x0 + b*y0)
-        let line_a = -dy_cm;
-        let line_b = dx_cm;
-        let line_c = -((line_a as i64 * x0) + (line_b as i64 * y0));
-
         // Heading in centidegrees (0.01° units)
         // Navigation bearing: 0° = North, 90° = East, measured clockwise
         // Formula: atan2(dx, dy) where dx = eastward, dy = northward
@@ -107,13 +93,10 @@ pub fn linearize_route(nodes_cm: &[(i64, i64)]) -> Vec<RouteNode> {
             x_cm: x0 as i32,
             y_cm: y0 as i32,
             len2_cm2,
-            line_c,
             cum_dist_cm,
             dx_cm,
             dy_cm,
             seg_len_cm,
-            line_a,
-            line_b,
             heading_cdeg,
             _pad: 0,
         });
@@ -131,6 +114,6 @@ mod tests {
 
     #[test]
     fn test_route_node_size() {
-        assert_eq!(std::mem::size_of::<RouteNode>(), 52);
+        assert_eq!(std::mem::size_of::<RouteNode>(), 36);
     }
 }

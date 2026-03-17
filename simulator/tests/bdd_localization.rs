@@ -27,11 +27,8 @@ fn setup_test_route_data() -> (Vec<u8>, i32, i32) {
     let start_y = (y_abs - y0_abs).round() as i32;
 
     // Segment 0: 100m North
-    let line_a = -10000;
-    let line_b = 0;
     nodes.push(RouteNode {
         len2_cm2: 10000 * 10000,
-        line_c: -((line_a as i64 * start_x as i64) + (line_b as i64 * start_y as i64)),
         heading_cdeg: 0,
         _pad: 0,
         x_cm: start_x,
@@ -40,14 +37,11 @@ fn setup_test_route_data() -> (Vec<u8>, i32, i32) {
         dx_cm: 0,
         dy_cm: 10000,
         seg_len_cm: 10000,
-        line_a,
-        line_b,
     });
 
     // End node
     nodes.push(RouteNode {
         len2_cm2: 0,
-        line_c: 0,
         heading_cdeg: 0,
         _pad: 0,
         x_cm: start_x,
@@ -56,8 +50,6 @@ fn setup_test_route_data() -> (Vec<u8>, i32, i32) {
         dx_cm: 0,
         dy_cm: 0,
         seg_len_cm: 0,
-        line_a: 0,
-        line_b: 0,
     });
 
     let grid = shared::SpatialGrid {

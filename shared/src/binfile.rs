@@ -11,7 +11,8 @@ use core::mem::size_of;
 pub const MAGIC: u32 = 0x42555341;
 
 /// Format version
-pub const VERSION: u16 = 1;
+/// v2: Removed line_a, line_b, line_c from RouteNode (52 → 36 bytes)
+pub const VERSION: u16 = 2;
 
 /// Error types for the bus arrival binary file handling
 #[derive(Debug, PartialEq)]

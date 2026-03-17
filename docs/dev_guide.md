@@ -306,16 +306,26 @@ pub struct StopState {
 ### 模組 ④ — 方向約束地圖匹配
 **檔案：** `firmware/src/pipeline/map_match.rs`
 
-距離計算（無 `sqrt`）：
+距離計算（無 `sqrt`）— 採用點積投影法：
 
 ```rust
-// d² = (A·Gx + B·Gy + C)² / len2_cm2
-// A、B、C、len2 均已預算於 RouteNode，runtime 僅需一次 i64 乘法與除法
-let numerator: i64 = (node.line_a as i64 * gx as i64
-                    + node.line_b as i64 * gy as i64
-                    + node.line_c) ;
-let d2 = (numerator * numerator) / node.len2_cm2;
+// 計算投影參數 t = dot(G - P[i], segment) / len2
+let dx = gps_x - node.x_cm;
+let dy = gps_y - node.y_cm;
+let t_num = (dx as i64 * node.dx_cm as i64) + (dy as i64 * node.dy_cm as i64);
+
+// 限制投影至路段範圍 [0, len2]
+let t = if t_num < 0 { 0 } else if t_num > node.len2_cm2 { node.len2_cm2 } else { t_num };
+
+// 計算投影點
+let px = node.x_cm + ((t * node.dx_cm as i64 / node.len2_cm2) as i32);
+let py = node.y_cm + ((t * node.dy_cm as i64 / node.len2_cm2) as i32);
+
+// 距離平方
+let d2 = ((gps_x - px) as i64).pow(2) + ((gps_y - py) as i64).pow(2);
 ```
+
+**備註：** `dx_cm`、`dy_cm`、`len2_cm2` 已預算於 RouteNode，runtime 僅需整數運算。
 
 Heading Ramp（漸進加權，非二元切換）：
 

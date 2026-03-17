@@ -40,36 +40,36 @@ pub type Prob8 = u8;
 /// Prevents overflow in dot products: (2×10⁶)² ≈ 4×10¹² < i64::MAX.
 pub type Dist2 = i64;
 
-/// Route node with ALL precomputed segment coefficients.
+/// Route node with precomputed segment coefficients for runtime GPS matching.
 ///
 /// Field ordering: i64 fields placed first to satisfy 8-byte alignment
 /// without compiler-inserted padding on ARM Cortex-M33.
-/// Total size = 52 bytes (verified at compile time).
+/// Total size = 36 bytes (verified at compile time).
 ///
 /// # Layout
 /// ```text
 /// offset  0: len2_cm2     i64   8 bytes  (|P[i+1]-P[i]|², cm²)
-/// offset  8: line_c       i64   8 bytes  (= -(A·x₀ + B·y₀))
-/// offset 16: heading_cdeg i16   2 bytes
-/// offset 18: _pad         i16   2 bytes
-/// offset 20: x_cm         i32   4 bytes
-/// offset 24: y_cm         i32   4 bytes
-/// offset 28: cum_dist_cm  i32   4 bytes
-/// offset 32: dx_cm        i32   4 bytes  (segment vector x)
-/// offset 36: dy_cm        i32   4 bytes  (segment vector y)
-/// offset 40: seg_len_cm   i32   4 bytes  (offline sqrt, not used runtime)
-/// offset 44: line_a       i32   4 bytes  (= -dy)
-/// offset 48: line_b       i32   4 bytes  (= dx)
-/// total: 52 bytes (no padding gaps)
+/// offset  8: heading_cdeg i16   2 bytes
+/// offset 10: _pad         i16   2 bytes  (alignment padding)
+/// offset 12: x_cm         i32   4 bytes
+/// offset 16: y_cm         i32   4 bytes
+/// offset 20: cum_dist_cm  i32   4 bytes
+/// offset 24: dx_cm        i32   4 bytes  (segment vector x)
+/// offset 28: dy_cm        i32   4 bytes  (segment vector y)
+/// offset 32: seg_len_cm   i32   4 bytes  (offline sqrt, not used runtime)
+/// total: 36 bytes (no padding gaps)
 /// ```
+///
+/// # Note on Removed Fields
+/// The `line_a`, `line_b`, `line_c` coefficients were removed in v8.2
+/// because runtime uses dot-product projection instead of line equation
+/// distance calculation. This saves 16 bytes per node (~9.6 KB for 600 nodes).
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct RouteNode {
     // ── i64 fields first (8-byte aligned) ──────────────────────────
     /// Squared segment length: |P[i+1] - P[i]|² in cm²
     pub len2_cm2: Dist2,
-    /// Line constant: -(line_a × x₀ + line_b × y₀)
-    pub line_c: Dist2,
 
     // ── i16 fields (2-byte aligned) ────────────────────────────────
     /// Segment heading in 0.01° (e.g., 9000 = 90°)
@@ -90,10 +90,6 @@ pub struct RouteNode {
     pub dy_cm: DistCm,
     /// Segment length in cm (sqrt computed offline only)
     pub seg_len_cm: DistCm,
-    /// Line coefficient A: = -dy_cm (for distance calculation)
-    pub line_a: DistCm,
-    /// Line coefficient B: = dx_cm (for distance calculation)
-    pub line_b: DistCm,
 }
 
 
@@ -284,5 +280,5 @@ pub struct ArrivalEvent {
 }
 
 // Compile-time assertion — fails if field reordering changes size
-const _: () = assert!(core::mem::size_of::<RouteNode>() == 52);
+const _: () = assert!(core::mem::size_of::<RouteNode>() == 36);
 const _: () = assert!(core::mem::size_of::<Stop>() == 12);

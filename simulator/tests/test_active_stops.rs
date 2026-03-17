@@ -14,11 +14,8 @@ fn setup_test_route_with_stop() -> (Vec<u8>, i32, i32) {
 
     // Create a 200m route with a stop at 100m
     // Segment 0: 200m North
-    let line_a = -20000;
-    let line_b = 0;
     nodes.push(RouteNode {
         len2_cm2: 20000 * 20000,
-        line_c: -((line_a as i64 * start_x as i64) + (line_b as i64 * start_y as i64)),
         heading_cdeg: 0,
         _pad: 0,
         x_cm: start_x,
@@ -27,14 +24,11 @@ fn setup_test_route_with_stop() -> (Vec<u8>, i32, i32) {
         dx_cm: 0,
         dy_cm: 20000,
         seg_len_cm: 20000,
-        line_a,
-        line_b,
     });
 
     // End node
     nodes.push(RouteNode {
         len2_cm2: 0,
-        line_c: 0,
         heading_cdeg: 0,
         _pad: 0,
         x_cm: start_x,
@@ -43,15 +37,12 @@ fn setup_test_route_with_stop() -> (Vec<u8>, i32, i32) {
         dx_cm: 0,
         dy_cm: 0,
         seg_len_cm: 0,
-        line_a: 0,
-        line_b: 0,
     });
 
 
     // End node
     nodes.push(RouteNode {
         len2_cm2: 0,
-        line_c: 0,
         heading_cdeg: 0,
         _pad: 0,
         x_cm: 0,
@@ -60,8 +51,6 @@ fn setup_test_route_with_stop() -> (Vec<u8>, i32, i32) {
         dx_cm: 0,
         dy_cm: 0,
         seg_len_cm: 0,
-        line_a: 0,
-        line_b: 0,
     });
 
     // Create a stop at 100m (progress_cm = 10000)
@@ -199,11 +188,8 @@ fn test_active_stops_with_multiple_stops() {
 
     // Create a 300m route with stops at 100m, 200m
     // Segment 0: 200m North
-    let line_a = -20000;
-    let line_b = 0;
     nodes.push(RouteNode {
         len2_cm2: 20000 * 20000,
-        line_c: -((line_a as i64 * start_x as i64) + (line_b as i64 * start_y as i64)),
         heading_cdeg: 0,
         _pad: 0,
         x_cm: start_x,
@@ -212,14 +198,11 @@ fn test_active_stops_with_multiple_stops() {
         dx_cm: 0,
         dy_cm: 20000,
         seg_len_cm: 20000,
-        line_a,
-        line_b,
     });
 
     // End node
     nodes.push(RouteNode {
         len2_cm2: 0,
-        line_c: 0,
         heading_cdeg: 0,
         _pad: 0,
         x_cm: start_x,
@@ -228,8 +211,6 @@ fn test_active_stops_with_multiple_stops() {
         dx_cm: 0,
         dy_cm: 0,
         seg_len_cm: 0,
-        line_a: 0,
-        line_b: 0,
     });
 
     // Create two stops with overlapping corridors

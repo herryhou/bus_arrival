@@ -38,11 +38,15 @@ fn test_v8_binary_loader_integration() {
 
     assert!(route_data.node_count > 2, "Should have interpolated nodes");
     assert_eq!(route_data.stop_count, 1);
-    
-    // Verify a random node's geometry
+
+    // Verify a node's geometric properties
     let n = route_data.get_node(0).unwrap();
-    let lhs = n.line_a as i64 * n.x_cm as i64 + n.line_b as i64 * n.y_cm as i64 + n.line_c;
-    assert_eq!(lhs, 0, "Line coefficient invariant must hold");
+    // Verify len2 = dx² + dy² invariant (copy packed fields to locals to avoid unaligned reference)
+    let len2_cm2 = n.len2_cm2;
+    let dx_cm = n.dx_cm;
+    let dy_cm = n.dy_cm;
+    let expected_len2 = (dx_cm as i64 * dx_cm as i64) + (dy_cm as i64 * dy_cm as i64);
+    assert_eq!(len2_cm2, expected_len2, "Length squared invariant must hold");
 
     // Verify LUTs are present
     assert_eq!(route_data.gaussian_lut.len(), 256);
