@@ -63,12 +63,6 @@ pub struct ReversalInfo {
     pub problem_progress: i32,
     /// Previous stop's progress (larger)
     pub previous_progress: i32,
-    /// Approximate route region to re-simplify (segment indices)
-    pub affected_region: (usize, usize),
-    /// Suggested epsilon for retry (binary search step)
-    pub suggested_epsilon: f64,
-    /// Retry attempt count
-    pub retry_count: u32,
 }
 
 /// Query grid with progressive window expansion
@@ -252,9 +246,6 @@ pub fn validate_stop_sequence(
                     stop_index: input_idx,
                     problem_progress: progress_cm,
                     previous_progress,
-                    affected_region: (min_segment_idx.saturating_sub(10), seg_idx + 10),
-                    suggested_epsilon: 350.0, // Binary search: 700 → 350
-                    retry_count: 0,
                 }),
             };
         }

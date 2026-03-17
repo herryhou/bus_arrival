@@ -129,7 +129,7 @@ fn main() {
 
     // 6. Build Spatial Grid Index (100m cells)
     let grid_size_cm = 10000; // 100m
-    let mut grid = grid::build_grid(&route_nodes, grid_size_cm);
+    let grid = grid::build_grid(&route_nodes, grid_size_cm);
     println!("Built {}x{} spatial grid ({} cells)", grid.cols, grid.rows, grid.cells.len());
 
     // 7. Stop projection with validation (or skip for loop routes)
@@ -145,59 +145,32 @@ fn main() {
         println!("  WARNING: Stop order may not match input order for loop routes");
         project_stops(&stop_pts_cm, &route_nodes)
     } else {
-        // Normal path with validation and retry loop
-        let mut epsilon_current = 700.0;
-        let mut simplified_pts_cm_current = simplified_pts_cm.clone();
-        let max_retries = 3;
-        let mut retry_count = 0;
-        let mut route_nodes = route_nodes.clone(); // Mutable for retry loop
+        // Validate stop sequence
+        let validation = validate_stop_sequence(&stop_pts_cm, &route_nodes, &grid);
 
-        loop {
-            let validation = validate_stop_sequence(&stop_pts_cm, &route_nodes, &grid);
-
-            match &validation.reversal_info {
-                None => {
-                    // Success!
-                    println!("[VALIDATION PASS]");
-                    for (i, progress) in validation.progress_values.iter().enumerate() {
-                        println!("  Stop {:03}: progress={} cm", i + 1, progress);
-                    }
-                    println!("✓ All {} stops validated - monotonic sequence confirmed", validation.progress_values.len());
-
-                    let stops = project_stops_validated(&validation.progress_values, &stops_input);
-                    break stops;
+        match &validation.reversal_info {
+            None => {
+                // Success!
+                println!("[VALIDATION PASS]");
+                for (i, progress) in validation.progress_values.iter().enumerate() {
+                    println!("  Stop {:03}: progress={} cm", i + 1, progress);
                 }
-                Some(info) => {
-                    retry_count += 1;
-                    let next_epsilon = if retry_count >= max_retries || epsilon_current / 2.0 < 100.0 {
-                        eprintln!("ERROR: Reversal persists after {} attempts", retry_count);
-                        eprintln!("  At stop {}: {} < {} cm",
-                                 info.stop_index, info.problem_progress, info.previous_progress);
-                        eprintln!("  This usually indicates:");
-                        eprintln!("    1. Input stop order does not match route geometry");
-                        eprintln!("    2. Route has self-intersection or loop-back (common in loop routes)");
-                        eprintln!("");
-                        eprintln!("  For loop routes with legitimate backtracking, use:");
-                        eprintln!("    preprocessor --skip-validation <route.json> <stops.json> <output.bin>");
-                        process::exit(1);
-                    } else {
-                        epsilon_current / 2.0
-                    };
+                println!("✓ All {} stops validated - monotonic sequence confirmed", validation.progress_values.len());
 
-                    println!("! Reversal at stop {}: {} < {} cm",
-                             info.stop_index, info.problem_progress, info.previous_progress);
-                    println!("  Retrying with ε={} cm (attempt {}/{})",
-                             next_epsilon, retry_count, max_retries);
-
-                    epsilon_current = next_epsilon;
-                    simplified_pts_cm_current = simplify::simplify_and_interpolate(
-                        &route_pts_cm,
-                        epsilon_current,
-                        &protected_indices,
-                    );
-                    route_nodes = linearize::linearize_route(&simplified_pts_cm_current);
-                    grid = grid::build_grid(&route_nodes, grid_size_cm);
-                }
+                let stops = project_stops_validated(&validation.progress_values, &stops_input);
+                stops
+            }
+            Some(info) => {
+                eprintln!("ERROR: Stop sequence validation failed");
+                eprintln!("  At stop {}: {} < {} cm",
+                         info.stop_index + 1, info.problem_progress, info.previous_progress);
+                eprintln!("  This usually indicates:");
+                eprintln!("    1. Input stop order does not match route geometry");
+                eprintln!("    2. Route has self-intersection or loop-back (common in loop routes)");
+                eprintln!("");
+                eprintln!("  For loop routes with legitimate backtracking, use:");
+                eprintln!("    preprocessor --skip-validation <route.json> <stops.json> <output.bin>");
+                process::exit(1);
             }
         }
     };
