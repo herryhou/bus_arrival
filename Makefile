@@ -11,7 +11,7 @@
 # Configuration
 TOOLS_DIR := tools
 # DATA_DIR := $(TOOLS_DIR)/data
-DATA_DIR := /test_data
+DATA_DIR := test_data
 GEN_NMEA := $(TOOLS_DIR)/gen_nmea/gen_nmea.js
 
 # Rust binaries (built with cargo)
