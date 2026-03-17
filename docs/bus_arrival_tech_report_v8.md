@@ -1222,6 +1222,14 @@ $$\theta^* = \arg\max_\theta F_1\text{-score}(\theta)$$
    - Section 17、18：更新 Flash 佔用估算（~34 KB → ~24 KB）
    - `dev_guide.md`：更新範例程式碼
 
+6. **序列約束站點投影（Sequence-Constrained Stop Projection）**
+   - `preprocessor/src/stops/validation.rs`：新增驗證模組
+   - 路徑約束格網搜索：每個站點只能匹配 >= 前一站點的路段索引
+   - 漸進式視窗擴展：3×3 → 5×5 → 7×7 → 線性回退
+   - 單調性驗證：確保進度值按輸入順序嚴格遞增
+   - 反轉檢測與自動重試：二元搜索 epsilon 降低（700 → 350 → 175 cm）
+   - 預處理器版本更新至 v8.3 Pipeline
+
 **變更原因：**
 - Runtime 採用點積投影法，不需要線性距離公式係數
 - `line_a`/`line_b`/`line_c` 僅用於測試驗證，從未被 runtime hot path 使用
