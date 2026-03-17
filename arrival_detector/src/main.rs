@@ -1,7 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 use std::fs::File;
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufWriter, Read};
 
 use shared::binfile::RouteData;
 use shared::{ArrivalEvent, FsmState};

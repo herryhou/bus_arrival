@@ -14,7 +14,7 @@ struct Phase2Record {
     #[serde(default)]
     heading_cdeg: Option<HeadCdeg>,
     status: String,
-    seg_idx: Option<usize>,
+    _seg_idx: Option<usize>, // Reserved for future use
 }
 
 /// Parsed input record
