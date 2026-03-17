@@ -815,11 +815,12 @@ Expected: Binary file exists, size > 0 bytes, timestamp updated
 
 - [ ] **Step 3: Test with visualizer**
 
-Run: Open `visualizer/index.html` in browser and verify:
-- Stops appear in correct order along the route
-- Progress values increase monotonically (check console if available)
-- No duplicate or out-of-order stops
-- Corridor boundaries don't cause overlap issues
+Run:
+1. Open `visualizer/index.html` in browser
+2. Load the route (should auto-load from `route_data.bin`)
+3. Verify: Stops appear numbered in order (1, 2, 3, ...) along the route
+4. Use arrow keys to move along route - stops should be encountered in increasing order
+5. Check browser console (F12) - no errors related to stop data
 
 - [ ] **Step 4: Commit if needed**
 
@@ -876,7 +877,11 @@ Create `tools/data/reversal_test/stops.json`:
 
 Run: `cargo run -p preprocessor -- tools/data/reversal_test/route.json tools/data/reversal_test/stops.json /tmp/test_reversal.bin`
 
-Expected: Detects reversal and re-simplifies
+Expected output:
+- "! Reversal detected at stop 1: ... < ... cm" message appears
+- "Retrying with ε=350 cm" message appears
+- Either: Validation passes on retry, OR: Error after max retries
+- Exit code: 0 (success) or 1 (persistent reversal - also acceptable behavior)
 
 - [ ] **Step 4: Commit test data**
 
@@ -963,7 +968,9 @@ Expected: All tests pass
 
 - [ ] **Step 2: Check for regressions**
 
-Run: Compare binary output with previous version
+Run: `hexdump -C visualizer/static/route_data.bin | head -20`
+
+Verify: Binary header shows VERSION=2 (or current version), route node count matches expected (~640 nodes for ty225)
 
 - [ ] **Step 3: Final commit**
 
