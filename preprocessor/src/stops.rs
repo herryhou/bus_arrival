@@ -3,6 +3,9 @@
 // Projects bus stops onto route segments and computes detection corridors.
 // Ensures corridors don't overlap with minimum separation constraints.
 
+pub mod validation;
+pub use validation::{ValidationResult, ReversalInfo};
+
 use shared::{RouteNode, Stop};
 
 /// Project stops onto route and compute corridor boundaries.
@@ -23,7 +26,7 @@ pub fn project_stops(stops_cm: &[(i64, i64)], route_nodes: &[RouteNode]) -> Vec<
         // Calculate progress: cum_dist_cm of start node + t * segment_length
         let node = &route_nodes[seg_idx];
         let progress_cm = node.cum_dist_cm + (t * node.seg_len_cm as f64).round() as i32;
-        
+
         intermediate_stops.push(progress_cm);
     }
 
@@ -45,10 +48,10 @@ pub fn project_stops(stops_cm: &[(i64, i64)], route_nodes: &[RouteNode]) -> Vec<
                 corridor_start_cm = min_start;
             }
         }
-        
+
         // Final sanity check: ensure progress is within corridor after overlap adjustment
         if corridor_start_cm >= progress_cm {
-            corridor_start_cm = progress_cm - 1; 
+            corridor_start_cm = progress_cm - 1;
         }
 
         final_stops.push(Stop {
