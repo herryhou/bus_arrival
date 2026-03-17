@@ -1,6 +1,6 @@
 // Offline preprocessor for GPS bus arrival detection system
 //
-// Phase 1: Route simplification, stop projection, and binary packing (v8)
+// Phase 1: Route simplification, stop projection, and binary packing (v8.3)
 
 use std::env;
 use std::fs;
@@ -15,6 +15,8 @@ mod pack;
 mod simplify;
 mod stops;
 
+use stops::{validate_stop_sequence, project_stops_validated};
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -28,7 +30,7 @@ fn main() {
     let output_bin_path = &args[3];
 
     println!("========================================");
-    println!("Bus Arrival Preprocessor - v8.0 Pipeline");
+    println!("Bus Arrival Preprocessor - v8.3 Pipeline");
     println!("========================================");
 
     // 1. Parse inputs
@@ -122,20 +124,76 @@ fn main() {
     let grid = grid::build_grid(&route_nodes, grid_size_cm);
     println!("Built {}x{} spatial grid ({} cells)", grid.cols, grid.rows, grid.cells.len());
 
-    // 6. Project stops (1D progress + non-overlapping corridors)
+    // 6. Build Spatial Grid Index (100m cells)
+    let grid_size_cm = 10000; // 100m
+    let mut grid = grid::build_grid(&route_nodes, grid_size_cm);
+    println!("Built {}x{} spatial grid ({} cells)", grid.cols, grid.rows, grid.cells.len());
+
+    // 7. Stop projection with validation and retry loop
     let stop_pts_cm: Vec<(i64, i64)> = stops_input.stops.iter().map(|s| {
         let (x, y) = coord::latlon_to_cm_relative(s.lat, s.lon, lat_avg);
         (x as i64, y as i64)
     }).collect();
 
-    let projected_stops = stops::project_stops(&stop_pts_cm, &route_nodes);
+    let mut epsilon_current = 700.0;
+    let mut simplified_pts_cm_current = simplified_pts_cm.clone();
+    let max_retries = 3;
+    let mut retry_count = 0;
+    let mut route_nodes = route_nodes.clone(); // Mutable for retry loop
+
+    let projected_stops = loop {
+        let validation = validate_stop_sequence(&stop_pts_cm, &route_nodes, &grid);
+
+        match &validation.reversal_info {
+            None => {
+                // Success!
+                println!("[VALIDATION PASS]");
+                for (i, progress) in validation.progress_values.iter().enumerate() {
+                    println!("  Stop {:03}: progress={} cm", i + 1, progress);
+                }
+                println!("✓ All {} stops validated - monotonic sequence confirmed", validation.progress_values.len());
+
+                let stops = project_stops_validated(&validation.progress_values, &stops_input);
+                break stops;
+            }
+            Some(info) => {
+                retry_count += 1;
+                let next_epsilon = if retry_count >= max_retries || epsilon_current / 2.0 < 100.0 {
+                    eprintln!("ERROR: Reversal persists after {} attempts", retry_count);
+                    eprintln!("  At stop {}: {} < {} cm",
+                             info.stop_index, info.problem_progress, info.previous_progress);
+                    eprintln!("  This usually indicates:");
+                    eprintln!("    1. Input stop order does not match route geometry");
+                    eprintln!("    2. Route has self-intersection or loop-back");
+                    eprintln!("  Please verify stops.json matches the actual bus route direction");
+                    process::exit(1);
+                } else {
+                    epsilon_current / 2.0
+                };
+
+                println!("! Reversal at stop {}: {} < {} cm",
+                         info.stop_index, info.problem_progress, info.previous_progress);
+                println!("  Retrying with ε={} cm (attempt {}/{})",
+                         next_epsilon, retry_count, max_retries);
+
+                epsilon_current = next_epsilon;
+                simplified_pts_cm_current = simplify::simplify_and_interpolate(
+                    &route_pts_cm,
+                    epsilon_current,
+                    &protected_indices,
+                );
+                route_nodes = linearize::linearize_route(&simplified_pts_cm_current);
+                grid = grid::build_grid(&route_nodes, grid_size_cm);
+            }
+        }
+    };
     println!("Projected {} stops with corridors", projected_stops.len());
 
-    // 7. Generate LUTs
+    // 8. Generate LUTs
     let gaussian_lut = lut::generate_gaussian_lut();
     let logistic_lut = lut::generate_logistic_lut();
 
-    // 8. Pack and write binary
+    // 9. Pack and write binary
     let output_file = fs::File::create(output_bin_path).expect("Failed to create output file");
     pack::pack_v8_route_data(
         &route_nodes,
