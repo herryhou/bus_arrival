@@ -1,8 +1,8 @@
 // Lookup Table (LUT) generation for arrival probability model
 //
-// Generates precomputed tables for:
+// Generates precomputed tables that match arrival_detector runtime formulas:
 // - Gaussian: exp(-x²/2) for distance and progress similarity
-// - Logistic: 1/(1 + exp(-x)) for speed similarity
+// - Logistic: 1/(1 + exp(k*(v-v_stop))) for speed similarity (v_stop=200cm/s, k=0.01)
 //
 // All outputs are scaled to u8 (0..255) to represent 0.0..1.0.
 
@@ -22,18 +22,19 @@ pub fn generate_gaussian_lut() -> Vec<u8> {
 
 /// Logistic LUT generator (for speed)
 ///
-/// x / v_stop range [0, 4.0) mapped to 128 entries.
-/// Returns 1/(1 + exp(x-2)) or similar sigmoid, scaled to u8 (0..255).
-/// Specifically for speed where low speed = high probability:
-/// f(v) = 1 / (1 + exp((v - v_stop) / scale))
+/// Matches arrival_detector formula: 1 / (1 + exp(k * (v - v_stop)))
+/// where v_stop = 200 cm/s, k = 0.01.
+/// Index i = v / 10. Range [0, 1270] cm/s mapped to 128 entries.
 pub fn generate_logistic_lut() -> Vec<u8> {
-    // We'll generate a 128-entry table for v/v_stop
+    const V_STOP: f64 = 200.0;  // cm/s, speed at which probability = 50%
+    const K: f64 = 0.01;         // logistic growth factor
+
     (0..128)
         .map(|i| {
-            let v_ratio = i as f64 / 32.0; // v/v_stop range [0, 4.0)
-            // Logistic function: 1 / (1 + exp(v_ratio * 4.0 - 2.0))
-            // This centers the drop-off around v_ratio = 0.5 (v = 0.5 * v_stop)
-            let val = 1.0 / (1.0 + (v_ratio * 6.0 - 3.0).exp());
+            let v = i as f64 * 10.0; // v range [0, 1270] cm/s
+            // Logistic function: 1 / (1 + exp(k * (v - v_stop)))
+            // At v = v_stop (200 cm/s), probability = 0.5
+            let val = 1.0 / (1.0 + (K * (v - V_STOP)).exp());
             (val * 255.0).round() as u8
         })
         .collect()
