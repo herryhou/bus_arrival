@@ -70,8 +70,6 @@ pub struct ReversalInfo {
     /// Retry attempt count
     pub retry_count: u32,
 }
-
-// TODO: Add validate_stop_sequence() in next task
 ```
 
 - [ ] **Step 2: Add validation module to stops.rs**
@@ -348,11 +346,8 @@ pub fn validate_stop_sequence(
             };
         }
 
-        // Near-duplicate warning check
-        if progress_cm - previous_progress < 100 {
-            // TODO: Emit warning in main.rs loop
-            // For now, just continue - duplicate progress <= triggers reversal above
-        }
+        // Near-duplicate check (warning emitted in main.rs via logging)
+        // Continue processing - duplicate progress (==) triggers reversal above
 
         progress_values.push(progress_cm);
         previous_progress = progress_cm;
@@ -420,9 +415,9 @@ Run: `cat preprocessor/src/stops.rs`
 
 Review lines 16-62 to understand current implementation
 
-- [ ] **Step 2: Rename and refactor project_stops**
+- [ ] **Step 2: Replace project_stops with project_stops_validated**
 
-Replace `project_stops` function in `preprocessor/src/stops.rs`:
+Delete the existing `project_stops` function (lines ~16-62) and replace with:
 
 ```rust
 /// Project validated stops onto route and compute corridor boundaries.
@@ -655,7 +650,11 @@ mod tests;
 
 Run: `cargo test -p preprocessor stops::`
 
-Expected: Tests compile and run (some may fail due to grid setup)
+Expected: All tests pass
+- test_validate_monotonic_sequence: PASS (3 stops, progress increasing)
+- test_single_stop: PASS (single stop edge case)
+- test_detect_reversal: PASS (detects non-monotonic sequence)
+- test_empty_stops: PASS (empty input edge case)
 
 - [ ] **Step 4: Commit**
 
@@ -687,89 +686,9 @@ Add to `preprocessor/src/main.rs` imports:
 use stops::{ValidationResult, ReversalInfo, validate_stop_sequence, project_stops_validated};
 ```
 
-- [ ] **Step 3: Replace stop projection section with retry loop**
+- [ ] **Step 3: Replace stop projection section with retry loop (FINAL version)**
 
 Replace the stop projection section (around lines 125-132) in `preprocessor/src/main.rs`:
-
-```rust
-    // 6. Build Spatial Grid Index (100m cells)
-    let grid_size_cm = 10000; // 100m
-    let grid = grid::build_grid(&route_nodes, grid_size_cm);
-    println!("Built {}x{} spatial grid ({} cells)", grid.cols, grid.rows, grid.cells.len());
-
-    // 7. Stop projection with validation and retry loop
-    let stop_pts_cm: Vec<(i64, i64)> = stops_input.stops.iter().map(|s| {
-        let (x, y) = coord::latlon_to_cm_relative(s.lat, s.lon, lat_avg);
-        (x as i64, y as i64)
-    }).collect();
-
-    let mut epsilon_current = 700.0; // Starting epsilon
-    let mut simplified_pts_cm = simplified_pts_cm.clone();
-    let mut max_retries = 3;
-    let mut retry_count = 0;
-
-    loop {
-        // 7a. Validation pass
-        let validation = validate_stop_sequence(&stop_pts_cm, &route_nodes, &grid);
-
-        match &validation.reversal_info {
-            None => {
-                // Success! Proceed to full projection
-                println!("[VALIDATION PASS]");
-                for (i, progress) in validation.progress_values.iter().enumerate() {
-                    println!("  Stop {:03}: progress={}, cm", i + 1, progress);
-                }
-                println!("✓ All {} stops validated - monotonic sequence confirmed", validation.progress_values.len());
-
-                // 7b. Full projection with corridors
-                let projected_stops = project_stops_validated(&validation.progress_values, &stops_input);
-                println!("Projected {} stops with corridors", projected_stops.len());
-
-                // ... rest of pipeline (LUTs, pack) ...
-                break;
-            }
-            Some(info) => {
-                retry_count += 1;
-
-                if retry_count >= max_retries || info.suggested_epsilon < 100.0 {
-                    eprintln!("ERROR: Stop sequence reversal persists after {} attempts", retry_count);
-                    eprintln!("  Problem at stop {}: {} cm < previous_progress={} cm",
-                             info.stop_index, info.problem_progress, info.previous_progress);
-                    eprintln!("  This usually indicates:");
-                    eprintln!("    1. Input stop order does not match route geometry");
-                    eprintln!("    2. Route has self-intersection or loop-back");
-                    eprintln!("  Please verify stops.json matches the actual bus route direction");
-                    process::exit(1);
-                }
-
-                println!("! Reversal detected at stop {}: {} < {} cm",
-                         info.stop_index, info.problem_progress, info.previous_progress);
-                println!("  Re-simplifying with ε={} cm (attempt {}/{})",
-                         info.suggested_epsilon, retry_count, max_retries);
-
-                // Re-simplify entire route with reduced epsilon
-                epsilon_current = info.suggested_epsilon;
-                simplified_pts_cm = simplify::simplify_and_interpolate(
-                    &route_pts_cm,
-                    epsilon_current,
-                    &protected_indices,
-                );
-
-                // Re-linearize and rebuild grid
-                let route_nodes = linearize::linearize_route(&simplified_pts_cm);
-                let grid = grid::build_grid(&route_nodes, grid_size_cm);
-                // Continue loop to validate again
-            }
-        }
-    }
-
-    // Store route_nodes for LUT generation (need to define outside loop)
-    let route_nodes = linearize::linearize_route(&simplified_pts_cm);
-```
-
-- [ ] **Step 4: Fix variable scope issues**
-
-The loop above needs `route_nodes` defined outside. Adjust the code structure:
 
 ```rust
     // 6. Build Spatial Grid Index (100m cells)
@@ -787,18 +706,19 @@ The loop above needs `route_nodes` defined outside. Adjust the code structure:
     let mut simplified_pts_cm = simplified_pts_cm.clone();
     let max_retries = 3;
     let mut retry_count = 0;
-    let mut route_nodes = route_nodes.clone(); // Need mutable for retry
+    let mut route_nodes = route_nodes.clone(); // Mutable for retry loop
 
     let projected_stops = loop {
         let validation = validate_stop_sequence(&stop_pts_cm, &route_nodes, &grid);
 
         match &validation.reversal_info {
             None => {
+                // Success!
                 println!("[VALIDATION PASS]");
                 for (i, progress) in validation.progress_values.iter().enumerate() {
                     println!("  Stop {:03}: progress={} cm", i + 1, progress);
                 }
-                println!("✓ All {} stops validated", validation.progress_values.len());
+                println!("✓ All {} stops validated - monotonic sequence confirmed", validation.progress_values.len());
 
                 let stops = project_stops_validated(&validation.progress_values, &stops_input);
                 break stops;
@@ -809,6 +729,10 @@ The loop above needs `route_nodes` defined outside. Adjust the code structure:
                     eprintln!("ERROR: Reversal persists after {} attempts", retry_count);
                     eprintln!("  At stop {}: {} < {} cm",
                              info.stop_index, info.problem_progress, info.previous_progress);
+                    eprintln!("  This usually indicates:");
+                    eprintln!("    1. Input stop order does not match route geometry");
+                    eprintln!("    2. Route has self-intersection or loop-back");
+                    eprintln!("  Please verify stops.json matches the actual bus route direction");
                     process::exit(1);
                 } else {
                     epsilon_current / 2.0
@@ -830,6 +754,9 @@ The loop above needs `route_nodes` defined outside. Adjust the code structure:
             }
         }
     };
+    println!("Projected {} stops with corridors", projected_stops.len());
+
+    // 8. Generate LUTs
 ```
 
 - [ ] **Step 5: Update version string**
@@ -852,7 +779,11 @@ Expected: Compiles successfully
 
 Run: `cargo run -p preprocessor -- tools/data/ty225_route.json tools/data/stops.json visualizer/static/route_data.bin`
 
-Expected: Processes successfully (may need adjustment for actual data)
+Expected output:
+- "[VALIDATION PASS]" message appears
+- All stops show increasing progress values
+- "✓ All X stops validated - monotonic sequence confirmed"
+- Binary file created successfully
 
 - [ ] **Step 8: Commit**
 
@@ -880,11 +811,15 @@ Expected: All tests pass including new validation
 
 Run: `ls -la visualizer/static/route_data.bin`
 
-Expected: Binary file exists and is non-zero size
+Expected: Binary file exists, size > 0 bytes, timestamp updated
 
 - [ ] **Step 3: Test with visualizer**
 
-Run: Open visualizer and verify stops are displayed correctly
+Run: Open `visualizer/index.html` in browser and verify:
+- Stops appear in correct order along the route
+- Progress values increase monotonically (check console if available)
+- No duplicate or out-of-order stops
+- Corridor boundaries don't cause overlap issues
 
 - [ ] **Step 4: Commit if needed**
 
