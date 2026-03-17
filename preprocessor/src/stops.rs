@@ -147,3 +147,6 @@ fn find_closest_segment(point: &(i64, i64), nodes: &[RouteNode]) -> (usize, f64)
 
     (best_idx, best_t)
 }
+
+#[cfg(test)]
+mod tests;
