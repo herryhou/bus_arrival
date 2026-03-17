@@ -144,3 +144,91 @@ fn find_closest_in_candidates(
 
     (best_idx, best_t)
 }
+
+/// Validate stop sequence for monotonicity
+///
+/// Projects all stops using path-constrained grid search and verifies
+/// that progress values strictly increase by input order.
+///
+/// # Arguments
+/// * `stops_cm` - Stop coordinates in centimeter units
+/// * `route_nodes` - Linearized route nodes
+/// * `grid` - Spatial grid index for fast segment lookup
+///
+/// # Returns
+/// ValidationResult with progress values in input order,
+/// or ReversalInfo if monotonicity violation detected
+pub fn validate_stop_sequence(
+    stops_cm: &[(i64, i64)],
+    route_nodes: &[RouteNode],
+    grid: &SpatialGrid,
+) -> ValidationResult {
+    if stops_cm.is_empty() {
+        // Should be handled earlier, but just in case
+        return ValidationResult {
+            progress_values: vec![],
+            reversal_info: None,
+        };
+    }
+
+    if stops_cm.len() == 1 {
+        // Single stop: no validation needed
+        let (seg_idx, t) = find_closest_segment_constrained(
+            &stops_cm[0],
+            route_nodes,
+            grid,
+            0,
+        );
+        let node = &route_nodes[seg_idx];
+        let progress_cm = node.cum_dist_cm + (t * node.seg_len_cm as f64).round() as i32;
+
+        return ValidationResult {
+            progress_values: vec![progress_cm],
+            reversal_info: None,
+        };
+    }
+
+    let mut progress_values = Vec::with_capacity(stops_cm.len());
+    let mut min_segment_idx = 0;
+    let mut previous_progress = i32::MIN;
+
+    for (input_idx, stop_pt) in stops_cm.iter().enumerate() {
+        let (seg_idx, t) = find_closest_segment_constrained(
+            stop_pt,
+            route_nodes,
+            grid,
+            min_segment_idx,
+        );
+
+        let node = &route_nodes[seg_idx];
+        let progress_cm = node.cum_dist_cm + (t * node.seg_len_cm as f64).round() as i32;
+
+        // Monotonicity validation
+        if progress_cm <= previous_progress {
+            // Reversal detected!
+            return ValidationResult {
+                progress_values, // Partial results
+                reversal_info: Some(ReversalInfo {
+                    stop_index: input_idx,
+                    problem_progress: progress_cm,
+                    previous_progress,
+                    affected_region: (min_segment_idx.saturating_sub(10), seg_idx + 10),
+                    suggested_epsilon: 350.0, // Binary search: 700 → 350
+                    retry_count: 0,
+                }),
+            };
+        }
+
+        // Near-duplicate check (warning emitted in main.rs via logging)
+        // Continue processing - duplicate progress (==) triggers reversal above
+
+        progress_values.push(progress_cm);
+        previous_progress = progress_cm;
+        min_segment_idx = seg_idx; // Update path constraint for next stop
+    }
+
+    ValidationResult {
+        progress_values,
+        reversal_info: None,
+    }
+}
