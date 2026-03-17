@@ -160,49 +160,45 @@ fn dot_i64(ax: i32, ay: i32, bx: i32, by: i32) -> i64 {
 
 ### 4.1 RouteNode — 路線節點（含預算係數）
 
-欄位順序依 i64 → i32 → i16 排列，`repr(C)` 下無 padding，共 **52 bytes**。
+欄位順序依 i64 → i16 → i32 排列，`repr(C, packed)` 下無 padding，共 **36 bytes**。
 
 ```rust
-/// 欄位佈局（repr(C)，ARM Cortex-M33）：
+/// 欄位佈局（repr(C, packed)，ARM Cortex-M33）：
 ///   offset  0: len2_cm2     i64   8 bytes  // |P_{i+1}-P_i|²（cm²）
-///   offset  8: line_c       i64   8 bytes  // -(A·x₀ + B·y₀)
-///   offset 16: x_cm         i32   4 bytes
-///   offset 20: y_cm         i32   4 bytes
-///   offset 24: cum_dist_cm  i32   4 bytes
-///   offset 28: dx_cm        i32   4 bytes  // 段向量 x
-///   offset 32: dy_cm        i32   4 bytes  // 段向量 y
-///   offset 36: seg_len_cm   i32   4 bytes  // 離線 sqrt，runtime 不用
-///   offset 40: line_a       i32   4 bytes  // = -dy
-///   offset 44: line_b       i32   4 bytes  // = dx
-///   offset 48: heading_cdeg i16   2 bytes
-///   offset 50: _pad         i16   2 bytes
-///   total: 52 bytes（無 padding gap）
-#[repr(C)]
+///   offset  8: heading_cdeg i16   2 bytes
+///   offset 10: _pad         i16   2 bytes  // alignment padding
+///   offset 12: x_cm         i32   4 bytes
+///   offset 16: y_cm         i32   4 bytes
+///   offset 20: cum_dist_cm  i32   4 bytes
+///   offset 24: dx_cm        i32   4 bytes  // 段向量 x
+///   offset 28: dy_cm        i32   4 bytes  // 段向量 y
+///   offset 32: seg_len_cm   i32   4 bytes  // 離線 sqrt，runtime 不用
+///   total: 36 bytes（無 padding gap）
+///
+/// Note: line_a, line_b, line_c removed in v8.3 - runtime uses dot-product projection
+#[repr(C, packed)]
 pub struct RouteNode {
-    // ── i64 fields first（避免 repr(C) 插入 padding）────────────
+    // ── i64 fields first（8-byte aligned）─────────────────────────────
     pub len2_cm2:     i64,   // |P_{i+1} - P_i|²（cm²）
-    pub line_c:       i64,   // = -(line_a·x₀ + line_b·y₀)
-    // ── i32 fields ──────────────────────────────────────────────
+    // ── i16 fields（2-byte aligned）───────────────────────────────────
+    pub heading_cdeg: i16,
+    pub _pad:         i16,   // alignment padding
+    // ── i32 fields（4-byte aligned）───────────────────────────────────
     pub x_cm:         i32,
     pub y_cm:         i32,
     pub cum_dist_cm:  i32,
     pub dx_cm:        i32,   // 段向量 x
     pub dy_cm:        i32,   // 段向量 y
     pub seg_len_cm:   i32,   // 離線 sqrt；runtime hot-path 不使用
-    pub line_a:       i32,   // = -dy
-    pub line_b:       i32,   // = dx
-    // ── i16 fields ──────────────────────────────────────────────
-    pub heading_cdeg: i16,
-    pub _pad:         i16,
 }
 
 // 編譯期驗證 — 欄位重排導致尺寸改變時立即失敗
-const _: () = assert!(core::mem::size_of::<RouteNode>() == 52);
+const _: () = assert!(core::mem::size_of::<RouteNode>() == 36);
 ```
 
-> **欄位重排說明：** 若 i64 欄位不放在前方，`repr(C)` 會插入兩段 4-byte padding，使結構體膨脹至 60 bytes。將兩個 i64 移至最前，600 節點節省 **4.8 KB** Flash。
+> **v8.3 優化說明：** 移除未使用的 `line_a`、`line_b`、`line_c` 係數（16 bytes），結構體從 52 → 36 bytes，**600 節點節省 9.6 KB Flash**。Runtime 使用點積投影法，不需線性距離公式。
 
-記憶體佔用：600 節點 × 52 bytes = **31.2 KB**（Flash）
+記憶體佔用：600 節點 × 36 bytes = **21.6 KB**（Flash）
 
 ### 4.2 Stop — 站點資料
 

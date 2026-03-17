@@ -82,15 +82,13 @@ export type TraceData = TraceRecord[];
  * Route data from binary route_data.bin file
  */
 
-/** Route node with all precomputed segment coefficients */
+/** Route node with precomputed segment coefficients (v8.3 format - 36 bytes) */
 export interface RouteNode {
 	/** Squared segment length: |P[i+1] - P[i]|² in cm² */
 	len2_cm2: bigint;
-	/** Line constant: -(line_a × x₀ + line_b × y₀) */
-	line_c: bigint;
 	/** Segment heading in 0.01° */
 	heading_cdeg: number;
-	/** Padding */
+	/** Padding for alignment */
 	_pad: number;
 	/** X coordinate (absolute, from fixed origin 120°E, 20°N) in cm */
 	x_cm: number;
@@ -104,10 +102,7 @@ export interface RouteNode {
 	dy_cm: number;
 	/** Segment length in cm */
 	seg_len_cm: number;
-	/** Line coefficient A: = -dy */
-	line_a: number;
-	/** Line coefficient B: = dx */
-	line_b: number;
+	/** Note: line_a, line_b, line_c removed in v8.3 - runtime uses dot-product projection */
 }
 
 /** Bus stop with precomputed corridor boundaries */

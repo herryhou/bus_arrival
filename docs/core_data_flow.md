@@ -70,7 +70,7 @@ GPS (lat/lon, heading, speed)      RouteNode[], Stop[]
          │
          ▼
   ┌─────────────────────┐
-  │ 3. Route Linearize  │  cum_dist, dx/dy, len2, line_a/b/c, heading
+  │ 3. Route Linearize  │  cum_dist, dx/dy, len2, heading
   └─────────────────────┘
          │
          ▼
