@@ -1,7 +1,47 @@
 // Stop sequence validation with path-constrained grid search
 //
-// Ensures stops project to monotonically increasing progress values
-// along the route, preserving input order from stops.json.
+// This module implements sequence-constrained stop projection to ensure
+// that the input order from stops.json is preserved after RDP simplification.
+//
+// Key algorithms:
+// - Path-constrained grid search: each stop can only match segments >= previous stop's segment
+// - Progressive window expansion: 3×3 → 5×5 → 7×7 → linear fallback
+// - Monotonicity validation: progress must strictly increase by input order
+//
+// When a reversal is detected, ReversalInfo is returned with:
+// - Location of the problem (stop index, progress values)
+// - Affected region (for potential re-simplification)
+// - Suggested epsilon for retry (binary search: 700 → 350 → 175)
+//
+// # Validation Flow
+//
+// 1. For each stop in input order:
+//    - Find closest segment with index >= min_segment_idx (path constraint)
+//    - Compute progress along route
+//    - Validate progress > previous_progress
+//    - Update min_segment_idx for next iteration
+//
+// 2. On reversal detection:
+//    - Return ValidationResult with partial progress_values
+//    - Include ReversalInfo with diagnostic data
+//    - Caller can retry with reduced RDP epsilon
+//
+// # Usage
+//
+// ```rust
+// let validation = validate_stop_sequence(&stops_cm, &route_nodes, &grid);
+// match &validation.reversal_info {
+//     None => {
+//         // Success - use validation.progress_values
+//         let stops = project_stops_validated(&validation.progress_values, &stops_input);
+//     }
+//     Some(info) => {
+//         // Reversal detected - retry or report error
+//         eprintln!("Reversal at stop {}: {} < {}",
+//                  info.stop_index, info.problem_progress, info.previous_progress);
+//     }
+// }
+// ```
 
 use shared::{RouteNode, SpatialGrid};
 
