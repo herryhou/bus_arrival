@@ -15,27 +15,19 @@ mod pack;
 mod simplify;
 mod stops;
 
-use stops::{validate_stop_sequence, project_stops_validated, project_stops};
+use stops::{validate_stop_sequence, project_stops_validated};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    // Check for --skip-validation flag (for loop routes with legitimate backtracking)
-    let skip_validation = args.iter().any(|a| a == "--skip-validation");
-
-    let expected_args = if skip_validation { 5 } else { 4 };
-    if args.len() != expected_args {
-        eprintln!("Usage: preprocessor [--skip-validation] <route.json> <stops.json> <route_data.bin>");
-        eprintln!("");
-        eprintln!("Options:");
-        eprintln!("  --skip-validation    Skip monotonicity validation (for loop routes)");
-        eprintln!("                       Use only when route has legitimate backtracking");
+    if args.len() != 4 {
+        eprintln!("Usage: preprocessor <route.json> <stops.json> <route_data.bin>");
         process::exit(1);
     }
 
-    let route_json_path = if skip_validation { &args[2] } else { &args[1] };
-    let stops_json_path = if skip_validation { &args[3] } else { &args[2] };
-    let output_bin_path = if skip_validation { &args[4] } else { &args[3] };
+    let route_json_path = &args[1];
+    let stops_json_path = &args[2];
+    let output_bin_path = &args[3];
 
     println!("========================================");
     println!("Bus Arrival Preprocessor - v8.3 Pipeline");
@@ -132,46 +124,34 @@ fn main() {
     let grid = grid::build_grid(&route_nodes, grid_size_cm);
     println!("Built {}x{} spatial grid ({} cells)", grid.cols, grid.rows, grid.cells.len());
 
-    // 7. Stop projection with validation (or skip for loop routes)
+    // 7. Stop projection with validation
     let stop_pts_cm: Vec<(i64, i64)> = stops_input.stops.iter().map(|s| {
         let (x, y) = coord::latlon_to_cm_relative(s.lat, s.lon, lat_avg);
         (x as i64, y as i64)
     }).collect();
 
-    let projected_stops = if skip_validation {
-        // Skip validation - use old projection method for loop routes
-        println!("[VALIDATION SKIPPED --skip-validation flag]");
-        println!("  Using legacy projection (stops will be sorted by progress)");
-        println!("  WARNING: Stop order may not match input order for loop routes");
-        project_stops(&stop_pts_cm, &route_nodes)
-    } else {
-        // Validate stop sequence
-        let validation = validate_stop_sequence(&stop_pts_cm, &route_nodes, &grid);
+    // Validate stop sequence
+    let validation = validate_stop_sequence(&stop_pts_cm, &route_nodes, &grid);
 
-        match &validation.reversal_info {
-            None => {
-                // Success!
-                println!("[VALIDATION PASS]");
-                for (i, progress) in validation.progress_values.iter().enumerate() {
-                    println!("  Stop {:03}: progress={} cm", i + 1, progress);
-                }
-                println!("✓ All {} stops validated - monotonic sequence confirmed", validation.progress_values.len());
+    let projected_stops = match &validation.reversal_info {
+        None => {
+            // Success!
+            println!("[VALIDATION PASS]");
+            for (i, progress) in validation.progress_values.iter().enumerate() {
+                println!("  Stop {:03}: progress={} cm", i + 1, progress);
+            }
+            println!("✓ All {} stops validated - monotonic sequence confirmed", validation.progress_values.len());
 
-                let stops = project_stops_validated(&validation.progress_values, &stops_input);
-                stops
-            }
-            Some(info) => {
-                eprintln!("ERROR: Stop sequence validation failed");
-                eprintln!("  At stop {}: {} < {} cm",
-                         info.stop_index + 1, info.problem_progress, info.previous_progress);
-                eprintln!("  This usually indicates:");
-                eprintln!("    1. Input stop order does not match route geometry");
-                eprintln!("    2. Route has self-intersection or loop-back (common in loop routes)");
-                eprintln!("");
-                eprintln!("  For loop routes with legitimate backtracking, use:");
-                eprintln!("    preprocessor --skip-validation <route.json> <stops.json> <output.bin>");
-                process::exit(1);
-            }
+            project_stops_validated(&validation.progress_values, &stops_input)
+        }
+        Some(info) => {
+            eprintln!("ERROR: Stop sequence validation failed");
+            eprintln!("  At stop {}: {} < {} cm",
+                     info.stop_index + 1, info.problem_progress, info.previous_progress);
+            eprintln!("  This usually indicates:");
+            eprintln!("    1. Input stop order does not match route geometry");
+            eprintln!("    2. Route has self-intersection or loop-back");
+            process::exit(1);
         }
     };
     println!("Projected {} stops with corridors", projected_stops.len());

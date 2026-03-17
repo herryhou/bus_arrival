@@ -239,16 +239,16 @@ The validation **correctly detected** that tpF805's stop order does not produce 
 
 ### Solution for Loop Routes
 
-For routes like tpF805 with legitimate backtracking, use the `--skip-validation` flag:
+Routes like tpF805 with legitimate backtracking will fail validation. This indicates that:
 
-```bash
-preprocessor --skip-validation \
-  tpF805_route.json \
-  tpF805_stops.json \
-  tpF805_route_data.bin
-```
+1. The route geometry has complex loops that cannot be simplified to a linear progression
+2. The input stop order does not produce a monotonically increasing progress along the route
 
-This uses the legacy projection method (sorts by progress) which is appropriate for loop routes.
+For such routes, consider:
+- Reviewing and correcting the stop order in `stops.json` to match the actual route traversal
+- Using a different preprocessing approach if the route truly requires non-monotonic stop ordering
+
+The preprocessor does not provide a bypass for this validation because doing so would produce incorrect stop ordering (stops sorted by geometric distance rather than input order).
 
 ## Implementation Details
 
@@ -328,25 +328,22 @@ pub fn validate_stop_sequence(
 ✅ **Simple loops:** Two-pass routes handled correctly
 ✅ **Moderate backtracking:** Grid search + path constraint works
 
-### What Requires --skip-validation
+### What Fails Validation
 
 ⚠️ **Complex loop routes** (like tpF805): Route geometry too complex for monotonic projection
-⚠️ **Severe RDP shortcuts:** Epsilon reduction cannot recover route geometry
 ⚠️ **Stop order mismatches:** Input order doesn't match actual route traversal
+
+For these cases, the preprocessor will fail with a clear error message indicating which stop caused the reversal and the problematic progress values. Users should review their route data and stop order to resolve the issue.
 
 ### Design Trade-offs
 
-**Chose:** Full-route re-simplification on retry
-**Alternative considered:** Region-based refinement
-**Reasoning:** Simpler implementation, RDP is fast enough
+**Chose:** Single-pass validation (no retry loop)
+**Alternative considered:** Binary search epsilon reduction (700 → 350 → 175 cm)
+**Reasoning:** Retry loop added complexity without effectively resolving the underlying geometric issues
 
 **Chose:** 100m grid cells
 **Alternative considered:** Smaller cells (50m, 25m)
 **Reasoning:** Balance between accuracy and memory usage
-
-**Chose:** Maximum 3 retries
-**Alternative considered:** Unlimited retries
-**Reasoning:** Prevents infinite loops, provides clear error reporting
 
 ## Future Improvements
 
@@ -362,8 +359,7 @@ The sequence-constrained stop projection implementation successfully:
 1. ✅ Preserves input stop order for standard linear routes
 2. ✅ Correctly handles routes that revisit the same location (two-pass test confirmed)
 3. ✅ Provides clear error diagnostics for problematic routes
-4. ✅ Offers `--skip-validation` fallback for complex loop routes
-5. ✅ Maintains backward compatibility with legacy projection method
+4. ✅ Fails fast with specific error location when validation cannot succeed
 
 The two-phase algorithm (Grid-Assisted + Path-Aware) is the key innovation that enables correct handling of duplicate locations while maintaining O(k) performance through spatial indexing.
 
