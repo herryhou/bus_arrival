@@ -536,25 +536,90 @@ fn test_integration_ty225_real_route() {
         );
     }
 
-    // Verify all progress values are within route bounds
-    let total_route_len = route_nodes.last().unwrap().cum_dist_cm;
-    for (i, &progress) in result.iter().enumerate() {
+    // === Geometric correctness validation ===
+    // For each stop, compute the actual mapped position on the route
+    // and verify it's close to the original stop location
+
+    let mut max_dist_cm = 0i64;
+    let mut total_dist_cm = 0i64;
+
+    for (i, (&stop_cm, &progress_cm)) in stops_cm.iter().zip(result.iter()).enumerate() {
+        // Find the actual position on the route at this progress value
+        let mapped_pos = position_at_progress(&route_nodes, progress_cm);
+
+        // Compute distance from stop to its mapped position
+        let dx = stop_cm.0 - mapped_pos.0 as i64;
+        let dy = stop_cm.1 - mapped_pos.1 as i64;
+        let dist_sq_cm2 = dx * dx + dy * dy;
+        let dist_cm = (dist_sq_cm2 as f64).sqrt().round() as i64;
+
+        max_dist_cm = max_dist_cm.max(dist_cm);
+        total_dist_cm += dist_cm;
+
+        // Each stop should be mapped to a position within 50m (5000cm)
+        // This is a reasonable threshold for correct bus stop-to-route mapping
         assert!(
-            progress >= 0 && progress <= total_route_len,
-            "ty225: stop {} mapped outside route bounds: progress={}, route_len={}",
+            dist_cm <= 5000,
+            "ty225: stop {} mapped too far from actual position: {}cm (stop: {:?}, mapped: {:?})",
             i + 1,
-            progress,
-            total_route_len
+            dist_cm,
+            stop_cm,
+            mapped_pos
         );
     }
 
-    // Verify reasonable coverage - stops should span most of the route
-    let coverage = result[result.len() - 1] as f64 / total_route_len as f64;
+    let avg_dist_cm = total_dist_cm / result.len() as i64;
+
+    // Additional sanity checks
+    // Average mapping error should be reasonably small
     assert!(
-        coverage > 0.7,
-        "ty225: stops should cover >70% of route: {}",
-        coverage
+        avg_dist_cm <= 2000,
+        "ty225: average mapping distance too large: {}cm (max: {}cm)",
+        avg_dist_cm,
+        max_dist_cm
     );
+
+    println!("ty225 validation: avg_dist={}m, max_dist={}m",
+        avg_dist_cm as f64 / 100.0,
+        max_dist_cm as f64 / 100.0
+    );
+}
+
+/// Find the (x, y) position on the route at a given progress value (in cm)
+fn position_at_progress(route_nodes: &[RouteNode], progress_cm: i32) -> (i32, i32) {
+    // Find the segment containing this progress value
+    // RouteNode stores cumulative distance at segment start
+    let mut seg_idx = 0;
+    for (i, node) in route_nodes.iter().enumerate() {
+        if node.cum_dist_cm <= progress_cm {
+            seg_idx = i;
+        } else {
+            break;
+        }
+    }
+
+    // Guard against edge case where progress exceeds last segment
+    if seg_idx >= route_nodes.len().saturating_sub(1) {
+        seg_idx = route_nodes.len().saturating_sub(1);
+    }
+
+    let node = &route_nodes[seg_idx];
+
+    // How far into this segment?
+    let offset_cm = progress_cm - node.cum_dist_cm;
+
+    // t = offset / seg_len (clamped to [0, 1])
+    let t = if node.seg_len_cm > 0 {
+        (offset_cm as f64 / node.seg_len_cm as f64).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    // Interpolate position
+    let x = node.x_cm as f64 + t * node.dx_cm as f64;
+    let y = node.y_cm as f64 + t * node.dy_cm as f64;
+
+    (x.round() as i32, y.round() as i32)
 }
 
 /// Helper: Build RouteNode list from cm coordinates

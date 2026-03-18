@@ -153,13 +153,16 @@ pub fn dp_forward_pass(
             let prev_cost = prev.best_cost[prev_idx];
 
             if prev_progress <= curr_progress {
-                // Update running minimum
-                match running_min {
-                    None => running_min = Some((prev_cost, prev_idx)),
-                    Some((min_cost, _)) if prev_cost < min_cost => {
-                        running_min = Some((prev_cost, prev_idx));
+                // Skip candidates with no valid predecessor (still at i64::MAX)
+                if prev_cost != i64::MAX {
+                    // Update running minimum
+                    match running_min {
+                        None => running_min = Some((prev_cost, prev_idx)),
+                        Some((min_cost, _)) if prev_cost < min_cost => {
+                            running_min = Some((prev_cost, prev_idx));
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
                 prev_ptr += 1;
             } else {
