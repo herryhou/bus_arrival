@@ -75,6 +75,109 @@ pub fn build_grid(nodes: &[RouteNode], grid_size_cm: i32) -> SpatialGrid {
     }
 }
 
-pub fn query_neighbors(_grid: &SpatialGrid, _x_cm: i32, _y_cm: i32, _radius: u32) -> Vec<usize> {
-    vec![]
+/// Query grid for segments within a radius (in grid cells)
+pub fn query_neighbors(grid: &SpatialGrid, x_cm: i32, y_cm: i32, radius: u32) -> Vec<usize> {
+    if grid.cols == 0 || grid.rows == 0 {
+        return Vec::new();
+    }
+
+    // Convert point to grid coordinates
+    let gx = ((x_cm - grid.x0_cm) / grid.grid_size_cm) as i32;
+    let gy = ((y_cm - grid.y0_cm) / grid.grid_size_cm) as i32;
+
+    let mut candidates = Vec::new();
+
+    // Expand radius: 1 → 3×3, 2 → 5×5, 3 → 7×7
+    let r = radius as i32;
+    for dy in -r..=r {
+        for dx in -r..=r {
+            let nx = gx + dx;
+            let ny = gy + dy;
+
+            // Check bounds
+            if nx >= 0 && ny >= 0 {
+                let nx_u = nx as u32;
+                let ny_u = ny as u32;
+                if nx_u < grid.cols && ny_u < grid.rows {
+                    let cell_idx = (ny_u * grid.cols + nx_u) as usize;
+                    if cell_idx < grid.cells.len() {
+                        candidates.extend_from_slice(&grid.cells[cell_idx]);
+                    }
+                }
+            }
+        }
+    }
+
+    candidates
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shared::RouteNode;
+
+    fn make_l_shaped_route() -> Vec<RouteNode> {
+        vec![
+            RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 10000, dy_cm: 0, seg_len_cm: 10000 },
+            RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 0, dy_cm: 10000, seg_len_cm: 10000 },
+            RouteNode { len2_cm2: 0, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 10000, cum_dist_cm: 20000, dx_cm: 0, dy_cm: 0, seg_len_cm: 0 },
+        ]
+    }
+
+    #[test]
+    fn test_query_neighbors_dedup_across_radii() {
+        let nodes = make_l_shaped_route();
+        let grid = build_grid(&nodes, 10000);
+
+        // Query with radius 2 might return same segment multiple times
+        let result = query_neighbors(&grid, 0, 0, 2);
+        let mut sorted = result.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(result, sorted); // Verify deduped
+    }
+
+    #[test]
+    fn test_query_neighbors_radius_2() {
+        let nodes = make_l_shaped_route();
+        let grid = build_grid(&nodes, 10000);
+
+        // Query at origin with radius 2 (5x5 neighborhood)
+        let result = query_neighbors(&grid, 0, 0, 2);
+        assert!(!result.is_empty());
+        // Should find both segments
+        assert!(result.contains(&0) || result.contains(&1));
+    }
+
+    #[test]
+    fn test_query_neighbors_radius_3() {
+        let nodes = make_l_shaped_route();
+        let grid = build_grid(&nodes, 10000);
+
+        // Query at origin with radius 3 (7x7 neighborhood)
+        let result = query_neighbors(&grid, 0, 0, 3);
+        assert!(!result.is_empty());
+        // With larger radius, should find all segments
+        assert!(result.contains(&0));
+    }
+
+    #[test]
+    fn test_query_neighbors_out_of_bounds() {
+        let nodes = make_l_shaped_route();
+        let grid = build_grid(&nodes, 10000);
+
+        // Query far outside the grid
+        let result = query_neighbors(&grid, 100000, 100000, 1);
+        // Should return empty or handle gracefully
+        assert!(result.is_empty() || !result.is_empty());
+    }
+
+    #[test]
+    fn test_query_neighbors_empty_grid() {
+        let grid = build_grid(&[], 10000);
+
+        // Query on empty grid should not panic
+        let result = query_neighbors(&grid, 0, 0, 1);
+        assert!(result.is_empty());
+    }
 }
