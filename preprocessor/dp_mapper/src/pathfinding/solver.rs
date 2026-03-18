@@ -50,13 +50,98 @@ pub fn map_stops_dp(
 /// 4. For each current candidate, find cheapest valid previous candidate
 ///    (progress[j] >= progress[j-1])
 ///
+/// # Arguments
+/// * `prev_layer` - Previous DP layer (for j>0)
+/// * `curr_candidates` - Candidates for current stop
+///
 /// # Returns
 /// New DpLayer with computed best_cost and best_prev
-pub fn dp_forward_pass(_prev_layers: &[DpLayer]) -> DpLayer {
+pub fn dp_forward_pass(
+    prev_layer: Option<&DpLayer>,
+    curr_candidates: Vec<Candidate>,
+) -> DpLayer {
+    let n = curr_candidates.len();
+
+    // Base case: no previous layer (first stop)
+    let prev = match prev_layer {
+        None => {
+            return DpLayer {
+                candidates: curr_candidates,
+                best_cost: vec![0; n],
+                best_prev: vec![None; n],
+            };
+        }
+        Some(p) => p,
+    };
+
+    // Create sorted indices for current candidates
+    let mut sorted_curr: Vec<SortedCandidate> = curr_candidates
+        .iter()
+        .enumerate()
+        .map(|(i, c)| SortedCandidate {
+            progress_cm: c.progress_cm,
+            orig_idx: i,
+        })
+        .collect();
+    sorted_curr.sort();
+
+    // Create sorted indices for previous candidates
+    let mut sorted_prev: Vec<SortedCandidate> = prev
+        .candidates
+        .iter()
+        .enumerate()
+        .map(|(i, c)| SortedCandidate {
+            progress_cm: c.progress_cm,
+            orig_idx: i,
+        })
+        .collect();
+    sorted_prev.sort();
+
+    // Running minimum: (cost, prev_idx)
+    let mut running_min: Option<(i64, usize)> = None;
+
+    let mut best_cost = vec![i64::MAX; n];
+    let mut best_prev = vec![None; n];
+
+    // Sweep through sorted current candidates
+    for sc in &sorted_curr {
+        let curr_idx = sc.orig_idx;
+        let curr_progress = curr_candidates[curr_idx].progress_cm;
+        let curr_dist = curr_candidates[curr_idx].dist_sq_cm2;
+
+        // Advance running minimum to include all valid previous candidates
+        for sp in &sorted_prev {
+            let prev_idx = sp.orig_idx;
+            let prev_progress = prev.candidates[prev_idx].progress_cm;
+            let prev_cost = prev.best_cost[prev_idx];
+
+            // Check if transition is valid (progress[j] >= progress[j-1])
+            if prev_progress <= curr_progress {
+                // Update running minimum
+                match running_min {
+                    None => running_min = Some((prev_cost, prev_idx)),
+                    Some((min_cost, _)) if prev_cost < min_cost => {
+                        running_min = Some((prev_cost, prev_idx));
+                    }
+                    _ => {}
+                }
+            } else {
+                // Previous candidates are sorted, so we can break
+                break;
+            }
+        }
+
+        // Assign best cost from running minimum
+        if let Some((min_cost, prev_idx)) = running_min {
+            best_cost[curr_idx] = min_cost + curr_dist;
+            best_prev[curr_idx] = Some(prev_idx);
+        }
+    }
+
     DpLayer {
-        candidates: vec![],
-        best_cost: vec![],
-        best_prev: vec![],
+        candidates: curr_candidates,
+        best_cost,
+        best_prev,
     }
 }
 
@@ -69,6 +154,41 @@ pub fn dp_forward_pass(_prev_layers: &[DpLayer]) -> DpLayer {
 ///
 /// # Returns
 /// Progress values for optimal path (in input order)
-pub fn dp_backtrack(_layers: &[DpLayer]) -> Vec<i32> {
-    vec![]
+pub fn dp_backtrack(layers: &[DpLayer]) -> Vec<i32> {
+    if layers.is_empty() {
+        return vec![];
+    }
+
+    let n = layers.len();
+    let mut path = Vec::with_capacity(n);
+
+    // Find minimum cost in final layer
+    let final_layer = &layers[n - 1];
+    let mut min_idx = 0;
+    let mut min_cost = final_layer.best_cost[0];
+
+    for (i, &cost) in final_layer.best_cost.iter().enumerate() {
+        if cost < min_cost {
+            min_cost = cost;
+            min_idx = i;
+        }
+    }
+
+    // Backtrack through layers
+    let mut curr_idx = Some(min_idx);
+
+    for layer in layers.iter().rev() {
+        match curr_idx {
+            Some(idx) => {
+                // Guard: j > 0 check is implicit - first layer has best_prev = [None, ...]
+                path.push(layer.candidates[idx].progress_cm);
+                curr_idx = layer.best_prev[idx];
+            }
+            None => break,
+        }
+    }
+
+    // Reverse to get forward order
+    path.reverse();
+    path
 }

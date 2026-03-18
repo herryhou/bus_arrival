@@ -41,39 +41,68 @@ fn test_dp_forward_pass_two_stops() {
     // Stop 1: 3 candidates at progress 150, 250, 350
     // Expected: should find valid transitions (progress[j] >= progress[j-1])
 
-    let layers = vec![
-        DpLayer {
-            candidates: vec![
-                Candidate {
-                    seg_idx: 0,
-                    t: 0.5,
-                    dist_sq_cm2: 10,
-                    progress_cm: 100,
-                },
-                Candidate {
-                    seg_idx: 1,
-                    t: 0.5,
-                    dist_sq_cm2: 20,
-                    progress_cm: 200,
-                },
-                Candidate {
-                    seg_idx: 2,
-                    t: 0.5,
-                    dist_sq_cm2: 30,
-                    progress_cm: 300,
-                },
-            ],
-            best_cost: vec![0, 0, 0], // Base case: zero cost
-            best_prev: vec![None, None, None],
+    let prev_layer = DpLayer {
+        candidates: vec![
+            Candidate {
+                seg_idx: 0,
+                t: 0.5,
+                dist_sq_cm2: 10,
+                progress_cm: 100,
+            },
+            Candidate {
+                seg_idx: 1,
+                t: 0.5,
+                dist_sq_cm2: 20,
+                progress_cm: 200,
+            },
+            Candidate {
+                seg_idx: 2,
+                t: 0.5,
+                dist_sq_cm2: 30,
+                progress_cm: 300,
+            },
+        ],
+        best_cost: vec![0, 0, 0], // Base case: zero cost
+        best_prev: vec![None, None, None],
+    };
+
+    let curr_candidates = vec![
+        Candidate {
+            seg_idx: 1,
+            t: 0.6,
+            dist_sq_cm2: 15,
+            progress_cm: 150,
+        },
+        Candidate {
+            seg_idx: 2,
+            t: 0.4,
+            dist_sq_cm2: 25,
+            progress_cm: 250,
+        },
+        Candidate {
+            seg_idx: 3,
+            t: 0.3,
+            dist_sq_cm2: 35,
+            progress_cm: 350,
         },
     ];
 
-    let result = dp_forward_pass(&layers);
+    let result = dp_forward_pass(Some(&prev_layer), curr_candidates);
 
     // Should return a new layer with computed costs and predecessors
     assert_eq!(result.candidates.len(), 3);
     assert_eq!(result.best_cost.len(), 3);
     assert_eq!(result.best_prev.len(), 3);
+
+    // Check that costs are computed (not MAX)
+    for &cost in &result.best_cost {
+        assert!(cost < i64::MAX, "Cost should be computed");
+    }
+
+    // Check that all predecessors are Some (not base case)
+    for prev in &result.best_prev {
+        assert!(prev.is_some(), "Should have predecessor");
+    }
 }
 
 #[test]
@@ -123,4 +152,82 @@ fn test_dp_backtrack() {
     // Should return progress values for optimal path
     assert_eq!(result.len(), 2);
     assert!(result[0] <= result[1]); // Monotonicity
+
+    // Optimal path: 100 -> 250 (cost 25)
+    assert_eq!(result[0], 100);
+    assert_eq!(result[1], 250);
+}
+
+#[test]
+fn test_dp_forward_pass_with_none_previous() {
+    // Test base case: no previous layer (first stop)
+    let curr_candidates = vec![
+        Candidate {
+            seg_idx: 0,
+            t: 0.5,
+            dist_sq_cm2: 10,
+            progress_cm: 100,
+        },
+        Candidate {
+            seg_idx: 1,
+            t: 0.5,
+            dist_sq_cm2: 20,
+            progress_cm: 200,
+        },
+    ];
+
+    let result = dp_forward_pass(None, curr_candidates);
+
+    // Base case: zero cost, no predecessors
+    assert_eq!(result.candidates.len(), 2);
+    assert_eq!(result.best_cost, vec![0, 0]);
+    assert_eq!(result.best_prev, vec![None, None]);
+}
+
+#[test]
+fn test_dp_forward_pass_transition_validity() {
+    // Test that only valid transitions are allowed (progress[j] >= progress[j-1])
+    let prev_layer = DpLayer {
+        candidates: vec![
+            Candidate {
+                seg_idx: 0,
+                t: 0.5,
+                dist_sq_cm2: 10,
+                progress_cm: 100,
+            },
+            Candidate {
+                seg_idx: 1,
+                t: 0.5,
+                dist_sq_cm2: 20,
+                progress_cm: 200,
+            },
+        ],
+        best_cost: vec![0, 0],
+        best_prev: vec![None, None],
+    };
+
+    let curr_candidates = vec![
+        Candidate {
+            seg_idx: 1,
+            t: 0.6,
+            dist_sq_cm2: 15,
+            progress_cm: 150, // Can transition from 100 or 200
+        },
+        Candidate {
+            seg_idx: 2,
+            t: 0.4,
+            dist_sq_cm2: 25,
+            progress_cm: 50, // Can ONLY transition from... none! Should be MAX
+        },
+    ];
+
+    let result = dp_forward_pass(Some(&prev_layer), curr_candidates);
+
+    // First candidate should have a valid transition
+    assert!(result.best_prev[0].is_some());
+    assert!(result.best_cost[0] < i64::MAX);
+
+    // Second candidate cannot transition (violates monotonicity)
+    // It should have no valid predecessor
+    assert!(result.best_cost[1] == i64::MAX || result.best_prev[1].is_none());
 }
