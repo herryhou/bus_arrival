@@ -130,11 +130,21 @@ pub struct Candidate {
 
 **Public Functions:**
 ```rust
+// For first stop (no previous layer), snap is not needed
 pub fn generate_candidates(
     stop: (i64, i64),
     route_nodes: &[RouteNode],
     grid: &SpatialGrid,
     k: usize,
+) -> Vec<Candidate>;
+
+// For subsequent stops, snap uses previous layer's minimum progress
+pub fn generate_candidates_with_snap(
+    stop: (i64, i64),
+    route_nodes: &[RouteNode],
+    grid: &SpatialGrid,
+    k: usize,
+    min_prev_progress_cm: i32,  // Minimum progress from previous layer
 ) -> Vec<Candidate>;
 ```
 
@@ -145,20 +155,35 @@ pub fn generate_candidates(
 3. **Deduplication:** Remove duplicates by `(seg_idx, t)` pair - same segment at same position
 4. **Sort:** Sort by distance² ascending
 5. **Select:** Keep top-K candidates (by distance)
-6. **Snap:** Add one snap-forward candidate as fallback
+6. **Snap:** Add one snap-forward candidate as fallback (for `generate_candidates_with_snap`)
 
-**Snap Candidate Generation:**
-- Find first segment where `cum_dist_cm + seg_len_cm >= min_known_prog`
-- Set `t = 0.0` (at segment start)
-- Set `dist_cm = SNAP_PENALTY_CM2`
-- This ensures DP uses it only when no valid transition exists
+**Snap Candidate Generation Algorithm:**
+
+```rust
+// Snap candidate generation for stop j (j > 0):
+// Input: min_prev_progress_cm from previous layer's candidates
+
+// 1. Find first segment with cum_dist_cm >= min_prev_progress_cm:
+let snap_seg_idx = route_nodes
+    .iter()
+    .position(|n| n.cum_dist_cm >= min_prev_progress_cm)
+    .unwrap_or(route_nodes.len() - 1);  // Default to last segment
+
+// 2. Create snap candidate at segment start:
+let snap_candidate = Candidate {
+    seg_idx: snap_seg_idx,
+    t: 0.0,                              // At segment start
+    dist_cm: SNAP_PENALTY_CM2,           // Large penalty
+    progress_cm: route_nodes[snap_seg_idx].cum_dist_cm,
+};
+```
 
 **Key Behavior:**
 - Projects stop onto all segments from grid query (3 radii)
 - Clamps t to [0.0, 1.0]
 - Deduplicates by `(seg_idx, t)` before sorting
 - Keeps top-K by distance (minimum distance first)
-- Adds snap-forward candidate with `SNAP_PENALTY_CM2`
+- Adds snap-forward candidate with `SNAP_PENALTY_CM2` (only for non-first stops)
 
 ### `pathfinding` Module
 
@@ -171,7 +196,13 @@ This module takes raw stop coordinates and orchestrates candidate generation and
 struct DpLayer {
     candidates: Vec<Candidate>,
     best_cost: Vec<i64>,      // min cost to reach each candidate
-    best_prev: Vec<usize>,    // backpointer to previous layer
+    best_prev: Vec<Option<usize>>,  // backpointer to previous layer
+}
+
+// For sorting by progress while preserving original indices
+struct SortedCandidate {
+    orig_idx: usize,
+    progress_cm: i32,
 }
 ```
 
@@ -185,18 +216,112 @@ pub fn map_stops_dp(
 ) -> Vec<i32>;
 ```
 
-**Algorithm:**
-1. **Generate candidates:** Call `generate_candidates()` for each stop, producing M layers
-2. **Forward pass:** For each layer j=1..M-1:
-   - Sort layer j and j-1 by progress_cm
-   - Sweep with running minimum to find valid transitions (progress[j] >= progress[j-1])
-   - Store best cost and backpointer
-3. **Find best final:** Select candidate in last layer with minimum cost
-4. **Backtrack:** Follow backpointers to reconstruct optimal path
-5. **Return:** Progress values in original input order
+**DP Transition Validity:**
+
+```rust
+// Transition from candidate a (stop j-1) to candidate b (stop j) is valid iff:
+fn is_valid_transition(a: &Candidate, b: &Candidate) -> bool {
+    if b.seg_idx > a.seg_idx {
+        true  // Different segment, moved forward
+    } else if b.seg_idx == a.seg_idx && b.t > a.t {
+        true  // Same segment, advanced position (strict inequality)
+    } else if b.progress_cm > a.progress_cm {
+        true  // Same location visited twice (route loop), different visit
+    } else {
+        false  // Would violate monotonicity
+    }
+}
+```
+
+**DP Forward Pass Algorithm:**
+
+```rust
+// For each layer j from 1 to M-1:
+// 1. Generate candidates for stop j (with snap)
+// 2. Sort both layers by progress_cm for efficient sweep
+// 3. Sweep to find minimum cost transitions
+
+fn dp_forward_pass(
+    layers: &mut Vec<DpLayer>,
+) {
+    for j in 1..layers.len() {
+        // Sort current layer by progress, tracking original indices
+        let curr_sorted: Vec<_> = layers[j].candidates
+            .iter()
+            .enumerate()
+            .map(|(i, c)| SortedCandidate { orig_idx: i, progress_cm: c.progress_cm })
+            .collect();
+        curr_sorted.sort_by_key(|s| s.progress_cm);
+
+        // Sort previous layer by progress
+        let prev_sorted: Vec<_> = layers[j-1].candidates
+            .iter()
+            .enumerate()
+            .map(|(i, c)| SortedCandidate { orig_idx: i, progress_cm: c.progress_cm })
+            .collect();
+        prev_sorted.sort_by_key(|s| s.progress_cm);
+
+        // Sweep with running minimum
+        let mut ptr = 0;
+        let mut best_prev_cost = i64::MAX;
+        let mut best_prev_idx = None;
+
+        for curr in &curr_sorted {
+            // Advance pointer: include all prev candidates with progress <= curr.progress
+            while ptr < prev_sorted.len() && prev_sorted[ptr].progress_cm <= curr.progress_cm {
+                let prev_orig_idx = prev_sorted[ptr].orig_idx;
+                if layers[j-1].best_cost[prev_orig_idx] < best_prev_cost {
+                    best_prev_cost = layers[j-1].best_cost[prev_orig_idx];
+                    best_prev_idx = Some(prev_orig_idx);
+                }
+                ptr += 1;
+            }
+
+            if let Some(prev_idx) = best_prev_idx {
+                let curr_orig_idx = curr.orig_idx;
+                let transition_cost = layers[j].candidates[curr_orig_idx].dist_cm;
+                let total_cost = best_prev_cost + transition_cost;
+
+                if total_cost < layers[j].best_cost[curr_orig_idx] {
+                    layers[j].best_cost[curr_orig_idx] = total_cost;
+                    layers[j].best_prev[curr_orig_idx] = Some(prev_idx);
+                }
+            }
+        }
+    }
+}
+```
+
+**Backtrack Algorithm:**
+
+```rust
+fn dp_backtrack(layers: &[DpLayer]) -> Vec<i32> {
+    let m = layers.len();
+    let mut result = vec![0i32; m];
+
+    // Find best final state (minimum cost in last layer)
+    let mut best_k = 0;
+    let mut best_cost = i64::MAX;
+    for (k, &cost) in layers[m-1].best_cost.iter().enumerate() {
+        if cost < best_cost {
+            best_cost = cost;
+            best_k = k;
+        }
+    }
+
+    // Backtrack to reconstruct path
+    let mut k = best_k;
+    for j in (0..m).rev() {
+        result[j] = layers[j].candidates[k].progress_cm;
+        k = layers[j].best_prev[k].unwrap_or(0);
+    }
+
+    result
+}
+```
 
 **Module Boundaries:**
-- `pathfinding` calls `generate_candidates()` - does not implement projection
+- `pathfinding` calls `generate_candidates()` and `generate_candidates_with_snap()` - does not implement projection
 - `pathfinding` implements DP logic - does not expose internal state
 - Clear separation: candidate generation (candidate module) vs path optimization (pathfinding module)
 
@@ -219,24 +344,37 @@ Input: stops_cm[], route_nodes[]
            │
            ▼
 ┌──────────────────────────────────────┐
-│  For each stop:                      │
-│  generate_candidates()               │
+│  Stop 0: generate_candidates()      │
+│  - Grid query (3 radii expansion)    │
+│  - Project onto segments             │
+│  - Deduplicate by (seg_idx, t)       │
+│  - Sort by distance²                 │
+│  - Select top-K                      │
+│  - NO snap (first stop)              │
+│  → K candidates                      │
+└──────────────────────────────────────┘
+           │
+           ▼
+┌──────────────────────────────────────┐
+│  Stop j (j > 0):                     │
+│  generate_candidates_with_snap()     │
 │  - Grid query (3 radii expansion)    │
 │  - Project onto segments             │
 │  - Deduplicate by (seg_idx, t)       │
 │  - Sort by distance²                 │
 │  - Select top-K                      │
 │  - Add snap fallback candidate       │
-│  → K+1 candidates per stop           │
+│  → K+1 candidates                    │
 └──────────────────────────────────────┘
            │
            ▼
 ┌──────────────────────────────────────┐
 │  map_stops_dp() pathfinding         │
-│  - Forward pass:                    │
+│  - Forward pass (DP sweep):          │
 │    * Sort each layer by progress    │
-│    * DP sweep O(M × K)              │
-│    * Track best_cost, best_prev     │
+│    * For each candidate in layer j:  │
+│      - Find valid transitions from j-1│
+│      - Track best_cost, best_prev   │
 │  - Find minimum cost final state    │
 │  - Backtrack to reconstruct path    │
 └──────────────────────────────────────┘
@@ -245,9 +383,9 @@ Input: stops_cm[], route_nodes[]
 Output: Vec<i32> progress values (input order, non-decreasing)
 ```
 
-**Empty Candidate Handling:** If grid query returns no segments (should not happen with radius 3), the snap candidate is always added, ensuring at least one candidate per stop.
+**Empty Candidate Handling:** If grid query returns no segments (should not happen with radius 3), the snap candidate is always added for j > 0, ensuring at least one candidate per non-first stop. For the first stop, an empty result is an error condition.
 
-**Memory:** For M=35 stops, K=15 candidates: ~35 × 16 × 32 bytes = ~18 KB (negligible).
+**Memory:** For M=35 stops, K=15 candidates: ~35 × 16 × (32 + 16) bytes = ~27 KB (negligible).
 
 ## Constants
 
@@ -298,39 +436,49 @@ No external dependencies. Pure Rust implementation.
 
 - Real route data (tpF805, two_pass_test) with known outputs
 - Comparison against greedy implementation to verify optimality
-- DP should always produce equal or better total distance than greedy
+- **Expected results:**
+  - Simple routes: DP produces identical or similar results to greedy
+  - Complex routes (loops, dense stops): DP produces lower total distance
+  - All routes: DP progress values are non-decreasing (greedy may have reversals)
 
 ### Performance Tests
 
 ```rust
 // Criterion benchmarks for:
-// - Grid construction time
-// - Candidate generation per stop
-// - Full DP solve for varying M (10, 35, 100 stops)
+// - Grid construction time (baseline)
+// - Candidate generation per stop (with and without snap)
+// - Full DP solve for varying M: M=10 (small), M=35 (typical), M=100 (large)
+// - Comparison benchmark: greedy vs DP for same inputs
 // - Memory allocation profile
 ```
 
-**Target:** O(M × K log K) < 10ms for M=35, K=15
+**Performance Targets:**
+- **Typical route:** M=35 stops, K=15 candidates < 10ms total
+- **Large route:** M=100 stops, K=15 candidates < 30ms total
+- **Small route:** M=10 stops, K=15 candidates < 5ms total
+
+**Definition of "typical":** Based on Taipei bus routes, most routes have 20-50 stops. M=35 is the median value.
 
 ### Edge Case Tests
 
 | Edge Case | Test Case |
 |-----------|-----------|
-| Stop projects behind min_prog | Verify DP doesn't select violating candidate |
+| Stop projects behind min_progress | Verify DP doesn't select violating candidate |
 | Route loop (same location twice) | Both segments as candidates; DP picks best |
 | Identical adjacent stops | Equal progress is valid (>= transition) |
 | No valid transition | Snap-forward candidate activates |
-| First stop (no constraint) | All candidates valid |
+| First stop (no constraint) | All candidates valid, no snap |
 | Large distance from route | Legitimate projection < SNAP_PENALTY |
+| Snap candidate selection | Verify snap progress >= min_prev_progress |
 
 ## Complexity
 
 | Phase | Cost |
 |-------|------|
-| Grid build | O(N) |
-| Candidate generation | O(M × K) |
+| Grid build | O(N) where N = route nodes |
+| Candidate generation | O(M × K) projections |
 | Per-layer sort | O(M × K log K) |
-| DP sweep | O(M × K) |
+| DP sweep | O(M × K) with running minimum |
 | Backtrack | O(M) |
 | **Total** | **O(M × K log K)** |
 
@@ -340,12 +488,13 @@ With M=35 stops, K=15: ~525 projections + trivial sort.
 
 | Edge Case | Detection | Solution |
 |-----------|-----------|----------|
-| Stop projects behind min_prog | Candidate progress < previous layer's min progress | DP doesn't select that candidate (higher cost path) |
+| Stop projects behind min_progress | Candidate progress < previous layer's min progress | DP doesn't select that candidate (higher cost path) |
 | Route loop (same location twice) | Grid returns both segments | Both appear as candidates; DP picks best sequence |
 | Identical adjacent stops | Progress values equal | Equal progress is valid (>= transition) |
-| No valid transition | All candidates have progress < previous min | Snap-forward candidate activates (dist = SNAP_PENALTY) |
-| First stop (no constraint) | No previous layer | All candidates valid, no filter |
-| Empty candidate set | Grid query returns nothing | Snap candidate always added (at least 1 candidate) |
+| No valid transition | All candidates have progress < previous min_progress | Snap-forward candidate activates (dist = SNAP_PENALTY) |
+| First stop (no constraint) | No previous layer | All candidates valid, no snap |
+| Empty candidate set (first stop) | Grid query returns nothing | Error: return empty progress values |
+| Empty candidate set (j > 0) | Grid query returns nothing | Snap candidate always added (at least 1 candidate) |
 
 ## Migration Strategy
 
@@ -408,13 +557,15 @@ The crate uses "never fail" design:
 - **Single stop:** Returns single progress value
 - **No valid path:** Uses snap-forward candidates to guarantee a path
 - **Invalid route (no segments):** Returns empty progress values
+- **First stop with no candidates:** Returns empty progress values (error condition)
 
-**No `Result` type** - the API always returns valid `Vec<i32>`.
+**No `Result` type** - the API always returns valid `Vec<i32>`. Callers should check that the result length equals the input length to detect errors.
 
 ## Success Criteria
 
 1. All unit tests pass
 2. Integration tests validate against real routes (tpF805, two_pass_test)
-3. Performance: O(M × K log K) < 10ms for typical routes
+3. Performance: < 10ms for typical routes (M=35, K=15)
 4. Correctness: Output is non-decreasing and globally optimal
 5. Comparison tests: DP total distance ≤ greedy total distance for all test cases
+6. Snap activation: Snap candidates only used when no valid transition exists
