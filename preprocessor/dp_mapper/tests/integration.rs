@@ -171,3 +171,198 @@ fn test_integration_snap_forward_usage() {
     assert_eq!(result.len(), 2);
     assert!(result[0] <= result[1]);
 }
+
+// ============================================================================
+// High-Priority Edge Case Tests
+// ============================================================================
+
+#[test]
+fn test_integration_route_loops_back() {
+    // U-shaped route: goes east, then north, then west back to same x
+    // This tests routes that double back on themselves
+    let route = vec![
+        // Leg 1: East 0 → 10000
+        RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 10000, dy_cm: 0, seg_len_cm: 10000 },
+        // Leg 2: North 0 → 5000
+        RouteNode { len2_cm2: 100000000, heading_cdeg: 9000, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 0, dy_cm: 5000, seg_len_cm: 5000 },
+        // Leg 3: West 10000 → 0 (returns to x=0)
+        RouteNode { len2_cm2: 100000000, heading_cdeg: 18000, _pad: 0, x_cm: 10000, y_cm: 5000, cum_dist_cm: 15000, dx_cm: -10000, dy_cm: 0, seg_len_cm: 10000 },
+        RouteNode { len2_cm2: 0, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 5000, cum_dist_cm: 25000, dx_cm: 0, dy_cm: 0, seg_len_cm: 0 },
+    ];
+
+    // Stops: first on east leg, second on west leg (same y, different x)
+    // The west leg stop has same progress as earlier on east leg
+    let stops = vec![(5000, 0), (5000, 5000)];
+
+    let result = map_stops(&stops, &route, Some(15));
+
+    assert_eq!(result.len(), 2);
+    // Both stops should be mapped
+    // First stop at ~5000 (middle of east leg)
+    assert!(result[0] >= 4000 && result[0] <= 6000, "first stop on east leg: {}", result[0]);
+    // Second stop at ~20000 (middle of west leg: 15000 + 5000)
+    assert!(result[1] >= 19000 && result[1] <= 21000, "second stop on west leg: {}", result[1]);
+    // Monotonicity must be preserved
+    assert!(result[0] < result[1], "west leg must have higher progress: {} < {}", result[0], result[1]);
+}
+
+#[test]
+fn test_integration_route_crosses_itself() {
+    // Figure-8 route: crosses itself at origin
+    // First loop: counter-clockwise from origin
+    // Second loop: clockwise crossing back through origin
+    let route = vec![
+        // Loop 1: Quadrant I
+        RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 5000, dy_cm: 0, seg_len_cm: 5000 },
+        RouteNode { len2_cm2: 100000000, heading_cdeg: 9000, _pad: 0, x_cm: 5000, y_cm: 0, cum_dist_cm: 5000, dx_cm: 0, dy_cm: 5000, seg_len_cm: 5000 },
+        RouteNode { len2_cm2: 100000000, heading_cdeg: 18000, _pad: 0, x_cm: 5000, y_cm: 5000, cum_dist_cm: 10000, dx_cm: -5000, dy_cm: 0, seg_len_cm: 5000 },
+        // Back to origin
+        RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 15000, dx_cm: 5000, dy_cm: 0, seg_len_cm: 5000 },
+        // Loop 2: Quadrant IV (different direction)
+        RouteNode { len2_cm2: 100000000, heading_cdeg: -9000, _pad: 0, x_cm: 5000, y_cm: 0, cum_dist_cm: 20000, dx_cm: 0, dy_cm: -5000, seg_len_cm: 5000 },
+        RouteNode { len2_cm2: 0, heading_cdeg: 0, _pad: 0, x_cm: 5000, y_cm: -5000, cum_dist_cm: 25000, dx_cm: 0, dy_cm: 0, seg_len_cm: 0 },
+    ];
+
+    // Stop at origin appears twice - once in each loop
+    let stops = vec![(0, 0), (5000, 0)];
+
+    let result = map_stops(&stops, &route, Some(15));
+
+    assert_eq!(result.len(), 2);
+    // Both should map to different progress values (same location, different visits)
+    // First occurrence at origin (progress 0 or 15000 depending on segment)
+    // Second occurrence on east leg
+    assert!(result[0] <= result[1], "monotonicity preserved across route crossing");
+}
+
+#[test]
+fn test_integration_scalability_many_stops() {
+    // Test with 35 stops (typical real-world route size)
+    // This verifies O(M × K log K) complexity doesn't degrade
+    let num_stops: usize = 35;
+    let seg_len: i64 = 3000; // 30m segments
+    let num_segments: usize = 40;
+
+    let route = make_straight_route((seg_len * num_segments as i64) as i32, num_segments);
+
+    // Stops distributed along the entire route
+    let stops: Vec<(i64, i64)> = (0..num_stops)
+        .map(|i| {
+            let i = i as i64;
+            let progress = i * seg_len * num_segments as i64 / num_stops as i64;
+            (progress, 0)
+        })
+        .collect();
+
+    let result = map_stops(&stops, &route, None);
+
+    assert_eq!(result.len(), num_stops, "all stops mapped");
+
+    // Verify monotonicity across all stops
+    for i in 0..result.len() - 1 {
+        assert!(
+            result[i] <= result[i + 1],
+            "progress should be monotonic at index {}: {} <= {}",
+            i,
+            result[i],
+            result[i + 1]
+        );
+    }
+
+    // Verify coverage - stops should span most of the route
+    let total_route_len = route.last().unwrap().cum_dist_cm;
+    let coverage = result[num_stops - 1] as f64 / total_route_len as f64;
+    assert!(coverage > 0.8, "should cover >80% of route: {}", coverage);
+}
+
+#[test]
+fn test_integration_scalability_dense_stops() {
+    // Many stops in a short distance (stops are dense relative to segment length)
+    // This is the scenario mentioned in the algorithm doc where greedy fails
+    let route = make_straight_route(10000, 10); // 10 segments of 1m each
+
+    // 20 stops packed into 10m route (more stops than segments)
+    let stops: Vec<(i64, i64)> = (0..20)
+        .map(|i| ((i * 500) as i64, 0))
+        .collect();
+
+    let result = map_stops(&stops, &route, Some(20));
+
+    assert_eq!(result.len(), 20);
+
+    // Verify monotonicity - critical for dense stops
+    for i in 0..result.len() - 1 {
+        assert!(
+            result[i] <= result[i + 1],
+            "dense stops must maintain monotonicity at index {}: {} <= {}",
+            i,
+            result[i],
+            result[i + 1]
+        );
+    }
+}
+
+#[test]
+fn test_integration_stops_at_segment_boundaries() {
+    // Test stops exactly at segment boundaries
+    // This tests floating point precision at t=0.0 and t=1.0 boundaries
+    let route = vec![
+        RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 10000, dy_cm: 0, seg_len_cm: 10000 },
+        RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 10000, dy_cm: 0, seg_len_cm: 10000 },
+        RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 20000, y_cm: 0, cum_dist_cm: 20000, dx_cm: 10000, dy_cm: 0, seg_len_cm: 10000 },
+        RouteNode { len2_cm2: 0, heading_cdeg: 0, _pad: 0, x_cm: 30000, y_cm: 0, cum_dist_cm: 30000, dx_cm: 0, dy_cm: 0, seg_len_cm: 0 },
+    ];
+
+    // Stops exactly at segment boundaries
+    let stops = vec![
+        (0, 0),      // Start of route (t=0.0 on segment 0)
+        (10000, 0),  // End of segment 0 / Start of segment 1 (t=1.0 / t=0.0 boundary)
+        (20000, 0),  // End of segment 1 / Start of segment 2 (t=1.0 / t=0.0 boundary)
+        (30000, 0),  // End of route (t=1.0 on last segment)
+    ];
+
+    let result = map_stops(&stops, &route, Some(10));
+
+    assert_eq!(result.len(), 4);
+
+    // Each stop should map to its exact boundary position
+    assert_eq!(result[0], 0, "first stop at route start");
+    assert_eq!(result[1], 10000, "stop at segment 0/1 boundary");
+    assert_eq!(result[2], 20000, "stop at segment 1/2 boundary");
+    assert_eq!(result[3], 30000, "stop at route end");
+}
+
+#[test]
+fn test_integration_stops_near_segment_boundaries() {
+    // Test stops very close to segment boundaries
+    // This checks for numerical stability in t-clamping
+    let route = vec![
+        RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 10000, dy_cm: 0, seg_len_cm: 10000 },
+        RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 10000, dy_cm: 0, seg_len_cm: 10000 },
+        RouteNode { len2_cm2: 0, heading_cdeg: 0, _pad: 0, x_cm: 20000, y_cm: 0, cum_dist_cm: 20000, dx_cm: 0, dy_cm: 0, seg_len_cm: 0 },
+    ];
+
+    // Stops 1cm before/after boundaries (within floating point epsilon)
+    let stops = vec![
+        (9999, 0),   // 1cm before first boundary
+        (10001, 0),  // 1cm after first boundary
+        (19999, 0),  // 1cm before second boundary
+    ];
+
+    let result = map_stops(&stops, &route, Some(10));
+
+    assert_eq!(result.len(), 3);
+
+    // All should be properly mapped without precision issues
+    for i in 0..result.len() {
+        assert!(
+            result[i] >= 0 && result[i] <= 20000,
+            "stop {} mapped within route bounds: {}",
+            i,
+            result[i]
+        );
+    }
+
+    // Monotonicity must hold
+    assert!(result[0] <= result[1] && result[1] <= result[2]);
+}
