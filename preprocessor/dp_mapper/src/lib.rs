@@ -6,6 +6,9 @@ pub mod pathfinding;
 
 use shared::RouteNode;
 
+// Re-export common types
+pub use candidate::Candidate;
+
 /// Map bus stops to route progress values using globally optimal DP.
 ///
 /// # Arguments
