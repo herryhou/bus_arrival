@@ -5,6 +5,60 @@
 use dp_mapper::map_stops;
 use shared::RouteNode;
 
+// ============================================================================
+// Coordinate Conversion (for tests with GPS data)
+// ============================================================================
+
+/// Earth's radius in centimeters
+const R_CM: f64 = 637_100_000.0;
+
+/// Fixed origin longitude in degrees (120.0°E)
+const FIXED_ORIGIN_LON_DEG: f64 = 120.0;
+
+/// Fixed origin latitude in degrees (20.0°N)
+const FIXED_ORIGIN_LAT_DEG: f64 = 20.0;
+
+/// Fixed origin Y coordinate in centimeters
+const FIXED_ORIGIN_Y_CM: i64 = {
+    let lat_rad = FIXED_ORIGIN_LAT_DEG * std::f64::consts::PI / 180.0;
+    let y_cm = R_CM * lat_rad;
+    y_cm as i64
+};
+
+/// Convert latitude/longitude to relative centimeter coordinates
+fn latlon_to_cm_relative(lat: f64, lon: f64, lat_avg: f64) -> (i32, i32) {
+    let lat_rad = lat.to_radians();
+    let lon_rad = lon.to_radians();
+    let lat_avg_rad = lat_avg.to_radians();
+
+    let cos_lat = lat_avg_rad.cos();
+
+    let x_abs = R_CM * lon_rad * cos_lat;
+    let y_abs = R_CM * lat_rad;
+
+    let x0_abs = (FIXED_ORIGIN_LON_DEG.to_radians() * R_CM) * cos_lat;
+    let y0_abs = FIXED_ORIGIN_Y_CM as f64;
+
+    let dx_cm = (x_abs - x0_abs).round() as i64;
+    let dy_cm = (y_abs - y0_abs).round() as i64;
+
+    (dx_cm as i32, dy_cm as i32)
+}
+
+/// Compute average latitude from a set of GPS coordinates
+fn compute_lat_avg(points: &[(f64, f64)]) -> f64 {
+    if points.is_empty() {
+        return 25.0; // Default Taiwan
+    }
+
+    let sum: f64 = points.iter().map(|(lat, _)| lat).sum();
+    sum / points.len() as f64
+}
+
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
 /// Helper: Create a simple straight-line route
 fn make_straight_route(length_cm: i32, num_segments: usize) -> Vec<RouteNode> {
     let seg_len = length_cm / num_segments as i32;
@@ -111,11 +165,11 @@ fn test_integration_empty_inputs() {
 
     // Empty stops
     let result = map_stops(&[], &route, None);
-    assert_eq!(result, vec![].as_slice());
+    assert_eq!(result, &[] as &[i32]);
 
     // Empty route
     let result = map_stops(&[(100, 0)], &[], None);
-    assert_eq!(result, vec![].as_slice());
+    assert_eq!(result, &[] as &[i32]);
 }
 
 #[test]
@@ -365,4 +419,195 @@ fn test_integration_stops_near_segment_boundaries() {
 
     // Monotonicity must hold
     assert!(result[0] <= result[1] && result[1] <= result[2]);
+}
+
+// ============================================================================
+// Real-World Route Tests
+// ============================================================================
+
+#[test]
+fn test_integration_ty225_real_route() {
+    // Integration test using real ty225 route data
+    // This is a real Taipei bus route with 57 stops
+    // Tests end-to-end functionality with actual GPS coordinates
+
+    // Resolve path to test data relative to project root
+    // CARGO_MANIFEST_DIR points to the dp_mapper crate directory
+    // We need to go up to the project root to find test_data/
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let project_root = manifest_dir
+        .parent() // preprocessor
+        .and_then(|p| p.parent()) // bus_arrival root or .worktrees/dp_mapper
+        .and_then(|p| {
+            // If we're in a worktree, go up to the actual project root
+            if p.ends_with(".worktrees") || p.ends_with("worktrees") {
+                p.parent()
+            } else {
+                Some(p)
+            }
+        });
+
+    let test_data_dir = match project_root {
+        Some(root) => root.join("test_data"),
+        None => {
+            // Fallback: try direct path from current directory
+            std::path::PathBuf::from("test_data")
+        }
+    };
+
+    let route_json_path = test_data_dir.join("ty225_route.json");
+    let stops_json_path = test_data_dir.join("ty225_stops.json");
+
+    let route_json = std::fs::read_to_string(&route_json_path)
+        .unwrap_or_else(|_| panic!("failed to load ty225 route file from {:?}", route_json_path));
+
+    let route_value: serde_json::Value = serde_json::from_str(&route_json)
+        .expect("failed to parse ty225 route JSON");
+
+    // Extract route points as [lat, lon] pairs
+    let route_points: Vec<(f64, f64)> = route_value["route_points"]
+        .as_array()
+        .expect("route_points should be an array")
+        .iter()
+        .map(|v| {
+            let arr = v.as_array().expect("route_point should be [lat, lon]");
+            (
+                arr[0].as_f64().expect("lat should be number"),
+                arr[1].as_f64().expect("lon should be number"),
+            )
+        })
+        .collect();
+
+    // Compute average latitude for coordinate conversion
+    let lat_avg = compute_lat_avg(&route_points);
+
+    // Convert route points to cm coordinates
+    let route_cm: Vec<(i32, i32)> = route_points
+        .iter()
+        .map(|(lat, lon)| latlon_to_cm_relative(*lat, *lon, lat_avg))
+        .collect();
+
+    // Build RouteNode list from converted coordinates
+    let route_nodes: Vec<RouteNode> = build_route_nodes_from_cm(&route_cm);
+
+    // Load stops JSON
+    let stops_json = std::fs::read_to_string(&stops_json_path)
+        .unwrap_or_else(|_| panic!("failed to load ty225 stops file from {:?}", stops_json_path));
+
+    let stops_value: serde_json::Value = serde_json::from_str(&stops_json)
+        .expect("failed to parse ty225 stops JSON");
+
+    // Extract stops as (lat, lon) pairs
+    let stops_gps: Vec<(f64, f64)> = stops_value["stops"]
+        .as_array()
+        .expect("stops should be an array")
+        .iter()
+        .map(|s| (
+            s["lat"].as_f64().expect("lat should be number"),
+            s["lon"].as_f64().expect("lon should be number"),
+        ))
+        .collect();
+
+    // Convert stops to cm coordinates
+    let stops_cm: Vec<(i64, i64)> = stops_gps
+        .iter()
+        .map(|(lat, lon)| {
+            let (x, y) = latlon_to_cm_relative(*lat, *lon, lat_avg);
+            (x as i64, y as i64)
+        })
+        .collect();
+
+    // Run DP mapper
+    let result = map_stops(&stops_cm, &route_nodes, Some(15));
+
+    // Validate results
+    assert_eq!(result.len(), 57, "should map all 57 stops");
+
+    // Verify monotonicity (critical constraint)
+    for i in 0..result.len() - 1 {
+        assert!(
+            result[i] <= result[i + 1],
+            "ty225: monotonicity violated at index {}: {} (stop {}) > {} (stop {})",
+            i,
+            result[i],
+            i + 1,
+            result[i + 1],
+            i + 2
+        );
+    }
+
+    // Verify all progress values are within route bounds
+    let total_route_len = route_nodes.last().unwrap().cum_dist_cm;
+    for (i, &progress) in result.iter().enumerate() {
+        assert!(
+            progress >= 0 && progress <= total_route_len,
+            "ty225: stop {} mapped outside route bounds: progress={}, route_len={}",
+            i + 1,
+            progress,
+            total_route_len
+        );
+    }
+
+    // Verify reasonable coverage - stops should span most of the route
+    let coverage = result[result.len() - 1] as f64 / total_route_len as f64;
+    assert!(
+        coverage > 0.7,
+        "ty225: stops should cover >70% of route: {}",
+        coverage
+    );
+}
+
+/// Helper: Build RouteNode list from cm coordinates
+fn build_route_nodes_from_cm(points: &[(i32, i32)]) -> Vec<RouteNode> {
+    if points.len() < 2 {
+        return vec![];
+    }
+
+    let mut nodes = Vec::with_capacity(points.len());
+
+    // Calculate cumulative distance
+    let mut cum_dist_cm: i32 = 0;
+
+    for (i, &(x_cm, y_cm)) in points.iter().enumerate() {
+        let is_last = i == points.len() - 1;
+
+        if !is_last {
+            let next_point = points[i + 1];
+            let dx_cm = next_point.0 - x_cm;
+            let dy_cm = next_point.1 - y_cm;
+            // Use i64 to avoid overflow when squaring large coordinate differences
+            let seg_len_cm = (((dx_cm as i64) * (dx_cm as i64) + (dy_cm as i64) * (dy_cm as i64)) as f64).sqrt().round() as i32;
+
+            let len2_cm2 = (seg_len_cm as i64) * (seg_len_cm as i64);
+
+            nodes.push(RouteNode {
+                len2_cm2,
+                heading_cdeg: 0,
+                _pad: 0,
+                x_cm,
+                y_cm,
+                cum_dist_cm,
+                dx_cm,
+                dy_cm,
+                seg_len_cm,
+            });
+
+            cum_dist_cm += seg_len_cm;
+        } else {
+            // Last node: no outgoing segment
+            nodes.push(RouteNode {
+                len2_cm2: 0,
+                heading_cdeg: 0,
+                _pad: 0,
+                x_cm,
+                y_cm,
+                cum_dist_cm,
+                dx_cm: 0,
+                dy_cm: 0,
+                seg_len_cm: 0,
+            });
+        }
+    }
+
+    nodes
 }

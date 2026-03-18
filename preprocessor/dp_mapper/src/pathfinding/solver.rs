@@ -170,7 +170,11 @@ pub fn dp_forward_pass(
 
         // Assign best cost from running minimum
         if let Some((min_cost, prev_idx)) = running_min {
-            best_cost[curr_idx] = min_cost + curr_dist;
+            let new_cost = min_cost.saturating_add(curr_dist);
+            if new_cost == i64::MAX {
+                eprintln!("WARNING: Cost saturation at stop layer - min_cost={}, curr_dist={}", min_cost, curr_dist);
+            }
+            best_cost[curr_idx] = new_cost;
             best_prev[curr_idx] = Some(prev_idx);
         }
     }
