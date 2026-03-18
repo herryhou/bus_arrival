@@ -1,4 +1,7 @@
 //! DP Mapper: Globally optimal stop-to-segment mapping using dynamic programming
+//!
+//! This crate provides a globally optimal solution for mapping bus stops to
+//! route segments using dynamic programming (Viterbi-like DAG shortest path).
 
 pub mod grid;
 pub mod candidate;
@@ -9,7 +12,17 @@ use shared::RouteNode;
 // Re-export common types
 pub use candidate::Candidate;
 
+/// Default number of candidates per stop
+const DEFAULT_K: usize = 15;
+
 /// Map bus stops to route progress values using globally optimal DP.
+///
+/// # Algorithm
+/// 1. Build spatial grid for O(k) segment queries
+/// 2. Generate K candidates per stop (top-K closest segments)
+/// 3. Add snap-forward fallback for disconnected layers
+/// 4. Run DP forward pass with sorted sweep O(M × K)
+/// 5. Backtrack to find optimal path
 ///
 /// # Arguments
 /// * `stops_cm` - Stop locations in centimeter coordinates (x, y)
@@ -18,10 +31,27 @@ pub use candidate::Candidate;
 ///
 /// # Returns
 /// Progress values in INPUT ORDER (validated, non-decreasing)
+///
+/// # Example
+/// ```no_run
+/// use dp_mapper::map_stops;
+/// use shared::RouteNode;
+///
+/// let stops = vec![(0, 0), (10000, 0)];
+/// let route = vec![/* ... */];
+/// let progress = map_stops(&stops, &route, None);
+/// assert!(progress[0] <= progress[1]); // Monotonicity
+/// ```
 pub fn map_stops(
-    _stops_cm: &[(i64, i64)],
-    _route_nodes: &[RouteNode],
-    _k: Option<usize>,
+    stops_cm: &[(i64, i64)],
+    route_nodes: &[RouteNode],
+    k: Option<usize>,
 ) -> Vec<i32> {
-    vec![]
+    let k = k.unwrap_or(DEFAULT_K);
+
+    // Build spatial grid
+    let grid = grid::build_grid(route_nodes, 10000);
+
+    // Run DP solver
+    pathfinding::map_stops_dp(stops_cm, route_nodes, &grid, k)
 }

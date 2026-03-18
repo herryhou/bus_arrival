@@ -1,7 +1,8 @@
 //! DP solver implementation
 
 use shared::RouteNode;
-use crate::candidate::Candidate;
+use crate::candidate::{Candidate, generate_candidates, generate_candidates_with_snap};
+use crate::grid::SpatialGrid;
 
 /// DP layer for one stop: contains candidate states and running minimum
 #[derive(Debug, Clone)]
@@ -33,12 +34,46 @@ pub struct SortedCandidate {
 /// # Returns
 /// Progress values in INPUT ORDER (validated, non-decreasing)
 pub fn map_stops_dp(
-    _stops_cm: &[(i64, i64)],
-    _route_nodes: &[RouteNode],
-    _grid: &(),
-    _k: usize,
+    stops_cm: &[(i64, i64)],
+    route_nodes: &[RouteNode],
+    grid: &SpatialGrid,
+    k: usize,
 ) -> Vec<i32> {
-    vec![]
+    if stops_cm.is_empty() || route_nodes.len() < 2 {
+        return vec![];
+    }
+
+    let mut layers: Vec<DpLayer> = Vec::with_capacity(stops_cm.len());
+
+    // Generate candidates for all stops
+    for (j, &stop) in stops_cm.iter().enumerate() {
+        let cands = if j == 0 {
+            // First stop: no snap needed
+            generate_candidates(stop, route_nodes, grid, k)
+        } else {
+            // Subsequent stops: add snap-forward fallback
+            let max_prev = layers[j - 1]
+                .candidates
+                .iter()
+                .map(|c| c.progress_cm)
+                .max()
+                .unwrap_or(0);
+            generate_candidates_with_snap(stop, route_nodes, grid, k, max_prev)
+        };
+
+        // Handle empty candidates (edge case)
+        if cands.is_empty() {
+            return vec![];
+        }
+
+        layers.push(dp_forward_pass(
+            if j == 0 { None } else { Some(&layers[j - 1]) },
+            cands,
+        ));
+    }
+
+    // Backtrack to find optimal path
+    dp_backtrack(&layers)
 }
 
 /// DP forward pass: compute minimum cost transitions from previous layer to current
