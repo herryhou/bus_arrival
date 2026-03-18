@@ -99,6 +99,7 @@ pub fn dp_forward_pass(
 
     // Running minimum: (cost, prev_idx)
     let mut running_min: Option<(i64, usize)> = None;
+    let mut prev_ptr = 0;
 
     let mut best_cost = vec![i64::MAX; n];
     let mut best_prev = vec![None; n];
@@ -109,13 +110,13 @@ pub fn dp_forward_pass(
         let curr_progress = curr_candidates[curr_idx].progress_cm;
         let curr_dist = curr_candidates[curr_idx].dist_sq_cm2;
 
-        // Advance running minimum to include all valid previous candidates
-        for sp in &sorted_prev {
+        // Advance running minimum: include all previous candidates with progress <= curr_progress
+        while prev_ptr < sorted_prev.len() {
+            let sp = &sorted_prev[prev_ptr];
             let prev_idx = sp.orig_idx;
             let prev_progress = prev.candidates[prev_idx].progress_cm;
             let prev_cost = prev.best_cost[prev_idx];
 
-            // Check if transition is valid (progress[j] >= progress[j-1])
             if prev_progress <= curr_progress {
                 // Update running minimum
                 match running_min {
@@ -125,8 +126,9 @@ pub fn dp_forward_pass(
                     }
                     _ => {}
                 }
+                prev_ptr += 1;
             } else {
-                // Previous candidates are sorted, so we can break
+                // Previous candidates are sorted, so we can stop
                 break;
             }
         }
