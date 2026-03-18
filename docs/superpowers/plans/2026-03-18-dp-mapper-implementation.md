@@ -54,12 +54,17 @@ resolver = "2"
 members = ["shared", "preprocessor", "preprocessor/dp_mapper", "simulator", "arrival_detector"]
 ```
 
-- [ ] **Step 2: Verify workspace compiles**
+- [ ] **Step 2: Verify directory structure exists**
+
+Run: `ls -la preprocessor/`
+Expected: Directory exists (it's part of the existing codebase)
+
+- [ ] **Step 3: Verify workspace compiles**
 
 Run: `cargo check --workspace`
 Expected: No errors (dp_mapper doesn't exist yet, but workspace is valid)
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add Cargo.toml
@@ -104,6 +109,8 @@ git commit -m "feat(dp-mapper): add crate manifest with shared dependency"
 ---
 
 ### Task 3: Create Module Skeleton
+
+**Note on placeholder types:** Functions use `()` as a placeholder for `SpatialGrid` since the actual type isn't defined until Chunk 2. Signatures will be updated when the type is implemented.
 
 **Files:**
 - Create: `preprocessor/dp_mapper/src/lib.rs`
@@ -153,6 +160,11 @@ pub mod builder;
 pub use builder::{build_grid, query_neighbors};
 ```
 
+- [ ] **Step 2b: Verify grid module compiles**
+
+Run: `cargo check -p dp_mapper 2>&1 | head -20`
+Expected: No compilation errors in grid module (other modules may have errors)
+
 - [ ] **Step 3: Create grid/builder.rs (placeholder)**
 
 ```rust
@@ -189,6 +201,11 @@ pub struct Candidate {
     pub progress_cm: i32,
 }
 ```
+
+- [ ] **Step 4b: Verify candidate module compiles**
+
+Run: `cargo check -p dp_mapper 2>&1 | head -20`
+Expected: No compilation errors in candidate module
 
 - [ ] **Step 5: Create candidate/generator.rs (placeholder)**
 
@@ -228,6 +245,11 @@ pub mod solver;
 pub use solver::map_stops_dp;
 ```
 
+- [ ] **Step 6b: Verify pathfinding module compiles**
+
+Run: `cargo check -p dp_mapper 2>&1 | head -20`
+Expected: No compilation errors in pathfinding module
+
 - [ ] **Step 7: Create pathfinding/solver.rs (placeholder)**
 
 ```rust
@@ -247,12 +269,12 @@ pub fn map_stops_dp(
 }
 ```
 
-- [ ] **Step 8: Verify crate compiles**
+- [ ] **Step 9: Verify crate compiles**
 
 Run: `cargo check -p dp_mapper`
 Expected: No errors
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add preprocessor/dp_mapper/src/
