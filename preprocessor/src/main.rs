@@ -130,27 +130,36 @@ fn main() {
         (x as i64, y as i64)
     }).collect();
 
-    // Validate stop sequence
+    // Validate stop sequence (always complete for debugging)
     let validation = validate_stop_sequence(&stop_pts_cm, &route_nodes, &grid);
 
+    // Print stop-segment mapping for all stops
+    println!("[STOP-SEGMENT MAPPING]");
+    for (i, ((seg, t), progress)) in validation.segment_indices.iter()
+        .zip(validation.t_values.iter())
+        .zip(validation.progress_values.iter())
+        .enumerate() {
+        println!("  Stop {:03}: segment={:5}, t={:.4}, progress={} cm",
+                 i + 1, seg, t, progress);
+    }
+
+    // Check validation result
     let projected_stops = match &validation.reversal_info {
         None => {
-            // Success!
             println!("[VALIDATION PASS]");
-            for (i, progress) in validation.progress_values.iter().enumerate() {
-                println!("  Stop {:03}: progress={} cm", i + 1, progress);
-            }
             println!("✓ All {} stops validated - monotonic sequence confirmed", validation.progress_values.len());
-
             project_stops_validated(&validation.progress_values, &stops_input)
         }
         Some(info) => {
-            eprintln!("ERROR: Stop sequence validation failed");
-            eprintln!("  At stop {}: {} < {} cm",
+            eprintln!("[VALIDATION FAIL]");
+            eprintln!("  At stop {:03}: progress={} cm < previous={} cm (reversal!)",
                      info.stop_index + 1, info.problem_progress, info.previous_progress);
             eprintln!("  This usually indicates:");
             eprintln!("    1. Input stop order does not match route geometry");
             eprintln!("    2. Route has self-intersection or loop-back");
+            eprintln!("");
+            eprintln!("  Segment mapping shown above for debugging.");
+            eprintln!("  Review the segment sequence to understand the route geometry.");
             process::exit(1);
         }
     };
