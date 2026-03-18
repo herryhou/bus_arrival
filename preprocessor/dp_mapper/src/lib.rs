@@ -30,7 +30,7 @@ const DEFAULT_K: usize = 15;
 /// * `k` - Number of candidates per stop (None = default 15)
 ///
 /// # Returns
-/// Progress values in INPUT ORDER (validated, non-decreasing)
+/// Candidates in INPUT ORDER (validated, non-decreasing)
 ///
 /// # Example
 /// ```no_run
@@ -39,14 +39,14 @@ const DEFAULT_K: usize = 15;
 ///
 /// let stops = vec![(0, 0), (10000, 0)];
 /// let route = vec![/* ... */];
-/// let progress = map_stops(&stops, &route, None);
-/// assert!(progress[0] <= progress[1]); // Monotonicity
+/// let candidates = map_stops(&stops, &route, None);
+/// assert!(candidates[0].progress_cm <= candidates[1].progress_cm); // Monotonicity
 /// ```
 pub fn map_stops(
     stops_cm: &[(i64, i64)],
     route_nodes: &[RouteNode],
     k: Option<usize>,
-) -> Vec<i32> {
+) -> Vec<Candidate> {
     let k = k.unwrap_or(DEFAULT_K);
 
     // Build spatial grid

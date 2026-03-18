@@ -269,7 +269,8 @@ export function getInterpolatedBusState(
 /**
  * Get stop positions for MapLibre GL JS
  *
- * Converts stops to GeoJSON Point coordinates
+ * Converts stops to GeoJSON Point coordinates by interpolating
+ * along route nodes for exact placement.
  *
  * @param routeData - Parsed route data
  * @param projectCmToLatLon - Function to convert cm to lat/lon
@@ -279,24 +280,15 @@ export function getStopPositions(
 	routeData: RouteData,
 	projectCmToLatLon: (x_cm: number, y_cm: number, lat_avg_deg: number) => [number, number]
 ): Array<{ index: number; lon: number; lat: number; progress_cm: number }> {
-	// We need to interpolate stop positions from the route nodes
-	// For now, return the stop progress_cm and approximate position from nearest node
 	return routeData.stops.map((stop, index) => {
-		// Find the nearest route node
-		let minDist = Infinity;
-		let nearestNode = routeData.nodes[0];
-
-		for (const node of routeData.nodes) {
-			const dist = Math.abs(node.cum_dist_cm - stop.progress_cm);
-			if (dist < minDist) {
-				minDist = dist;
-				nearestNode = node;
-			}
+		const latLon = getStopLatLon(stop.progress_cm, routeData);
+		if (!latLon) {
+			// Fallback to first node if interpolation fails
+			const node = routeData.nodes[0];
+			const [lat, lon] = projectCmToLatLon(node.x_cm, node.y_cm, routeData.lat_avg_deg);
+			return { index, lon, lat, progress_cm: stop.progress_cm };
 		}
-
-		// Nodes are stored as absolute coordinates
-		const [lat, lon] = projectCmToLatLon(nearestNode.x_cm, nearestNode.y_cm, routeData.lat_avg_deg);
-		return { index, lon, lat, progress_cm: stop.progress_cm };
+		return { index, lon: latLon[1], lat: latLon[0], progress_cm: stop.progress_cm };
 	});
 }
 
@@ -325,34 +317,19 @@ export function getStopLatLon(
 		if (stopProgressCm >= node.cum_dist_cm && stopProgressCm <= nextNode.cum_dist_cm) {
 			// Interpolate between nodes
 			const seg_len = nextNode.cum_dist_cm - node.cum_dist_cm;
-			if (seg_len <= 0) {
-				// Fallback to start node
-				const [lat, lon] = projectCmToLatLonFromOrigin(node.x_cm, node.y_cm, routeData);
-				return [lat, lon];
+			let x_cm = node.x_cm;
+			let y_cm = node.y_cm;
+
+			if (seg_len > 0) {
+				const t = (stopProgressCm - node.cum_dist_cm) / seg_len;
+				x_cm = node.x_cm + t * (nextNode.x_cm - node.x_cm);
+				y_cm = node.y_cm + t * (nextNode.y_cm - node.y_cm);
 			}
 
-			const t = (stopProgressCm - node.cum_dist_cm) / seg_len;
-			const x_cm = node.x_cm + t * (nextNode.x_cm - node.x_cm);
-			const y_cm = node.y_cm + t * (nextNode.y_cm - node.y_cm);
-
-			// Project to lat/lon
-			return projectCmToLatLonFromOrigin(x_cm, y_cm, routeData);
+			// Project to lat/lon using absolute coordinates
+			return projectCmToLatLon(x_cm, y_cm, routeData.lat_avg_deg);
 		}
 	}
 
 	return null;
-}
-
-/**
- * Helper to project cm to lat/lon using route data's grid_origin and lat_avg_deg
- * This is needed because projectCmToLatLon doesn't take grid_origin parameter
- */
-function projectCmToLatLonFromOrigin(
-	x_cm: number,
-	y_cm: number,
-	routeData: RouteData
-): [number, number] {
-	// projectCmToLatLon expects coordinates relative to fixed origin (120E, 20N)
-	// Nodes are already stored as absolute coordinates, so we pass them directly
-	return projectCmToLatLon(x_cm, y_cm, routeData.lat_avg_deg);
 }

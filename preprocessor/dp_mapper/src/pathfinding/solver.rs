@@ -32,13 +32,13 @@ pub struct SortedCandidate {
 /// 3. Backtrack: reconstruct optimal path
 ///
 /// # Returns
-/// Progress values in INPUT ORDER (validated, non-decreasing)
+/// Candidates in INPUT ORDER (validated, non-decreasing progress)
 pub fn map_stops_dp(
     stops_cm: &[(i64, i64)],
     route_nodes: &[RouteNode],
     grid: &SpatialGrid,
     k: usize,
-) -> Vec<i32> {
+) -> Vec<Candidate> {
     if stops_cm.is_empty() || route_nodes.len() < 2 {
         return vec![];
     }
@@ -194,11 +194,11 @@ pub fn dp_forward_pass(
 /// # Algorithm
 /// 1. Find minimum cost in final layer
 /// 2. Follow best_prev pointers back to first stop
-/// 3. Extract progress values in forward order
+/// 3. Extract candidates in forward order
 ///
 /// # Returns
-/// Progress values for optimal path (in input order)
-pub fn dp_backtrack(layers: &[DpLayer]) -> Vec<i32> {
+/// Candidates for optimal path (in input order)
+pub fn dp_backtrack(layers: &[DpLayer]) -> Vec<Candidate> {
     if layers.is_empty() {
         return vec![];
     }
@@ -225,7 +225,7 @@ pub fn dp_backtrack(layers: &[DpLayer]) -> Vec<i32> {
         match curr_idx {
             Some(idx) => {
                 // Guard: j > 0 check is implicit - first layer has best_prev = [None, ...]
-                path.push(layer.candidates[idx].progress_cm);
+                path.push(layer.candidates[idx].clone());
                 curr_idx = layer.best_prev[idx];
             }
             None => break,

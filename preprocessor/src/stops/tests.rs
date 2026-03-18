@@ -9,11 +9,12 @@ mod tests {
         let mut nodes = Vec::new();
         let mut cum_dist = 0i32;
 
-        for (i, &(x, y)) in coords.iter().enumerate() {
-            let (dx, dy, len2, seg_len, heading) = if i > 0 {
-                let prev = coords[i - 1];
-                let dx = x - prev.0;
-                let dy = y - prev.1;
+        for i in 0..coords.len() {
+            let (dx, dy, len2, seg_len, heading) = if i < coords.len() - 1 {
+                let curr = coords[i];
+                let next = coords[i + 1];
+                let dx = next.0 - curr.0;
+                let dy = next.1 - curr.1;
                 let len2 = dx * dx + dy * dy;
                 let seg_len = (len2 as f64).sqrt() as i32;
                 let heading = (dy as f64).atan2(dx as f64).to_degrees() as i16 * 100;
@@ -26,8 +27,8 @@ mod tests {
                 len2_cm2: len2,
                 heading_cdeg: heading,
                 _pad: 0,
-                x_cm: x as i32,
-                y_cm: y as i32,
+                x_cm: coords[i].0 as i32,
+                y_cm: coords[i].1 as i32,
                 cum_dist_cm: cum_dist,
                 dx_cm: dx as i32,
                 dy_cm: dy as i32,

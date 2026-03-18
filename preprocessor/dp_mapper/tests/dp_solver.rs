@@ -151,11 +151,11 @@ fn test_dp_backtrack() {
 
     // Should return progress values for optimal path
     assert_eq!(result.len(), 2);
-    assert!(result[0] <= result[1]); // Monotonicity
+    assert!(result[0].progress_cm <= result[1].progress_cm); // Monotonicity
 
     // Optimal path: 100 -> 250 (cost 25)
-    assert_eq!(result[0], 100);
-    assert_eq!(result[1], 250);
+    assert_eq!(result[0].progress_cm, 100);
+    assert_eq!(result[1].progress_cm, 250);
 }
 
 #[test]

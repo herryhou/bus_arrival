@@ -135,12 +135,12 @@ fn main() {
 
     // Print stop-segment mapping for all stops
     println!("[STOP-SEGMENT MAPPING]");
-    for (i, ((seg, t), progress)) in validation.segment_indices.iter()
+    for (i, ((seg_idx, t), progress)) in validation.segment_indices.iter()
         .zip(validation.t_values.iter())
         .zip(validation.progress_values.iter())
         .enumerate() {
         println!("  Stop {:03}: segment={:5}, t={:.4}, progress={} cm",
-                 i + 1, seg, t, progress);
+                 i + 1, seg_idx, t, progress);
     }
 
     // Check validation result
