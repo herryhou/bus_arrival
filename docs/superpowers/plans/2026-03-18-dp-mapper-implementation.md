@@ -231,6 +231,8 @@ pub use solver::map_stops_dp;
 ```rust
 //! DP solver implementation
 
+// Placeholder: implemented in Chunk 4
+
 use shared::RouteNode;
 
 pub fn map_stops_dp(
