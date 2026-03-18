@@ -2,6 +2,7 @@
 name = "dp_mapper"
 version.workspace = true
 edition.workspace = true
+description = "Globally optimal stop-to-segment mapping using dynamic programming"
 
 [dependencies]
 shared = { path = "../../shared" }
