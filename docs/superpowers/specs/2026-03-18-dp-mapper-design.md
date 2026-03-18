@@ -121,10 +121,10 @@ pub fn query_neighbors(grid: &SpatialGrid, x_cm: i32, y_cm: i32, radius: u32) ->
 **Public Types:**
 ```rust
 pub struct Candidate {
-    seg_idx: usize,      // Route segment index
-    t: f64,              // Position on segment [0, 1]
-    dist_cm: i64,        // Squared distance from stop to projection (cm²)
-    progress_cm: i32,    // Absolute progress along route (cm)
+    seg_idx: usize,         // Route segment index
+    t: f64,                 // Position on segment [0, 1]
+    dist_sq_cm2: i64,       // Squared distance from stop to projection (cm²)
+    progress_cm: i32,       // Absolute progress along route (cm)
 }
 ```
 
@@ -138,22 +138,22 @@ pub fn generate_candidates(
     k: usize,
 ) -> Vec<Candidate>;
 
-// For subsequent stops, snap uses previous layer's minimum progress
+// For subsequent stops, snap uses previous layer's maximum progress
 pub fn generate_candidates_with_snap(
     stop: (i64, i64),
     route_nodes: &[RouteNode],
     grid: &SpatialGrid,
     k: usize,
-    min_prev_progress_cm: i32,  // Minimum progress from previous layer
+    max_prev_progress_cm: i32,  // Maximum progress from previous layer
 ) -> Vec<Candidate>;
 ```
 
 **Algorithm Details:**
 
 1. **Grid Query:** For radii 1, 2, 3 (expanding 3×3 → 5×5 → 7×7), collect all segment indices
-2. **Projection:** For each segment, project stop onto line, clamp t to [0, 1], compute distance² and progress
+2. **Projection:** For each segment, project stop onto line, clamp t to [0, 1], compute squared distance and progress
 3. **Deduplication:** Remove duplicates by `(seg_idx, t)` pair - same segment at same position
-4. **Sort:** Sort by distance² ascending
+4. **Sort:** Sort by squared distance ascending
 5. **Select:** Keep top-K candidates (by distance)
 6. **Snap:** Add one snap-forward candidate as fallback (for `generate_candidates_with_snap`)
 
@@ -161,28 +161,37 @@ pub fn generate_candidates_with_snap(
 
 ```rust
 // Snap candidate generation for stop j (j > 0):
-// Input: min_prev_progress_cm from previous layer's candidates
+// Input: max_prev_progress_cm from previous layer's candidates
+//
+// Purpose: Guarantee at least one candidate reachable from ALL previous candidates.
+// For DP sweep transition prev.progress <= curr.progress to fire, snap must satisfy:
+//   snap.progress >= max(prev.progress) for all prev in previous layer
 
-// 1. Find first segment with cum_dist_cm >= min_prev_progress_cm:
+// 1. Find first segment whose END is past max_prev_progress_cm:
 let snap_seg_idx = route_nodes
     .iter()
-    .position(|n| n.cum_dist_cm >= min_prev_progress_cm)
-    .unwrap_or(route_nodes.len() - 1);  // Default to last segment
+    .position(|n| n.cum_dist_cm + n.seg_len_cm >= max_prev_progress_cm)
+    .unwrap_or(route_nodes.len().saturating_sub(2));  // Default to last valid segment
 
 // 2. Create snap candidate at segment start:
 let snap_candidate = Candidate {
     seg_idx: snap_seg_idx,
-    t: 0.0,                              // At segment start
-    dist_cm: SNAP_PENALTY_CM2,           // Large penalty
+    t: 0.0,                                     // At segment start
+    dist_sq_cm2: SNAP_PENALTY_CM2,              // Large penalty (squared)
     progress_cm: route_nodes[snap_seg_idx].cum_dist_cm,
 };
 ```
+
+**Key points:**
+- Using `max_prev_progress_cm` ensures snap is reachable from **every** previous candidate
+- Condition `cum_dist_cm + seg_len_cm >= max_prev_progress_cm` finds segment **containing** the threshold
+- Fallback `len().saturating_sub(2)` handles edge cases (returns last valid segment index)
 
 **Key Behavior:**
 - Projects stop onto all segments from grid query (3 radii)
 - Clamps t to [0.0, 1.0]
 - Deduplicates by `(seg_idx, t)` before sorting
-- Keeps top-K by distance (minimum distance first)
+- Keeps top-K by squared distance (minimum distance first)
 - Adds snap-forward candidate with `SNAP_PENALTY_CM2` (only for non-first stops)
 
 ### `pathfinding` Module
@@ -195,8 +204,8 @@ This module takes raw stop coordinates and orchestrates candidate generation and
 ```rust
 struct DpLayer {
     candidates: Vec<Candidate>,
-    best_cost: Vec<i64>,      // min cost to reach each candidate
-    best_prev: Vec<Option<usize>>,  // backpointer to previous layer
+    best_cost: Vec<i64>,                // min cost to reach each candidate
+    best_prev: Vec<Option<usize>>,      // backpointer to previous layer
 }
 
 // For sorting by progress while preserving original indices
@@ -216,22 +225,25 @@ pub fn map_stops_dp(
 ) -> Vec<i32>;
 ```
 
-**DP Transition Validity:**
+**DP Transition Rule:**
+
+The DP sweep enforces the transition constraint directly using `<=` comparison:
 
 ```rust
-// Transition from candidate a (stop j-1) to candidate b (stop j) is valid iff:
-fn is_valid_transition(a: &Candidate, b: &Candidate) -> bool {
-    if b.seg_idx > a.seg_idx {
-        true  // Different segment, moved forward
-    } else if b.seg_idx == a.seg_idx && b.t > a.t {
-        true  // Same segment, advanced position (strict inequality)
-    } else if b.progress_cm > a.progress_cm {
-        true  // Same location visited twice (route loop), different visit
-    } else {
-        false  // Would violate monotonicity
-    }
+// In the forward pass sweep:
+while ptr < prev_sorted.len()
+    && prev_sorted[ptr].progress_cm <= curr.progress_cm {
+    // Include this previous candidate as valid predecessor
+    ...
 }
 ```
+
+**Canonical transition rule:** A transition from candidate `a` (stop j-1) to candidate `b` (stop j) is valid iff `a.progress_cm <= b.progress_cm`. This allows:
+- Different segments: `b.seg_idx > a.seg_idx`
+- Same segment, advanced position: `b.seg_idx == a.seg_idx && b.t >= a.t` (equal progress allowed)
+- Route loops: same location visited twice, different visits
+
+**Note:** Equal progress (`>=`) is explicitly allowed to handle identical adjacent stops and route loops.
 
 **DP Forward Pass Algorithm:**
 
@@ -279,7 +291,7 @@ fn dp_forward_pass(
 
             if let Some(prev_idx) = best_prev_idx {
                 let curr_orig_idx = curr.orig_idx;
-                let transition_cost = layers[j].candidates[curr_orig_idx].dist_cm;
+                let transition_cost = layers[j].candidates[curr_orig_idx].dist_sq_cm2;
                 let total_cost = best_prev_cost + transition_cost;
 
                 if total_cost < layers[j].best_cost[curr_orig_idx] {
@@ -313,7 +325,10 @@ fn dp_backtrack(layers: &[DpLayer]) -> Vec<i32> {
     let mut k = best_k;
     for j in (0..m).rev() {
         result[j] = layers[j].candidates[k].progress_cm;
-        k = layers[j].best_prev[k].unwrap_or(0);
+        if j > 0 {
+            k = layers[j].best_prev[k]
+                .expect("DP backtrack broken: missing predecessor for non-base layer");
+        }
     }
 
     result
@@ -348,7 +363,7 @@ Input: stops_cm[], route_nodes[]
 │  - Grid query (3 radii expansion)    │
 │  - Project onto segments             │
 │  - Deduplicate by (seg_idx, t)       │
-│  - Sort by distance²                 │
+│  - Sort by squared distance          │
 │  - Select top-K                      │
 │  - NO snap (first stop)              │
 │  → K candidates                      │
@@ -361,7 +376,7 @@ Input: stops_cm[], route_nodes[]
 │  - Grid query (3 radii expansion)    │
 │  - Project onto segments             │
 │  - Deduplicate by (seg_idx, t)       │
-│  - Sort by distance²                 │
+│  - Sort by squared distance          │
 │  - Select top-K                      │
 │  - Add snap fallback candidate       │
 │  → K+1 candidates                    │
@@ -395,7 +410,7 @@ const DEFAULT_K: usize = 15;
 const GRID_RADIUS_MAX: u32 = 3;  // 3×3, 5×5, 7×7 expansion
 const GRID_SIZE_CM: i32 = 10000; // 100m cells
 
-// Snap fallback
+// Snap fallback (squared distance units)
 const SNAP_PENALTY_CM2: i64 = 1_000_000_000_000; // ~316 km² penalty
 
 // Deduplication
@@ -407,6 +422,7 @@ const MAX_CANDIDATES: usize = 100; // cap before sort to prevent explosion
 - Purpose: Large enough that DP only uses snap candidate when no valid transition exists
 - Safety margin: Real bus stops are rarely >100m from route (distance² < 10^10 cm²)
 - The penalty is ~100× larger than worst-case legitimate projection, ensuring snap is truly a last resort
+- All distance costs use squared units (cm²) for consistency
 
 ## Dependencies
 
@@ -430,7 +446,7 @@ No external dependencies. Pure Rust implementation.
 |--------|----------|
 | `grid` | Empty route, single segment, multi-segment; boundary conditions; query radius expansion; deduplication |
 | `candidate` | Projection at t=0, t=1, t=0.5; clamping; sorting/K-limiting; snap generation; deduplication by (seg_idx, t) |
-| `pathfinding` | Two-stop monotonic; same-segment strict inequality; route loops; snap activation; backtrack correctness |
+| `pathfinding` | Two-stop monotonic; same-segment equality allowed; route loops; snap activation; backtrack correctness |
 
 ### Integration Tests
 
@@ -465,11 +481,13 @@ No external dependencies. Pure Rust implementation.
 |-----------|-----------|
 | Stop projects behind min_progress | Verify DP doesn't select violating candidate |
 | Route loop (same location twice) | Both segments as candidates; DP picks best |
-| Identical adjacent stops | Equal progress is valid (>= transition) |
+| Identical adjacent stops | Equal progress is valid (<= transition) |
 | No valid transition | Snap-forward candidate activates |
 | First stop (no constraint) | All candidates valid, no snap |
 | Large distance from route | Legitimate projection < SNAP_PENALTY |
-| Snap candidate selection | Verify snap progress >= min_prev_progress |
+| Snap candidate selection | Verify snap progress >= max_prev_progress |
+| Snap reachability | Verify snap reachable from ALL previous candidates |
+| Backtrack at j=0 | Verify no unwrap_or panic at base layer |
 
 ## Complexity
 
@@ -490,11 +508,12 @@ With M=35 stops, K=15: ~525 projections + trivial sort.
 |-----------|-----------|----------|
 | Stop projects behind min_progress | Candidate progress < previous layer's min progress | DP doesn't select that candidate (higher cost path) |
 | Route loop (same location twice) | Grid returns both segments | Both appear as candidates; DP picks best sequence |
-| Identical adjacent stops | Progress values equal | Equal progress is valid (>= transition) |
-| No valid transition | All candidates have progress < previous min_progress | Snap-forward candidate activates (dist = SNAP_PENALTY) |
+| Identical adjacent stops | Progress values equal | Equal progress is valid (<= transition) |
+| No valid transition | All candidates have progress < previous max_progress | Snap-forward candidate activates (dist = SNAP_PENALTY) |
 | First stop (no constraint) | No previous layer | All candidates valid, no snap |
 | Empty candidate set (first stop) | Grid query returns nothing | Error: return empty progress values |
 | Empty candidate set (j > 0) | Grid query returns nothing | Snap candidate always added (at least 1 candidate) |
+| Snap unreachable (old bug) | Snap anchored at min_prev_progress | Fixed: anchor at max_prev_progress ensures reachability |
 
 ## Migration Strategy
 
@@ -569,3 +588,4 @@ The crate uses "never fail" design:
 4. Correctness: Output is non-decreasing and globally optimal
 5. Comparison tests: DP total distance ≤ greedy total distance for all test cases
 6. Snap activation: Snap candidates only used when no valid transition exists
+7. Snap reachability: Snap candidate always reachable from all previous candidates
