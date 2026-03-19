@@ -26,17 +26,17 @@ fn setup_test_route_data() -> (Vec<u8>, i32, i32) {
     let start_x = (x_abs - x0_abs).round() as i32;
     let start_y = (y_abs - y0_abs).round() as i32;
 
-    // Segment 0: 100m North
+    // Segment 0: 1km North
     nodes.push(RouteNode {
-        len2_cm2: 10000 * 10000,
+        len2_cm2: 100000 * 100000,
         heading_cdeg: 0,
         _pad: 0,
         x_cm: start_x,
         y_cm: start_y,
         cum_dist_cm: 0,
         dx_cm: 0,
-        dy_cm: 10000,
-        seg_len_cm: 10000,
+        dy_cm: 100000,
+        seg_len_cm: 100000,
     });
 
     // End node
@@ -45,16 +45,16 @@ fn setup_test_route_data() -> (Vec<u8>, i32, i32) {
         heading_cdeg: 0,
         _pad: 0,
         x_cm: start_x,
-        y_cm: start_y + 10000,
-        cum_dist_cm: 10000,
+        y_cm: start_y + 100000,
+        cum_dist_cm: 100000,
         dx_cm: 0,
         dy_cm: 0,
         seg_len_cm: 0,
     });
 
     let grid = shared::SpatialGrid {
-        cells: vec![vec![0]], // First segment in first cell
-        grid_size_cm: 10000,
+        cells: vec![vec![0]],
+        grid_size_cm: 100000,
         cols: 1,
         rows: 1,
         x0_cm: start_x,
@@ -76,6 +76,99 @@ fn test_localization_behavioral_scenarios() {
     scenario_normal_forward_movement(&route_data, start_x, start_y);
     scenario_handle_gps_jump(&route_data, start_x, start_y);
     scenario_handle_gps_outage_with_dr(&route_data, start_x, start_y);
+    scenario_heading_penalty_overlapping_routes(&route_data, start_x, start_y);
+    scenario_monotonicity_tolerance(&route_data, start_x, start_y);
+    scenario_max_speed_rejection(&route_data, start_x, start_y);
+}
+
+fn scenario_heading_penalty_overlapping_routes(route_data: &RouteData, start_x: i32, start_y: i32) {
+    let mut state = KalmanState::new();
+    let mut dr = DrState::new();
+
+    // Given: A GPS point close to the route but with OPPOSITE heading
+    let mut gps = GpsPoint::new();
+    gps.has_fix = true;
+    gps.timestamp = 1000;
+    gps.lat = lat_from_y(start_y + 1000); // 10m north
+    gps.lon = lon_from_x(start_x + 500, route_data.lat_avg_deg); // 5m east
+    gps.heading_cdeg = 18000; // Moving SOUTH
+    gps.speed_cms = 1000;
+
+    // When: Processing the update
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
+
+    // Then: It should still snap to the segment but the heading penalty should be high in the score calculation
+    // (internal to find_best_segment_restricted).
+    // In this simple 1-segment route, it will still pick segment 0 because it's the only one.
+    // In a real multi-segment route with a southbound segment nearby, it would prefer the southbound one.
+    if let ProcessResult::Valid { seg_idx, .. } = result {
+        assert_eq!(seg_idx, 0);
+    } else {
+        panic!("Should still be valid for single-segment route");
+    }
+}
+
+fn scenario_monotonicity_tolerance(route_data: &RouteData, start_x: i32, start_y: i32) {
+    let mut state = KalmanState::new();
+    let mut dr = DrState::new();
+
+    // Given: Initial position at 800m (80000cm)
+    let mut gps = GpsPoint::new();
+    gps.has_fix = true;
+    gps.timestamp = 1000;
+    gps.lat = lat_from_y(start_y + 80000);
+    gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
+    process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
+
+    // When: GPS jumps BACKWARDS by 5m (500cm) - within 500m tolerance
+    gps.timestamp += 1;
+    gps.lat = lat_from_y(start_y + 79500);
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false);
+
+    // Then: It should be accepted
+    if let ProcessResult::Valid { s_cm, .. } = result {
+        assert!(s_cm < 80000);
+    } else {
+        panic!("Backward noise should be accepted");
+    }
+
+    // When: GPS jumps BACKWARDS by 600m (60000cm) - outside 500m tolerance
+    // to position 200m (20000cm).
+    // Increase timestamp by 60s to pass speed constraint (max_dist = 3000*60 + 5000 = 185000)
+    gps.timestamp += 60;
+    gps.lat = lat_from_y(start_y + 20000); 
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 2, false);
+
+    // Then: It should be rejected by monotonicity
+    match result {
+        ProcessResult::Rejected(reason) => assert_eq!(reason, "monotonicity"),
+        _ => panic!("Expected monotonicity rejection"),
+    }
+}
+
+fn scenario_max_speed_rejection(route_data: &RouteData, start_x: i32, start_y: i32) {
+    let mut state = KalmanState::new();
+    let mut dr = DrState::new();
+
+    // Given: Initial position at 0m
+    let mut gps = GpsPoint::new();
+    gps.has_fix = true;
+    gps.timestamp = 1000;
+    gps.lat = lat_from_y(start_y);
+    gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
+    process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
+
+    // When: GPS jumps 100m in 1s (10000 cm/s)
+    // V_MAX is 3000 cm/s. Max dist = 3000*1 + 5000 = 8000 cm.
+    gps.timestamp += 1;
+    gps.lat = lat_from_y(start_y + 10000);
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false);
+
+    // Then: It should be rejected by speed constraint
+    match result {
+        ProcessResult::Rejected(reason) => assert_eq!(reason, "speed constraint"),
+        _ => panic!("Expected speed constraint rejection"),
+    }
 }
 
 fn lat_from_y(y_cm: i32) -> f64 {
