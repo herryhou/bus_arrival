@@ -79,6 +79,99 @@ fn test_localization_behavioral_scenarios() {
     scenario_heading_penalty_overlapping_routes(&route_data, start_x, start_y);
     scenario_monotonicity_tolerance(&route_data, start_x, start_y);
     scenario_max_speed_rejection(&route_data, start_x, start_y);
+    scenario_hdop_adaptive_smoothing(&route_data, start_x, start_y);
+    scenario_extended_gps_outage(&route_data, start_x, start_y);
+    scenario_route_end_clamping(&route_data, start_x, start_y);
+}
+
+fn scenario_hdop_adaptive_smoothing(route_data: &RouteData, start_x: i32, start_y: i32) {
+    let mut state = KalmanState::new();
+    let mut dr = DrState::new();
+
+    // Given: Initial fix at 0m
+    let mut gps = GpsPoint::new();
+    gps.has_fix = true;
+    gps.timestamp = 1000;
+    gps.lat = lat_from_y(start_y);
+    gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
+    gps.speed_cms = 1000;
+    gps.hdop_x10 = 10; // Accurate
+    process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
+
+    // When: GPS update at 20m with high noise (HDOP=5.0)
+    // Predicted position: 0 + 1000*1 = 1000cm
+    // Raw position: 2000cm
+    gps.timestamp += 1;
+    gps.lat = lat_from_y(start_y + 2000);
+    gps.hdop_x10 = 50; // Noisy (Ks = 13 instead of 77)
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false);
+
+    // Then: Progress should stay closer to predicted (1000) than raw (2000)
+    // s_pred = 0 + 1000 = 1000
+    // ks for hdop=50 is 26
+    // s_new = 1000 + (26 * (2000 - 1000)) / 256 = 1000 + 26000 / 256 = 1000 + 101 = 1101
+    if let ProcessResult::Valid { s_cm, .. } = result {
+        assert_eq!(s_cm, 1101);
+        assert!(s_cm < 1200); // Verify it stayed close to prediction
+    } else {
+        panic!("HDOP update failed");
+    }
+}
+
+fn scenario_extended_gps_outage(route_data: &RouteData, start_x: i32, start_y: i32) {
+    let mut state = KalmanState::new();
+    let mut dr = DrState::new();
+
+    // Given: A valid state
+    let mut gps = GpsPoint::new();
+    gps.has_fix = true;
+    gps.timestamp = 1000;
+    gps.lat = lat_from_y(start_y);
+    gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
+    gps.speed_cms = 1000;
+    process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
+
+    // When: GPS signal is lost for 11 seconds
+    let mut gps_lost = GpsPoint::new();
+    gps_lost.has_fix = false;
+    gps_lost.timestamp = 1011;
+    let result = process_gps_update(&mut state, &mut dr, &gps_lost, &route_data, 11, false);
+
+    // Then: Should return Outage status
+    match result {
+        ProcessResult::Outage => (),
+        _ => panic!("Expected Outage, got other"),
+    }
+}
+
+fn scenario_route_end_clamping(route_data: &RouteData, start_x: i32, start_y: i32) {
+    let mut state = KalmanState::new();
+    let mut dr = DrState::new();
+
+    // Given: Bus is near the end of 1km route
+    let mut gps = GpsPoint::new();
+    gps.has_fix = true;
+    gps.timestamp = 1000;
+    gps.lat = lat_from_y(start_y + 90000); // 900m
+    gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
+    process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
+
+    // When: multiple GPS updates place bus at 1.1km (past the 1km end)
+    for _ in 0..10 {
+        gps.timestamp += 10;
+        gps.lat = lat_from_y(start_y + 110000); 
+        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 10, false);
+        
+        if let ProcessResult::Valid { s_cm, .. } = result {
+            assert!(s_cm <= 100000, "Progress should never exceed 100000, got {}", s_cm);
+        } else {
+            panic!("End clamping update failed");
+        }
+    }
+
+    // Then: Progress should be very close to 1km (100000cm)
+    assert!(state.s_cm > 99000);
+    assert!(state.s_cm <= 100000);
 }
 
 fn scenario_heading_penalty_overlapping_routes(route_data: &RouteData, start_x: i32, start_y: i32) {

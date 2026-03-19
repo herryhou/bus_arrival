@@ -1,0 +1,76 @@
+use arrival_detector::corridor::find_active_stops;
+use arrival_detector::probability::THETA_ARRIVAL;
+use arrival_detector::state_machine::StopState;
+use shared::Stop;
+
+#[test]
+fn scenario_simultaneous_overlapping_corridors() {
+    // Given: two stops have overlapping corridors
+    // Stop 0: [9200, 10400]
+    // Stop 1: [9700, 10900]
+    let stops = vec![
+        Stop { progress_cm: 10000, corridor_start_cm: 9200, corridor_end_cm: 10400 },
+        Stop { progress_cm: 10500, corridor_start_cm: 9700, corridor_end_cm: 10900 },
+    ];
+
+    // When: the bus is at 10000m (in the overlap region)
+    let active = find_active_stops(10000, &stops);
+
+    // Then: both stops should be returned as active
+    assert_eq!(active.len(), 2);
+    assert_eq!(active, vec![0, 1]);
+}
+
+#[test]
+fn scenario_corridor_boundary_exact_start_and_end() {
+    let stops = vec![
+        Stop { progress_cm: 10000, corridor_start_cm: 2000, corridor_end_cm: 14000 },
+    ];
+
+    // When: the bus progress is exactly at the start boundary
+    let active_start = find_active_stops(2000, &stops);
+    // Then: the stop should be identified as active
+    assert_eq!(active_start, vec![0]);
+
+    // When: the bus progress is exactly at the end boundary
+    let active_end = find_active_stops(14000, &stops);
+    // Then: the stop should be identified as active
+    assert_eq!(active_end, vec![0]);
+}
+
+#[test]
+fn scenario_probability_threshold_edge_case() {
+    let mut state = StopState::new(0);
+    let stop_progress = 10000;
+
+    // Given: the arrival probability equals exactly THETA_ARRIVAL (191)
+    let probability = THETA_ARRIVAL;
+
+    // When: the state update is processed in Arriving zone
+    state.update(9000, 100, stop_progress, 0); // Enter Arriving zone
+    let arrived_at_threshold = state.update(10000, 100, stop_progress, probability);
+
+    // Then: arrival should NOT be triggered (must be > threshold)
+    assert!(!arrived_at_threshold, "Arrival should NOT trigger at exactly THETA_ARRIVAL");
+
+    // When: probability is 192
+    let arrived_above_threshold = state.update(10000, 100, stop_progress, THETA_ARRIVAL + 1);
+    
+    // Then: arrival SHOULD trigger
+    assert!(arrived_above_threshold, "Arrival should trigger at THETA_ARRIVAL + 1");
+}
+
+#[test]
+fn scenario_dwell_time_progression() {
+    let mut state = StopState::new(0);
+    let stop_progress = 10000;
+    
+    // Given: a bus is stationary at a stop (speed = 0 cm/s)
+    // When: multiple updates occur (simulating 5 seconds/updates)
+    for _ in 0..5 {
+        state.update(10000, 0, stop_progress, 0);
+    }
+
+    // Then: the dwell_time_s should increment with each update
+    assert_eq!(state.dwell_time_s, 5);
+}

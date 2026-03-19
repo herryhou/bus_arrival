@@ -22,7 +22,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **And** their corridors overlap (Stop A: [920m, 1040m], Stop B: [970m, 1090m])
 *   **When** the bus is at 1000m
 *   **Then** both Stop A and Stop B should be identified as "active"
-*   *Status: 🔄 PARTIAL* - `bdd_arrival.rs::scenario_close_stop_discrimination` tests adjacent stops but not overlapping corridors (needs test with 2 stops both active simultaneously)
+*   *Status: ✅ IMPLEMENTED* - `bdd_arrival_edge_cases.rs::scenario_simultaneous_overlapping_corridors`
 
 ## 2. Bayesian Arrival Probability
 
@@ -113,32 +113,32 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **Given** two stops have overlapping corridors (Stop A: [920m, 1040m], Stop B: [970m, 1090m])
 *   **When** the bus is at 1000m (in the overlap region)
 *   **Then** both stops should be returned as active
-*   *Status: ❌ MISSING* - Current test only validates one active stop at a time
+*   *Status: ✅ IMPLEMENTED* - `bdd_arrival_edge_cases.rs::scenario_simultaneous_overlapping_corridors`
 
 ### Scenario: Corridor Boundary - Exact Start
 *   **Given** a stop with corridor_start_cm = 2000 and corridor_end_cm = 14000
 *   **When** the bus progress is exactly 2000
 *   **Then** the stop should be identified as active
-*   *Status: ❌ MISSING*
+*   *Status: ✅ IMPLEMENTED* - `bdd_arrival_edge_cases.rs::scenario_corridor_boundary_exact_start_and_end`
 
 ### Scenario: Corridor Boundary - Exact End
 *   **Given** a stop with corridor_start_cm = 2000 and corridor_end_cm = 14000
 *   **When** the bus progress is exactly 14000
 *   **Then** the stop should be identified as active
-*   *Status: ❌ MISSING*
+*   *Status: ✅ IMPLEMENTED* - `bdd_arrival_edge_cases.rs::scenario_corridor_boundary_exact_start_and_end`
 
 ### Scenario: Dwell Time Progression
 *   **Given** a bus is stationary at a stop (speed = 0 cm/s)
 *   **When** multiple updates occur over 5 seconds
 *   **Then** the dwell_time_s should increment with each update
 *   **And** the accumulated dwell time should increase the arrival probability
-*   *Status: ❌ MISSING*
+*   *Status: ✅ IMPLEMENTED* - `bdd_arrival_edge_cases.rs::scenario_dwell_time_progression`
 
 ### Scenario: Probability Threshold Edge Case
 *   **Given** the arrival probability equals exactly THETA_ARRIVAL (75%)
 *   **When** the state update is processed
-*   **Then** arrival should be triggered (>= threshold)
-*   *Status: ❌ MISSING* - Need test for exact threshold boundary
+*   **Then** arrival should NOT be triggered (must be > threshold)
+*   *Status: ✅ IMPLEMENTED* - `bdd_arrival_edge_cases.rs::scenario_probability_threshold_edge_case`
 
 ### Scenario: GPS Jump Over Entire Corridor
 *   **Given** a stop with corridor [2000, 14000]

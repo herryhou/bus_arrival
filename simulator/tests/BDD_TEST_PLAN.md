@@ -22,7 +22,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** a GPS update has high noise (HDOP = 5.0)
 *   **Then** the Kalman filter should give less weight to the GPS update
 *   **And** the route progress should stay closer to the predicted position than the raw GPS point
-*   *Status: ❌ MISSING* - Need to test HDOP-based Kalman gain adjustment
+*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_hdop_adaptive_smoothing`
 
 ### Scenario: Handling sharp turns
 *   **Given** the route has a 90-degree turn
@@ -70,7 +70,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** the GPS signal remains lost for more than 10 seconds
 *   **Then** the simulator should stop reporting progress
 *   **And** return an `Outage` status
-*   *Status: ❌ MISSING* - Need test for long-term outage (>10s) triggering Outage status
+*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_extended_gps_outage`
 
 ## 4. Physical & Routing Constraints
 
@@ -109,7 +109,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** it moves past the last node
 *   **Then** the progress should clamp to the total route length
 *   **And** subsequent updates should indicate the end of the trip
-*   *Status: ❌ MISSING* - Need test for progress clamping at route end
+*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_route_end_clamping`
 
 ### Scenario: Loop Closure
 *   **Given** a circular route where the start and end nodes are at the same location
@@ -148,7 +148,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** GPS HDOP varies from 1.0 (accurate) to 5.0 (noisy)
 *   **Then** the Kalman gain (Ks) should decrease for high HDOP
 *   **And** the filter should rely more on prediction than measurement
-*   *Status: ❌ MISSING*
+*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_hdop_adaptive_smoothing`
 
 ### Scenario: L-Shaped Route with 90° Turn
 *   **Given** a route with a 90-degree L-shape (horizontal then vertical)
@@ -168,7 +168,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** GPS updates place the bus at 1050m (past the end)
 *   **Then** the progress should clamp to 1000m (route length)
 *   **And** no Invalid status should be returned
-*   *Status: ❌ MISSING*
+*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_route_end_clamping`
 
 ### Scenario: Stop Re-activation After Loop
 *   **Given** a stop is in Departed state
