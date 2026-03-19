@@ -2,12 +2,13 @@
 //!
 //! This test loads the actual ty225.bin file and checks the stop data.
 
+mod common;
+use common::load_test_asset_bytes;
 use shared::binfile::RouteData;
 
 #[test]
 fn test_ty225_bin_stops() {
-    let data = std::fs::read("/Users/herry/project/pico2w/bus_arrival/ty225.bin")
-        .expect("Failed to read ty225.bin");
+    let data = load_test_asset_bytes("ty225.bin");
     let route_data = RouteData::load(&data).expect("Failed to load route data");
 
     println!("Route data: {} nodes, {} stops", route_data.node_count, route_data.stop_count);

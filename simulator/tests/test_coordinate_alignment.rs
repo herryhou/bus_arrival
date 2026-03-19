@@ -1,11 +1,12 @@
 //! Test to check coordinate alignment between NMEA and route data
 
+mod common;
+use common::load_test_asset_bytes;
 use shared::binfile::RouteData;
 
 #[test]
 fn test_coordinate_alignment() {
-    let data = std::fs::read("/Users/herry/project/pico2w/bus_arrival/ty225_aligned.bin")
-        .expect("Failed to read ty225_aligned.bin");
+    let data = load_test_asset_bytes("ty225_with_stop_at_gps.bin");
     let route_data = RouteData::load(&data).expect("Failed to load route data");
 
     println!("Route data: {} nodes, {} stops", route_data.node_count, route_data.stop_count);
@@ -55,6 +56,7 @@ fn test_coordinate_alignment() {
     // Find closest node to this position
     let mut min_dist2 = i64::MAX;
     let mut closest_idx = 0;
+
     for i in 0..route_data.node_count {
         if let Some(node) = route_data.get_node(i) {
             let dx = x_cm as i64 - node.x_cm as i64;

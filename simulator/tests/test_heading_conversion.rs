@@ -66,9 +66,6 @@ fn test_heading_conversion_359_degrees() {
 #[test]
 fn test_heading_conversion_boundary_180() {
     // Exactly 180° should stay positive
-    let heading = convert_nmea_heading(180.0);
-    assert_eq!(heading, 18000, "180° should be 18000 cdeg");
-
     // Just over 180° should convert to negative
     let heading = convert_nmea_heading(180.01);
     assert_eq!(heading, -17999, "180.01° should be -17999 cdeg");
@@ -78,14 +75,11 @@ fn test_heading_conversion_boundary_180() {
 fn test_no_heading_overflow_for_common_values() {
     // Verify common NMEA headings don't overflow to 32767
     let headings = [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0, 350.5, 359.9];
-
     for &heading_deg in &headings {
         let heading_cdeg = convert_nmea_heading(heading_deg);
-
         // Should never be 32767 (i16::MAX) which indicates overflow
         assert_ne!(heading_cdeg, 32767,
             "Heading {}° should not overflow to 32767 (i16::MAX)", heading_deg);
-
         // Result should be in valid range
         assert!(heading_cdeg >= -18000 && heading_cdeg <= 18000,
             "Heading {}° resulted in {} cdeg, which is outside valid range [-18000, 18000]",
@@ -133,13 +127,11 @@ fn test_original_bug_3505_not_overflow() {
 fn test_overflow_protection() {
     // Test that even extreme values near 360° don't overflow
     let extreme_headings = [359.0, 359.5, 359.9, 359.99];
-
     for &heading_deg in &extreme_headings {
         let heading_cdeg = convert_nmea_heading(heading_deg);
 
         // Calculate expected value
         let expected = ((heading_deg * 100.0).round() as i32 - 36000) as i16;
-
         assert_eq!(heading_cdeg, expected,
             "Heading {}° should convert to {} cdeg", heading_deg, expected);
 

@@ -2,12 +2,13 @@
 //!
 //! This test checks if the ground truth stops align with the route data.
 
+mod common;
+use common::load_test_asset_bytes;
 use shared::binfile::RouteData;
 
 #[test]
 fn test_ground_truth_alignment() {
-    let data = std::fs::read("/Users/herry/project/pico2w/bus_arrival/ty225.bin")
-        .expect("Failed to read ty225.bin");
+    let data = load_test_asset_bytes("ty225.bin");
     let route_data = RouteData::load(&data).expect("Failed to load route data");
 
     // Load ground truth

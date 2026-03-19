@@ -1,11 +1,12 @@
 //! Test to check the debug route data with 57 stops
 
+mod common;
+use common::load_test_asset_bytes;
 use shared::binfile::RouteData;
 
 #[test]
 fn test_debug_ty225_bin_stops() {
-    let data = std::fs::read("/tmp/ty225_debug.bin")
-        .expect("Failed to read /tmp/ty225_debug.bin");
+    let data = load_test_asset_bytes("ty225_debug.bin");
     let route_data = RouteData::load(&data).expect("Failed to load route data");
 
     println!("Route data: {} nodes, {} stops", route_data.node_count, route_data.stop_count);

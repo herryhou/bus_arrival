@@ -56,3 +56,6 @@ ground_truth_*.json
 *_test.*
 *_route.bin
 *_consistent.bin
+
+# Generated test binaries (regenerated from test_data/*.json)
+simulator/test_assets/*.bin

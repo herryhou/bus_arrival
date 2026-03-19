@@ -1,11 +1,12 @@
 //! Verify the stop at GPS position is correctly projected
 
+mod common;
+use common::load_test_asset_bytes;
 use shared::binfile::RouteData;
 
 #[test]
 fn test_verify_stop_at_gps_position() {
-    let data = std::fs::read("/Users/herry/project/pico2w/bus_arrival/ty225_with_stop_at_gps.bin")
-        .expect("Failed to read ty225_with_stop_at_gps.bin");
+    let data = load_test_asset_bytes("ty225_with_stop_at_gps.bin");
     let route_data = RouteData::load(&data).expect("Failed to load route data");
 
     println!("Route data: {} nodes, {} stops", route_data.node_count, route_data.stop_count);

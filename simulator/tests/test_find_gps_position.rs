@@ -1,11 +1,12 @@
 //! Find the exact route position for GPS at s_cm=1717259
 
+mod common;
+use common::load_test_asset_bytes;
 use shared::binfile::RouteData;
 
 #[test]
 fn test_find_gps_route_position() {
-    let data = std::fs::read("/Users/herry/project/pico2w/bus_arrival/ty225_loop_stop.bin")
-        .expect("Failed to read ty225_loop_stop.bin");
+    let data = load_test_asset_bytes("ty225_with_stop_at_gps.bin");
     let route_data = RouteData::load(&data).expect("Failed to load route data");
 
     let target_s_cm = 1717259i32;
