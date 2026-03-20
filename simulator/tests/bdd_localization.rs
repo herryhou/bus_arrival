@@ -263,6 +263,7 @@ fn test_localization_behavioral_scenarios() {
     scenario_hdop_adaptive_smoothing(&route_data, start_x, start_y);
     scenario_extended_gps_outage(&route_data, start_x, start_y);
     scenario_route_end_clamping(&route_data, start_x, start_y);
+    scenario_route_reversal_detection(&route_data, start_x, start_y);
 
     // L-shaped route tests
     let (l_buffer, l_start_x, l_start_y) = setup_l_shaped_route();
@@ -720,6 +721,49 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
         // Tracking: https://github.com/anthropics/claude-code/issues/XXX
     } else {
         panic!("Loop completion update failed");
+    }
+}
+
+fn scenario_route_reversal_detection(route_data: &RouteData, start_x: i32, start_y: i32) {
+    let mut state = KalmanState::new();
+    let mut dr = DrState::new();
+
+    // Given: Bus is at 80m moving North (heading = 0)
+    let mut gps = GpsPoint::new();
+    gps.has_fix = true;
+    gps.timestamp = 1000;
+    gps.lat = lat_from_y(start_y + 80000);
+    gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
+    gps.heading_cdeg = 0; // North
+    gps.speed_cms = 1000;
+
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
+    if let ProcessResult::Valid { s_cm, .. } = result {
+        assert_eq!(s_cm, 80000);
+    } else {
+        panic!("Initial position failed");
+    }
+
+    // When: GPS suddenly shows movement South (opposite direction on a one-way route)
+    // Bus jumps from 80m back to 10m - a 70m backward movement
+    // This exceeds the 50m (50000cm) monotonicity tolerance
+    gps.timestamp += 70; // 70 seconds gives enough time for the speed constraint
+    gps.lat = lat_from_y(start_y + 10000); // Jumped back to 10m
+    gps.heading_cdeg = 18000; // South (opposite direction)
+    gps.speed_cms = 1000;
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false);
+
+    // Then: Should be rejected due to monotonicity (70000cm backward > 50000cm tolerance)
+    match result {
+        ProcessResult::Rejected(reason) => {
+            assert_eq!(reason, "monotonicity", "Backward jump should be rejected by monotonicity");
+        }
+        ProcessResult::Valid { s_cm, .. } => {
+            panic!("Backward jump of 70000cm should be rejected, but was accepted with s_cm={}", s_cm);
+        }
+        _ => {
+            panic!("Unexpected result type");
+        }
     }
 }
 
