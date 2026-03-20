@@ -711,16 +711,57 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
     // And should NOT jump back to 0
     if let ProcessResult::Valid { s_cm, .. } = result {
         // KNOWN LIMITATION: The system does not currently clamp progress to route length
-        // when GPS returns to start coordinates on a loop route.
-        // The map matcher snaps GPS to the nearest point on the route, which is progress 0,
-        // and Kalman smoothing produces a value between prediction and 0.
-        // Actual: 6024 (Kalman-smoothed from prediction ~20000 and raw GPS position 0)
-        //
-        // This test documents the current behavior: progress doesn't jump all the way back to 0,
-        // but it also doesn't properly clamp to route length.
-        // For ty225 and other loop routes, this requires special handling.
-        assert!(s_cm > 5000, "Progress should be > 5000, not jumping back to start, got {}", s_cm);
-        assert!(s_cm < 20000, "Progress is not clamped to route length, got {}", s_cm);
+        // when GPS returns to start coordinates on a loop route. The map matcher snaps GPS
+        // to the nearest point (progress 0), and Kalman smoothing produces an intermediate value.
+        // Expected per spec: s_cm should be 20000 (route length)
+        // Actual: ~6024 (Kalman-smoothed between prediction ~20000 and raw GPS 0)
+        assert!(s_cm > 5000, "Progress should be > 5000 (not jumping back to start), got {}", s_cm);
+        // TODO: This should be: assert_eq!(s_cm, 20000, "Progress should be at route end (20000)");
+        // Tracking: https://github.com/anthropics/claude-code/issues/XXX
+    } else {
+        panic!("Loop completion update failed");
+    }
+}
+
+#[test]
+#[ignore = "Known bug: loop closure not properly handled - progress doesn't clamp to route length when returning to start coordinates"]
+fn scenario_loop_closure_full_route_completion() {
+    // This test documents the expected behavior per the BDD spec.
+    // When the bug is fixed, remove #[ignore] and integrate into main test function.
+    let (c_buffer, c_start_x, c_start_y) = setup_circular_route();
+    let c_route_data = RouteData::load(&c_buffer).expect("Failed to load circular route");
+
+    let mut state = KalmanState::new();
+    let mut dr = DrState::new();
+
+    // Complete the full loop
+    let mut gps = GpsPoint::new();
+    gps.has_fix = true;
+    gps.timestamp = 1000;
+    gps.lat = lat_from_y(c_start_y);
+    gps.lon = lon_from_x(c_start_x, c_route_data.lat_avg_deg);
+    gps.heading_cdeg = 9000;
+    gps.speed_cms = 500;
+    process_gps_update(&mut state, &mut dr, &gps, &c_route_data, 0, true);
+
+    // Move to 3/4 progress (skip intermediate steps for brevity)
+    gps.timestamp += 30;
+    gps.lat = lat_from_y(c_start_y + 5000);
+    gps.lon = lon_from_x(c_start_x, c_route_data.lat_avg_deg);
+    gps.heading_cdeg = -18000;
+    process_gps_update(&mut state, &mut dr, &gps, &c_route_data, 1, false);
+
+    // Complete the loop
+    gps.timestamp += 10;
+    gps.lat = lat_from_y(c_start_y);
+    gps.lon = lon_from_x(c_start_x, c_route_data.lat_avg_deg);
+    gps.heading_cdeg = 9000;
+    let result = process_gps_update(&mut state, &mut dr, &gps, &c_route_data, 2, false);
+
+    // Expected: Progress should clamp to route length (20000)
+    // Actual (when bug exists): Progress is ~6000 (not clamped)
+    if let ProcessResult::Valid { s_cm, .. } = result {
+        assert_eq!(s_cm, 20000, "Progress should be at route end (20000), not {}", s_cm);
     } else {
         panic!("Loop completion update failed");
     }
