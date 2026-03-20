@@ -160,6 +160,11 @@ fn test_localization_behavioral_scenarios() {
     scenario_hdop_adaptive_smoothing(&route_data, start_x, start_y);
     scenario_extended_gps_outage(&route_data, start_x, start_y);
     scenario_route_end_clamping(&route_data, start_x, start_y);
+
+    // L-shaped route tests
+    let (l_buffer, l_start_x, l_start_y) = setup_l_shaped_route();
+    let l_route_data = RouteData::load(&l_buffer).expect("Failed to load L-shaped route");
+    scenario_l_shaped_turn(&l_route_data, l_start_x, l_start_y);
 }
 
 fn scenario_hdop_adaptive_smoothing(route_data: &RouteData, start_x: i32, start_y: i32) {
@@ -459,5 +464,59 @@ fn scenario_handle_gps_outage_with_dr(route_data: &RouteData, start_x: i32, star
         assert_eq!(s_cm, 2000);
     } else {
         panic!("Expected DR result, got other");
+    }
+}
+
+fn scenario_l_shaped_turn(route_data: &RouteData, start_x: i32, start_y: i32) {
+    let mut state = KalmanState::new();
+    let mut dr = DrState::new();
+
+    // Given: Bus starts at the beginning of L-shaped route (going East)
+    let mut gps = GpsPoint::new();
+    gps.has_fix = true;
+    gps.timestamp = 1000;
+    gps.lat = lat_from_y(start_y);
+    gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
+    gps.heading_cdeg = 9000; // East
+    gps.speed_cms = 500; // 5 m/s
+
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
+    if let ProcessResult::Valid { seg_idx, s_cm, .. } = result {
+        assert_eq!(seg_idx, 0, "Should start on segment 0 (East)");
+        assert_eq!(s_cm, 0);
+    } else {
+        panic!("Initial fix failed");
+    }
+
+    // When: Bus moves 25m East (halfway through first segment)
+    // Kalman smoothing: s_pred = 0 + 500 = 500, z = 2500
+    // s_new = 500 + 77*(2500-500)/256 = 500 + 601 = 1101
+    gps.timestamp += 5;
+    gps.lat = lat_from_y(start_y);
+    gps.lon = lon_from_x(start_x + 2500, route_data.lat_avg_deg);
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false);
+
+    if let ProcessResult::Valid { seg_idx, s_cm, .. } = result {
+        assert_eq!(seg_idx, 0, "Should still be on segment 0");
+        assert_eq!(s_cm, 1101, "Progress should be Kalman-smoothed (1101, not 2500)");
+    } else {
+        panic!("Mid-segment update failed");
+    }
+
+    // When: Bus reaches the corner and turns North
+    // s_pred = 1101 + 500 = 1601, z = 5000 + 2500 = 7500
+    // s_new = 1601 + 77*(7500-1601)/256 = 1601 + 1771 = 3372
+    gps.timestamp += 5;
+    gps.lat = lat_from_y(start_y + 2500); // 25m North from corner
+    gps.lon = lon_from_x(start_x + 5000, route_data.lat_avg_deg); // At corner x
+    gps.heading_cdeg = 0; // North now
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 2, false);
+
+    // Then: Map matcher should identify segment 1 (North)
+    if let ProcessResult::Valid { seg_idx, s_cm, .. } = result {
+        assert_eq!(seg_idx, 1, "Should transition to segment 1 (North)");
+        assert_eq!(s_cm, 3375, "Progress should be Kalman-smoothed (3375, not 7500)");
+    } else {
+        panic!("Turn transition failed");
     }
 }
