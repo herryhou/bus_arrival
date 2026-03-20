@@ -146,6 +146,109 @@ fn setup_l_shaped_route() -> (Vec<u8>, i32, i32) {
     (buffer, start_x, start_y)
 }
 
+// Creates a circular/loop route where start and end are at the same location
+// Uses a square pattern: East 50m, North 50m, West 50m, South 50m back to start
+fn setup_circular_route() -> (Vec<u8>, i32, i32) {
+    let mut nodes = Vec::new();
+
+    use shared::{EARTH_R_CM, FIXED_ORIGIN_LON_DEG, FIXED_ORIGIN_Y_CM};
+
+    const BASE_LAT: f64 = 25.0;
+    const BASE_LON: f64 = 121.0;
+    let lat_avg_rad = BASE_LAT.to_radians();
+    let cos_lat = lat_avg_rad.cos();
+
+    let lon_rad = BASE_LON.to_radians();
+    let lat_rad = BASE_LAT.to_radians();
+    let x_abs = EARTH_R_CM as f64 * lon_rad * cos_lat;
+    let y_abs = EARTH_R_CM as f64 * lat_rad;
+    let x0_abs = (FIXED_ORIGIN_LON_DEG.to_radians() * EARTH_R_CM as f64) * cos_lat;
+    let y0_abs = FIXED_ORIGIN_Y_CM as f64;
+
+    let start_x = (x_abs - x0_abs).round() as i32;
+    let start_y = (y_abs - y0_abs).round() as i32;
+
+    // Segment 0: East 50m (heading 9000)
+    nodes.push(RouteNode {
+        len2_cm2: 5000 * 5000,
+        heading_cdeg: 9000,
+        _pad: 0,
+        x_cm: start_x,
+        y_cm: start_y,
+        cum_dist_cm: 0,
+        dx_cm: 5000,
+        dy_cm: 0,
+        seg_len_cm: 5000,
+    });
+
+    // Node 1: Corner NE
+    nodes.push(RouteNode {
+        len2_cm2: 5000 * 5000,
+        heading_cdeg: 0,
+        _pad: 0,
+        x_cm: start_x + 5000,
+        y_cm: start_y,
+        cum_dist_cm: 5000,
+        dx_cm: 0,
+        dy_cm: 5000,
+        seg_len_cm: 5000,
+    });
+
+    // Node 2: Corner NW
+    nodes.push(RouteNode {
+        len2_cm2: 5000 * 5000,
+        heading_cdeg: -9000, // West
+        _pad: 0,
+        x_cm: start_x + 5000,
+        y_cm: start_y + 5000,
+        cum_dist_cm: 10000,
+        dx_cm: -5000,
+        dy_cm: 0,
+        seg_len_cm: 5000,
+    });
+
+    // Node 3: Corner SW
+    nodes.push(RouteNode {
+        len2_cm2: 5000 * 5000,
+        heading_cdeg: -18000, // South
+        _pad: 0,
+        x_cm: start_x,
+        y_cm: start_y + 5000,
+        cum_dist_cm: 15000,
+        dx_cm: 0,
+        dy_cm: -5000,
+        seg_len_cm: 5000,
+    });
+
+    // Node 4: Back to start (end = start coordinates)
+    nodes.push(RouteNode {
+        len2_cm2: 0,
+        heading_cdeg: 0,
+        _pad: 0,
+        x_cm: start_x,
+        y_cm: start_y,
+        cum_dist_cm: 20000,
+        dx_cm: 0,
+        dy_cm: 0,
+        seg_len_cm: 0,
+    });
+
+    let grid = shared::SpatialGrid {
+        cells: vec![vec![0, 1, 2], vec![3, 0, 1], vec![2, 3, 0]],
+        grid_size_cm: 5000,
+        cols: 3,
+        rows: 3,
+        x0_cm: start_x,
+        y0_cm: start_y,
+    };
+
+    let mut buffer = Vec::new();
+    shared::binfile::pack_route_data(&nodes, &[], &grid, 25.0, &[0u8; 256], &[0u8; 128], &mut buffer)
+        .expect("Failed to pack circular route");
+
+    (buffer, start_x, start_y)
+}
+
 #[test]
 fn test_localization_behavioral_scenarios() {
     let (buffer, start_x, start_y) = setup_test_route_data();
