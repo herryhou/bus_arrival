@@ -64,7 +64,7 @@ fn scenario_probability_threshold_edge_case() {
 fn scenario_dwell_time_progression() {
     let mut state = StopState::new(0);
     let stop_progress = 10000;
-    
+
     // Given: a bus is stationary at a stop (speed = 0 cm/s)
     // When: multiple updates occur (simulating 5 seconds/updates)
     for _ in 0..5 {
@@ -73,4 +73,53 @@ fn scenario_dwell_time_progression() {
 
     // Then: the dwell_time_s should increment with each update
     assert_eq!(state.dwell_time_s, 5);
+}
+
+#[test]
+fn scenario_gps_jump_over_entire_corridor() {
+    // Given: a stop with corridor [2000, 14000]
+    let stops = vec![
+        Stop { progress_cm: 10000, corridor_start_cm: 2000, corridor_end_cm: 14000 },
+    ];
+
+    // When: checking progress before corridor
+    let active_before = find_active_stops(1000, &stops);
+    assert_eq!(active_before.len(), 0, "Should not be active before corridor");
+
+    // When: GPS jumps to 15000 (skipping the corridor entirely)
+    let active_after = find_active_stops(15000, &stops);
+
+    // Then: the stop should never be marked as active
+    assert_eq!(active_after.len(), 0, "Should not be active after jumping over corridor");
+}
+
+#[test]
+fn scenario_dense_stops_adjacent_corridors() {
+    // Given: multiple stops with corridors that touch but don't overlap
+    // Stop 0: [0, 10000]
+    // Stop 1: [10000, 20000] - starts where Stop 0 ends
+    // Stop 2: [20000, 30000] - starts where Stop 1 ends
+    let stops = vec![
+        Stop { progress_cm: 5000, corridor_start_cm: 0, corridor_end_cm: 10000 },
+        Stop { progress_cm: 15000, corridor_start_cm: 10000, corridor_end_cm: 20000 },
+        Stop { progress_cm: 25000, corridor_start_cm: 20000, corridor_end_cm: 30000 },
+    ];
+
+    // When: checking at boundary between Stop 0 and Stop 1
+    let active_at_boundary = find_active_stops(10000, &stops);
+
+    // Then: both stops should be active (at exact boundary)
+    assert_eq!(active_at_boundary.len(), 2, "Both stops should be active at boundary");
+
+    // When: checking in middle of Stop 1's corridor
+    let active_middle = find_active_stops(15000, &stops);
+
+    // Then: only Stop 1 should be active
+    assert_eq!(active_middle, vec![1], "Only Stop 1 should be active");
+
+    // Verify no gaps: every point should have at least one active stop
+    for progress in [0, 5000, 10000, 15000, 20000, 25000, 30000].iter() {
+        let active = find_active_stops(*progress, &stops);
+        assert!(active.len() >= 1, "Should have at least one active stop at progress {}", progress);
+    }
 }
