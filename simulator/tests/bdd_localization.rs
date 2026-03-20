@@ -489,6 +489,8 @@ fn scenario_l_shaped_turn(route_data: &RouteData, start_x: i32, start_y: i32) {
     }
 
     // When: Bus moves 25m East (halfway through first segment)
+    // Kalman smoothing: s_pred = 0 + 500 = 500, z = 2500
+    // s_new = 500 + 77*(2500-500)/256 = 500 + 601 = 1101
     gps.timestamp += 5;
     gps.lat = lat_from_y(start_y);
     gps.lon = lon_from_x(start_x + 2500, route_data.lat_avg_deg);
@@ -496,12 +498,14 @@ fn scenario_l_shaped_turn(route_data: &RouteData, start_x: i32, start_y: i32) {
 
     if let ProcessResult::Valid { seg_idx, s_cm, .. } = result {
         assert_eq!(seg_idx, 0, "Should still be on segment 0");
-        assert_eq!(s_cm, 2500, "Progress should be 25m");
+        assert_eq!(s_cm, 1101, "Progress should be Kalman-smoothed (1101, not 2500)");
     } else {
         panic!("Mid-segment update failed");
     }
 
     // When: Bus reaches the corner and turns North
+    // s_pred = 1101 + 500 = 1601, z = 5000 + 2500 = 7500
+    // s_new = 1601 + 77*(7500-1601)/256 = 1601 + 1771 = 3372
     gps.timestamp += 5;
     gps.lat = lat_from_y(start_y + 2500); // 25m North from corner
     gps.lon = lon_from_x(start_x + 5000, route_data.lat_avg_deg); // At corner x
@@ -511,7 +515,7 @@ fn scenario_l_shaped_turn(route_data: &RouteData, start_x: i32, start_y: i32) {
     // Then: Map matcher should identify segment 1 (North)
     if let ProcessResult::Valid { seg_idx, s_cm, .. } = result {
         assert_eq!(seg_idx, 1, "Should transition to segment 1 (North)");
-        assert_eq!(s_cm, 7500, "Progress should be 50m + 25m = 75m");
+        assert_eq!(s_cm, 3375, "Progress should be Kalman-smoothed (3375, not 7500)");
     } else {
         panic!("Turn transition failed");
     }
