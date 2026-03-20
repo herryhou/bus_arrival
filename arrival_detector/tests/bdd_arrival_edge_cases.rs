@@ -123,3 +123,36 @@ fn scenario_dense_stops_adjacent_corridors() {
         assert!(active.len() >= 1, "Should have at least one active stop at progress {}", progress);
     }
 }
+
+#[test]
+fn scenario_stop_reactivation_after_loop() {
+    use shared::FsmState;
+
+    // Given: a stop with corridor [2000, 14000]
+    let stop = Stop {
+        progress_cm: 10000,
+        corridor_start_cm: 2000,
+        corridor_end_cm: 14000,
+    };
+    let mut state = StopState::new(0);
+
+    // When: bus approaches and enters Arriving zone
+    state.update(6000, 100, stop.progress_cm, 0);
+    assert_eq!(state.fsm_state, FsmState::Arriving);
+
+    // When: bus arrives at stop
+    state.update(10000, 0, stop.progress_cm, 200); // High probability triggers arrival
+    assert_eq!(state.fsm_state, FsmState::AtStop);
+
+    // When: bus departs (moves past stop)
+    state.update(15000, 500, stop.progress_cm, 0);
+    assert_eq!(state.fsm_state, FsmState::Departed);
+
+    // When: bus loops back and enters corridor again (e.g., circular route)
+    let can_reset = state.can_reactivate(5000, stop.progress_cm);
+    assert!(can_reset, "Should be able to re-enter corridor after loop");
+
+    state.reset();
+    assert_eq!(state.fsm_state, FsmState::Approaching);
+    assert_eq!(state.dwell_time_s, 0, "Dwell time should reset");
+}
