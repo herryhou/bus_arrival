@@ -140,7 +140,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** the bus's progress jumps from 700m to 1300m (skipping the 800-1200m corridor)
 *   **Then** the stop should NOT be reported as active (as it was never "in" the corridor at a sample point)
 *   *Note: This is current behavior; a future enhancement might interpolate to catch missed stops.*
-*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_gps_jump_over_corridor`
+*   **Status: 🔄 PARTIAL** - Simulator API doesn't expose active stops, so this can't be tested at simulator level. Properly tested in arrival_detector: `bdd_arrival_edge_cases.rs::scenario_gps_jump_over_entire_corridor`
 
 ## 7. Additional Missing Scenarios (Added 2026-03-19)
 
@@ -182,7 +182,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** GPS jumps from 700m to 1300m (skipping the corridor entirely)
 *   **Then** the stop should never be marked as active
 *   *And** no arrival event should be emitted
-*   **Status: ✅ IMPLEMENTED** - `bdd_localization.rs::scenario_gps_jump_over_corridor` (simulator) and `bdd_arrival_edge_cases.rs::scenario_gps_jump_over_entire_corridor` (arrival_detector)
+*   **Status: ✅ IMPLEMENTED** - `bdd_arrival_edge_cases.rs::scenario_gps_jump_over_entire_corridor` (arrival_detector). Note: Simulator API doesn't expose active stops for testing.
 
 ### Scenario: Opposite Direction Rejection
 *   **Given** a route with northbound segments

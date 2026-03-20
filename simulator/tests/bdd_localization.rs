@@ -274,11 +274,6 @@ fn test_localization_behavioral_scenarios() {
     let (c_buffer, c_start_x, c_start_y) = setup_circular_route();
     let c_route_data = RouteData::load(&c_buffer).expect("Failed to load circular route");
     scenario_loop_closure(&c_route_data, c_start_x, c_start_y);
-
-    // GPS jump over corridor test
-    let (s_buffer, s_start_x, s_start_y) = setup_route_with_stop();
-    let s_route_data = RouteData::load(&s_buffer).expect("Failed to load route with stop");
-    scenario_gps_jump_over_corridor(&s_route_data, s_start_x, s_start_y);
 }
 
 fn scenario_hdop_adaptive_smoothing(route_data: &RouteData, start_x: i32, start_y: i32) {
@@ -769,121 +764,6 @@ fn scenario_large_backward_jump_rejection(route_data: &RouteData, start_x: i32, 
         _ => {
             panic!("Unexpected result type");
         }
-    }
-}
-
-// Creates a 200m North route with a stop at 100m (corridor: 80m-120m)
-// Returns (buffer, start_x, start_y)
-fn setup_route_with_stop() -> (Vec<u8>, i32, i32) {
-    let mut nodes = Vec::new();
-
-    use shared::{EARTH_R_CM, FIXED_ORIGIN_LON_DEG, FIXED_ORIGIN_Y_CM};
-
-    const BASE_LAT: f64 = 25.0;
-    const BASE_LON: f64 = 121.0;
-    let lat_avg_rad = BASE_LAT.to_radians();
-    let cos_lat = lat_avg_rad.cos();
-
-    let lon_rad = BASE_LON.to_radians();
-    let lat_rad = BASE_LAT.to_radians();
-    let x_abs = EARTH_R_CM as f64 * lon_rad * cos_lat;
-    let y_abs = EARTH_R_CM as f64 * lat_rad;
-    let x0_abs = (FIXED_ORIGIN_LON_DEG.to_radians() * EARTH_R_CM as f64) * cos_lat;
-    let y0_abs = FIXED_ORIGIN_Y_CM as f64;
-
-    let start_x = (x_abs - x0_abs).round() as i32;
-    let start_y = (y_abs - y0_abs).round() as i32;
-
-    // 200m route North
-    nodes.push(RouteNode {
-        len2_cm2: 20000 * 20000,
-        heading_cdeg: 0,
-        _pad: 0,
-        x_cm: start_x,
-        y_cm: start_y,
-        cum_dist_cm: 0,
-        dx_cm: 0,
-        dy_cm: 20000,
-        seg_len_cm: 20000,
-    });
-
-    nodes.push(RouteNode {
-        len2_cm2: 0,
-        heading_cdeg: 0,
-        _pad: 0,
-        x_cm: start_x,
-        y_cm: start_y + 20000,
-        cum_dist_cm: 20000,
-        dx_cm: 0,
-        dy_cm: 0,
-        seg_len_cm: 0,
-    });
-
-    // Stop at 100m with corridor [80m, 120m]
-    let stops = vec![
-        shared::Stop {
-            progress_cm: 10000,
-            corridor_start_cm: 8000,
-            corridor_end_cm: 12000,
-        }
-    ];
-
-    let grid = shared::SpatialGrid {
-        cells: vec![vec![0]],
-        grid_size_cm: 20000,
-        cols: 1,
-        rows: 1,
-        x0_cm: start_x,
-        y0_cm: start_y,
-    };
-
-    let mut buffer = Vec::new();
-    shared::binfile::pack_route_data(&nodes, &stops, &grid, 25.0, &[0u8; 256], &[0u8; 128], &mut buffer)
-        .expect("Failed to pack route with stop");
-
-    (buffer, start_x, start_y)
-}
-
-fn scenario_gps_jump_over_corridor(route_data: &RouteData, start_x: i32, start_y: i32) {
-    let mut state = KalmanState::new();
-    let mut dr = DrState::new();
-
-    // Given: Bus is at 70m (before corridor [80m, 120m])
-    let mut gps = GpsPoint::new();
-    gps.has_fix = true;
-    gps.timestamp = 1000;
-    gps.lat = lat_from_y(start_y + 7000);
-    gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
-    gps.speed_cms = 500;
-    gps.hdop_x10 = 10; // Accurate GPS (HDOP = 1.0)
-
-    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
-    let initial_s = match result {
-        ProcessResult::Valid { s_cm, .. } => s_cm,
-        _ => panic!("Initial position failed"),
-    };
-    assert!(initial_s < 8000, "Should start before corridor (80m), got {}", initial_s);
-
-    // When: GPS jumps from 70m to 140m (skipping the 80-120m corridor entirely)
-    // Use 5 second gap to get predictable Kalman behavior
-    gps.timestamp += 5;
-    gps.lat = lat_from_y(start_y + 14000);
-    gps.hdop_x10 = 10; // Keep accurate GPS
-    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false);
-
-    // Then: The corridor (80-120m) was never sampled at any GPS update point
-    // This verifies the system handles GPS jumps over corridors
-    // Note: Due to Kalman smoothing, the exact progress may vary
-    // The key point is that the GPS jumped from 70m directly to 140m
-    // without ever sampling the 80-120m corridor region
-    if let ProcessResult::Valid { s_cm, .. } = result {
-        // We just need to verify the GPS update was accepted
-        // The corridor was skipped in the raw GPS samples
-        assert!(s_cm > initial_s, "Progress should increase, was {} now {}", initial_s, s_cm);
-        // The raw GPS was at 140m, so even with smoothing we should be well past 80m
-        assert!(s_cm > 8000, "Progress should be > 80m (past corridor start), got {}", s_cm);
-    } else {
-        panic!("GPS jump update failed");
     }
 }
 
