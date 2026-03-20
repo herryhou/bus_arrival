@@ -29,7 +29,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** the bus enters the turn at 5m/s
 *   **Then** the map matcher should correctly identify the next segment based on the change in heading
 *   **And** the route progress should remain continuous through the turn
-*   *Status: ❌ MISSING* - Need test with L-shaped or 90° turn route
+*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_l_shaped_turn`
 
 ## 2. Map Matching & Segment Selection
 
@@ -93,7 +93,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** the bus starts moving in the opposite direction of the route segments
 *   **Then** the map matcher's heading penalty should increase
 *   **And** eventually, the updates should be rejected if they deviate too far from the route's directed path
-*   *Status: ❌ MISSING* - Need test for opposite direction (heading penalty) causing rejection
+*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_route_reversal_detection`
 
 ## 5. Route Boundary Conditions
 
@@ -116,7 +116,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** the bus completes a full lap
 *   **Then** the map matcher should distinguish between being at the "start" (idx 0) and the "end" (idx N) based on previous progress and heading
 *   **And** avoid "jumping" back to the start prematurely
-*   *Status: ❌ MISSING* - Critical for ty225 loop route; need circular route test
+*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_loop_closure` (note: known limitation documented in test comments)
 
 ## 6. Arrival Detection (Active Stops)
 
@@ -139,7 +139,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** the bus's progress jumps from 700m to 1300m (skipping the 800-1200m corridor)
 *   **Then** the stop should NOT be reported as active (as it was never "in" the corridor at a sample point)
 *   *Note: This is current behavior; a future enhancement might interpolate to catch missed stops.*
-*   *Status: ❌ MISSING* - Need test for GPS jump over corridor
+*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_gps_jump_over_corridor`
 
 ## 7. Additional Missing Scenarios (Added 2026-03-19)
 
@@ -155,13 +155,13 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** the bus makes the turn
 *   **Then** the map matcher should correctly transition between perpendicular segments
 *   **And** heading change should be reflected in segment selection
-*   *Status: ❌ MISSING*
+*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_l_shaped_turn`
 
 ### Scenario: Circular Route (Loop)
 *   **Given** a route where the first and last nodes are at the same GPS coordinates
 *   **When** the bus completes a full loop
 *   **Then** the map matcher should distinguish start from end based on cumulative progress
-*   *Status: ❌ MISSING* - Critical for ty225 and similar loop routes
+*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_loop_closure` (note: known limitation documented)
 
 ### Scenario: Progress Clamping at Route End
 *   **Given** a route with total length 1000m
@@ -174,17 +174,17 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **Given** a stop is in Departed state
 *   **When** the bus loops back and enters the stop's corridor again
 *   **Then** the state machine should reset to Approaching
-*   *Status: ❌ MISSING* - Essential for loop routes
+*   *Status: ✅ IMPLEMENTED* - `arrival_detector/tests/bdd_arrival_edge_cases.rs::scenario_stop_reactivation_after_loop`
 
 ### Scenario: GPS Jump Over Stop Corridor
 *   **Given** a stop with corridor [800, 1200]
 *   **When** GPS jumps from 700m to 1300m (skipping the corridor entirely)
 *   **Then** the stop should never be marked as active
 *   *And** no arrival event should be emitted
-*   *Status: ❌ MISSING*
+*   **Status: ✅ IMPLEMENTED** - `bdd_localization.rs::scenario_gps_jump_over_corridor` (simulator) and `bdd_arrival_edge_cases.rs::scenario_gps_jump_over_entire_corridor` (arrival_detector)
 
 ### Scenario: Opposite Direction Rejection
 *   **Given** a route with northbound segments
 *   **When** GPS indicates movement southward (heading = 18000 cdeg)
 *   **Then** the heading penalty should cause rejection
-*   *Status: ❌ MISSING*
+*   **Status: ✅ IMPLEMENTED** - `bdd_localization.rs::scenario_route_reversal_detection`

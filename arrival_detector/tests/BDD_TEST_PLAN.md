@@ -145,7 +145,7 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** GPS jumps from 1000 to 15000 (skipping the corridor entirely)
 *   **Then** the stop should never be marked as active
 *   **And** the recovery logic should handle the gap correctly
-*   *Status: ❌ MISSING*
+*   **Status: ✅ IMPLEMENTED** - `bdd_arrival_edge_cases.rs::scenario_gps_jump_over_entire_corridor`
 
 ### Scenario: Exit Corridor Without Arrival
 *   **Given** a stop is in the `Arriving` state
@@ -159,4 +159,4 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** the bus progresses through the route
 *   **Then** only one stop should be active at any given time
 *   **And** there should be no gaps in coverage
-*   *Status: ❌ MISSING*
+*   **Status: ✅ IMPLEMENTED** - `bdd_arrival_edge_cases.rs::scenario_dense_stops_adjacent_corridors`
