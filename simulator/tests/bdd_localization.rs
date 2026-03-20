@@ -505,7 +505,7 @@ fn scenario_l_shaped_turn(route_data: &RouteData, start_x: i32, start_y: i32) {
 
     // When: Bus reaches the corner and turns North
     // s_pred = 1101 + 500 = 1601, z = 5000 + 2500 = 7500
-    // s_new = 1601 + 77*(7500-1601)/256 = 1601 + 1771 = 3372
+    // s_new = 1601 + 77*(7500-1601)/256 = 1601 + 1774 = 3375
     gps.timestamp += 5;
     gps.lat = lat_from_y(start_y + 2500); // 25m North from corner
     gps.lon = lon_from_x(start_x + 5000, route_data.lat_avg_deg); // At corner x
