@@ -93,7 +93,8 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **When** the bus starts moving in the opposite direction of the route segments
 *   **Then** the map matcher's heading penalty should increase
 *   **And** eventually, the updates should be rejected if they deviate too far from the route's directed path
-*   *Status: ✅ IMPLEMENTED* - `bdd_localization.rs::scenario_route_reversal_detection`
+*   *Status: ❌ MISSING* - Heading-based direction rejection not implemented
+*   *Note:* Large backward jumps are rejected by monotonicity check (`scenario_large_backward_jump_rejection`), but this is different from heading penalty-based rejection
 
 ## 5. Route Boundary Conditions
 
@@ -187,4 +188,4 @@ This document outlines the behavior-driven development (BDD) test scenarios for 
 *   **Given** a route with northbound segments
 *   **When** GPS indicates movement southward (heading = 18000 cdeg)
 *   **Then** the heading penalty should cause rejection
-*   **Status: ✅ IMPLEMENTED** - `bdd_localization.rs::scenario_route_reversal_detection`
+*   **Status: ❌ MISSING** - Heading-based direction rejection not implemented. See `scenario_large_backward_jump_rejection` for monotonicity-based rejection.
