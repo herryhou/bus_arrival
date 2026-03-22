@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/rustfmt_on_claude_edit.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
