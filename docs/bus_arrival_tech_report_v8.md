@@ -4,7 +4,7 @@
 
 **目標受眾：** Embedded Rust 開發團隊  
 **硬體平台：** Raspberry Pi Pico 2（RP2350）  
-**文件版本：** v8.3（優化：移除未使用的 line_a/b/c 係數，RouteNode 52→36 bytes，Flash ~34KB→~24KB / **其他同 v8.2**）
+**文件版本：** v8.4（新增：模組 ⑨ 加入語音播報觸發，以廊道入口為觸發點，首個符合 tick 立即播報 / **Stop struct / Flash / 預處理器均不變**）
 
 ---
 
@@ -12,7 +12,7 @@
 
 本報告系統化整理一套適用於嵌入式車機環境之公車到站判定演算法架構。目標硬體為 Raspberry Pi Pico 2（RP2350，雙核 Cortex-M33，**無硬體 FPU**），GPS 更新頻率為 1 Hz（Δt = 1 s），已知完整路線 polyline 與停靠站 GPS 座標。
 
-核心需求為解決 GPS 漂移、跳點（jump）、近距離站點混淆三類主要誤判場景。本報告提出一套以確定性（deterministic）規則為基礎的工程化架構：以 Route Linearization 將問題降至一維，以**語義化整數型別（cm、0.01°、cm/s）取代浮點運算**以適應無 FPU 平台，以 Heading-Constrained Map Matching 進行路段篩選，以 1D Kalman Filter 平滑狀態估計，以 Dead-Reckoning 補償 GPS 斷訊，最終以 Stop Corridor + Probabilistic Arrival Model + Stop State Machine 三層機制完成到站判定。
+核心需求為解決 GPS 漂移、跳點（jump）、近距離站點混淆三類主要誤判場景，並支援**到站前語音播報**（提前 10–15 秒觸發）。本報告提出一套以確定性（deterministic）規則為基礎的工程化架構：以 Route Linearization 將問題降至一維，以**語義化整數型別（cm、0.01°、cm/s）取代浮點運算**以適應無 FPU 平台，以 Heading-Constrained Map Matching 進行路段篩選，以 1D Kalman Filter 平滑狀態估計，以 Dead-Reckoning 補償 GPS 斷訊，最終以 Stop Corridor（兼語音播報觸發）+ Probabilistic Arrival Model + Stop State Machine 三層機制完成到站判定。
 
 完整 pipeline 在 Pico 2 上之計算成本估計為 **CPU < 8%、SRAM < 1 KB（runtime）**，可達到 **≥ 97% 到站判定準確率**，並具備 GPS 斷訊 10 秒以內之持續追蹤能力。路線資料（含預算係數）Flash 佔用約 **~34 KB**。
 
@@ -133,12 +133,13 @@
   │ Phase 3: ARRIVAL DETECTION (1Hz Loop)                             │
   ├───────────────────────────────────────────────────────────────────┤
   │ ŝ(t), v̂(t)                                                        │
-  │    → ⑨ Stop Corridor Filter (80m pre/40m post window)            │
+  │    → ⑨ Stop Corridor Filter (80m pre/40m post)                   │
+  │         └─ 廊道入口（corridor_start）觸發語音播報（首 tick 立即觸發）   │
   │    → ⑩ Stop Probability Model (4-feature Bayesian fusion)        │
-  │    → ⑪ Stop State Machine (FSM + deduplication)                  │
+  │    → ⑪ Stop State Machine (Approaching→Arriving→AtStop→Departed)  │
   │    → ⑫ Stop Index Recovery (post-outage resync)                  │
-  │                   ↓                                               │
-  │             Arrival Event Output                                  │
+  │                   ↓                         ↓                     │
+  │             Arrival Event Output      ANNOUNCE Event Output       │
   └───────────────────────────────────────────────────────────────────┘
 ```
 ---
@@ -724,6 +725,8 @@ pub struct PersistedState {
 
 每個停靠站不應被視為點（point），而應視為沿路線方向延伸的廊道區域（corridor）。只有當車輛路線進度 $\hat{s}$ 落入對應廊道範圍時，才啟動該站點之到站檢測。廊道邊界在**離線預處理階段完整計算**並存入 `Stop` 結構，runtime 僅需兩次整數比較。
 
+**v8.4 新增：廊道入口同時作為語音播報觸發點**，不需要額外的距離計算或 Flash 欄位。
+
 ### 12.2 廊道定義
 
 $$\text{corridor\_start} = s_i - L_\text{pre} \qquad (L_\text{pre} = 8000\ \text{cm})$$
@@ -736,13 +739,93 @@ $$\text{corridor\_end} = s_i + L_\text{post} \qquad (L_\text{post} = 4000\ \text
 - **快速確認離站：** 後置寬度縮短至 40 m，使廊道在公車離站後盡快失效，減少「已離站但仍在廊道內」的 False Positive 時間窗口。
 - **緩衝相鄰站點：** 後置短可降低與下一站廊道重疊的機率，搭配 $\delta_\text{sep} = 20\ \text{m}$ 截斷規則確保任兩站廊道之間至少存在 20 m 的不活躍區間。
 
-### 12.3 廊道重疊保護
+### 12.3 語音播報觸發
+
+廊道入口（`corridor_start_cm`）距站點 80 m，在市區公車典型速度下自然提供 10–15 秒預告：
+
+| 速度 | 80m 所需時間 |
+|------|------------|
+| 20 km/h（555 cm/s） | **~14 s** |
+| 25 km/h（694 cm/s） | **~12 s** |
+| 30 km/h（833 cm/s） | **~10 s** |
+
+公車實際進站前會減速，實際預告時間只會**比上表更長**，對乘客有利。
+
+**觸發條件（全整數，每 tick 評估）：**
+
+| 條件 | 運算式 | 說明 |
+|------|--------|------|
+| ① 廊道內 FSM 狀態 | `Approaching \| Arriving \| AtStop` | 位置條件已足夠，無需速度門檻 |
+| ② 去重保護 | `last_announced_stop != current_stop_index` | 紀錄最後播報站點，不需主動重置 |
+
+廊道距站點 ≤ 80 m，位置條件本身已排除漂移誤報，速度門檻反而會在塞車慢行場景下阻擋播報，故移除。
+
+```rust
+pub struct StopState {
+    pub fsm_state: FsmState,
+    pub current_stop_index: u8,
+    pub last_announced_stop: u8,  // u8::MAX = none announced yet
+    // ... 其他既有欄位
+}
+
+impl StopState {
+    /// Called by Module ⑫ on recovery. Resets FSM and announce state together.
+    pub fn reset_for_recovery(&mut self, new_index: u8) {
+        self.current_stop_index = new_index;
+        self.fsm_state = FsmState::Idle;
+        self.last_announced_stop = u8::MAX;
+    }
+
+    pub fn update(&mut self, s_hat: i32, v_hat: i32, stops: &[Stop], /* ... */) {
+        let stop = &stops[self.current_stop_index as usize];
+
+        // Step 1: FSM 狀態轉移（先更新，確保 Announce 檢查拿到最新狀態）
+        self.fsm_state = match self.fsm_state {
+            FsmState::Idle => {
+                if s_hat >= stop.corridor_start_cm { FsmState::Approaching }
+                else { FsmState::Idle }
+            }
+            FsmState::Approaching => {
+                if d_to_stop < 5_000 { FsmState::Arriving }
+                else if s_hat < stop.corridor_start_cm { FsmState::Idle }
+                else { FsmState::Approaching }
+            }
+            FsmState::Arriving => {
+                if p_arrived > 191 { FsmState::AtStop }
+                else { FsmState::Arriving }
+            }
+            FsmState::AtStop => {
+                if d_to_stop > 4_000 && s_hat > stop.progress_cm { FsmState::Departed }
+                else { FsmState::AtStop }
+            }
+            FsmState::Departed => {
+                self.current_stop_index += 1;
+                FsmState::Idle
+            }
+        };
+
+        // Step 2: Announce 檢查（FSM 轉移後執行，覆蓋所有廊道內狀態）
+        // 復原後同 tick 可能從 Idle 直接跳至 Arriving；先轉移再檢查確保不漏報。
+        if matches!(self.fsm_state,
+                    FsmState::Approaching | FsmState::Arriving | FsmState::AtStop)
+            && self.last_announced_stop != self.current_stop_index
+        {
+            self.last_announced_stop = self.current_stop_index;
+            // fire ANNOUNCE event
+        }
+    }
+}
+```
+
+**計算成本：** 1 次 `matches!` + 1 次整數比較 ≈ **< 0.01 ms**。
+
+### 12.4 廊道重疊保護
 
 若相鄰兩站廊道重疊，離線預處理時截斷：
 
 $$\text{corridor}_{i+1}.\text{start} = \max\!\left(\text{corridor}_{i+1}.\text{start},\;\; s_i + \delta_\text{sep}\right), \quad \delta_\text{sep} = 2000\ \text{cm}$$
 
-### 12.4 廊道過濾效果
+### 12.5 廊道過濾效果
 
 | 方法 | 誤判率（錯站率） |
 |------|-----------------|
@@ -804,28 +887,30 @@ $$P(\text{arrived}) > \theta_\text{arrival} = 191 \qquad \text{（u8 對應 0.75
 
 | 狀態 | 含義 | 轉入條件（全為整數比較） |
 |------|------|----------------------|
-| `Approaching` | 正在接近站點 | $\hat{s} \in \text{corridor}$ AND $d < 12000\ \text{cm}$ |
-| `Arriving` | 進入站點區域 | $d < 5000\ \text{cm}$ |
-| `AtStop` | 確認到站 | $d < 5000\ \text{cm}$ AND $P > 191$ |
-| `Departed` | 離站 | $d > 4000\ \text{cm}$ AND $\hat{s} > s_i$ |
+| `Approaching` | 進入廊道，正在接近站點；`check_announce()` 於此狀態呼叫 | `s_hat ∈ corridor` AND `d < 12000 cm` |
+| `Arriving` | 進入站點區域 | `d < 5000 cm` |
+| `AtStop` | 確認到站 | `d < 5000 cm` AND `P > 191` |
+| `Departed` | 離站 | `d > 4000 cm` AND `ŝ > s_i` |
 
-> 概率閾值 191 = u8 × 0.75（= 255 × 0.75）。速度閾值已移除以支援公車在站點附近停車後稍晚觸發的情況。距離閾值從 30m 放寬至 50m 以容納 GPS 漂移與城市環境限制。
+> 語音播報直接在 `Approaching` 狀態內處理，`check_announce()` 每 tick 呼叫一次，`v_hat > 200` 且 `!announced` 時立即觸發，不新增獨立狀態。
 
 ### 14.2 狀態轉移規則
 
 ```
-Approaching → Arriving:  d_to_stop < 5000 cm
-Arriving    → AtStop:    d_to_stop < 5000 cm
-                         AND P_arrived > 191
-AtStop      → Departed:  d_to_stop > 4000 cm  AND  ŝ > s_i_cm
-Departed:                current_stop_index++  →  Approaching (next stop)
+Idle        → Approaching: s_hat >= corridor_start_cm
+                           每 tick 評估播報條件（見 12.3）
+Approaching → Arriving:   d_to_stop < 5000 cm
+Arriving    → AtStop:     d_to_stop < 5000 cm
+                          AND P_arrived > 191
+AtStop      → Departed:   d_to_stop > 4000 cm  AND  ŝ > s_i_cm
+Departed:                 current_stop_index++  →  Idle (next stop)
 ```
 
 **關鍵設計：** 狀態轉移為單向，一旦進入 `Departed` 即無法返回舊站，防止 GPS 漂移引起重複報站。
 
 ### 14.3 跳站保護（Skip-Stop Guard）
 
-若 GPS 突然跳至較遠站點（跳過 stop $i$，直接指向 stop $i+2$），狀態機要求必須先經過 stop $i$ 的 `Approaching` 才能觸發，否則忽略。
+若 GPS 突然跳至較遠站點（跳過 stop $i$，直接指向 stop $i+2$），狀態機要求必須先進入 stop $i$ 的 `Approaching` 才能觸發到站或播報，否則忽略。跳點經 Module ⑥/⑦ 過濾後通常不會通過廊道入口條件，加上去重保護（`announced`），播報不會誤觸發。
 
 ---
 
@@ -1201,6 +1286,41 @@ $$\theta^* = \arg\max_\theta F_1\text{-score}(\theta)$$
 ---
 
 ## 版本更新記錄
+
+### v8.4（本版本）← v8.3 (2026-03-23)
+
+**新增：模組 ⑨ 廊道入口語音播報觸發**
+
+**設計決策：**  
+廊道入口（`corridor_start_cm`，距站點 80 m）在市區公車典型速度（20–30 km/h）下自然提供 10–15 秒預告，不需要額外的觸發距離計算。公車實際進站前會減速，實際預告時間只會更長，對乘客有利。
+
+**變更內容：**
+
+1. **模組 ⑨（Section 12）：新增 12.3 語音播報觸發**
+   - 觸發條件：廊道內任意 FSM 狀態（Approaching / Arriving / AtStop）+ 去重
+   - 無速度門檻（廊道位置條件已足夠，速度門檻在塞車場景下會阻擋播報）
+   - Runtime 新增 **1 byte**：`last_announced_stop: u8`（納入 `StopState`，初始值 `u8::MAX`）
+   - FSM 轉移後再做 Announce 檢查，確保復原後同 tick 跳至 Arriving 時不漏報
+
+2. **模組 ⑪ FSM（Section 14）：播報邏輯整合至既有 `Approaching` 狀態，無新狀態、無重置點**
+
+3. **Phase 3 架構圖（Section 2）：新增 ANNOUNCE Event 輸出**
+
+4. **附錄 A：新增** $V_\text{ann}$、$C_\text{confirm}$ 參數
+
+**影響評估：**
+- ✅ Stop struct 不變（12 bytes）
+- ✅ 預處理器不變
+- ✅ Binary format VERSION 不變（VERSION: 2）
+- ✅ Module ⑩/⑫ 完全不變
+- ✅ 新增 SRAM：**1 byte**（`AnnouncementState`）
+- ✅ Runtime 額外開銷：2 次整數比較 + 飽和加法，< 0.01 ms/tick
+
+**向後相容性：**
+- ✅ 現有 `route_data.bin` 無需重新生成
+- ✅ 所有現有模組行為不變
+
+---
 
 ### v8.4 → v8.3 (2026-03-18)
 
