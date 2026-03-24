@@ -12,6 +12,9 @@ pub struct StopState {
     pub dwell_time_s: u16,
     /// Last computed arrival probability
     pub last_probability: Prob8,
+    /// Last announced stop (v8.4: announcement tracking)
+    /// Uses u8::MAX (255) as uninitialized value
+    pub last_announced_stop: u8,
 }
 
 impl StopState {
@@ -21,6 +24,7 @@ impl StopState {
             fsm_state: FsmState::Approaching,
             dwell_time_s: 0,
             last_probability: 0,
+            last_announced_stop: u8::MAX,
         }
     }
 
@@ -29,6 +33,8 @@ impl StopState {
         self.fsm_state = FsmState::Approaching;
         self.dwell_time_s = 0;
         self.last_probability = 0;
+        // Note: last_announced_stop is NOT reset to allow re-announcement
+        // if the bus circles back to a previously visited stop
     }
 
     /// Update state and return true if just arrived
@@ -39,6 +45,8 @@ impl StopState {
     ///
     /// Note: Speed threshold was removed to accommodate buses that stop
     /// slightly past the stop location due to GPS noise or urban constraints.
+    ///
+    /// v8.4: Also returns true if corridor entry (first time) for announcement
     pub fn update(
         &mut self,
         s_cm: DistCm,
@@ -76,9 +84,38 @@ impl StopState {
             FsmState::Departed => {
                 // Stay departed - dwell_time no longer accumulates
             }
+            FsmState::TripComplete => {
+                // Terminal state - no further transitions
+            }
         }
 
         self.last_probability = probability;
+        false
+    }
+
+    /// Check if announcement should trigger (v8.4 corridor entry announcement)
+    ///
+    /// Triggers when:
+    /// - Any FSM state is active (Approaching/Arriving/AtStop)
+    /// - Not yet announced for this stop
+    /// - Just entered corridor (s_cm >= corridor_start_cm)
+    ///
+    /// Returns true if announcement should be made
+    pub fn should_announce(&mut self, s_cm: DistCm, corridor_start_cm: DistCm) -> bool {
+        // Check if already in corridor and not yet announced
+        if s_cm >= corridor_start_cm && self.last_announced_stop != self.index {
+            // Check if we're in an active FSM state
+            let is_active = matches!(
+                self.fsm_state,
+                FsmState::Approaching | FsmState::Arriving | FsmState::AtStop
+            );
+
+            if is_active {
+                self.last_announced_stop = self.index;
+                return true;
+            }
+        }
+
         false
     }
 
@@ -87,6 +124,11 @@ impl StopState {
         matches!(self.fsm_state, FsmState::Departed)
             && s_cm >= stop_progress - 8000  // Back in corridor
             && s_cm <= stop_progress + 4000
+    }
+
+    /// Check if this is the terminal trip-completed state
+    pub fn is_trip_complete(&self) -> bool {
+        matches!(self.fsm_state, FsmState::TripComplete)
     }
 }
 
@@ -115,5 +157,85 @@ mod tests {
         // Departing
         state.update(15000, 500, stop_progress, 10);
         assert_eq!(state.fsm_state, FsmState::Departed);
+    }
+
+    #[test]
+    fn test_trip_complete_state() {
+        let mut state = StopState::new(255); // Last stop (u8::MAX)
+        state.fsm_state = FsmState::Departed;
+        assert!(!state.is_trip_complete());
+
+        // Transition to TripComplete
+        state.fsm_state = FsmState::TripComplete;
+        assert!(state.is_trip_complete());
+
+        // Cannot reactivate from TripComplete
+        assert!(!state.can_reactivate(10000, 10000));
+    }
+
+    #[test]
+    fn test_trip_complete_is_terminal_state() {
+        // v8.5: TripComplete is a terminal state - no further transitions
+        let mut state = StopState::new(255);
+        state.fsm_state = FsmState::TripComplete;
+        let stop_progress = 100000;
+
+        // Try to update from TripComplete state
+        // Even if GPS position changes, state should remain TripComplete
+        let arrived = state.update(200000, 500, stop_progress, 255);
+
+        // Should not trigger arrival (already at terminal state)
+        assert!(!arrived, "TripComplete should not trigger arrival");
+        assert_eq!(state.fsm_state, FsmState::TripComplete);
+    }
+
+    #[test]
+    fn test_trip_complete_dwell_time_does_not_accumulate() {
+        // v8.5: In TripComplete, dwell_time should not change
+        let mut state = StopState::new(255);
+        state.fsm_state = FsmState::TripComplete;
+        state.dwell_time_s = 100;
+
+        // Update multiple times
+        for _ in 0..10 {
+            state.update(100000, 0, 100000, 0);
+        }
+
+        // dwell_time should remain unchanged in TripComplete
+        assert_eq!(state.dwell_time_s, 100, "dwell_time should not accumulate in TripComplete");
+    }
+
+    #[test]
+    fn test_departed_state_allows_reactivation() {
+        // v8.5: Departed state can be reactivated, but TripComplete cannot
+        let mut state = StopState::new(10);
+        state.fsm_state = FsmState::Departed;
+        let stop_progress = 10000;
+
+        // Departed should allow reactivation within corridor
+        assert!(state.can_reactivate(stop_progress - 8000, stop_progress));
+        assert!(state.can_reactivate(stop_progress, stop_progress));
+        assert!(state.can_reactivate(stop_progress + 4000, stop_progress));
+    }
+
+    #[test]
+    fn test_fsm_handles_all_states() {
+        // v8.5: Ensure update() handles all FSM states without panic
+        let stop_progress = 10000;
+        let states = [
+            FsmState::Approaching,
+            FsmState::Arriving,
+            FsmState::AtStop,
+            FsmState::Departed,
+            FsmState::TripComplete,
+        ];
+
+        for fsm_state in states {
+            let mut state = StopState::new(0);
+            state.fsm_state = fsm_state;
+
+            // Should not panic for any state
+            state.update(15000, 100, stop_progress, 100);
+        }
     }
 }

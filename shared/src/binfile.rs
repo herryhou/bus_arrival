@@ -12,7 +12,9 @@ pub const MAGIC: u32 = 0x42555341;
 
 /// Format version
 /// v2: Removed line_a, line_b, line_c from RouteNode (52 → 36 bytes)
-pub const VERSION: u16 = 2;
+/// v3 (v8.5): Changed repr(C, packed) to repr(C) to fix UB with field references
+///             Size now 40 bytes on platforms with 8-byte i64 alignment
+pub const VERSION: u16 = 3;
 
 /// Error types for the bus arrival binary file handling
 #[derive(Debug, PartialEq)]

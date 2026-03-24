@@ -429,7 +429,7 @@
 	}
 
 	.dashboard-footer {
-		height: 180px;  /* CHANGED from 250px */
+		height: 80px;
 		background-color: #0a0a0a;
 		border-top: 1px solid #333;
 		display: flex;

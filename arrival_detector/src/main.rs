@@ -11,15 +11,17 @@ use arrival_detector::{input, corridor, probability, recovery, output, trace};
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    // Parse arguments: <input.jsonl> <route_data.bin> <output.jsonl> [--trace <trace.jsonl>]
-    if args.len() != 4 && args.len() != 6 {
-        eprintln!("Usage: arrival_detector <input.jsonl> <route_data.bin> <output.jsonl> [--trace <trace.jsonl>]");
+    // Parse arguments: <input.jsonl> <route_data.bin> <output.jsonl> [--trace <trace.jsonl>] [--announce <announce.jsonl>]
+    if args.len() != 4 && args.len() != 6 && args.len() != 8 {
+        eprintln!("Usage: arrival_detector <input.jsonl> <route_data.bin> <output.jsonl> [--trace <trace.jsonl>] [--announce <announce.jsonl>]");
         std::process::exit(1);
     }
 
-    let enable_trace = args.len() == 6 && args[4] == "--trace";
-    if args.len() == 6 && !enable_trace {
-        eprintln!("Error: expected --trace as 4th argument");
+    let enable_trace = args.len() >= 6 && args[4] == "--trace";
+    let enable_announce = args.len() == 8 && args[6] == "--announce";
+
+    if args.len() >= 6 && !enable_trace && !enable_announce {
+        eprintln!("Error: expected --trace or --announce as 4th argument");
         std::process::exit(1);
     }
 
@@ -27,6 +29,7 @@ fn main() {
     let route_path = PathBuf::from(&args[2]);
     let output_path = PathBuf::from(&args[3]);
     let trace_path = enable_trace.then(|| PathBuf::from(&args[5]));
+    let announce_path = enable_announce.then(|| PathBuf::from(&args[7]));
 
     println!("Phase 3: Arrival Detection");
     println!("  Input:  {}", input_path.display());
@@ -34,6 +37,9 @@ fn main() {
     println!("  Output: {}", output_path.display());
     if let Some(ref tp) = trace_path {
         println!("  Trace:  {}", tp.display());
+    }
+    if let Some(ref ap) = announce_path {
+        println!("  Announce: {}", ap.display());
     }
     println!();
 
@@ -53,20 +59,22 @@ fn main() {
     let mut stop_states: Vec<StopState> = (0..route_data.stop_count as u8)
         .map(|i| StopState::new(i))
         .collect();
-    
+
     let mut last_s_cm = 0;
     let mut current_stop_idx = 0u8;
 
     let mut output_writer = BufWriter::new(File::create(&output_path).expect("Failed to create output file"));
     let mut trace_writer = trace_path.map(|p| BufWriter::new(File::create(&p).expect("Failed to create trace file")));
+    let mut announce_writer = announce_path.map(|p| BufWriter::new(File::create(&p).expect("Failed to create announce file")));
 
-    // Pre-compute LUTs (Note: we use the ones from route_data if available, 
+    // Pre-compute LUTs (Note: we use the ones from route_data if available,
     // but here we use the builder functions for simplicity as per spec)
     let gaussian_lut = probability::build_gaussian_lut();
     let logistic_lut = probability::build_logistic_lut();
 
     let mut processed = 0;
     let mut arrivals = 0;
+    let mut announces = 0;
 
     for record in input::parse_input(&input_path) {
         if !record.valid {
@@ -156,6 +164,21 @@ fn main() {
                 current_stop_idx = state.index;
                 arrived_this_frame.push(state.index);
             }
+
+            // v8.4: Check for announcement (corridor entry)
+            // Triggers after FSM update to ensure state is correct
+            if let Some(ref mut aw) = announce_writer {
+                if state.should_announce(record.s_cm, stop.corridor_start_cm) {
+                    let announce_event = trace::AnnounceEvent {
+                        time: record.time,
+                        stop_idx: state.index,
+                        s_cm: record.s_cm,
+                        v_cms: record.v_cms,
+                    };
+                    trace::write_announce_event(aw, &announce_event).expect("Failed to write announce event");
+                    announces += 1;
+                }
+            }
         }
 
         // Write trace record if enabled
@@ -198,4 +221,7 @@ fn main() {
     }
 
     println!("Processed {} records, detected {} arrivals", processed, arrivals);
+    if enable_announce {
+        println!("Generated {} announcement events", announces);
+    }
 }

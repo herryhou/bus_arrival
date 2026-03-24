@@ -28,14 +28,16 @@
 		Approaching: '#3b82f6',
 		Arriving: '#f59e0b',
 		AtStop: '#22c55e',
-		Departed: '#6b7280'
+		Departed: '#6b7280',
+		TripComplete: '#1e3a8a'
 	};
 
 	const stateBgColors: Record<FsmState, string> = {
 		Approaching: 'rgba(59, 130, 246, 0.15)',
 		Arriving: 'rgba(245, 158, 11, 0.15)',
 		AtStop: 'rgba(34, 197, 94, 0.15)',
-		Departed: 'rgba(107, 114, 128, 0.15)'
+		Departed: 'rgba(107, 114, 128, 0.15)',
+		TripComplete: 'rgba(30, 58, 138, 0.15)'
 	};
 
 	function formatProb(value: number): string {

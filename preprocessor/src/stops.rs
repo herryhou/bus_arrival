@@ -27,10 +27,9 @@ pub fn project_stops_validated(
         let mut corridor_start_cm = progress_cm - 8000;
         let corridor_end_cm = progress_cm + 4000;
 
-        // Overlap protection with previous stop
+        // Overlap protection with previous stop (v8.5 spec: corridor_end[i] + δ_sep)
         if let Some(prev) = final_stops.last() {
-            let min_separation = 2000; // 20m
-            let min_start = prev.corridor_end_cm + min_separation;
+            let min_start = prev.corridor_end_cm + 2000; // δ_sep = 2000 cm (20m)
             if corridor_start_cm < min_start {
                 corridor_start_cm = min_start;
             }

@@ -114,6 +114,8 @@ mod tests {
 
     #[test]
     fn test_route_node_size() {
-        assert_eq!(std::mem::size_of::<RouteNode>(), 36);
+        // v8.5: Changed from repr(C, packed) to repr(C)
+        // Size increased from 36 to 40 bytes due to 8-byte alignment padding
+        assert_eq!(std::mem::size_of::<RouteNode>(), 40);
     }
 }

@@ -70,6 +70,28 @@ pub struct FeatureScores {
     pub p4: u8,  // Dwell time likelihood (Linear)
 }
 
+/// v8.4: Voice announcement event
+#[derive(Serialize)]
+pub struct AnnounceEvent {
+    /// GPS timestamp (seconds since epoch)
+    pub time: u64,
+    /// Stop index being announced
+    pub stop_idx: u8,
+    /// Route progress at announcement (cm)
+    pub s_cm: DistCm,
+    /// Velocity at announcement (cm/s)
+    pub v_cms: SpeedCms,
+}
+
+/// Write an announcement event to the output file
+pub fn write_announce_event<W: Write>(
+    output: &mut BufWriter<W>,
+    event: &AnnounceEvent,
+) -> std::io::Result<()> {
+    let json = serde_json::to_string(event)?;
+    writeln!(output, "{}", json)
+}
+
 /// Write a trace record to the output file
 pub fn write_trace_record<W: Write>(
     output: &mut BufWriter<W>,

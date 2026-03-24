@@ -9,8 +9,9 @@
 /**
  * FSM state - matches Rust FsmState enum serialization
  * Serde serializes enum variants as their string names
+ * v8.5: Added TripComplete state for terminal trip completion
  */
-export type FsmState = 'Approaching' | 'Arriving' | 'AtStop' | 'Departed';
+export type FsmState = 'Approaching' | 'Arriving' | 'AtStop' | 'Departed' | 'TripComplete';
 
 /**
  * Individual feature scores from Bayesian probability model
@@ -79,10 +80,30 @@ export interface TraceRecord {
 export type TraceData = TraceRecord[];
 
 /**
+ * v8.4: Voice announcement event
+ * Emitted when bus enters corridor for the first time
+ */
+export interface AnnounceEvent {
+	/** GPS timestamp (seconds since epoch) */
+	time: number;
+	/** Stop index being announced */
+	stop_idx: number;
+	/** Route progress at announcement (cm) */
+	s_cm: number;
+	/** Velocity at announcement (cm/s) */
+	v_cms: number;
+}
+
+/**
+ * Parsed JSONL file for announcements - array of announce events
+ */
+export type AnnounceData = AnnounceEvent[];
+
+/**
  * Route data from binary route_data.bin file
  */
 
-/** Route node with precomputed segment coefficients (v8.3 format - 36 bytes) */
+/** Route node with precomputed segment coefficients (v8.5 format - 40 bytes) */
 export interface RouteNode {
 	/** Squared segment length: |P[i+1] - P[i]|² in cm² */
 	len2_cm2: bigint;
@@ -102,7 +123,7 @@ export interface RouteNode {
 	dy_cm: number;
 	/** Segment length in cm */
 	seg_len_cm: number;
-	/** Note: line_a, line_b, line_c removed in v8.3 - runtime uses dot-product projection */
+	/** Note: v8.5 changed from repr(C, packed) to repr(C) - 40 bytes with alignment padding */
 }
 
 /** Bus stop with precomputed corridor boundaries */

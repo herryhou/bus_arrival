@@ -44,7 +44,7 @@ pub type Dist2 = i64;
 ///
 /// Field ordering: i64 fields placed first to satisfy 8-byte alignment
 /// without compiler-inserted padding on ARM Cortex-M33.
-/// Total size = 36 bytes (verified at compile time).
+/// Total size = 40 bytes (with repr(C) alignment padding at end).
 ///
 /// # Layout
 /// ```text
@@ -57,14 +57,15 @@ pub type Dist2 = i64;
 /// offset 24: dx_cm        i32   4 bytes  (segment vector x)
 /// offset 28: dy_cm        i32   4 bytes  (segment vector y)
 /// offset 32: seg_len_cm   i32   4 bytes  (offline sqrt, not used runtime)
-/// total: 36 bytes (no padding gaps)
+/// offset 36: _end_pad     i32   4 bytes  (struct alignment padding to 8-byte boundary)
+/// total: 40 bytes (aligned to 8-byte boundary for i64 field)
 /// ```
 ///
 /// # Note on Removed Fields
 /// The `line_a`, `line_b`, `line_c` coefficients were removed in v8.2
 /// because runtime uses dot-product projection instead of line equation
 /// distance calculation. This saves 16 bytes per node (~9.6 KB for 600 nodes).
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct RouteNode {
     // ── i64 fields first (8-byte aligned) ──────────────────────────
@@ -155,11 +156,21 @@ impl KalmanState {
         KalmanState { s_cm: 0, v_cms: 0, last_seg_idx: 0 }
     }
 
+    /// Cold start initialization from first valid GPS fix.
+    /// Should be paired with 3-second warm-up period (see tech report Section 19.5).
+    pub fn init(z_cm: DistCm, v_gps_cms: SpeedCms, seg_idx: usize) -> Self {
+        KalmanState {
+            s_cm: z_cm,
+            v_cms: v_gps_cms,
+            last_seg_idx: seg_idx,
+        }
+    }
+
     pub fn update(&mut self, z_cm: DistCm, v_gps_cms: SpeedCms) {
         let s_pred = self.s_cm + self.v_cms;
         let v_pred = self.v_cms;
         self.s_cm = s_pred + (51 * (z_cm - s_pred)) / 256;
-        self.v_cms = v_pred + (77 * (v_gps_cms - v_pred)) / 256;
+        self.v_cms = (v_pred + (77 * (v_gps_cms - v_pred)) / 256).max(0);
     }
 
     pub fn update_adaptive(&mut self, z_cm: DistCm, v_gps_cms: SpeedCms, hdop_x10: u16) {
@@ -167,7 +178,7 @@ impl KalmanState {
         let s_pred = self.s_cm + self.v_cms;
         let v_pred = self.v_cms;
         self.s_cm = s_pred + (ks * (z_cm - s_pred)) / 256;
-        self.v_cms = v_pred + (77 * (v_gps_cms - v_pred)) / 256;
+        self.v_cms = (v_pred + (77 * (v_gps_cms - v_pred)) / 256).max(0);
     }
 
     fn ks_from_hdop(hdop_x10: u16) -> i32 {
@@ -262,6 +273,8 @@ pub enum FsmState {
     AtStop,
     /// Bus has departed (moved past stop)
     Departed,
+    /// Trip completed (past last stop, terminal state)
+    TripComplete,
 }
 
 /// Arrival event emitted when bus reaches a stop
@@ -280,5 +293,71 @@ pub struct ArrivalEvent {
 }
 
 // Compile-time assertion — fails if field reordering changes size
-const _: () = assert!(core::mem::size_of::<RouteNode>() == 36);
+// v8.5: Changed from repr(C, packed) to repr(C) to avoid UB with field references
+// This increased size from 36 to 40 bytes on platforms with 8-byte i64 alignment
+const _: () = assert!(core::mem::size_of::<RouteNode>() == 40);
 const _: () = assert!(core::mem::size_of::<Stop>() == 12);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_kalman_v_cms_non_negative_constraint() {
+        // v8.5: GPS noise can produce negative velocity, which causes
+        // predict step to move backward, triggering chain rejections.
+        // The .max(0) constraint prevents this.
+
+        let mut state = KalmanState::init(10000, 100, 5);
+
+        // Simulate GPS noise: negative speed measurement
+        state.update(10100, -500);  // GPS reports -500 cm/s (noise)
+
+        // v_cms should be clamped to 0, not negative
+        assert_eq!(state.v_cms, 0, "v_cms should be clamped to 0, got {}", state.v_cms);
+    }
+
+    #[test]
+    fn test_kalman_update_adaptive_v_cms_non_negative() {
+        let mut state = KalmanState::init(10000, 100, 5);
+
+        // Test with various HDOP levels, all should respect non-negative constraint
+        for hdop in [10, 25, 40, 100] {
+            let v_before = state.v_cms;
+            state.update_adaptive(10100, -1000, hdop);
+            assert!(state.v_cms >= 0, "v_cms should be non-negative for HDOP {}", hdop);
+        }
+    }
+
+    #[test]
+    fn test_kalman_init_cold_start() {
+        // v8.5: New init() method for cold start from first valid GPS fix
+        let state = KalmanState::init(50000, 200, 10);
+
+        assert_eq!(state.s_cm, 50000, "s_cm should be initialized");
+        assert_eq!(state.v_cms, 200, "v_cms should be initialized");
+        assert_eq!(state.last_seg_idx, 10, "last_seg_idx should be initialized");
+    }
+
+    #[test]
+    fn test_kalman_normal_update_preserves_positive_velocity() {
+        let mut state = KalmanState::init(10000, 500, 5);
+
+        // Normal GPS update with positive speed
+        state.update(10500, 600);
+
+        // v_cms should remain positive
+        assert!(state.v_cms > 0, "v_cms should remain positive with normal GPS data");
+    }
+
+    #[test]
+    fn test_kalman_severe_noise_clamps_to_zero() {
+        let mut state = KalmanState::init(10000, 100, 5);
+
+        // Extreme GPS noise: very negative speed
+        state.update(10100, -10000);
+
+        // v_cms should be clamped to 0
+        assert_eq!(state.v_cms, 0, "v_cms should be clamped to 0 with extreme noise");
+    }
+}

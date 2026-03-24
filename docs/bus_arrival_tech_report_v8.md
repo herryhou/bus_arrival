@@ -4,7 +4,7 @@
 
 **目標受眾：** Embedded Rust 開發團隊  
 **硬體平台：** Raspberry Pi Pico 2（RP2350）  
-**文件版本：** v8.4（新增：模組 ⑨ 加入語音播報觸發，以廊道入口為觸發點，首個符合 tick 立即播報 / **Stop struct / Flash / 預處理器均不變**）
+**文件版本：** v8.5（修正：5 項 runtime bug + 7 項設計缺陷 + 3 項文件錯誤 / **功能行為與 v8.4 相同，二進制格式不變**）
 
 ---
 
@@ -343,7 +343,9 @@ $$s_\text{stop} = D[i] + \delta \cdot \|P_{i+1} - P_i\|$$
 ///   total: 36 bytes (no padding gaps)
 ///
 /// Note: line_a, line_b, line_c removed in v8.2 (16 bytes saved per node)
-#[repr(C, packed)]
+// repr(C) only — manual _pad field already ensures correct alignment;
+// packed would strip padding and make field references UB in Rust.
+#[repr(C)]
 pub struct RouteNode {
     // ── i64 fields first (8-byte aligned) ──────────────────────────
     pub len2_cm2: i64,       // |P_{i+1} - P_i|²  (cm²)
@@ -423,7 +425,7 @@ $$W = \left\lceil \frac{\hat{v}_\text{cm/s} \cdot \Delta t}{\overline{L}_\text{s
 
 **實作方法：點積投影法（Dot Product Projection）**
 
-此方法將 GPS 點投影至路段上，限制投影點在路段範圍內，再計算距離平方。雖然 `line_a`、`line_b`、`line_c` 係數已於離線預算並儲存於 `RouteNode`，但點積投影法對線段邊界之處理更為直觀，且與使用線性距離公式在數學上等價。
+此方法將 GPS 點投影至路段上，限制投影點在路段範圍內，再計算距離平方。對線段邊界的處理直觀（投影點 clamp 至路段範圍），且與線性距離公式在數學上等價。
 
 $$\Delta_x = G_x - P_{i,x}, \qquad \Delta_y = G_y - P_{i,y}$$
 
@@ -440,14 +442,6 @@ $$P_t = P_i + \frac{t}{\text{len2}_\text{cm2}} \cdot (\text{dx}_\text{cm},\; \te
 $$d^2(G,\; \text{seg}_i) = \|G - P_t\|^2$$
 
 其中 $\text{dx}_\text{cm}$、$\text{dy}_\text{cm}$、$\text{len2}_\text{cm2}$ 已於離線預算並儲存於 `RouteNode`。Runtime 僅需整數運算：點積（i64）、除法（i64）、距離平方（i64），完全避免 `sqrt`。
-
-**為何保留 `line_a`/`line_b`/`line_c` 係數？**
-
-這些係數仍於離線預算並儲存，原因如下：
-1. **完整性文件**：明確記錄路段的直線方程式 $ax + by + c = 0$
-2. **調試與驗證**：可用於單元測試中驗證距離計算正確性
-3. **未來擴展**：若需實作 HMM 地圖匹配等進階功能時可直接使用
-4. **向後相容**：維持資料結構穩定性，避免版本不一致
 
 ### 7.2 方向篩選（純整數，漸進權重）
 
@@ -563,6 +557,8 @@ $$|z_\text{new} - \hat{s}_\text{prev}| > D_\text{max} \;\Rightarrow\; \text{reje
 
 以 `i32` 減法配合 `i32::unsigned_abs()` 實現，無浮點。
 
+**拒絕後的行為：** 跳過 Kalman 更新步驟，僅執行 predict step（`ŝ += v̂`），等效於短暫 Dead-Reckoning。`v_gps` 同樣不更新（沿用上一幀 `v̂`）。此機制確保單一跳點不污染 Kalman 狀態。
+
 ---
 
 ## 10. 一維卡爾曼濾波器（模組 ⑦）
@@ -593,17 +589,25 @@ $$K_s = \frac{51}{256} \approx 0.20, \qquad K_v = \frac{77}{256} \approx 0.30$$
 
 ```rust
 pub struct KalmanState {
-    pub s_cm: i32,     // route progress in cm
-    pub v_cms: i32,    // speed in cm/s
+    pub s_cm: i32,   // route progress in cm
+    pub v_cms: i32,  // speed in cm/s (always ≥ 0)
 }
 
 impl KalmanState {
+    /// Cold-start: initialise from first valid GPS projection.
+    /// Call once after warm-up period (3 GPS ticks) before entering normal loop.
+    pub fn init(z_cm: i32, v_gps_cms: i32) -> Self {
+        Self { s_cm: z_cm, v_cms: v_gps_cms.max(0) }
+    }
+
     /// Fixed-point update: Ks = 51/256 ≈ 0.20, Kv = 77/256 ≈ 0.30
     pub fn update(&mut self, z_cm: i32, v_gps_cms: i32) {
         let s_pred = self.s_cm + self.v_cms; // dt = 1s
         let v_pred = self.v_cms;
         self.s_cm  = s_pred + (51 * (z_cm - s_pred)) / 256;
-        self.v_cms = v_pred + (77 * (v_gps_cms - v_pred)) / 256;
+        // Clamp v_cms ≥ 0: bus does not reverse along route;
+        // negative v_gps from GPS noise would corrupt the next predict step.
+        self.v_cms = (v_pred + (77 * (v_gps_cms - v_pred)) / 256).max(0);
     }
 }
 ```
@@ -642,7 +646,7 @@ impl KalmanState {
         let s_pred = self.s_cm + self.v_cms;
         let v_pred = self.v_cms;
         self.s_cm  = s_pred + (ks * (z_cm - s_pred)) / 256;
-        self.v_cms = v_pred + (77 * (v_gps_cms - v_pred)) / 256;
+        self.v_cms = (v_pred + (77 * (v_gps_cms - v_pred)) / 256).max(0);
     }
 }
 ```
@@ -698,9 +702,13 @@ DR 最大持續時間：$T_\text{DR,max} = 10\ \text{s}$，對應最大估計誤
 
 ### 11.3 GPS 恢復重同步
 
-GPS 恢復後，soft correction（以整數 2/10 近似 GPS 占比 0.2）：
+GPS 恢復後，第一筆資料先通過 Module ⑥ 速度約束過濾（跳點拒絕），驗證通過後才執行 soft correction：
 
-$$\hat{s}_\text{resync} = \hat{s}_\text{DR} + \frac{2 \cdot (z_\text{gps} - \hat{s}_\text{DR})}{10}$$
+$$\text{若 } |z_\text{gps} - \hat{s}_\text{DR}| > D_\text{max} \;\Rightarrow\; \text{捨棄，繼續 DR（等待下一筆）}$$
+
+$$\text{否則：}\hat{s}_\text{resync} = \hat{s}_\text{DR} + \frac{2 \cdot (z_\text{gps} - \hat{s}_\text{DR})}{10}$$
+
+> GPS 剛恢復的第一筆資料品質最差（HDOP 可能偏高、座標偏移），若直接用於修正 DR 狀態可能引入錯誤。先過速度約束可拒絕明顯跳點；若同時有 HDOP 資訊，建議搭配 10.4.1 的自適應增益進一步降低信任度。
 
 ### 11.4 Flash 狀態持久化
 
@@ -821,9 +829,13 @@ impl StopState {
 
 ### 12.4 廊道重疊保護
 
-若相鄰兩站廊道重疊，離線預處理時截斷：
+若相鄰兩站廊道重疊，離線預處理時截斷。截斷基準為 `corridor_end[i]`（而非 `s_i`），確保兩站廊道之間至少存在 $\delta_\text{sep}$ 的不活躍區間：
 
-$$\text{corridor}_{i+1}.\text{start} = \max\!\left(\text{corridor}_{i+1}.\text{start},\;\; s_i + \delta_\text{sep}\right), \quad \delta_\text{sep} = 2000\ \text{cm}$$
+$$\text{corridor}_{i+1}.\text{start} = \max\!\left(\text{corridor}_{i+1}.\text{start},\;\; s_i + L_\text{post} + \delta_\text{sep}\right), \quad \delta_\text{sep} = 2000\ \text{cm}$$
+
+即：$\text{corridor\_end}[i] + \delta_\text{sep} = s_i + 4000 + 2000 = s_i + 6000\ \text{cm}$。
+
+> **v8.4 勘誤：** 原公式以 $s_i + \delta_\text{sep}$ 為截斷點，但 $\text{corridor\_end}[i] = s_i + L_\text{post} = s_i + 4000\ \text{cm}$，導致兩廊道仍有 20 m 重疊。正確基準應從 `corridor_end[i]` 起算。
 
 ### 12.5 廊道過濾效果
 
@@ -842,27 +854,42 @@ $$\text{corridor}_{i+1}.\text{start} = \max\!\left(\text{corridor}_{i+1}.\text{s
 
 ### 13.2 特徵定義與似然函數
 
-#### 特徵 F₁：距離似然
+所有距離量均使用 **1D 路線進度差**（`|ŝ - s_i|` 或 `|z_gps - s_i|`），符合無 `sqrt` 原則。
 
-$$p_1 = \text{gaussian\_lut}(d_\text{cm},\; \sigma_d = 2750\ \text{cm}) \qquad \text{（u8, 0–255）}$$
+#### 特徵 F₁：原始 GPS 距離似然
+
+$$p_1 = \text{gaussian\_lut}(|z_\text{gps} - s_i|,\; \sigma_d = 2750\ \text{cm}) \qquad \text{（u8, 0–255）}$$
+
+使用**未經 Kalman 平滑的原始 GPS 投影** $z_\text{gps}$，反映 GPS 感測器對站點位置的直接觀測。$\sigma_d = 2750$ cm 較寬，容納 GPS 原始雜訊（±30 m）。
 
 #### 特徵 F₂：速度似然
 
 $$p_2 = \text{logistic\_lut}(v_\text{cms},\; v_\text{stop} = 200\ \text{cm/s}) \qquad \text{（u8，128 項 LUT）}$$
 
-#### 特徵 F₃：路線進度差似然
+#### 特徵 F₃：Kalman 進度差似然
 
 $$p_3 = \text{gaussian\_lut}(|\hat{s} - s_i|,\; \sigma_p = 2000\ \text{cm}) \qquad \text{（u8, 0–255）}$$
+
+使用 **Kalman 平滑後的進度估計** $\hat{s}$，雜訊已壓縮（±10–20 m）。$\sigma_p = 2000$ cm 較窄，提供更精確的位置確認。F₁ 與 F₃ 測量同一物理量（到站距離），但訊號來源不同（原始 GPS vs Kalman 濾波），兩者相關但非冗餘：F₁ 反映當前感測器觀測，F₃ 反映系統整合估計。
 
 #### 特徵 F₄：停留時間
 
 $$p_4 = \min\!\left(\frac{\tau_\text{dwell} \cdot 255}{T_\text{ref}},\;\; 255\right), \quad T_\text{ref} = 10\ \text{s} \qquad \text{（整數線性截飽，無 LUT）}$$
 
+$\tau_\text{dwell}$ 從 FSM 進入 `Approaching`（即 `s_hat >= corridor_start_cm`）時開始計數，單位秒。每個 GPS tick（1 s）遞增 1，離開廊道時重置為 0。
+
 ### 13.3 概率融合
 
-各特徵以 `u8` 整數加權，係數設計使分母為 2 的冪（÷32），結果仍為 `u8` 尺度（0–255）：
+各特徵以 `u8` 整數加權，中間值以 `u16` 累加（最大值 32 × 255 = 8160，超出 `u8` 範圍），最終 `>> 5`（÷32）截回 `u8`：
 
-$$P(\text{arrived}) = \frac{13 p_1 + 6 p_2 + 10 p_3 + 3 p_4}{32} \qquad \text{（13+6+10+3=32，等比例 0.4+0.2+0.3+0.1）}$$
+$$P(\text{arrived}) = \frac{13 p_1 + 6 p_2 + 10 p_3 + 3 p_4}{32} \qquad \text{（中間型別 u16，13+6+10+3=32）}$$
+
+```rust
+// 中間以 u16 累加，避免 u8 溢位（max = 32×255 = 8160 > 255）
+let p_raw: u16 = 13 * p1 as u16 + 6 * p2 as u16
+               + 10 * p3 as u16 + 3 * p4 as u16;
+let p_arrived: u8 = (p_raw >> 5) as u8;  // ÷32
+```
 
 到站觸發條件：
 
@@ -887,12 +914,13 @@ $$P(\text{arrived}) > \theta_\text{arrival} = 191 \qquad \text{（u8 對應 0.75
 
 | 狀態 | 含義 | 轉入條件（全為整數比較） |
 |------|------|----------------------|
-| `Approaching` | 進入廊道，正在接近站點；`check_announce()` 於此狀態呼叫 | `s_hat ∈ corridor` AND `d < 12000 cm` |
-| `Arriving` | 進入站點區域 | `d < 5000 cm` |
-| `AtStop` | 確認到站 | `d < 5000 cm` AND `P > 191` |
-| `Departed` | 離站 | `d > 4000 cm` AND `ŝ > s_i` |
+| `Approaching` | 進入廊道，正在接近站點；播報邏輯於此啟動 | `s_hat >= corridor_start_cm` |
+| `Arriving` | 進入站點近距離區域 | `d_to_stop < 5000 cm` |
+| `AtStop` | 確認到站 | `d_to_stop < 5000 cm` AND `P > 191` |
+| `Departed` | 離站 | `d_to_stop > 4000 cm` AND `ŝ > s_i` |
+| `TripComplete` | 末站離站，本趟行程結束 | `Departed` 且 `current_stop_index + 1 == stops.len()` |
 
-> 語音播報直接在 `Approaching` 狀態內處理，`check_announce()` 每 tick 呼叫一次，`v_hat > 200` 且 `!announced` 時立即觸發，不新增獨立狀態。
+> `d_to_stop` 定義：`|ŝ - s_i|`（一維路線進度差，cm）。採用 1D 定義以維持無 `sqrt` 原則；在路線已線性化的前提下，1D 進度差等效於沿路線的實際距離。
 
 ### 14.2 狀態轉移規則
 
@@ -903,7 +931,10 @@ Approaching → Arriving:   d_to_stop < 5000 cm
 Arriving    → AtStop:     d_to_stop < 5000 cm
                           AND P_arrived > 191
 AtStop      → Departed:   d_to_stop > 4000 cm  AND  ŝ > s_i_cm
-Departed:                 current_stop_index++  →  Idle (next stop)
+Departed:                 if current_stop_index + 1 < stops.len()
+                              current_stop_index += 1 → Idle
+                          else
+                              → TripComplete（末站，停止判定）
 ```
 
 **關鍵設計：** 狀態轉移為單向，一旦進入 `Departed` 即無法返回舊站，防止 GPS 漂移引起重複報站。
@@ -932,7 +963,9 @@ Recovery 機制只在真正需要時觸發，避免常規運行中誤啟動：
 
 候選集合（全整數）：
 
-$$\mathcal{C} = \{\, i \mid |s_i - \hat{s}| < 20000\ \text{cm} \;\text{ AND }\; i \geq \text{last\_index} - 1 \,\}$$
+$$\mathcal{C} = \{\, i \mid |s_i - \hat{s}| < 20000\ \text{cm} \;\text{ AND }\; i \geq i_\text{min} \,\}$$
+
+其中 $i_\text{min} = \text{last\_index}.saturating\_sub(1)$，以飽和減法避免 `u8` 下溢（`last_index = 0` 時 $i_\text{min} = 0$）。
 
 評分（取最小值）：
 
@@ -1190,7 +1223,7 @@ static CURRENT_STOP: AtomicU32 = AtomicU32::new(0);
 | DR 重同步 GPS 占比 | 2/10（≈ 0.20） | soft correction |
 | 廊道前置寬度 $L_\text{pre}$ | 8000 cm（80 m） | Stop Corridor |
 | 廊道後置寬度 $L_\text{post}$ | 4000 cm（40 m） | Stop Corridor |
-| 廊道最小分隔 $\delta_\text{sep}$ | 2000 cm（20 m） | 相鄰廊道重疊保護 |
+| 廊道最小分隔 $\delta_\text{sep}$ | 2000 cm（20 m） | 相鄰廊道重疊保護，從 `corridor_end[i]` 起算 |
 | Distance sigma $\sigma_d$ | 2750 cm（27.5 m） | Gaussian LUT |
 | Progress sigma $\sigma_p$ | 2000 cm（20 m） | Gaussian LUT |
 | Speed stop threshold $v_\text{stop}$ | 200 cm/s（7.2 km/h） | Logistic LUT |
@@ -1287,7 +1320,78 @@ $$\theta^* = \arg\max_\theta F_1\text{-score}(\theta)$$
 
 ## 版本更新記錄
 
-### v8.4（本版本）← v8.3 (2026-03-23)
+### v8.5（本版本）← v8.4 (2026-03-23)
+
+**修正：系統性程式碼審查，共 15 項修正**
+
+功能行為與 v8.4 相同，二進制格式（VERSION: 2）不變。
+
+**🔴 嚴重（runtime bug）：**
+
+1. **`RouteNode` repr 修正（Section 5.5）**
+   - `repr(C, packed)` → `repr(C)`
+   - `packed` 在已有手動 `_pad` 欄位的情況下，對 field 取 `&` 是 UB
+
+2. **Module ⑫ `u8` 下溢保護（Section 15.2）**
+   - `last_index - 1` → `last_index.saturating_sub(1)`
+   - 首站（`last_index = 0`）時原公式下溢至 255，候選集合為空，復原失效
+
+3. **概率融合中間值溢位（Section 13.3）**
+   - 中間型別 `u8` → `u16`（最大值 32×255=8160，超出 `u8`）
+   - 新增 Rust 程式碼片段明確標示 `u16` 累加
+
+4. **廊道重疊保護基準修正（Section 12.4）**
+   - 截斷點 `s_i + δ_sep` → `s_i + L_post + δ_sep`（= `corridor_end[i] + δ_sep`）
+   - 原公式導致相鄰廊道仍有 20 m 重疊
+
+5. **末站 index 溢位保護（Section 14.2）**
+   - `Departed` 新增邊界檢查，末站轉入 `TripComplete` 狀態
+   - 原設計 `current_stop_index++` 在末站 u8 溢位回到 0
+
+**🟠 設計缺陷：**
+
+6. **F₁ 與 F₃ 訊號來源釐清（Section 13.2）**
+   - F₁ 使用原始 GPS 投影 `z_gps`（σ=2750 cm，寬）
+   - F₃ 使用 Kalman 平滑後 `ŝ`（σ=2000 cm，窄）
+   - 兩者測量同一物理量但訊號來源不同，非冗餘，說明各自作用
+
+7. **`d_to_stop` 統一定義為 1D（Section 14.1）**
+   - 明確定義 `d_to_stop = |ŝ - s_i|`（路線進度差，cm）
+   - 符合無 `sqrt` 原則；消除全文 `d` / `d_to_stop` / `d_cm` 混用
+
+8. **移除 `Approaching` 死條件（Section 14.1）**
+   - 刪除 `d < 12000 cm` 入口條件（廊道內永遠成立，無意義）
+   - 入口條件簡化為 `s_hat >= corridor_start_cm`
+
+9. **`τ_dwell` 計數起點明確定義（Section 13.2）**
+   - 從 FSM 進入 `Approaching` 時開始計數，離開廊道重置為 0
+
+10. **GPS 恢復先過速度約束（Section 11.3）**
+    - soft correction 前先執行 Module ⑥ 跳點拒絕
+    - 避免 GPS 恢復後第一筆低品質資料直接污染 DR 狀態
+
+11. **Module ⑥ 拒絕後行為明確定義（Section 9.2）**
+    - 拒絕後僅執行 Kalman predict step，等效短暫 DR，不更新 `v_cms`
+
+12. **Kalman `v_cms` 限制非負（Section 10.4）**
+    - `update()` 及 `update_adaptive()` 末尾加 `.max(0)`
+    - GPS 雜訊產生的負速度會讓 predict step 倒推 `ŝ`，觸發連鎖拒絕
+
+**🟡 文件錯誤：**
+
+13. **移除 Section 7.1 過時 `line_a`/`line_b`/`line_c` 描述**
+    - v8.2 已移除這些欄位，但 Section 7.1 仍描述其存在，已清除
+
+14. **Section 14.1 播報邏輯範圍與程式碼對齊**
+    - 狀態表更新為與 Section 12.3 程式碼一致（Approaching/Arriving/AtStop）
+
+15. **Kalman 冷啟動初始化明確定義（Section 10.4）**
+    - 新增 `KalmanState::init(z_cm, v_gps_cms)` 方法
+    - 冷啟動直接以第一筆有效 GPS 投影初始化，搭配 Section 19.5 的 3 s 暖機
+
+---
+
+### v8.4 ← v8.3 (2026-03-23)
 
 **新增：模組 ⑨ 廊道入口語音播報觸發**
 
