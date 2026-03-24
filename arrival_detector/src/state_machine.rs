@@ -1,6 +1,6 @@
 //! Stop state machine with skip-stop protection
 
-use shared::{DistCm, SpeedCms, Prob8, FsmState};
+use shared::{DistCm, FsmState, Prob8, SpeedCms};
 
 /// Runtime state for a single stop
 pub struct StopState {
@@ -82,7 +82,7 @@ impl StopState {
                 if d_to_stop < 5000 && probability > crate::probability::THETA_ARRIVAL {
                     self.fsm_state = FsmState::AtStop;
                     self.dwell_time_s += 1;
-                    return true;  // Just arrived!
+                    return true; // Just arrived!
                 }
                 if d_to_stop > 4000 && s_cm > stop_progress {
                     self.fsm_state = FsmState::Departed;
@@ -222,7 +222,10 @@ mod tests {
         }
 
         // dwell_time should remain unchanged in TripComplete
-        assert_eq!(state.dwell_time_s, 100, "dwell_time should not accumulate in TripComplete");
+        assert_eq!(
+            state.dwell_time_s, 100,
+            "dwell_time should not accumulate in TripComplete"
+        );
     }
 
     #[test]
@@ -259,5 +262,107 @@ mod tests {
             // Should not panic for any state
             state.update(15000, 100, stop_progress, corridor_start_cm, 100);
         }
+    }
+
+    #[test]
+    fn test_idle_state_initialization() {
+        // v8.5: New states should initialize to Idle, not Approaching
+        let state = StopState::new(5);
+        assert_eq!(state.fsm_state, FsmState::Idle);
+        assert_eq!(state.index, 5);
+        assert_eq!(state.dwell_time_s, 0);
+    }
+
+    #[test]
+    fn test_idle_to_approaching_on_corridor_entry() {
+        // v8.5: Idle -> Approaching when entering corridor (s_cm >= corridor_start_cm)
+        let mut state = StopState::new(0);
+        let stop_progress = 10000;
+        let corridor_start_cm = 2000;
+
+        // Before corridor: should stay Idle
+        state.update(1000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(state.fsm_state, FsmState::Idle);
+        assert_eq!(state.dwell_time_s, 0);
+
+        // Enter corridor: should transition to Approaching
+        state.update(2000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(state.fsm_state, FsmState::Approaching);
+        assert_eq!(state.dwell_time_s, 0); // No increment on transition tick
+    }
+
+    #[test]
+    fn test_approaching_to_idle_on_corridor_exit() {
+        // v8.5: Approaching -> Idle when exiting corridor (s_cm < corridor_start_cm)
+        let mut state = StopState::new(0);
+        let stop_progress = 10000;
+        let corridor_start_cm = 2000;
+
+        // Enter corridor and stay for a few ticks
+        state.update(5000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(state.fsm_state, FsmState::Approaching);
+
+        state.update(5000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(state.fsm_state, FsmState::Approaching);
+        assert_eq!(state.dwell_time_s, 1);
+
+        state.update(5000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(state.dwell_time_s, 2);
+
+        // Exit corridor: should transition to Idle and reset dwell_time
+        state.update(1000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(state.fsm_state, FsmState::Idle);
+        assert_eq!(state.dwell_time_s, 0); // Reset on exit
+    }
+
+    #[test]
+    fn test_dwell_time_only_counts_in_corridor() {
+        // v8.5: dwell_time_s should only increment while in Approaching state
+        let mut state = StopState::new(0);
+        let stop_progress = 10000;
+        let corridor_start_cm = 2000;
+
+        // Outside corridor: no dwell_time increment
+        for _ in 0..10 {
+            state.update(1000, 100, stop_progress, corridor_start_cm, 0);
+        }
+        assert_eq!(state.fsm_state, FsmState::Idle);
+        assert_eq!(state.dwell_time_s, 0);
+
+        // Enter corridor: first tick transitions, no increment
+        state.update(5000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(state.fsm_state, FsmState::Approaching);
+        assert_eq!(state.dwell_time_s, 0);
+
+        // Subsequent ticks in corridor: dwell_time increments
+        for _ in 0..5 {
+            state.update(5000, 100, stop_progress, corridor_start_cm, 0);
+        }
+        assert_eq!(state.dwell_time_s, 5);
+
+        // Exit corridor: resets to Idle
+        state.update(1000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(state.fsm_state, FsmState::Idle);
+        assert_eq!(state.dwell_time_s, 0);
+    }
+
+    #[test]
+    fn test_reset_returns_to_idle() {
+        // v8.5: reset() should return state to Idle, not Approaching
+        let mut state = StopState::new(0);
+        let stop_progress = 10000;
+        let corridor_start_cm = 2000;
+
+        // Progress through the state machine
+        state.update(5000, 100, stop_progress, corridor_start_cm, 0);
+        state.update(5000, 100, stop_progress, corridor_start_cm, 200);
+        state.fsm_state = FsmState::AtStop;
+        state.dwell_time_s = 10;
+
+        // Reset should return to Idle
+        state.reset();
+        assert_eq!(state.fsm_state, FsmState::Idle);
+        assert_eq!(state.dwell_time_s, 0);
+        assert_eq!(state.last_probability, 0);
     }
 }
