@@ -21,7 +21,7 @@ impl StopState {
     pub fn new(index: u8) -> Self {
         StopState {
             index,
-            fsm_state: FsmState::Approaching,
+            fsm_state: FsmState::Idle,
             dwell_time_s: 0,
             last_probability: 0,
             last_announced_stop: u8::MAX,
@@ -30,7 +30,7 @@ impl StopState {
 
     /// Reset state for re-entry into corridor (after departure)
     pub fn reset(&mut self) {
-        self.fsm_state = FsmState::Approaching;
+        self.fsm_state = FsmState::Idle;
         self.dwell_time_s = 0;
         self.last_probability = 0;
         // Note: last_announced_stop is NOT reset to allow re-announcement
@@ -52,17 +52,31 @@ impl StopState {
         s_cm: DistCm,
         _v_cms: SpeedCms,
         stop_progress: DistCm,
+        corridor_start_cm: DistCm,
         probability: Prob8,
     ) -> bool {
         let d_to_stop = (s_cm - stop_progress).abs();
 
         match self.fsm_state {
+            FsmState::Idle => {
+                // Transition to Approaching when entering corridor
+                if s_cm >= corridor_start_cm {
+                    self.fsm_state = FsmState::Approaching;
+                }
+                // Don't increment dwell_time when idle
+            }
             FsmState::Approaching => {
                 if d_to_stop < 5000 {
                     self.fsm_state = FsmState::Arriving;
                 }
-                // Update dwell time when in corridor
-                self.dwell_time_s += 1;
+                // Can exit corridor back to Idle if we leave the corridor
+                if s_cm < corridor_start_cm {
+                    self.fsm_state = FsmState::Idle;
+                    self.dwell_time_s = 0; // Reset dwell time when leaving corridor
+                } else {
+                    // Update dwell time when in corridor
+                    self.dwell_time_s += 1;
+                }
             }
             FsmState::Arriving => {
                 if d_to_stop < 5000 && probability > crate::probability::THETA_ARRIVAL {
@@ -140,22 +154,26 @@ mod tests {
     fn test_fsm_transitions() {
         let mut state = StopState::new(0);
         let stop_progress = 10000;
-        
-        // Far away
-        state.update(2000, 100, stop_progress, 0);
+        let corridor_start_cm = 2000; // 80m before stop
+
+        // Start in Idle state
+        assert_eq!(state.fsm_state, FsmState::Idle);
+
+        // Enter corridor -> Approaching
+        state.update(2000, 100, stop_progress, corridor_start_cm, 0);
         assert_eq!(state.fsm_state, FsmState::Approaching);
 
         // Entering Arriving zone
-        state.update(6000, 100, stop_progress, 100);
+        state.update(6000, 100, stop_progress, corridor_start_cm, 100);
         assert_eq!(state.fsm_state, FsmState::Arriving);
 
         // At stop (trigger!) - distance < 50m, probability > 191
-        let arrived = state.update(14050, 100, stop_progress, 200);
+        let arrived = state.update(14050, 100, stop_progress, corridor_start_cm, 200);
         assert!(arrived);
         assert_eq!(state.fsm_state, FsmState::AtStop);
 
         // Departing
-        state.update(15000, 500, stop_progress, 10);
+        state.update(15000, 500, stop_progress, corridor_start_cm, 10);
         assert_eq!(state.fsm_state, FsmState::Departed);
     }
 
@@ -182,7 +200,8 @@ mod tests {
 
         // Try to update from TripComplete state
         // Even if GPS position changes, state should remain TripComplete
-        let arrived = state.update(200000, 500, stop_progress, 255);
+        let corridor_start_cm = stop_progress - 8000;
+        let arrived = state.update(200000, 500, stop_progress, corridor_start_cm, 255);
 
         // Should not trigger arrival (already at terminal state)
         assert!(!arrived, "TripComplete should not trigger arrival");
@@ -197,8 +216,9 @@ mod tests {
         state.dwell_time_s = 100;
 
         // Update multiple times
+        let corridor_start_cm = 100000 - 8000;
         for _ in 0..10 {
-            state.update(100000, 0, 100000, 0);
+            state.update(100000, 0, 100000, corridor_start_cm, 0);
         }
 
         // dwell_time should remain unchanged in TripComplete
@@ -222,7 +242,9 @@ mod tests {
     fn test_fsm_handles_all_states() {
         // v8.5: Ensure update() handles all FSM states without panic
         let stop_progress = 10000;
+        let corridor_start_cm = 2000;
         let states = [
+            FsmState::Idle,
             FsmState::Approaching,
             FsmState::Arriving,
             FsmState::AtStop,
@@ -235,7 +257,7 @@ mod tests {
             state.fsm_state = fsm_state;
 
             // Should not panic for any state
-            state.update(15000, 100, stop_progress, 100);
+            state.update(15000, 100, stop_progress, corridor_start_cm, 100);
         }
     }
 }

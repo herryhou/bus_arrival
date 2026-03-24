@@ -150,7 +150,7 @@ fn main() {
             });
 
             // Update state machine (may modify dwell_time_s)
-            if state.update(record.s_cm, record.v_cms, stop.progress_cm, prob) {
+            if state.update(record.s_cm, record.v_cms, stop.progress_cm, stop.corridor_start_cm, prob) {
                 // Just arrived!
                 let event = ArrivalEvent {
                     time: record.time,

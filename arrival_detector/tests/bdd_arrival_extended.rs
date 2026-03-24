@@ -13,16 +13,18 @@ fn scenario_premature_departure() {
     };
     let mut state = StopState::new(0);
 
-    // Given: bus enters arrival zone
-    state.update(8000, 500, stop.progress_cm, 0);
+    // Given: bus enters corridor and arrival zone
+    state.update(8000, 500, stop.progress_cm, stop.corridor_start_cm, 0);
+    assert_eq!(state.fsm_state, FsmState::Approaching);
+    state.update(8000, 500, stop.progress_cm, stop.corridor_start_cm, 0);
     assert_eq!(state.fsm_state, FsmState::Arriving);
 
     // When: bus moves past the stop without probability triggering arrival
     // (e.g. speed remains too high)
     let prob = arrival_probability(14100, 1000, &stop, state.dwell_time_s, &g_lut, &l_lut);
     assert!(prob < THETA_ARRIVAL);
-    
-    let arrived = state.update(14100, 1000, stop.progress_cm, prob);
+
+    let arrived = state.update(14100, 1000, stop.progress_cm, stop.corridor_start_cm, prob);
     
     // Then: state should transition to Departed without triggering arrival
     assert!(!arrived);
@@ -51,8 +53,8 @@ fn scenario_stop_reactivation() {
         state.reset();
     }
 
-    // Then: state should be Approaching again
-    assert_eq!(state.fsm_state, FsmState::Approaching);
+    // Then: state should be Idle again
+    assert_eq!(state.fsm_state, FsmState::Idle);
     assert_eq!(state.dwell_time_s, 0);
 }
 

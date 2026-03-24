@@ -38,13 +38,17 @@ fn scenario_successful_arrival_at_standard_stop() {
         corridor_end_cm: 14000,
     };
     
-    // And: the bus is in the Approaching state
+    // And: the bus is in the Idle state
     let mut state = StopState::new(0);
+    assert_eq!(state.fsm_state, FsmState::Idle);
+
+    // When: the bus enters the corridor (s_cm >= corridor_start_cm)
+    state.update(6000, 500, stop.progress_cm, stop.corridor_start_cm, 0);
     assert_eq!(state.fsm_state, FsmState::Approaching);
 
-    // When: the bus enters the arrival zone (d < 5000cm)
+    // And: the bus enters the arrival zone (d < 5000cm)
     // d = |6000 - 10000| = 4000.
-    state.update(6000, 500, stop.progress_cm, 0);
+    state.update(6000, 500, stop.progress_cm, stop.corridor_start_cm, 0);
     assert_eq!(state.fsm_state, FsmState::Arriving);
 
     // And: the speed drops to 20 cm/s
@@ -58,7 +62,7 @@ fn scenario_successful_arrival_at_standard_stop() {
     assert!(prob > THETA_ARRIVAL, "Probability {} should be > {}", prob, THETA_ARRIVAL);
 
     // And: an ArrivalEvent for that stop must be emitted
-    let arrived = state.update(10050, 20, stop.progress_cm, prob);
+    let arrived = state.update(10050, 20, stop.progress_cm, stop.corridor_start_cm, prob);
     assert!(arrived);
     assert_eq!(state.fsm_state, FsmState::AtStop);
 }
@@ -76,23 +80,25 @@ fn scenario_skip_stop_protection_high_speed() {
 
     // When: the bus passes the stop at 1111 cm/s (40 km/h)
     // Progress: 9000 -> 10111 -> 11222
-    
-    // At 9000: Entering Arriving zone
-    state.update(9000, 1111, stop.progress_cm, 0);
+
+    // At 9000: Entering corridor -> Approaching, then to Arriving zone
+    state.update(9000, 1111, stop.progress_cm, stop.corridor_start_cm, 0);
+    assert_eq!(state.fsm_state, FsmState::Approaching);
+    state.update(9000, 1111, stop.progress_cm, stop.corridor_start_cm, 0);
     assert_eq!(state.fsm_state, FsmState::Arriving);
 
     // At 10111: Passing stop
     let prob = arrival_probability(10111, 1111, &stop, state.dwell_time_s, &g_lut, &l_lut);
-    
+
     // Then: Speed likelihood (p2) should be low, and prob should be low
     // v=1111 -> i=111. 1/(1+exp(0.01*(1111-200))) = 1/(1+exp(9.11)) -> near 0.
     assert!(prob < THETA_ARRIVAL);
-    
-    let arrived = state.update(10111, 1111, stop.progress_cm, prob);
+
+    let arrived = state.update(10111, 1111, stop.progress_cm, stop.corridor_start_cm, prob);
     assert!(!arrived);
 
     // At 14100: Departing
-    state.update(14100, 1111, stop.progress_cm, 0);
+    state.update(14100, 1111, stop.progress_cm, stop.corridor_start_cm, 0);
     assert_eq!(state.fsm_state, FsmState::Departed);
 }
 

@@ -265,6 +265,8 @@ impl DrState {
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FsmState {
+    /// Bus is idle (before entering corridor)
+    Idle,
     /// Bus is approaching stop (in corridor, not yet close)
     Approaching,
     /// Bus is in arrival zone (close to stop)

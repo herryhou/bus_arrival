@@ -1,7 +1,7 @@
 use arrival_detector::corridor::find_active_stops;
 use arrival_detector::probability::THETA_ARRIVAL;
 use arrival_detector::state_machine::StopState;
-use shared::Stop;
+use shared::{Stop, FsmState};
 
 #[test]
 fn scenario_simultaneous_overlapping_corridors() {
@@ -46,15 +46,16 @@ fn scenario_probability_threshold_edge_case() {
     // Given: the arrival probability equals exactly THETA_ARRIVAL (191)
     let probability = THETA_ARRIVAL;
 
-    // When: the state update is processed in Arriving zone
-    state.update(9000, 100, stop_progress, 0); // Enter Arriving zone
-    let arrived_at_threshold = state.update(10000, 100, stop_progress, probability);
+    // When: the state update is processed in corridor and Arriving zone
+    let corridor_start_cm = stop_progress - 8000; // 2000
+    state.update(9000, 100, stop_progress, corridor_start_cm, 0); // Enter corridor and Arriving zone
+    let arrived_at_threshold = state.update(10000, 100, stop_progress, corridor_start_cm, probability);
 
     // Then: arrival should NOT be triggered (must be > threshold)
     assert!(!arrived_at_threshold, "Arrival should NOT trigger at exactly THETA_ARRIVAL");
 
     // When: probability is 192
-    let arrived_above_threshold = state.update(10000, 100, stop_progress, THETA_ARRIVAL + 1);
+    let arrived_above_threshold = state.update(10000, 100, stop_progress, corridor_start_cm, THETA_ARRIVAL + 1);
     
     // Then: arrival SHOULD trigger
     assert!(arrived_above_threshold, "Arrival should trigger at THETA_ARRIVAL + 1");
@@ -66,12 +67,19 @@ fn scenario_dwell_time_progression() {
     let stop_progress = 10000;
 
     // Given: a bus is stationary at a stop (speed = 0 cm/s)
-    // When: multiple updates occur (simulating 5 seconds/updates)
+    let corridor_start_cm = stop_progress - 8000; // 2000
+
+    // First update transitions from Idle to Approaching (no dwell_time increment)
+    state.update(10000, 0, stop_progress, corridor_start_cm, 0);
+    assert_eq!(state.fsm_state, FsmState::Approaching);
+    assert_eq!(state.dwell_time_s, 0);
+
+    // When: 5 more updates occur (simulating 5 seconds/updates in corridor)
     for _ in 0..5 {
-        state.update(10000, 0, stop_progress, 0);
+        state.update(10000, 0, stop_progress, corridor_start_cm, 0);
     }
 
-    // Then: the dwell_time_s should increment with each update
+    // Then: the dwell_time_s should be 5 (one for each update while in Approaching)
     assert_eq!(state.dwell_time_s, 5);
 }
 
@@ -136,16 +144,18 @@ fn scenario_stop_reactivation_after_loop() {
     };
     let mut state = StopState::new(0);
 
-    // When: bus approaches and enters Arriving zone
-    state.update(6000, 100, stop.progress_cm, 0);
+    // When: bus approaches and enters corridor and Arriving zone
+    state.update(6000, 100, stop.progress_cm, stop.corridor_start_cm, 0);
+    assert_eq!(state.fsm_state, FsmState::Approaching);
+    state.update(6000, 100, stop.progress_cm, stop.corridor_start_cm, 0);
     assert_eq!(state.fsm_state, FsmState::Arriving);
 
     // When: bus arrives at stop
-    state.update(10000, 0, stop.progress_cm, 200); // High probability triggers arrival
+    state.update(10000, 0, stop.progress_cm, stop.corridor_start_cm, 200); // High probability triggers arrival
     assert_eq!(state.fsm_state, FsmState::AtStop);
 
     // When: bus departs (moves past stop)
-    state.update(15000, 500, stop.progress_cm, 0);
+    state.update(15000, 500, stop.progress_cm, stop.corridor_start_cm, 0);
     assert_eq!(state.fsm_state, FsmState::Departed);
 
     // When: bus loops back and enters corridor again (e.g., circular route)
@@ -153,6 +163,6 @@ fn scenario_stop_reactivation_after_loop() {
     assert!(can_reset, "Should be able to re-enter corridor after loop");
 
     state.reset();
-    assert_eq!(state.fsm_state, FsmState::Approaching);
+    assert_eq!(state.fsm_state, FsmState::Idle);
     assert_eq!(state.dwell_time_s, 0, "Dwell time should reset");
 }
