@@ -99,6 +99,19 @@ fn main() {
         // Find active stops (corridor filter)
         let active_indices = corridor::find_active_stops(record.s_cm, &stops);
 
+        // Calculate sequential next_stop for each stop (before processing loop)
+        // This is the NEXT STOP IN THE ROUTE SEQUENCE, not the next active stop
+        let next_stops: Vec<Option<&shared::Stop>> = stops.iter()
+            .enumerate()
+            .map(|(i, _)| {
+                if i + 1 < stops.len() {
+                    Some(&stops[i + 1])
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         // Track which stops arrived this frame for trace output
         let mut arrived_this_frame: Vec<u8> = Vec::new();
 
@@ -124,13 +137,14 @@ fn main() {
 
             // Compute probability and features BEFORE state.update()
             // These values are used for the state machine decision
-            let prob = probability::arrival_probability(
+            let prob = probability::arrival_probability_adaptive(
                 record.s_cm,
                 record.v_cms,
                 stop,
                 state.dwell_time_s,
                 &gaussian_lut,
                 &logistic_lut,
+                next_stops[stop_idx],  // Sequential next stop from route
             );
 
             let features = probability::compute_feature_scores(
