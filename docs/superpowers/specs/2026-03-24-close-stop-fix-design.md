@@ -36,31 +36,44 @@ Input GPS → Tier 1 (Main Loop) → Tier 2 (Preprocess) → Tier 3 (Probability
 
 **File**: `arrival_detector/src/main.rs`
 
-**Purpose**: Pass next stop information to probability calculation.
+**Purpose**: Pass sequential next stop information to probability calculation.
+
+**Rationale**: The probability model needs to know if the NEXT stop in the route sequence is close (<120m), regardless of whether it's currently active. This allows adaptive weights to be applied proactively.
 
 **Changes**:
 ```rust
-// Determine next stop among active stops
-let next_stop_opt = active_indices.iter()
-    .position(|&idx| idx == stop_idx)
-    .and_then(|pos| {
-        if pos + 1 < active_indices.len() {
-            Some(&stops[active_indices[pos + 1]])
+// Before the active_stops loop, calculate next_stop for each stop
+let next_stops: Vec<Option<&Stop>> = stops.iter()
+    .enumerate()
+    .map(|(i, _)| {
+        if i + 1 < stops.len() {
+            Some(&stops[i + 1])
         } else {
             None
         }
-    });
+    })
+    .collect();
 
-let prob = probability::arrival_probability_adaptive(
-    record.s_cm,
-    record.v_cms,
-    stop,
-    state.dwell_time_s,
-    &gaussian_lut,
-    &logistic_lut,
-    next_stop_opt,  // NEW parameter
-);
+// Inside the active_stops loop:
+for &stop_idx in &active_indices {
+    let stop = &stops[stop_idx];
+    let state = &mut stop_states[stop_idx];
+    let next_stop = next_stops[stop_idx];  // Sequential next, not next active
+
+    let prob = probability::arrival_probability_adaptive(
+        record.s_cm,
+        record.v_cms,
+        stop,
+        state.dwell_time_s,
+        &gaussian_lut,
+        &logistic_lut,
+        next_stop,  // NEW parameter
+    );
+    // ... rest of processing
+}
 ```
+
+**Key Point**: We pass the sequential next stop from the route, NOT the next active stop. This is critical because when stops overlap, the next active stop might be the same as the current stop.
 
 ## Tier 2: Preprocess Corridor Redesign
 
@@ -92,6 +105,14 @@ pub fn preprocess_close_stop_corridors(stops: &mut [Stop]) {
 - 55% before stop (pre-corridor)
 - 10% gap between corridors
 - 35% after stop (post-corridor)
+
+**Rationale for 55%/10%/35% Ratio**:
+1. **Pre-corridor (55%)**: Prioritizes early detection over post-corridor, giving the system more time to build dwell_time_s probability
+2. **Post-corridor (35%)**: Reduced from 40% to accommodate the tight spacing, but still sufficient for departure detection
+3. **Gap (10%)**: Maintains separation between corridors to prevent ambiguous state when both stops could be active
+
+**Relationship with Existing Overlap Protection**:
+The existing preprocessor applies a 20m (δ_sep = 2000cm) gap enforcement AFTER corridor boundaries are set. For close stops (<120m), this existing logic would produce invalid corridors (starting after the stop). The `preprocess_close_stop_corridors()` function is called BEFORE the existing overlap protection, ensuring corridors are valid before the 20m gap check is applied. This is a complementary fix, not a replacement.
 
 **For Stop #2/#3 (79.32m apart)**:
 ```
@@ -134,7 +155,7 @@ pub fn arrival_probability_adaptive(
     let (w1, w2, w3, w4) = if let Some(next) = next_stop {
         let dist_to_next = (next.progress_cm - stop.progress_cm).abs();
         if dist_to_next < 12_000 {
-            (19, 5, 8, 0)  // Close stop: remove p4
+            (14, 7, 11, 0)  // Close stop: remove p4, maintain proportions
         } else {
             (13, 6, 10, 3)  // Normal stop
         }
@@ -146,11 +167,46 @@ pub fn arrival_probability_adaptive(
 }
 ```
 
+**Weight Redistribution Rationale**:
+When removing p4 (weight=3) for close stops, we scale remaining weights proportionally:
+- Original: w1=13, w2=6, w3=10, w4=3 (sum=32)
+- Without p4: 13+6+10=29, scale factor = 32/29 ≈ 1.103
+- Scaled: w1≈14, w2≈7, w3≈11, w4=0 (sum=32)
+
+This maintains the relative importance of each feature while ensuring sum=32 to prevent u8 overflow.
+
 **Weight Comparison**:
 | Condition | w1 | w2 | w3 | w4 | Sum |
 |-----------|----|----|----|----|-----|
-| Close stop (<120m) | 19 | 5 | 8 | 0 | 32 |
+| Close stop (<120m) | 14 | 7 | 11 | 0 | 32 |
 | Normal stop | 13 | 6 | 10 | 3 | 32 |
+
+**Probability Calculation Examples**:
+
+*Example 1: Close stop (Stop #3 at time=483 with new corridor)*
+```
+Input: s_cm=140,609, stop.progress_cm=135,621, v_cms≈0, dwell_time_s=8s
+
+Features:
+- p1 (distance): d_cm=4,988, idx1≈116, p1≈220 (near stop)
+- p2 (speed): v_cms=0, idx2=0, p2≈30 (stationary)
+- p3 (progress): d_cm=4,988, idx3≈160, p3≈255 (very near)
+- p4 (dwell): dwell=8s, p4=(8×255)/10=204
+
+With adaptive weights (14,7,11,0):
+prob = (14×220 + 7×30 + 11×255 + 0×204) / 32
+     = (3080 + 210 + 2805 + 0) / 32
+     = 6095 / 32 = 190 ✓ (just below threshold, but dwell continues)
+
+At time=485 with dwell=10s:
+- p4 = 255
+- prob = (14×220 + 7×30 + 11×255 + 0×255) / 32 = 191 ✓ (threshold met)
+```
+
+*Example 2: Normal stop (>120m apart)*
+```
+Standard weights (13,6,10,3) apply unchanged.
+```
 
 ## Data Flow
 
@@ -168,10 +224,21 @@ GPS record → find_active_stops() → For each: determine next_stop → arrival
 
 ### Edge Cases
 
-1. **Distance too small (<2000cm)**: Skip adjustment, minimum corridor sizes apply
-2. **First/last stop**: Loop handles via `saturating_sub(1)` and `Option<&Stop>`
-3. **Next stop before current** (route reversal): Distance check handles naturally
-4. **Exactly 120m threshold**: No adjustment (uses `<` not `<=`)
+1. **Distance too small (<2000cm)**: Skip adjustment, minimum corridor sizes apply. This prevents degenerate corridors when stops are extremely close (e.g., same physical location).
+
+2. **First/last stop**: Loop handles via `saturating_sub(1)` and `Option<&Stop>`. First stop has no previous stop to compare with; last stop has no next stop (next_stop=None in probability calculation).
+
+3. **Next stop before current** (route reversal): Distance check handles naturally via `.abs()`. The system will detect the distance but won't apply close-stop logic since route progress is expected to be monotonic.
+
+4. **Exactly 120m threshold**: No adjustment (uses `<` not `<=`). This provides clear boundary behavior and matches the overlap protection threshold.
+
+5. **Overlapping corridors after preprocessing**: The existing 20m overlap protection in `project_stops_validated()` still applies AFTER this function, ensuring a minimum gap even with adjusted corridors.
+
+6. **Sequential stops with large gaps (>120m)**: No modification applied; standard corridor sizes (80m pre, 40m post) are used.
+
+7. **Three or more consecutive close stops**: Each adjacent pair is processed independently. For stops A, B, C where A→B and B→C are both <120m, B's corridor will be adjusted twice (once for A→B, once for B→C).
+
+8. **GPS drift at corridor boundaries**: The 10% gap between close-stop corridors provides buffer against GPS noise triggering incorrect state transitions.
 
 ### Validation
 
@@ -205,9 +272,15 @@ After:  Stop #3 probability >= 191, state = AtStop
 
 ## Implementation Order
 
-1. **Tier 2** (Preprocess) - Foundation for other tiers
-2. **Tier 3** (Probability) - Depends on preprocess output
-3. **Tier 1** (Main Loop) - Depends on probability signature
+1. **Tier 3** (Probability) - Add `arrival_probability_adaptive()` function. This is the core logic change and can be implemented independently. The function only needs `next_stop` distance from the Stop struct, which is already available.
+
+2. **Tier 1** (Main Loop) - Update main loop to pass `next_stop` parameter. Depends on Tier 3 being complete so the new function signature is available.
+
+3. **Tier 2** (Preprocess) - Add `preprocess_close_stop_corridors()` function. This is independent of the other tiers and can be implemented in parallel or after. For testing, it's beneficial to implement this first to fix the corridor boundaries.
+
+**Alternative order for incremental testing**:
+- Implement Tier 2 first (fix corridors) → test if alone solves the problem
+- If not, proceed with Tier 3 + Tier 1 for the adaptive probability
 
 ## Files Modified
 
