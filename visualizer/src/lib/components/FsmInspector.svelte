@@ -29,16 +29,17 @@
 
 	const stateColors = FSM_STATE_COLORS;
 
-	const states: FsmState[] = ['Approaching', 'Arriving', 'AtStop', 'Departed', 'TripComplete'];
+	const states: FsmState[] = ['Idle', 'Approaching', 'Arriving', 'AtStop', 'Departed', 'TripComplete'];
 
 	// Coordinates for SVG state diagram
-	// v8.5: Linear left-to-right layout matching FSM flow: Approaching → Arriving → AtStop → Departed → TripComplete
+	// v8.5: Linear left-to-right layout matching FSM flow: Idle → Approaching → Arriving → AtStop → Departed → TripComplete
 	const stateNodes = {
-		Approaching: { x: 30, y: 50 },
-		Arriving: { x: 100, y: 50 },
-		AtStop: { x: 170, y: 50 },
-		Departed: { x: 240, y: 50 },
-		TripComplete: { x: 310, y: 50 }  // Terminal state at far right
+		Idle: { x: 30, y: 50 },
+		Approaching: { x: 100, y: 50 },
+		Arriving: { x: 170, y: 50 },
+		AtStop: { x: 240, y: 50 },
+		Departed: { x: 310, y: 50 },
+		TripComplete: { x: 380, y: 50 }  // Terminal state at far right
 	};
 
 	function formatDwellTime(seconds: number): string {
@@ -60,7 +61,7 @@
 
 		<!-- SVG State Diagram -->
 		<div class="diagram-card">
-			<svg viewBox="0 0 350 100">
+			<svg viewBox="0 0 420 100">
 				<!-- Transitions -->
 				<defs>
 					<marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orientation="auto" markerUnits="strokeWidth">
@@ -72,17 +73,22 @@
 				</defs>
 
 				<!-- Node connections - Linear left-to-right flow -->
-				<!-- Approaching -> Arriving -->
+				<!-- Idle -> Approaching -->
 				<line x1="50" y1="50" x2="79" y2="50" stroke="#444" marker-end="url(#arrow)" />
-				<!-- Arriving -> AtStop -->
+				<!-- Approaching -> Arriving -->
 				<line x1="120" y1="50" x2="149" y2="50" stroke="#444" marker-end="url(#arrow)" />
-				<!-- AtStop -> Departed -->
+				<!-- Arriving -> AtStop -->
 				<line x1="190" y1="50" x2="219" y2="50" stroke="#444" marker-end="url(#arrow)" />
+				<!-- AtStop -> Departed -->
+				<line x1="260" y1="50" x2="289" y2="50" stroke="#444" marker-end="url(#arrow)" />
 				<!-- Departed -> TripComplete -->
-				<line x1="260" y1="50" x2="289" y2="50" stroke="#444" marker-end="url(#arrow)" stroke-dasharray="3,3" />
+				<line x1="330" y1="50" x2="359" y2="50" stroke="#444" marker-end="url(#arrow)" stroke-dasharray="3,3" />
+
+				<!-- Bidirectional: Approaching -> Idle (corridor exit) -->
+				<path d="M 95 35 Q 65 20 35 35" fill="none" stroke="#444" marker-end="url(#arrow)" stroke-dasharray="2,2" />
 
 				<!-- Skip transition (Arriving -> Departed, bypassing AtStop) -->
-				<path d="M 110 35 Q 170 10 230 35" fill="none" stroke="#444" marker-end="url(#arrow)" />
+				<path d="M 180 35 Q 240 10 300 35" fill="none" stroke="#444" marker-end="url(#arrow)" />
 
 				{#each Object.entries(stateNodes) as [name, pos]}
 					<g transform="translate({pos.x}, {pos.y})">
@@ -169,6 +175,7 @@
 		text-transform: uppercase;
 	}
 
+	.idle { background-color: #94a3b8; color: white; }
 	.approaching { background-color: #3b82f6; color: white; }
 	.arriving { background-color: #f59e0b; color: white; }
 	.atstop { background-color: #22c55e; color: white; }

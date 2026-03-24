@@ -9,9 +9,9 @@
 /**
  * FSM state - matches Rust FsmState enum serialization
  * Serde serializes enum variants as their string names
- * v8.5: Added TripComplete state for terminal trip completion
+ * v8.5: Added Idle and TripComplete states
  */
-export type FsmState = 'Approaching' | 'Arriving' | 'AtStop' | 'Departed' | 'TripComplete';
+export type FsmState = 'Idle' | 'Approaching' | 'Arriving' | 'AtStop' | 'Departed' | 'TripComplete';
 
 /**
  * Individual feature scores from Bayesian probability model
