@@ -17,10 +17,11 @@ Current corridors (with 20m overlap protection):
 - Stop #2: corridor_end ≈ 131,468 cm
 - Stop #3: corridor_start ≈ 134,179 cm
 
-Critical Issue: Stop #3's corridor starts 1,442 cm PAST the stop location!
+Critical Issue: Stop #3's corridor starts only 1,442 cm BEFORE the stop location!
+(Normal pre-corridor is 8,000cm, but compressed to just 1,442cm due to overlap protection)
 ```
 
-**Result**: Bus enters Stop #3's corridor after already passing the stop, causing:
+**Result**: Bus enters Stop #3's corridor very late (only 14m before stop), causing:
 - Low dwell_time_s (just entered corridor)
 - Low p4 probability feature
 - Total probability = 185 < threshold 191
@@ -131,7 +132,7 @@ Stop #3 corridor: [131,258 ~ 138,397]
 ```rust
 pub fn arrival_probability_adaptive(
     s_cm: DistCm,
-    v_cms: SpeedCms,
+    v_cms: SpeedCms,  // Type alias for i32, matches record.v_cms
     stop: &shared::Stop,
     dwell_time_s: u16,
     gaussian_lut: &[u8; 256],
@@ -183,24 +184,25 @@ This maintains the relative importance of each feature while ensuring sum=32 to 
 
 **Probability Calculation Examples**:
 
-*Example 1: Close stop (Stop #3 at time=483 with new corridor)*
+*Example 1: Close stop (Stop #3 at time=481 with new corridor)*
 ```
-Input: s_cm=140,609, stop.progress_cm=135,621, v_cms≈0, dwell_time_s=8s
+Input: s_cm=135,584, stop.progress_cm=135,621, v_cms=641, dwell_time_s≈6s
+
+Context: With new corridor_start=131,258, bus entered corridor at time≈469.
+         By time=481, dwell has accumulated for ~6 seconds.
 
 Features:
-- p1 (distance): d_cm=4,988, idx1≈116, p1≈220 (near stop)
-- p2 (speed): v_cms=0, idx2=0, p2≈30 (stationary)
-- p3 (progress): d_cm=4,988, idx3≈160, p3≈255 (very near)
-- p4 (dwell): dwell=8s, p4=(8×255)/10=204
+- p1 (distance): d_cm=|135584-135621|=37, idx1=0, p1≈255 (at stop)
+- p2 (speed): v_cms=641, idx2=64, p2≈105 (approaching)
+- p3 (progress): d_cm=37, idx3=1, p3≈255 (very near)
+- p4 (dwell): dwell≈6s, p4=(6×255)/10=153
 
 With adaptive weights (14,7,11,0):
-prob = (14×220 + 7×30 + 11×255 + 0×204) / 32
-     = (3080 + 210 + 2805 + 0) / 32
-     = 6095 / 32 = 190 ✓ (just below threshold, but dwell continues)
+prob = (14×255 + 7×105 + 11×255 + 0×153) / 32
+     = (3570 + 735 + 2805 + 0) / 32
+     = 7110 / 32 = 222 ✓ (well above threshold 191)
 
-At time=485 with dwell=10s:
-- p4 = 255
-- prob = (14×220 + 7×30 + 11×255 + 0×255) / 32 = 191 ✓ (threshold met)
+Note: With p4 weight removed, high p1/p3 compensate for moderate speed.
 ```
 
 *Example 2: Normal stop (>120m apart)*
@@ -236,7 +238,24 @@ GPS record → find_active_stops() → For each: determine next_stop → arrival
 
 6. **Sequential stops with large gaps (>120m)**: No modification applied; standard corridor sizes (80m pre, 40m post) are used.
 
-7. **Three or more consecutive close stops**: Each adjacent pair is processed independently. For stops A, B, C where A→B and B→C are both <120m, B's corridor will be adjusted twice (once for A→B, once for B→C).
+7. **Three or more consecutive close stops**: Each adjacent pair is processed independently. For stops A, B, C where A→B and B→C are both <120m:
+
+   - Processing A→B pair adjusts: B.corridor_start_cm (pre-corridor from B's perspective)
+   - Processing B→C pair adjusts: B.corridor_end_cm (post-corridor from B's perspective)
+
+   These two adjustments affect **different boundaries** of B's corridor and do not conflict. Example:
+   ```
+   A.progress = 100,000cm
+   B.progress = 108,000cm (A→B: d1=8,000cm)
+   C.progress = 115,000cm (B→C: d2=7,000cm)
+
+   After A→B processing: B.corridor_start = 108,000 - 0.55×8000 = 103,600cm
+   After B→C processing: B.corridor_end   = 108,000 + 0.35×7000 = 110,450cm
+
+   B's final corridor: [103,600 ~ 110,450] - valid and symmetric around B
+   ```
+
+   The validation assert ensures corridor_start < progress < corridor_end for all cases.
 
 8. **GPS drift at corridor boundaries**: The 10% gap between close-stop corridors provides buffer against GPS noise triggering incorrect state transitions.
 
@@ -272,15 +291,19 @@ After:  Stop #3 probability >= 191, state = AtStop
 
 ## Implementation Order
 
-1. **Tier 3** (Probability) - Add `arrival_probability_adaptive()` function. This is the core logic change and can be implemented independently. The function only needs `next_stop` distance from the Stop struct, which is already available.
+**Recommended order: Tier 2 → Tier 3 → Tier 1**
 
-2. **Tier 1** (Main Loop) - Update main loop to pass `next_stop` parameter. Depends on Tier 3 being complete so the new function signature is available.
+1. **Tier 2** (Preprocess) - Implement `preprocess_close_stop_corridors()` first. This is static preprocessing with no runtime dependencies. Can be verified independently by checking corridor boundaries in the generated route_data.bin.
 
-3. **Tier 2** (Preprocess) - Add `preprocess_close_stop_corridors()` function. This is independent of the other tiers and can be implemented in parallel or after. For testing, it's beneficial to implement this first to fix the corridor boundaries.
+2. **Tier 3** (Probability) - Implement `arrival_probability_adaptive()` function. The new function signature takes `next_stop: Option<&Stop>` parameter. This can be implemented and unit tested independently.
 
-**Alternative order for incremental testing**:
-- Implement Tier 2 first (fix corridors) → test if alone solves the problem
-- If not, proceed with Tier 3 + Tier 1 for the adaptive probability
+3. **Tier 1** (Main Loop) - Update main.rs to calculate `next_stops` array and pass to probability function. Depends on Tier 3's function signature being complete.
+
+**Rationale for this order**:
+- Tier 2 is pure data transformation with clear verification (corridor boundaries)
+- Tier 3 adds the adaptive logic but doesn't change existing behavior until called
+- Tier 1 wires everything together and should be done last
+- Each step can be tested independently before moving to the next
 
 ## Files Modified
 
