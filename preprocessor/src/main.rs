@@ -15,7 +15,7 @@ mod pack;
 mod simplify;
 mod stops;
 
-use stops::{validate_stop_sequence, project_stops_validated};
+use stops::{validate_stop_sequence, project_stops_validated, preprocess_close_stop_corridors};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -148,7 +148,10 @@ fn main() {
         None => {
             println!("[VALIDATION PASS]");
             println!("✓ All {} stops validated - monotonic sequence confirmed", validation.progress_values.len());
-            project_stops_validated(&validation.progress_values, &stops_input)
+            let mut stops = project_stops_validated(&validation.progress_values, &stops_input);
+            preprocess_close_stop_corridors(&mut stops);
+            println!("✓ Applied close-stop corridor adjustment");
+            stops
         }
         Some(info) => {
             eprintln!("[VALIDATION FAIL]");

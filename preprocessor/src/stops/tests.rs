@@ -111,4 +111,90 @@ mod tests {
         assert_eq!(result.progress_values.len(), 2);
         assert!(result.progress_values[0] < result.progress_values[1]);
     }
+
+    #[test]
+    fn test_close_stop_corridor_adjustment() {
+        // Stops 79m apart (tpF805 Stop #2/#3 case)
+        let progress_values = vec![127_689, 135_621]; // d = 7,932 cm
+
+        // First, get standard corridors
+        let mut stops = super::super::project_stops_validated(
+            &progress_values,
+            &crate::input::StopsInput { stops: vec![] } // Dummy input
+        );
+
+        // Apply close stop preprocessing
+        super::super::preprocess_close_stop_corridors(&mut stops);
+
+        // Verify 55%/10%/35% ratio
+        // Stop 1 corridor_end = 127,689 + 0.35*7,932 = 130,465
+        // Stop 2 corridor_start = 135,621 - 0.55*7,932 = 131,258
+        // Gap = 793 cm (10% of distance)
+
+        assert_eq!(stops[0].corridor_end_cm, 130_465);
+        assert_eq!(stops[1].corridor_start_cm, 131_258);
+
+        // Verify gap between corridors
+        assert_eq!(stops[1].corridor_start_cm - stops[0].corridor_end_cm, 793);
+    }
+
+    #[test]
+    fn test_no_adjustment_at_threshold() {
+        // Stops exactly 120m apart - should NOT be adjusted
+        let progress_values = vec![100_000, 112_000]; // d = 12,000 cm
+
+        let mut stops = super::super::project_stops_validated(
+            &progress_values,
+            &crate::input::StopsInput { stops: vec![] }
+        );
+
+        let stops_before = stops.clone();
+        super::super::preprocess_close_stop_corridors(&mut stops);
+
+        // Corridors should be unchanged (threshold uses <, not <=)
+        assert_eq!(stops[0].corridor_end_cm, stops_before[0].corridor_end_cm);
+        assert_eq!(stops[1].corridor_start_cm, stops_before[1].corridor_start_cm);
+    }
+
+    #[test]
+    fn test_no_adjustment_far_apart() {
+        // Stops 200m apart - standard corridors apply
+        let progress_values = vec![100_000, 120_000]; // d = 20,000 cm
+
+        let mut stops = super::super::project_stops_validated(
+            &progress_values,
+            &crate::input::StopsInput { stops: vec![] }
+        );
+
+        let stops_before = stops.clone();
+        super::super::preprocess_close_stop_corridors(&mut stops);
+
+        // Should be unchanged
+        assert_eq!(stops[0].corridor_end_cm, stops_before[0].corridor_end_cm);
+        assert_eq!(stops[1].corridor_start_cm, stops_before[1].corridor_start_cm);
+    }
+
+    #[test]
+    fn test_three_consecutive_close_stops() {
+        // Three stops: A→B=80m, B→C=90m
+        // B's corridor should be adjusted on both sides
+        let progress_values = vec![100_000, 108_000, 117_000];
+
+        let mut stops = super::super::project_stops_validated(
+            &progress_values,
+            &crate::input::StopsInput { stops: vec![] }
+        );
+
+        super::super::preprocess_close_stop_corridors(&mut stops);
+
+        // Verify B's corridor boundaries
+        // B.corridor_start from A→B: 108,000 - 0.55*8,000 = 103,600
+        // B.corridor_end from B→C: 108,000 + 0.35*9,000 = 111,150
+        assert_eq!(stops[1].corridor_start_cm, 103_600);
+        assert_eq!(stops[1].corridor_end_cm, 111_150);
+
+        // Verify B is still valid (start < progress < end)
+        assert!(stops[1].corridor_start_cm < stops[1].progress_cm);
+        assert!(stops[1].corridor_end_cm > stops[1].progress_cm);
+    }
 }

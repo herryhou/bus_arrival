@@ -50,5 +50,44 @@ pub fn project_stops_validated(
     final_stops
 }
 
+/// Adjust corridor boundaries for closely-spaced stops.
+///
+/// For stops <120m apart, redistributes corridor space as:
+/// - 55% before stop (pre-corridor)
+/// - 10% gap between corridors
+/// - 35% after stop (post-corridor)
+///
+/// This prevents overlap protection from compressing corridors
+/// to the point where detection fails.
+///
+/// # Arguments
+/// * `stops` - Stops with standard corridors (modified in place)
+///
+/// # Called by
+/// main.rs after project_stops_validated(), before packing
+pub fn preprocess_close_stop_corridors(stops: &mut [Stop]) {
+    const CLOSE_STOP_THRESHOLD_CM: i32 = 12_000; // 120m
+    const PRE_RATIO: i32 = 55;   // 0.55 × distance
+    const POST_RATIO: i32 = 35;  // 0.35 × distance
+    // Gap of 0.10 × distance forms naturally
+
+    for i in 0..stops.len().saturating_sub(1) {
+        let distance = stops[i + 1].progress_cm - stops[i].progress_cm;
+
+        // Skip if distance is too small or at threshold
+        if distance < 2_000 || distance >= CLOSE_STOP_THRESHOLD_CM {
+            continue;
+        }
+
+        // Adjust current stop's post-corridor
+        stops[i].corridor_end_cm =
+            stops[i].progress_cm + (distance * POST_RATIO) / 100;
+
+        // Adjust next stop's pre-corridor
+        stops[i + 1].corridor_start_cm =
+            stops[i + 1].progress_cm - (distance * PRE_RATIO) / 100;
+    }
+}
+
 #[cfg(test)]
 mod tests;
