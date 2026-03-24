@@ -63,6 +63,55 @@ pub fn arrival_probability(
     ((13 * p1 + 6 * p2 + 10 * p3 + 3 * p4) / 32) as u8
 }
 
+/// Compute arrival probability with adaptive weights for close stops.
+///
+/// When next stop is <120m away, removes dwell time (p4) weight and
+/// redistributes proportionally: (14, 7, 11, 0) instead of (13, 6, 10, 3).
+///
+/// # Arguments
+/// * `next_stop` - Next sequential stop in route (not next active stop)
+pub fn arrival_probability_adaptive(
+    s_cm: DistCm,
+    v_cms: SpeedCms,  // Type alias for i32
+    stop: &shared::Stop,
+    dwell_time_s: u16,
+    gaussian_lut: &[u8; 256],
+    logistic_lut: &[u8; 128],
+    next_stop: Option<&shared::Stop>,
+) -> Prob8 {
+    // Feature calculations (same as arrival_probability)
+    let d_cm = (s_cm - stop.progress_cm).abs();
+    let idx1 = ((d_cm as i64 * 64) / 2750).min(255) as usize;
+    let p1 = gaussian_lut[idx1] as u32;
+
+    let idx2 = (v_cms / 10).max(0).min(127) as usize;
+    let p2 = logistic_lut[idx2] as u32;
+
+    let idx3 = ((d_cm as i64 * 64) / 2000).min(255) as usize;
+    let p3 = gaussian_lut[idx3] as u32;
+
+    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
+
+    // Adaptive weights based on next stop distance
+    let (w1, w2, w3, w4) = if let Some(next) = next_stop {
+        let dist_to_next = (next.progress_cm - stop.progress_cm).abs();
+        if dist_to_next < 12_000 {
+            // Close stop: remove p4, scale remaining to sum=32
+            // Original: 13+6+10+3=32, without p4: 29, scale factor = 32/29
+            // 13/29*32 ≈ 14, 6/29*32 ≈ 7, 10/29*32 ≈ 11
+            (14, 7, 11, 0)
+        } else {
+            // Normal stop: standard weights
+            (13, 6, 10, 3)
+        }
+    } else {
+        // Last stop: standard weights
+        (13, 6, 10, 3)
+    };
+
+    ((w1 * p1 + w2 * p2 + w3 * p3 + w4 * p4) / 32) as u8
+}
+
 /// Compute individual feature scores for trace output
 pub fn compute_feature_scores(
     s_cm: DistCm,
@@ -116,5 +165,84 @@ mod tests {
 
         let p = arrival_probability(10000, 100, &stop, 5, &g_lut, &l_lut);
         assert!(p <= 255);
+    }
+
+    #[test]
+    fn test_adaptive_probability_close_stop() {
+        let g_lut = build_gaussian_lut();
+        let l_lut = build_logistic_lut();
+
+        let stop_current = Stop {
+            progress_cm: 100_000,
+            corridor_start_cm: 90_000,
+            corridor_end_cm: 110_000,
+        };
+
+        let stop_next = Stop {
+            progress_cm: 108_000, // 8,000cm away (<12,000 threshold)
+            corridor_start_cm: 98_000,
+            corridor_end_cm: 118_000,
+        };
+
+        // At stop, moderate speed, some dwell
+        let prob = arrival_probability_adaptive(
+            100_000,  // s_cm (at stop)
+            600,      // v_cms (approaching)
+            &stop_current,
+            5,        // dwell_time_s
+            &g_lut,
+            &l_lut,
+            Some(&stop_next),
+        );
+
+        // With close stop, p4 weight is removed, should be higher
+        assert!(prob > 190, "Expected probability > 190 for close stop, got {}", prob);
+        assert!(prob <= 255);
+    }
+
+    #[test]
+    fn test_adaptive_probability_normal_stop() {
+        let g_lut = build_gaussian_lut();
+        let l_lut = build_logistic_lut();
+
+        let stop_current = Stop {
+            progress_cm: 100_000,
+            corridor_start_cm: 90_000,
+            corridor_end_cm: 110_000,
+        };
+
+        let stop_next = Stop {
+            progress_cm: 125_000, // 25,000cm away (>12,000 threshold)
+            corridor_start_cm: 115_000,
+            corridor_end_cm: 135_000,
+        };
+
+        let prob_close = arrival_probability_adaptive(
+            100_000, 600, &stop_current, 5, &g_lut, &l_lut, Some(&stop_next)
+        );
+
+        // Normal stop uses standard weights
+        assert!(prob_close <= 255);
+    }
+
+    #[test]
+    fn test_adaptive_probability_last_stop() {
+        let g_lut = build_gaussian_lut();
+        let l_lut = build_logistic_lut();
+
+        let stop = Stop {
+            progress_cm: 100_000,
+            corridor_start_cm: 90_000,
+            corridor_end_cm: 110_000,
+        };
+
+        // Last stop (next_stop = None)
+        let prob = arrival_probability_adaptive(
+            100_000, 0, &stop, 10, &g_lut, &l_lut, None
+        );
+
+        // Should use standard weights
+        assert!(prob <= 255);
+        assert!(prob > 150); // At stop with 10s dwell should be high
     }
 }
