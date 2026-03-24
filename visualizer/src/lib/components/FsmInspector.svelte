@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { TraceData, StopTraceState, FsmState } from '$lib/types';
+	import { FSM_STATE_COLORS } from '$lib/constants/fsmColors';
 
 	interface Props {
 		traceData: TraceData;
@@ -26,21 +27,18 @@
 			: null;
 	});
 
-	const stateColors: Record<FsmState, string> = {
-		Approaching: '#3b82f6',
-		Arriving: '#f59e0b',
-		AtStop: '#22c55e',
-		Departed: '#6b7280'
-	};
+	const stateColors = FSM_STATE_COLORS;
 
-	const states: FsmState[] = ['Approaching', 'Arriving', 'AtStop', 'Departed'];
-	
+	const states: FsmState[] = ['Approaching', 'Arriving', 'AtStop', 'Departed', 'TripComplete'];
+
 	// Coordinates for SVG state diagram
+	// v8.5: Linear left-to-right layout matching FSM flow: Approaching → Arriving → AtStop → Departed → TripComplete
 	const stateNodes = {
-		Approaching: { x: 50, y: 30 },
-		Arriving: { x: 150, y: 30 },
-		AtStop: { x: 150, y: 100 },
-		Departed: { x: 50, y: 100 }
+		Approaching: { x: 30, y: 50 },
+		Arriving: { x: 100, y: 50 },
+		AtStop: { x: 170, y: 50 },
+		Departed: { x: 240, y: 50 },
+		TripComplete: { x: 310, y: 50 }  // Terminal state at far right
 	};
 
 	function formatDwellTime(seconds: number): string {
@@ -62,7 +60,7 @@
 
 		<!-- SVG State Diagram -->
 		<div class="diagram-card">
-			<svg viewBox="0 0 200 130">
+			<svg viewBox="0 0 350 100">
 				<!-- Transitions -->
 				<defs>
 					<marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orientation="auto" markerUnits="strokeWidth">
@@ -73,13 +71,18 @@
 					</marker>
 				</defs>
 
-				<!-- Node connections -->
-				<line x1="80" y1="30" x2="120" y2="30" stroke="#444" marker-end="url(#arrow)" />
-				<line x1="150" y1="50" x2="150" y2="80" stroke="#444" marker-end="url(#arrow)" />
-				<line x1="120" y1="100" x2="80" y2="100" stroke="#444" marker-end="url(#arrow)" />
-				
-				<!-- Skip transition (Arriving -> Departed) -->
-				<path d="M 130 45 Q 100 65 70 85" fill="none" stroke="#444" marker-end="url(#arrow)" />
+				<!-- Node connections - Linear left-to-right flow -->
+				<!-- Approaching -> Arriving -->
+				<line x1="50" y1="50" x2="79" y2="50" stroke="#444" marker-end="url(#arrow)" />
+				<!-- Arriving -> AtStop -->
+				<line x1="120" y1="50" x2="149" y2="50" stroke="#444" marker-end="url(#arrow)" />
+				<!-- AtStop -> Departed -->
+				<line x1="190" y1="50" x2="219" y2="50" stroke="#444" marker-end="url(#arrow)" />
+				<!-- Departed -> TripComplete -->
+				<line x1="260" y1="50" x2="289" y2="50" stroke="#444" marker-end="url(#arrow)" stroke-dasharray="3,3" />
+
+				<!-- Skip transition (Arriving -> Departed, bypassing AtStop) -->
+				<path d="M 110 35 Q 170 10 230 35" fill="none" stroke="#444" marker-end="url(#arrow)" />
 
 				{#each Object.entries(stateNodes) as [name, pos]}
 					<g transform="translate({pos.x}, {pos.y})">
@@ -170,6 +173,7 @@
 	.arriving { background-color: #f59e0b; color: white; }
 	.atstop { background-color: #22c55e; color: white; }
 	.departed { background-color: #6b7280; color: white; }
+	.tripcomplete { background-color: #1e3a8a; color: white; }
 
 	.diagram-card {
 		background-color: #000;
