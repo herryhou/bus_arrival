@@ -18,6 +18,7 @@ GEN_NMEA := $(TOOLS_DIR)/gen_nmea/gen_nmea.js
 PREPROCESSOR := target/release/preprocessor
 SIMULATOR := target/release/simulator
 ARRIVAL_DETECTOR := target/release/arrival_detector
+TRACE_VALIDATOR := target/release/trace_validator
 
 # Route configuration (can be overridden)
 ROUTE_NAME ?= ty225
@@ -37,7 +38,7 @@ TRACE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_trace.jsonl
 # Node.js executable
 NODE := node
 
-.PHONY: all run gen_nmea preprocess simulate detect clean help build
+.PHONY: all run gen_nmea preprocess simulate detect clean help build validate-trace validate-ty225 validate-all
 
 # Default target
 all: run
@@ -127,3 +128,26 @@ help:
 	@echo "  make run ROUTE_NAME=ty225 SCENARIO=normal"
 	@echo "  make run ROUTE_NAME=ty225 SCENARIO=drift"
 	@echo "  make simulate ROUTE_NAME=another_route SCENARIO=jump"
+
+# Trace validation targets
+.PHONY: validate-trace validate-ty225 validate-all
+
+validate-trace:
+	@if [ -n "$(GROUND_TRUTH)" ]; then \
+		cargo run --release --bin trace_validator -- "$(TRACE_FILE)" --ground-truth "$(GROUND_TRUTH)" -o "$(OUTPUT)"; \
+	else \
+		cargo run --release --bin trace_validator -- "$(TRACE_FILE)" -o "$(OUTPUT)"; \
+	fi
+
+validate-ty225:
+	@cargo run --release --bin trace_validator -- \
+		visualizer/static/ty225_trace.jsonl \
+		--ground-truth ground_truth.json \
+		-o validation_report.html \
+		--verbose
+
+validate-all:
+	@for trace in visualizer/static/*_trace.jsonl; do \
+		output=$${trace%_trace.jsonl}_report.html; \
+		cargo run --release --bin trace_validator -- "$$trace" -o "$$output"; \
+	done
