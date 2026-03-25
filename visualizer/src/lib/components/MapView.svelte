@@ -11,24 +11,21 @@
 
 	// Constants for stop arrival zone circles (50m radius)
 	const EARTH_RADIUS = 6378137; // meters
-	const STOP_RADIUS_M = 50; // 50 meters - arrival detection threshold
-	const CIRCLE_SCALE_FACTOR = 1.6; // Empirical correction for MapLibre GL rendering
+	const EARTH_CIRCUMFERENCE = 2 * Math.PI * EARTH_RADIUS; // meters
+	const STOP_RADIUS_M = 100; // 100 meters = 50m radius (circle spans 100m diameter)
 
 	/**
-	 * Convert meters to pixels for MapLibre GL circle radius
+	 * Convert meters to pixels for MapLibre GL circle-radius at a given zoom and latitude
 	 *
-	 * Uses the standard formula: at zoom level z, 256 * 2^z pixels = Earth circumference
-	 * Circle radius scales by factor of 2 for each zoom level
+	 * Web Mercator projection: at zoom z, 256 * 2^z pixels = 360 degrees of longitude
+	 * At latitude lat: 1 degree longitude = (EARTH_CIRCUMFERENCE * cos(lat) / 360) meters
+	 * Therefore: meters_per_pixel = (EARTH_CIRCUMFERENCE * cos(lat)) / (256 * 2^zoom)
+	 * And: radius_pixels = radius_meters / meters_per_pixel
 	 */
-	function metersToPixels(meters: number, lat: number, zoom: number): number {
-		// Base: at zoom 0, equator, 256 pixels = Earth circumference
-		// At latitude lat, adjust for cosine of latitude
+	function metersToMapPixels(meters: number, lat: number, zoom: number): number {
 		const latRad = lat * Math.PI / 180;
-		const earthCircumference = 2 * Math.PI * EARTH_RADIUS;
-		// At given zoom, pixels = 256 * 2^zoom
-		// Meters per pixel = (earthCircumference * cos(lat)) / (256 * 2^zoom)
-		const metersPerPixel = (earthCircumference * Math.cos(latRad)) / (256 * Math.pow(2, zoom));
-		return (meters / metersPerPixel) * CIRCLE_SCALE_FACTOR;
+		const metersPerPixel = (EARTH_CIRCUMFERENCE * Math.cos(latRad)) / (256 * Math.pow(2, zoom));
+		return meters / metersPerPixel;
 	}
 
 	/**
@@ -193,25 +190,39 @@
 				}
 			});
 
+			// Calculate exact 50m radius at each zoom level using the correct formula
+			// radius_pixels = radius_meters / meters_per_pixel
+			// where meters_per_pixel = (EARTH_CIRCUMFERENCE * cos(lat)) / (256 * 2^zoom)
+			const calcRadius = (zoom: number) => metersToMapPixels(STOP_RADIUS_M, routeData.lat_avg_deg, zoom);
+
 			mapRef.addLayer({
 				id: 'stops-accuracy-circles',
 				type: 'circle',
 				source: stopsSourceId,
 				paint: {
+					// Use exponential zoom interpolation for proper scaling
+					// Circles scale by factor of 2 for each zoom level (Web Mercator projection)
 					'circle-radius': [
 						'interpolate',
-						['linear'],
+						['exponential', 2],
 						['zoom'],
-						12, metersToPixels(STOP_RADIUS_M, routeData.lat_avg_deg, 12),
-						14, metersToPixels(STOP_RADIUS_M, routeData.lat_avg_deg, 14),
-						16, metersToPixels(STOP_RADIUS_M, routeData.lat_avg_deg, 16),
-						18, metersToPixels(STOP_RADIUS_M, routeData.lat_avg_deg, 18)
+						10, calcRadius(10),
+						11, calcRadius(11),
+						12, calcRadius(12),
+						13, calcRadius(13),
+						14, calcRadius(14),
+						15, calcRadius(15),
+						16, calcRadius(16),
+						17, calcRadius(17),
+						18, calcRadius(18),
+						19, calcRadius(19),
+						20, calcRadius(20)
 					],
 					'circle-color': '#3b82f6',
-					'circle-opacity': 0.15,
-					'circle-stroke-width': 1,
+					'circle-opacity': 0.2,
+					'circle-stroke-width': 1.5,
 					'circle-stroke-color': '#3b82f6',
-					'circle-stroke-opacity': 0.3
+					'circle-stroke-opacity': 0.4
 				}
 			});
 
@@ -413,7 +424,7 @@
 		currentPanTarget = null;
 	});
 
-	// Highlight selected stop and filter 50m circles
+	// Highlight selected stop - show all 50m circles, highlight selected one
 	$effect(() => {
 		if (!map || !mapLoaded) return;
 
@@ -432,13 +443,39 @@
 				'#f59e0b',
 				'#ef4444'
 			]);
-			// Filter accuracy circles to only show selected stop
-			map.setFilter('stops-accuracy-circles', ['==', ['get', 'index'], selectedStop]);
+			// Highlight the selected stop's accuracy circle
+			map.setPaintProperty('stops-accuracy-circles', 'circle-opacity', [
+				'match',
+				['get', 'index'],
+				selectedStop,
+				0.25,
+				0.1
+			]);
+			map.setPaintProperty('stops-accuracy-circles', 'circle-stroke-opacity', [
+				'match',
+				['get', 'index'],
+				selectedStop,
+				0.6,
+				0.3
+			]);
+			map.setPaintProperty('stops-accuracy-circles', 'circle-stroke-width', [
+				'match',
+				['get', 'index'],
+				selectedStop,
+				2,
+				1
+			]);
+			// Show all accuracy circles
+			map.setFilter('stops-accuracy-circles', null);
 		} else {
 			map.setPaintProperty('stops-circle', 'circle-radius', 8);
 			map.setPaintProperty('stops-circle', 'circle-color', '#ef4444');
-			// Hide all accuracy circles when nothing selected
-			map.setFilter('stops-accuracy-circles', ['==', ['get', 'index'], -1]);
+			// Reset accuracy circle styling
+			map.setPaintProperty('stops-accuracy-circles', 'circle-opacity', 0.2);
+			map.setPaintProperty('stops-accuracy-circles', 'circle-stroke-opacity', 0.4);
+			map.setPaintProperty('stops-accuracy-circles', 'circle-stroke-width', 1.5);
+			// Show all accuracy circles
+			map.setFilter('stops-accuracy-circles', null);
 		}
 	});
 
