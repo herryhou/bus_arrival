@@ -4,7 +4,7 @@
 //! and enable zero-cost runtime behavior on no_std targets.
 
 #[cfg(feature = "serde")]
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Earth's radius in centimeters
 pub const EARTH_R_CM: f64 = 637_100_000.0;
@@ -262,7 +262,7 @@ impl DrState {
 }
 
 /// Stop state machine states
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FsmState {
     /// Bus is idle (before entering corridor)

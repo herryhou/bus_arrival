@@ -1,11 +1,11 @@
 //! Trace record emission for debugging visualization
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use shared::{DistCm, SpeedCms, Prob8, FsmState, HeadCdeg};
 use std::io::{BufWriter, Write};
 
 /// Trace record for debugging visualization
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct TraceRecord {
     /// Input: GPS timestamp (seconds since epoch)
     pub time: u64,
@@ -39,7 +39,7 @@ pub struct TraceRecord {
     pub recovery_idx: Option<u8>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct StopTraceState {
     pub stop_idx: u8,
 
@@ -62,7 +62,7 @@ pub struct StopTraceState {
     pub just_arrived: bool,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct FeatureScores {
     pub p1: u8,  // Distance likelihood (Gaussian)
     pub p2: u8,  // Speed likelihood (Logistic)
