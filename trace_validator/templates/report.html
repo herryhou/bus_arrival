@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trace Validation Report - {{trace_file}}</title>
+  <style>
+    body { background: #0a0a0a; color: #e0e0e0; font-family: system-ui; margin: 0; padding: 20px; }
+    h1 { margin-bottom: 5px; }
+    header { margin-bottom: 20px; }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 20px; }
+    .metric { background: #1a1a1a; padding: 1rem; border-radius: 4px; }
+    .metric-value { font-size: 2rem; font-weight: bold; }
+    .health-excellent { color: #22c55e; }
+    .health-good { color: #eab308; }
+    .health-fair { color: #f97316; }
+    .health-poor { color: #ef4444; }
+    #timeline { width: 100%; height: 300px; background: #111; margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 0.5rem; text-align: left; border-bottom: 1px solid #333; }
+    .status-complete { color: #22c55e; }
+    .status-partial { color: #eab308; }
+    .status-missing { color: #ef4444; }
+    .issue-critical { color: #ef4444; }
+    .issue-warning { color: #f97316; }
+    .issue-info { color: #3b82f6; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Trace Validation Report</h1>
+    <p>File: {{trace_file}}</p>
+  </header>
+
+  <section class="summary">
+    <div class="metric">
+      <div class="metric-value">{{total_records}}</div>
+      <div>Total Records</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value">{{total_stops}}</div>
+      <div>Stops Analyzed</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value health-{{health_class}}">{{health_percent}}%</div>
+      <div>Stops Detected</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value">{{gps_jumps}}</div>
+      <div>GPS Jumps</div>
+    </div>
+  </section>
+
+  <section id="global-issues">
+    <h2>Global Issues</h2>
+    <ul>{{global_issues}}</ul>
+  </section>
+
+  <section id="timeline">
+    <h2>Timeline Visualization</h2>
+    <canvas id="timeline-canvas"></canvas>
+  </section>
+
+  <section id="stop-details">
+    <h2>Stop Details</h2>
+    <table id="stops-table">
+      <thead>
+        <tr>
+          <th>Stop</th>
+          <th>Status</th>
+          <th>AtStop Time</th>
+          <th>Dwell</th>
+          <th>Distance (m)</th>
+          <th>Issues</th>
+        </tr>
+      </thead>
+      <tbody>{{stop_rows}}</tbody>
+    </table>
+  </section>
+
+  <script>
+    const DATA = {{data_json}};
+
+    function renderTimeline() {
+      const canvas = document.getElementById('timeline-canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = canvas.parentElement.clientWidth;
+      canvas.height = 300;
+
+      const data = DATA.stops_analyzed;
+      const timeRange = DATA.time_range;
+      const stopIndices = Object.keys(data).map(Number);
+      const rowHeight = 5;
+      const startY = 20;
+
+      ctx.fillStyle = '#111';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      stopIndices.forEach((stopIdx, i) => {
+        const stop = data[stopIdx];
+        const y = startY + i * rowHeight;
+        const events = Object.values(stop.events).sort((a, b) => a.time - b.time);
+
+        for (let j = 0; j < events.length; j++) {
+          const event = events[j];
+          const startX = ((event.time - timeRange[0]) / (timeRange[1] - timeRange[0])) * canvas.width;
+          const endX = j < events.length - 1
+            ? ((events[j + 1].time - timeRange[0]) / (timeRange[1] - timeRange[0])) * canvas.width
+            : canvas.width;
+
+          ctx.fillStyle = stateColor(event.state);
+          ctx.fillRect(startX, y, Math.max(endX - startX, 1), rowHeight - 1);
+        }
+      });
+
+      ctx.fillStyle = '#666';
+      ctx.font = '10px monospace';
+      for (let t = timeRange[0]; t <= timeRange[1]; t += (timeRange[1] - timeRange[0]) / 10) {
+        const x = ((t - timeRange[0]) / (timeRange[1] - timeRange[0])) * canvas.width;
+        ctx.fillText(`${t}s`, x, canvas.height - 5);
+      }
+    }
+
+    function stateColor(state) {
+      const colors = {
+        'Approaching': '#3b82f6',
+        'Arriving': '#f97316',
+        'AtStop': '#22c55e',
+        'Departed': '#6b7280',
+        'Idle': '#9ca3af',
+      };
+      return colors[state] || '#ffffff';
+    }
+
+    renderTimeline();
+  </script>
+</body>
+</html>
