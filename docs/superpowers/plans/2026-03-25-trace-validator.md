@@ -380,11 +380,13 @@ mod tests {
     fn test_parse_trace_valid_record() {
         use arrival_detector::trace::{StopTraceState, FeatureScores};
         let mut file = tempfile::NamedTempFile::new().unwrap();
-        writeln!(file, r#"{{"time":1,"lat":25.0,"lon":121.0,"s_cm":0,"v_cms":100,"heading_cdeg":0,"active_stops":[],"stop_states":[],"gps_jump":false,"recovery_idx":null}}"#).unwrap();
+        writeln!(file, r#"{{"time":1,"lat":25.0,"lon":121.0,"s_cm":0,"v_cms":100,"heading_cdeg":0,"active_stops":[0],"stop_states":[{"stop_idx":0,"distance_cm":-7000,"fsm_state":"Approaching","dwell_time_s":0,"probability":10,"features":{"p1":5,"p2":3,"p3":2,"p4":0},"just_arrived":false}],"gps_jump":false,"recovery_idx":null}}"#).unwrap();
 
         let result = Parser::parse_trace(file.path()).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].time, 1);
+        assert_eq!(result[0].stop_states.len(), 1);
+        assert_eq!(result[0].stop_states[0].features.p1, 5);
     }
 }
 ```
