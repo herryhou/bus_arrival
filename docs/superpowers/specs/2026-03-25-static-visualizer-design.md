@@ -100,7 +100,7 @@ Template structure with placeholders for build script injection:
   <div id="app"></div>
   <script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
   <script>
-    // BUNDLE_JS
+    /* BUNDLE_JS */
   </script>
 </body>
 </html>
