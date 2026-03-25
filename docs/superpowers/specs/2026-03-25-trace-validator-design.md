@@ -761,7 +761,7 @@ fn print_summary(result: &ValidationResult) {
 cargo run --bin trace_validator -- ty225_trace.jsonl -o report.html
 
 # With ground truth comparison
-cargo run --bin trace_validator -- ty225_trace.jsonl ground_truth.json -o report.html
+cargo run --bin trace_validator -- ty225_trace.jsonl --ground-truth ground_truth.json -o report.html
 
 # Verbose output
 cargo run --bin trace_validator -- ty225_trace.jsonl -o report.html --verbose
@@ -851,12 +851,16 @@ tempfile = "3.0"
 .PHONY: validate-trace validate-ty225 validate-all
 
 validate-trace:
-	@cargo run --bin trace_validator -- $(TRACE_FILE) $(GROUND_TRUTH) -o $(OUTPUT)
+	@if [ -n "$(GROUND_TRUTH)" ]; then \
+		cargo run --bin trace_validator -- "$(TRACE_FILE)" --ground-truth "$(GROUND_TRUTH)" -o "$(OUTPUT)"; \
+	else \
+		cargo run --bin trace_validator -- "$(TRACE_FILE)" -o "$(OUTPUT)"; \
+	fi
 
 validate-ty225:
 	@cargo run --bin trace_validator -- \
 		visualizer/static/ty225_trace.jsonl \
-		ground_truth.json \
+		--ground-truth ground_truth.json \
 		-o validation_report.html \
 		--verbose
 
