@@ -263,7 +263,7 @@ impl DrState {
 
 /// Stop state machine states
 #[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FsmState {
     /// Bus is idle (before entering corridor)
     Idle,
