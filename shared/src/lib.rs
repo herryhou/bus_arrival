@@ -294,6 +294,19 @@ pub struct ArrivalEvent {
     pub probability: Prob8,
 }
 
+/// Departure event emitted when bus leaves a stop
+#[derive(Debug, Clone)]
+pub struct DepartureEvent {
+    /// GPS update timestamp (seconds since epoch)
+    pub time: u64,
+    /// Stop index that was departed from
+    pub stop_idx: u8,
+    /// Route progress at departure (cm)
+    pub s_cm: DistCm,
+    /// Speed at departure (cm/s)
+    pub v_cms: SpeedCms,
+}
+
 // Compile-time assertion — fails if field reordering changes size
 // v8.5: Changed from repr(C, packed) to repr(C) to avoid UB with field references
 // This increased size from 36 to 40 bytes on platforms with 8-byte i64 alignment

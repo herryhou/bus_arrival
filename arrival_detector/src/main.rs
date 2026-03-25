@@ -4,8 +4,8 @@ use std::fs::File;
 use std::io::{BufWriter, Read};
 
 use shared::binfile::RouteData;
-use shared::{ArrivalEvent, FsmState};
-use arrival_detector::state_machine::StopState;
+use shared::{ArrivalEvent, DepartureEvent, FsmState};
+use arrival_detector::state_machine::{StopState, StopEvent};
 use arrival_detector::{input, corridor, probability, recovery, output, trace};
 
 fn main() {
@@ -74,6 +74,7 @@ fn main() {
 
     let mut processed = 0;
     let mut arrivals = 0;
+    let mut departures = 0;
     let mut announces = 0;
 
     for record in input::parse_input(&input_path) {
@@ -97,7 +98,15 @@ fn main() {
         last_s_cm = record.s_cm;
 
         // Find active stops (corridor filter)
-        let active_indices = corridor::find_active_stops(record.s_cm, &stops);
+        let mut active_indices = corridor::find_active_stops(record.s_cm, &stops);
+
+        // KEY: Keep processing stops that are in AtStop state even after corridor exit,
+        // until departure is confirmed. This ensures departure detection works naturally.
+        for (idx, state) in stop_states.iter().enumerate() {
+            if state.fsm_state == FsmState::AtStop && !active_indices.contains(&idx) {
+                active_indices.push(idx);
+            }
+        }
 
         // Calculate sequential next_stop for each stop (before processing loop)
         // This is the NEXT STOP IN THE ROUTE SEQUENCE, not the next active stop
@@ -164,19 +173,34 @@ fn main() {
             });
 
             // Update state machine (may modify dwell_time_s)
-            if state.update(record.s_cm, record.v_cms, stop.progress_cm, stop.corridor_start_cm, prob) {
-                // Just arrived!
-                let event = ArrivalEvent {
-                    time: record.time,
-                    stop_idx: state.index,
-                    s_cm: record.s_cm,
-                    v_cms: record.v_cms,
-                    probability: prob,
-                };
-                output::write_event(&mut output_writer, &event).expect("Failed to write arrival event");
-                arrivals += 1;
-                current_stop_idx = state.index;
-                arrived_this_frame.push(state.index);
+            let event = state.update(record.s_cm, record.v_cms, stop.progress_cm, stop.corridor_start_cm, prob);
+            match event {
+                StopEvent::Arrived => {
+                    let arrival_event = ArrivalEvent {
+                        time: record.time,
+                        stop_idx: state.index,
+                        s_cm: record.s_cm,
+                        v_cms: record.v_cms,
+                        probability: prob,
+                    };
+                    output::write_arrival_event(&mut output_writer, &arrival_event).expect("Failed to write arrival event");
+                    arrivals += 1;
+                    current_stop_idx = state.index;
+                    arrived_this_frame.push(state.index);
+                }
+                StopEvent::Departed => {
+                    let departure_event = DepartureEvent {
+                        time: record.time,
+                        stop_idx: state.index,
+                        s_cm: record.s_cm,
+                        v_cms: record.v_cms,
+                    };
+                    output::write_departure_event(&mut output_writer, &departure_event).expect("Failed to write departure event");
+                    departures += 1;
+                }
+                StopEvent::None => {
+                    // No event this frame
+                }
             }
 
             // v8.4: Check for announcement (corridor entry)
@@ -234,7 +258,7 @@ fn main() {
         processed += 1;
     }
 
-    println!("Processed {} records, detected {} arrivals", processed, arrivals);
+    println!("Processed {} records, detected {} arrivals, {} departures", processed, arrivals, departures);
     if enable_announce {
         println!("Generated {} announcement events", announces);
     }

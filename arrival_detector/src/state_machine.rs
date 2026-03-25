@@ -2,6 +2,17 @@
 
 use shared::{DistCm, FsmState, Prob8, SpeedCms};
 
+/// Event type returned by state machine update
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopEvent {
+    /// Bus has arrived at this stop
+    Arrived,
+    /// Bus has departed from this stop
+    Departed,
+    /// No event this update
+    None,
+}
+
 /// Runtime state for a single stop
 pub struct StopState {
     /// Stop index in route
@@ -37,11 +48,16 @@ impl StopState {
         // if the bus circles back to a previously visited stop
     }
 
-    /// Update state and return true if just arrived
+    /// Update state and return any event (arrival or departure)
     ///
     /// Arrival is triggered when:
     /// - Distance to stop < 50m (5000 cm)
     /// - Probability > THETA_ARRIVAL (191)
+    ///
+    /// Departure is triggered when:
+    /// - Distance to stop > 40m (4000 cm)
+    /// - Bus has moved past the stop (s_cm > stop_progress)
+    /// - Currently in AtStop state
     ///
     /// Note: Speed threshold was removed to accommodate buses that stop
     /// slightly past the stop location due to GPS noise or urban constraints.
@@ -54,7 +70,7 @@ impl StopState {
         stop_progress: DistCm,
         corridor_start_cm: DistCm,
         probability: Prob8,
-    ) -> bool {
+    ) -> StopEvent {
         let d_to_stop = (s_cm - stop_progress).abs();
 
         match self.fsm_state {
@@ -82,16 +98,21 @@ impl StopState {
                 if d_to_stop < 5000 && probability > crate::probability::THETA_ARRIVAL {
                     self.fsm_state = FsmState::AtStop;
                     self.dwell_time_s += 1;
-                    return true; // Just arrived!
+                    self.last_probability = probability;
+                    return StopEvent::Arrived; // Just arrived!
                 }
                 if d_to_stop > 4000 && s_cm > stop_progress {
                     self.fsm_state = FsmState::Departed;
+                    self.last_probability = probability;
+                    return StopEvent::Departed; // Departed from Arriving state
                 }
                 self.dwell_time_s += 1;
             }
             FsmState::AtStop => {
                 if d_to_stop > 4000 && s_cm > stop_progress {
                     self.fsm_state = FsmState::Departed;
+                    self.last_probability = probability;
+                    return StopEvent::Departed; // Just departed!
                 }
                 // Don't increment dwell_time after departure
             }
@@ -104,7 +125,7 @@ impl StopState {
         }
 
         self.last_probability = probability;
-        false
+        StopEvent::None
     }
 
     /// Check if announcement should trigger (v8.4 corridor entry announcement)
@@ -168,12 +189,13 @@ mod tests {
         assert_eq!(state.fsm_state, FsmState::Arriving);
 
         // At stop (trigger!) - distance < 50m, probability > 191
-        let arrived = state.update(14050, 100, stop_progress, corridor_start_cm, 200);
-        assert!(arrived);
+        let event = state.update(14050, 100, stop_progress, corridor_start_cm, 200);
+        assert_eq!(event, StopEvent::Arrived);
         assert_eq!(state.fsm_state, FsmState::AtStop);
 
         // Departing
-        state.update(15000, 500, stop_progress, corridor_start_cm, 10);
+        let event = state.update(15000, 500, stop_progress, corridor_start_cm, 10);
+        assert_eq!(event, StopEvent::Departed);
         assert_eq!(state.fsm_state, FsmState::Departed);
     }
 
@@ -201,10 +223,10 @@ mod tests {
         // Try to update from TripComplete state
         // Even if GPS position changes, state should remain TripComplete
         let corridor_start_cm = stop_progress - 8000;
-        let arrived = state.update(200000, 500, stop_progress, corridor_start_cm, 255);
+        let event = state.update(200000, 500, stop_progress, corridor_start_cm, 255);
 
         // Should not trigger arrival (already at terminal state)
-        assert!(!arrived, "TripComplete should not trigger arrival");
+        assert_eq!(event, StopEvent::None, "TripComplete should not trigger arrival");
         assert_eq!(state.fsm_state, FsmState::TripComplete);
     }
 

@@ -1,5 +1,5 @@
 use arrival_detector::probability::{build_gaussian_lut, build_logistic_lut, arrival_probability, THETA_ARRIVAL};
-use arrival_detector::state_machine::StopState;
+use arrival_detector::state_machine::{StopState, StopEvent};
 use shared::{Stop, FsmState};
 
 #[test]
@@ -62,8 +62,8 @@ fn scenario_successful_arrival_at_standard_stop() {
     assert!(prob > THETA_ARRIVAL, "Probability {} should be > {}", prob, THETA_ARRIVAL);
 
     // And: an ArrivalEvent for that stop must be emitted
-    let arrived = state.update(10050, 20, stop.progress_cm, stop.corridor_start_cm, prob);
-    assert!(arrived);
+    let event = state.update(10050, 20, stop.progress_cm, stop.corridor_start_cm, prob);
+    assert_eq!(event, StopEvent::Arrived);
     assert_eq!(state.fsm_state, FsmState::AtStop);
 }
 
@@ -94,8 +94,8 @@ fn scenario_skip_stop_protection_high_speed() {
     // v=1111 -> i=111. 1/(1+exp(0.01*(1111-200))) = 1/(1+exp(9.11)) -> near 0.
     assert!(prob < THETA_ARRIVAL);
 
-    let arrived = state.update(10111, 1111, stop.progress_cm, stop.corridor_start_cm, prob);
-    assert!(!arrived);
+    let event = state.update(10111, 1111, stop.progress_cm, stop.corridor_start_cm, prob);
+    assert_eq!(event, StopEvent::None);
 
     // At 14100: Departing
     state.update(14100, 1111, stop.progress_cm, stop.corridor_start_cm, 0);

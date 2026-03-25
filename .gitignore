@@ -2,6 +2,8 @@
 /target
 Cargo.lock
 .cargo
+cargo-cache
+claude-npm-cache
 
 # IDEs and OS
 /.worktrees

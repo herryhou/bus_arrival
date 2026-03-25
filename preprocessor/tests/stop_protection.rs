@@ -103,7 +103,7 @@ fn test_terminal_stops() {
     // 80m pre, 40m post
     assert_eq!(first_stop.corridor_start_cm, -8000);
     assert_eq!(first_stop.corridor_end_cm, 4000);
-    
+
     let last_stop = route_data.get_stop(1).unwrap();
     // 200m ≈ 19900-20000 cm depending on lat_avg
     assert!(last_stop.progress_cm > 19900);

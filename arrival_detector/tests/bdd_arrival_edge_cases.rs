@@ -1,6 +1,6 @@
 use arrival_detector::corridor::find_active_stops;
 use arrival_detector::probability::THETA_ARRIVAL;
-use arrival_detector::state_machine::StopState;
+use arrival_detector::state_machine::{StopState, StopEvent};
 use shared::{Stop, FsmState};
 
 #[test]
@@ -49,16 +49,16 @@ fn scenario_probability_threshold_edge_case() {
     // When: the state update is processed in corridor and Arriving zone
     let corridor_start_cm = stop_progress - 8000; // 2000
     state.update(9000, 100, stop_progress, corridor_start_cm, 0); // Enter corridor and Arriving zone
-    let arrived_at_threshold = state.update(10000, 100, stop_progress, corridor_start_cm, probability);
+    let event_at_threshold = state.update(10000, 100, stop_progress, corridor_start_cm, probability);
 
     // Then: arrival should NOT be triggered (must be > threshold)
-    assert!(!arrived_at_threshold, "Arrival should NOT trigger at exactly THETA_ARRIVAL");
+    assert_eq!(event_at_threshold, StopEvent::None, "Arrival should NOT trigger at exactly THETA_ARRIVAL");
 
     // When: probability is 192
-    let arrived_above_threshold = state.update(10000, 100, stop_progress, corridor_start_cm, THETA_ARRIVAL + 1);
-    
+    let event_above_threshold = state.update(10000, 100, stop_progress, corridor_start_cm, THETA_ARRIVAL + 1);
+
     // Then: arrival SHOULD trigger
-    assert!(arrived_above_threshold, "Arrival should trigger at THETA_ARRIVAL + 1");
+    assert_eq!(event_above_threshold, StopEvent::Arrived, "Arrival should trigger at THETA_ARRIVAL + 1");
 }
 
 #[test]

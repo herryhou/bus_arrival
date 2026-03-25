@@ -34,6 +34,7 @@ ROUTE_DATA_BIN := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO).bin
 SIMULATOR_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_sim.json
 DETECTOR_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_arrivals.json
 TRACE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_trace.jsonl
+ANNOUNCE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_announce.jsonl
 
 # Node.js executable
 NODE := node
@@ -54,6 +55,7 @@ run: build gen_nmea preprocess simulate detect
 	@echo "Simulator output: $(SIMULATOR_OUT)"
 	@echo "Arrival detector output: $(DETECTOR_OUT)"
 	@echo "Trace output: $(TRACE_OUT)"
+	@echo "Announce output: $(ANNOUNCE_OUT)"
 
 # Build all Rust binaries in release mode
 build:
@@ -86,12 +88,15 @@ simulate: gen_nmea preprocess
 	$(SIMULATOR) $(NMEA_OUT) $(ROUTE_DATA_BIN) $(SIMULATOR_OUT)
 	@echo "Generated: $(SIMULATOR_OUT)"
 
-# Run arrival detector: GPS trace + route_data → arrivals
+# Run arrival detector: GPS trace + route_data → arrivals + announce
 detect: simulate
 	@echo "=== Running arrival detector ==="
-	$(ARRIVAL_DETECTOR) $(SIMULATOR_OUT) $(ROUTE_DATA_BIN) $(DETECTOR_OUT) --trace $(TRACE_OUT)
+	@echo "Binary: $(ARRIVAL_DETECTOR)"
+	@echo "Source: arrival_detector/"
+	$(ARRIVAL_DETECTOR) $(SIMULATOR_OUT) $(ROUTE_DATA_BIN) $(DETECTOR_OUT) --trace $(TRACE_OUT) --announce $(ANNOUNCE_OUT)
 	@echo "Generated: $(DETECTOR_OUT)"
 	@echo "Generated: $(TRACE_OUT)"
+	@echo "Generated: $(ANNOUNCE_OUT)"
 
 # Clean all generated files
 clean:
@@ -141,7 +146,7 @@ validate-trace:
 
 validate-ty225:
 	@cargo run --release --bin trace_validator -- \
-		visualizer/static/ty225_trace.jsonl \
+		test_data/tpF805_normal_trace.jsonl \
 		--ground-truth ground_truth.json \
 		-o validation_report.html \
 		--verbose

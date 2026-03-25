@@ -1,5 +1,5 @@
 use arrival_detector::probability::{build_gaussian_lut, build_logistic_lut, arrival_probability, THETA_ARRIVAL};
-use arrival_detector::state_machine::StopState;
+use arrival_detector::state_machine::{StopState, StopEvent};
 use shared::{Stop, FsmState};
 
 #[test]
@@ -24,10 +24,10 @@ fn scenario_premature_departure() {
     let prob = arrival_probability(14100, 1000, &stop, state.dwell_time_s, &g_lut, &l_lut);
     assert!(prob < THETA_ARRIVAL);
 
-    let arrived = state.update(14100, 1000, stop.progress_cm, stop.corridor_start_cm, prob);
-    
+    let event = state.update(14100, 1000, stop.progress_cm, stop.corridor_start_cm, prob);
+
     // Then: state should transition to Departed without triggering arrival
-    assert!(!arrived);
+    assert_eq!(event, StopEvent::Departed);
     assert_eq!(state.fsm_state, FsmState::Departed);
 }
 
