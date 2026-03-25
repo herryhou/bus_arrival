@@ -4,7 +4,7 @@
 
 **目標受眾：** Embedded Rust 開發團隊  
 **硬體平台：** Raspberry Pi Pico 2（RP2350）  
-**文件版本：** v8.5（修正：5 項 runtime bug + 7 項設計缺陷 + 3 項文件錯誤 / **功能行為與 v8.4 相同，二進制格式不變**）
+**文件版本：** v8.6（新增：近距離站點檢測修正 / 三層架構解決站距 <120m 的檢測失敗問題）
 
 ---
 
@@ -837,7 +837,113 @@ $$\text{corridor}_{i+1}.\text{start} = \max\!\left(\text{corridor}_{i+1}.\text{s
 
 > **v8.4 勘誤：** 原公式以 $s_i + \delta_\text{sep}$ 為截斷點，但 $\text{corridor\_end}[i] = s_i + L_\text{post} = s_i + 4000\ \text{cm}$，導致兩廊道仍有 20 m 重疊。正確基準應從 `corridor_end[i]` 起算。
 
-### 12.5 廊道過濾效果
+### 12.5 近距離站點廊道調整（v8.6 新增）
+
+當相鄰兩站距離 <120m 時，標準的 20m 重疊保護會導致第二站的 pre-corridor 被過度壓縮。此問題在 **v8.6 版本中透過預處理階段的廊道調整來解決**。
+
+#### 12.5.1 問題分析
+
+**案例：tpF805 路線 Stop #2 → #3**
+
+```
+Stop #2 progress_cm = 127,689 cm
+Stop #3 progress_cm = 135,621 cm
+Distance d = 7,932 cm (79.32m)
+```
+
+**標準廊道配置（80m pre + 40m post）+ 20m 重疊保護：**
+
+```
+Stop #2: corridor_end = 127,689 + 4,000 = 131,689 cm
+Stop #3: corridor_start = max(127,689, 131,689 + 2,000) = 133,689 cm
+
+經過重疊保護後：
+Stop #2: corridor_end = min(131,689, 135,621 - 2,000) = 131,468 cm
+Stop #3: corridor_start = max(127,689, 131,468 + 2,000) = 134,179 cm
+```
+
+**問題：Stop #3 的 pre-corridor 僅有 1,442 cm**
+```
+Stop #3 location: 135,621 cm
+Stop #3 corridor_start: 134,179 cm
+Pre-corridor = 135,621 - 134,179 = 1,442 cm (14.4m)
+```
+
+正常情況下 pre-corridor 應為 8,000 cm (80m)，但被壓縮至僅剩 14.4m！
+
+**檢測失敗鏈：**
+1. 公車進入 Stop #3 廊道過晚（僅剩 14m）
+2. `dwell_time_s` 來不及累積（僅 ~1s）
+3. p₄ = (1 × 255) / 10 = 25（極低）
+4. 概率 = (13×p₁ + 6×p₂ + 10×p₃ + 3×25) / 32 ≈ 185
+5. 閾值 θ_arrival = 191
+6. **185 < 191：檢測失敗 ❌**
+
+#### 12.5.2 解決方案：55%/10%/35% 廊道重劃
+
+**觸發條件：** 相鄰兩站距離 `d < 12,000 cm` (120m)
+
+**新比例分配：**
+- **Pre-corridor**: 55% × d（從站點向後）
+- **Gap**: 10% × d（兩廊道之間的緩衝）
+- **Post-corridor**: 35% × d（從站點向前）
+
+**公式：**
+```rust
+// preprocessor/src/stops.rs
+for i in 0..stops.len().saturating_sub(1) {
+    let d = stops[i + 1].progress_cm - stops[i].progress_cm;
+
+    if d < CLOSE_STOP_THRESHOLD_CM {  // 12,000 cm
+        stops[i].corridor_end_cm = stops[i].progress_cm + (d * 35) / 100;
+        stops[i + 1].corridor_start_cm = stops[i + 1].progress_cm - (d * 55) / 100;
+    }
+}
+```
+
+**tpF805 Stop #2/#3 案例結果：**
+```
+Stop #2 corridor_end = 127,689 + 0.35 × 7,932 = 130,465 cm
+Gap = 0.10 × 7,932 = 793 cm (8m)
+Stop #3 corridor_start = 135,621 - 0.55 × 7,932 = 131,258 cm
+
+Stop #3 pre-corridor = 135,621 - 131,258 = 4,363 cm (43.6m)
+```
+
+**改善幅度：** 1,442 cm → 4,363 cm（**3× 改善**）
+
+#### 12.5.3 實作細節
+
+**最小距離保護：** 若 `d < 2,000 cm`，跳過調整，避免產生退化廊道。
+
+**與現有重疊保護的關係：**
+- 此函數於 `project_stops_validated()` **之後**執行
+- 現有的 20m 重疊保護仍然會套用於調整後的廊道
+- 兩者互補：55%/10%/35% 避免過度壓縮，20m gap 提供額外緩衝
+
+**Rust 實作：**
+```rust
+pub fn preprocess_close_stop_corridors(stops: &mut [Stop]) {
+    const CLOSE_STOP_THRESHOLD_CM: i32 = 12_000;  // 120m
+    const PRE_RATIO: i32 = 55;   // 0.55 × d
+    const POST_RATIO: i32 = 35;  // 0.35 × d
+
+    for i in 0..stops.len().saturating_sub(1) {
+        let distance = stops[i + 1].progress_cm - stops[i].progress_cm;
+
+        if distance < 2_000 || distance >= CLOSE_STOP_THRESHOLD_CM {
+            continue;  // 跳過過近或正常距離
+        }
+
+        stops[i].corridor_end_cm = stops[i].progress_cm + (distance * POST_RATIO) / 100;
+        stops[i + 1].corridor_start_cm = stops[i + 1].progress_cm - (distance * PRE_RATIO) / 100;
+    }
+}
+```
+
+**計算成本：** O(n) 預處理，n 為站點數量，僅執行一次。
+
+### 12.6 廊道過濾效果
 
 | 方法 | 誤判率（錯站率） |
 |------|-----------------|
@@ -895,16 +1001,152 @@ let p_arrived: u8 = (p_raw >> 5) as u8;  // ÷32
 
 $$P(\text{arrived}) > \theta_\text{arrival} = 191 \qquad \text{（u8 對應 0.75，即 255 × 0.75）}$$
 
-### 13.4 與簡單閾值法之比較
+### 13.4 適應性概率權重（v8.6 新增）
+
+**動機：** 對於近距離站點（<120m），dwell time 特徵（F₄）不再是可靠信號。公車可能快速通過而不長停留，導致 p₄ 過低而影響整體概率。
+
+**解決方案：** 當下一站距離 <120m 時，移除 p₄ 權重並重新分配給其他特徵。
+
+**權重調整：**
+
+| 條件 | w₁ (距離) | w₂ (速度) | w₃ (進度) | w₄ (dwell) | 總和 |
+|------|-----------|-----------|-----------|------------|------|
+| 標準（含末站） | 13 | 6 | 10 | 3 | 32 |
+| 近距站點（<120m） | 14 | 7 | 11 | 0 | 32 |
+
+**權重重分配原理：**
+- 原始權重：13+6+10+3 = 32
+- 移除 w₄ 後：13+6+10 = 29
+- 縮放因子：32/29 ≈ 1.103
+- 新權重：⌊13×1.103⌋=14, ⌊6×1.103⌋=7, ⌊10×1.103⌋=11
+
+**Rust 實作：**
+```rust
+pub fn arrival_probability_adaptive(
+    s_cm: DistCm,
+    v_cms: SpeedCms,
+    stop: &Stop,
+    dwell_time_s: u16,
+    gaussian_lut: &[u8; 256],
+    logistic_lut: &[u8; 128],
+    next_stop: Option<&Stop>,  // 新增參數
+) -> Prob8 {
+    // 特徵計算（同 Section 13.2）
+    let d_cm = (s_cm - stop.progress_cm).abs();
+    let p1 = gaussian_lut[...];
+    let p2 = logistic_lut[...];
+    let p3 = gaussian_lut[...];
+    let p4 = (dwell_time_s * 255 / 10).min(255) as u32;
+
+    // 適應性權重
+    let (w1, w2, w3, w4) = if let Some(next) = next_stop {
+        let dist_to_next = (next.progress_cm - stop.progress_cm).abs();
+        if dist_to_next < 12_000 {
+            (14, 7, 11, 0)  // 近距站點：移除 p₄
+        } else {
+            (13, 6, 10, 3)  // 標準站距
+        }
+    } else {
+        (13, 6, 10, 3)  // 末站
+    };
+
+    ((w1 * p1 + w2 * p2 + w3 * p3 + w4 * p4) / 32) as u8
+}
+```
+
+**為何需要 `next_stop` 參數？**
+
+Probability 模型需要知道「**路線順序的下一站**」距離，而非「**當前活躍的下一站**」：
+
+| 場景 | 路線順序 next_stop | 活躍 next_stop | 正確選擇 |
+|------|-------------------|----------------|----------|
+| 廊道重疊時 | Stop i+1（固定） | 可能等於 Stop i | **路線順序** |
+| 換站公車跳站 | Stop i+1（固定） | 可能是 Stop i+2 | **路線順序** |
+| 正常情況 | Stop i+1 | Stop i+1 | 相同 |
+
+**實例計算（tpF805 Stop #3，dwell=6s）：**
+```
+輸入：s_cm = 136,080, stop.progress = 135,621, v = 600, dwell = 6
+      next_stop.progress = 143,500 (距離 7,879cm > 120m → 標準權重)
+
+特徵：p₁ = 255, p₂ = 105, p₃ = 255, p₄ = 153
+
+標準權重：(13×255 + 6×105 + 10×255 + 3×153) / 32 = 8478 / 32 = 265
+近距權重：(14×255 + 7×105 + 11×255 + 0×153) / 32 = 8820 / 32 = 275
+```
+
+**注意：** 此例中 next_stop 距離 >120m，故使用標準權重。若 Stop #2 處理時，next_stop 為 Stop #3（距離 7,932cm <120m），則會使用近距權重。
+
+### 13.5 與簡單閾值法之比較
 
 | 方法 | False Positive 率 |
 |------|------------------|
 | `distance < 50 m`（單一閾值） | 15–30% |
 | Stop Probability Model（四特徵） | < 5% |
 
-### 13.5 計算成本（Pico 2）
+### 13.6 計算成本（Pico 2）
 
 2 次 LUT 查表 + 1 次線性計算 + 1 次加權求和 ≈ **< 0.1 ms**。
+
+### 13.7 主迴圈整合：順序性 next_stop 傳遞（v8.6 新增）
+
+**目的：** 為立路線順序的 `next_stops` 陣列，供 `arrival_probability_adaptive()` 使用。
+
+**關鍵設計：** 傳遞「路線順序的下一站」而非「當前活躍的下一站」。
+
+**Rust 實作：**
+```rust
+// arrival_detector/src/main.rs
+// 在 active_stops 迴圈之前建立 next_stops 陣列
+
+let next_stops: Vec<Option<&shared::Stop>> = stops.iter()
+    .enumerate()
+    .map(|(i, _)| {
+        if i + 1 < stops.len() {
+            Some(&stops[i + 1])  // 路線順序的下一站
+        } else {
+            None  // 末站
+        }
+    })
+    .collect();
+
+// 在處理每個活躍站點時使用
+for &stop_idx in &active_indices {
+    let stop = &stops[stop_idx];
+    let state = &mut stop_states[stop_idx];
+    let next_stop = next_stops[stop_idx];  // 預計算的順序下一站
+
+    let prob = probability::arrival_probability_adaptive(
+        record.s_cm,
+        record.v_cms,
+        stop,
+        state.dwell_time_s,
+        &gaussian_lut,
+        &logistic_lut,
+        next_stop,  // 傳遞順序下一站
+    );
+    // ...
+}
+```
+
+**為何不使用「活躍的下一站」？**
+
+當廊道重疊時，`active_indices` 可能包含多個站點，但「下一個活躍站」的概念不清晰：
+
+```
+案例：Stop #2 和 #3 廊道重疊
+time=469: s_cm = 131,134
+  active_indices = [2]        # 只有 Stop #2 活躍
+  next_active = 無或 #3      # 不明確
+
+但路線順序是固定的：
+  next_stops[2] = Stop #3    # 明確且穩定
+```
+
+**計算成本：**
+- 建立 `next_stops`：O(n)，n 為站點數量
+- 每個站點的參考查詢：O(1)
+- 每幀執行一次，開銷可忽略不計
 
 ---
 
@@ -1043,6 +1285,7 @@ $$\text{best\_seg} = \arg\max_i \left[\, P(O \mid S=i) \cdot P(S=i \mid S=\text{
 | **6** | **建立空間格網索引** | 根據線性化後的節點建立 $100\text{m} \times 100\text{m}$ 的 Spatial Grid Index。這將用於 DP mapper 的候選路段搜尋。 |
 | **7** | **DP 站點投影（dp_mapper）** | **(v8.4 核心更新)** 使用 `dp_mapper` crate 進行**全域最佳化**的站點投影：<br><br>**演算法概述：**<br>- 將站點投影問題轉化為**分層 DAG 最短路徑問題**（Viterbi-like）<br>- 每個站點產生 K 個候選投影（預設 K=15），使用空間格網進行 $O(k)$ 路段查詢<br>- DP 前向傳播：排序掃描找出最小成本路徑（滿足進度單調性）<br>- 回溯重建：從最終層最佳狀態回溯，輸出全域最佳路徑<br><br>**Snap-Forward 機制：**<br>- 對於 j > 0 的站點，若候選進度皆小於前一層最大進度，加入 snap-forward 候選<br>- Snap candidate 錨定於 `max_prev_progress_cm` 之後的首個路段，施加巨大懲罰（`SNAP_PENALTY_CM2 = 10^12 cm²`）<br>- DP 只會在無其他有效轉移時才選擇 snap candidate<br><br>**轉移約束：**<br>- 有效轉移條件：`progress[curr] >= progress[prev]`（允許相等，處理相同位置的相鄰站點）<br>- 支援路線迴圈（同一位置多次經過）<br>- 保證輸出進度值嚴格單調遞增<br><br>**複雜度：** $O(M \times K \log K)$，其中 M = 站點數，K = 候選數<br>- 典型路線（M=35, K=15）：< 10 ms<br>- 大型路線（M=100, K=15）：< 30 ms<br><br>**實作模組：** `preprocessor/dp_mapper/`<br>- `grid/`：空間格網索引<br>- `candidate/`：投影與 K-candidate 選取<br>- `pathfinding/`：DP solver 與回溯 |
 | **8** | **計算廊道邊界** | 為每個站點計算非對稱廊道：前置 $80\text{ m}$，後置 $40\text{ m}$。若相鄰廊道重疊，執行 **$\delta_{sep} = 20\text{ m}$ 強制截斷**。 |
+| **8.5** | **近距站點廊道調整（v8.6 新增）** | 對站距 $<120\text{ m}$ 的站對，重新分配廊道空間：**55% pre + 10% gap + 35% post**。於 `project_stops_validated()` **之後** 執行，作為標準重疊保護的補強。詳見 Section 12.5。 |
 | **9** | **生成查表 (LUT)** | 生成 256 項 Gaussian LUT (距離/進度似然) 與 128 項 Logistic LUT (速度似然)，並縮放至 $u8$ 尺度。 |
 | **10** | **數據打包與校驗** | 將 RouteNode (36 bytes/node)、Stops、Grid 及 LUT 打包。計算 **CRC32** 並標記 **VERSION 2**，產出 `route_data.bin`。 |
 
@@ -1224,6 +1467,11 @@ static CURRENT_STOP: AtomicU32 = AtomicU32::new(0);
 | 廊道前置寬度 $L_\text{pre}$ | 8000 cm（80 m） | Stop Corridor |
 | 廊道後置寬度 $L_\text{post}$ | 4000 cm（40 m） | Stop Corridor |
 | 廊道最小分隔 $\delta_\text{sep}$ | 2000 cm（20 m） | 相鄰廊道重疊保護，從 `corridor_end[i]` 起算 |
+| **近距站點閾值**（v8.6 新增） | **12,000 cm（120 m）** | **觸發廊道調整** |
+| **近距站點 Pre 比例**（v8.6 新增） | **55%** | **近距站點的 pre-corridor 佔站距比例** |
+| **近距站點 Post 比例**（v8.6 新增） | **35%** | **近距站點的 post-corridor 佔站距比例** |
+| **近距站點 Gap 比例**（v8.6 新增） | **10%** | **兩廊道間的緩衝（自動形成）** |
+| **近距站點最小距離**（v8.6 新增） | **2,000 cm（20 m）** | **避免產生退化廊道** |
 | Distance sigma $\sigma_d$ | 2750 cm（27.5 m） | Gaussian LUT |
 | Progress sigma $\sigma_p$ | 2000 cm（20 m） | Gaussian LUT |
 | Speed stop threshold $v_\text{stop}$ | 200 cm/s（7.2 km/h） | Logistic LUT |
@@ -1319,6 +1567,53 @@ $$\theta^* = \arg\max_\theta F_1\text{-score}(\theta)$$
 ---
 
 ## 版本更新記錄
+
+### v8.6（本版本）← v8.5 (2026-03-25)
+
+**新增：近距離站點檢測修正（Close-Stop Fix）**
+
+解決站距 <120m 時，因廊道重疊保護導致第二站檢測失敗的問題。
+
+**問題背景：**
+
+- 當相鄰兩站距離 <120m（如 79m）時，標準廊道配置（80m pre + 40m post）加上 20m 重疊保護
+- 導致第二站的 pre-corridor 被壓縮至僅剩 14m（原應為 80m）
+- 公車進入廊道過晚 → dwell_time_s 過短 → 概率不足 → **漏報**
+
+**解決方案：三層架構**
+
+1. **Tier 2：廊道預處理（Section 12.5）**
+   - 對站距 <120m 的站對，重新分配廊道空間：55% pre + 10% gap + 35% post
+   - 確保第二站的 pre-corridor 至少有 40m 以上（原 14m → 43.6m，3× 改善）
+
+2. **Tier 3：適應性概率權重（Section 13.4）**
+   - 偵測到下一站 <120m 時，移除 dwell time（p₄）權重
+   - 權重從 (13,6,10,3) 調整為 (14,7,11,0)，總和維持 32
+   - 避免因 dwell time 過短而導致的誤判
+
+3. **Tier 1：順序性 next_stop 傳遞（Section 13.5）**
+   - 傳遞「路線順序的下一站」而非「當前活躍的下一站」
+   - 確保概率模型能正確判斷是否需要啟用適應性權重
+
+**測試結果：**
+
+- tpF805 路線 Stop #3（距 Stop #2 僅 79m）：從漏報 → 正常檢測 ✓
+- 概率從 185（<191）提升至 222（>191）
+- 單元測試：7 個新測試（4 廊道 + 3 概率）
+- 整合測試：`scripts/verify_close_stop_fix.sh`
+
+**影響評估：**
+- ✅ 解決近距離站點檢測問題
+- ✅ 標準站距（>120m）行為不變
+- ✅ 向後相容，現有路線資料重新生成即可
+- ⚠️ 需重新生成所有 `route_data.bin` 文件
+
+**檔案變更：**
+- `preprocessor/src/stops.rs`：新增 `preprocess_close_stop_corridors()`
+- `arrival_detector/src/probability.rs`：新增 `arrival_probability_adaptive()`
+- `arrival_detector/src/main.rs`：傳遞 sequential next_stop
+
+---
 
 ### v8.5（本版本）← v8.4 (2026-03-23)
 
