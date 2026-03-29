@@ -36,8 +36,20 @@ pub const DEFAULT_K: usize = 15;
 /// Stop protection radius in cm (30m = 3000cm)
 pub const STOP_PROTECTION_RADIUS_CM: f64 = 3000.0;
 
-/// Maximum segment length constraint in cm (30m = 3000cm)
-pub const MAX_SEGMENT_LENGTH_CM: i32 = 3000;
+/// Maximum segment length constraint in cm (100m = 10000cm)
+pub const MAX_SEGMENT_LENGTH_CM: i32 = 10000;  // was 3000
+
+/// Adaptive segment length for critical areas in cm (30m = 3000cm)
+/// Used near stops and sharp turns for precise arrival detection
+pub const ADAPTIVE_SEGMENT_LENGTH_CM: i32 = 3000;
+
+/// Stop proximity threshold for adaptive segmentation in cm (100m)
+/// Segments within this distance of any stop get refined to 30m
+pub const STOP_PROXIMITY_THRESHOLD_CM: f64 = 10000.0;
+
+/// Sharp turn angle threshold for adaptive segmentation in degrees
+/// Turns exceeding this angle trigger segment refinement
+pub const SHARP_TURN_DEGREES: f64 = 20.0;
 
 // ============================================================================
 // Route Builders
