@@ -185,3 +185,40 @@ fn distance(p1: (i64, i64), p2: (i64, i64)) -> f64 {
     let dy = p2.1 - p1.1;
     ((dx * dx + dy * dy) as f64).sqrt()
 }
+
+/// Check if a line segment passes within a given distance of a point
+/// Returns true if the minimum distance from point to segment is <= threshold
+fn segment_near_point(p1: (i64, i64), p2: (i64, i64), point: (i64, i64), threshold_cm: f64) -> bool {
+    let px = point.0 as f64;
+    let py = point.1 as f64;
+    let x1 = p1.0 as f64;
+    let y1 = p1.1 as f64;
+    let x2 = p2.0 as f64;
+    let y2 = p2.1 as f64;
+
+    // Vector from p1 to p2
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+
+    // Vector from p1 to point
+    let ldx = px - x1;
+    let ldy = py - y1;
+
+    // Project point onto line, clamped to segment [0, 1]
+    let seg_len2 = dx * dx + dy * dy;
+
+    let t = if seg_len2 < 1e-10 {
+        // Segment is essentially a point
+        0.0
+    } else {
+        ((ldx * dx + ldy * dy) / seg_len2).clamp(0.0, 1.0)
+    };
+
+    // Find closest point on segment
+    let closest_x = x1 + t * dx;
+    let closest_y = y1 + t * dy;
+
+    // Distance from point to closest point on segment
+    let dist_sq = (px - closest_x).powi(2) + (py - closest_y).powi(2);
+    dist_sq.sqrt() <= threshold_cm
+}
