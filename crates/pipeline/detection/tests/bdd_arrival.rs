@@ -1,5 +1,5 @@
-use arrival_detector::probability::{build_gaussian_lut, build_logistic_lut, arrival_probability, THETA_ARRIVAL};
-use arrival_detector::state_machine::{StopState, StopEvent};
+use detection::probability::{build_gaussian_lut, build_logistic_lut, arrival_probability, THETA_ARRIVAL};
+use detection::state_machine::{StopState, StopEvent};
 use shared::{Stop, FsmState};
 
 #[test]
@@ -117,19 +117,19 @@ fn scenario_gps_jump_recovery() {
     let jump_progress = 50100;
     
     // Then: find_stop_index must trigger and find the best stop
-    let recovered = arrival_detector::recovery::find_stop_index(jump_progress, &stops, last_index);
+    let recovered = detection::recovery::find_stop_index(jump_progress, &stops, last_index);
     assert_eq!(recovered, Some(1));
 
     // When: a GPS jump occurs to progress 89900 cm (800m jump)
     let jump_progress = 89900;
-    let recovered = arrival_detector::recovery::find_stop_index(jump_progress, &stops, 1);
+    let recovered = detection::recovery::find_stop_index(jump_progress, &stops, 1);
     assert_eq!(recovered, Some(2));
 
     // When: a jump backwards occurs, it's penalized
     // At s=49900, but last_index=2.
     // Index 1 (50000): dist 100, penalty 5000 -> score 5100
     // Index 2 (90000): dist 40100, penalty 0 -> score 40100
-    let recovered = arrival_detector::recovery::find_stop_index(49900, &stops, 2);
+    let recovered = detection::recovery::find_stop_index(49900, &stops, 2);
     assert_eq!(recovered, Some(1));
 }
 
@@ -148,13 +148,13 @@ fn scenario_close_stop_discrimination() {
     let stops = vec![stop_a, stop_b];
 
     // When: the bus is at 5100 cm
-    let active = arrival_detector::corridor::find_active_stops(5100, &stops);
+    let active = detection::corridor::find_active_stops(5100, &stops);
     
     // Then: only Stop A's Corridor Filter should be active
     assert_eq!(active, vec![0]);
 
     // When: the bus is at 7100 cm
-    let active = arrival_detector::corridor::find_active_stops(7100, &stops);
+    let active = detection::corridor::find_active_stops(7100, &stops);
     
     // Then: only Stop B's Corridor Filter should be active
     assert_eq!(active, vec![1]);

@@ -1,6 +1,6 @@
 use shared::{DrState, GpsPoint, KalmanState, RouteNode};
-use simulator::kalman::{process_gps_update, ProcessResult};
-use simulator::route_data::RouteData;
+use gps_processor::kalman::{process_gps_update, ProcessResult};
+use gps_processor::route_data::RouteData;
 
 // A single straight segment of 100m north.
 // Uses ABSOLUTE coordinates from fixed origin (120°E, 20°N).

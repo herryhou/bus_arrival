@@ -6,7 +6,7 @@
 //! This test would have caught the bug where the simulator was subtracting grid origin
 //! from GPS coordinates, causing bus positions to appear far from the route path.
 
-use simulator::map_match;
+use gps_processor::map_match;
 
 #[test]
 fn test_gps_to_absolute_coordinates_uses_correct_lat_avg() {

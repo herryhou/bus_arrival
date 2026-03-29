@@ -229,12 +229,13 @@ Detected arrival events:
 
 ```
 bus_arrival/
-├── shared/           # Shared types and binary format
-├── preprocessor/     # Phase 1: Route simplification & binary packing
-├── simulator/        # Phase 2: GPS localization (library only, binary deprecated)
-├── arrival_detector/ # Phase 3: Bayesian arrival detection (library only, binary deprecated)
-├── pipeline/         # Unified pipeline (Phase 2 + 3) - RECOMMENDED
-├── trace_validator/  # Trace validation tool
+├── crates/           # Rust workspace
+│   ├── shared/       # Shared types and binary format
+│   ├── preprocessor/ # Phase 1: Route simplification & binary packing
+│   ├── pipeline/     # Unified pipeline (Phase 2 + 3) - RECOMMENDED
+│   │   ├── gps_processor/    # GPS localization library
+│   │   └── detection/        # Arrival detection library
+│   └── trace_validator/ # Trace validation tool
 ├── visualizer/       # Web-based debugging UI
 ├── tools/            # Test data generation
 │   ├── data/         # Sample route/stop GeoJSON files
@@ -249,11 +250,11 @@ After `cargo build`, binaries are in `target/debug/` or `target/release/`:
 - `preprocessor` - Generate `route_data.bin`
 - `trace_validator` - Validate trace output against ground truth
 
-**Library-only crates** (binaries deprecated, use `pipeline` instead):
-- `simulator` - Phase 2: GPS localization (Kalman filter)
-- `arrival_detector` - Phase 3: Bayesian arrival detection
+**Library-only crates** (no binaries, use `pipeline` instead):
+- `gps_processor` - Phase 2: GPS localization (Kalman filter)
+- `detection` - Phase 3: Bayesian arrival detection
 
-These crates are still built as libraries and can be used for testing, but their CLI binaries have been deprecated in favor of the unified `pipeline` binary.
+These libraries are used by the `pipeline` crate and can be used for testing, but do not have standalone binaries.
 
 ## Development
 

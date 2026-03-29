@@ -3,7 +3,7 @@
 //! Bug: arrival_detector didn't preserve heading_cdeg from simulator input
 //! Fix: Added heading_cdeg to Phase2Record and InputRecord
 
-use arrival_detector::input;
+use detection::input;
 use std::io::Write;
 
 #[test]

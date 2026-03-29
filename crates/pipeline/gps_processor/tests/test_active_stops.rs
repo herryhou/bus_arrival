@@ -4,8 +4,8 @@
 //! based on route progress and stop corridor boundaries.
 
 use shared::{DrState, GpsPoint, KalmanState, RouteNode, Stop};
-use simulator::kalman::{process_gps_update, ProcessResult};
-use simulator::route_data::RouteData;
+use gps_processor::kalman::{process_gps_update, ProcessResult};
+use gps_processor::route_data::RouteData;
 
 fn setup_test_route_with_stop() -> (Vec<u8>, i32, i32) {
     let mut nodes = Vec::new();

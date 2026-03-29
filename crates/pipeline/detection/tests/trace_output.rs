@@ -1,6 +1,6 @@
 //! Integration test for trace output
 
-use arrival_detector::trace::{TraceRecord, StopTraceState, FeatureScores};
+use detection::trace::{TraceRecord, StopTraceState, FeatureScores};
 use shared::FsmState;
 
 #[test]

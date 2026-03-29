@@ -1,6 +1,6 @@
-use arrival_detector::corridor::find_active_stops;
-use arrival_detector::probability::THETA_ARRIVAL;
-use arrival_detector::state_machine::{StopState, StopEvent};
+use detection::corridor::find_active_stops;
+use detection::probability::THETA_ARRIVAL;
+use detection::state_machine::{StopState, StopEvent};
 use shared::{Stop, FsmState};
 
 #[test]

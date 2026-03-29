@@ -1,5 +1,5 @@
-use arrival_detector::probability::{build_gaussian_lut, build_logistic_lut, arrival_probability, THETA_ARRIVAL};
-use arrival_detector::state_machine::{StopState, StopEvent};
+use detection::probability::{build_gaussian_lut, build_logistic_lut, arrival_probability, THETA_ARRIVAL};
+use detection::state_machine::{StopState, StopEvent};
 use shared::{Stop, FsmState};
 
 #[test]

@@ -2,175 +2,175 @@
   {
     "stop_idx": 0,
     "seg_idx": 1,
-    "timestamp": 1700000017,
-    "dwell_s": 3
+    "timestamp": 1700000018,
+    "dwell_s": 2
   },
   {
     "stop_idx": 1,
     "seg_idx": 13,
-    "timestamp": 1700000133,
-    "dwell_s": 5
+    "timestamp": 1700000132,
+    "dwell_s": 4
   },
   {
     "stop_idx": 2,
     "seg_idx": 14,
-    "timestamp": 1700000193,
-    "dwell_s": 7
+    "timestamp": 1700000191,
+    "dwell_s": 5
   },
   {
     "stop_idx": 3,
     "seg_idx": 16,
-    "timestamp": 1700000236,
-    "dwell_s": 9
+    "timestamp": 1700000234,
+    "dwell_s": 6
   },
   {
     "stop_idx": 4,
     "seg_idx": 17,
-    "timestamp": 1700000268,
-    "dwell_s": 10
+    "timestamp": 1700000263,
+    "dwell_s": 7
   },
   {
     "stop_idx": 5,
     "seg_idx": 45,
-    "timestamp": 1700000573,
+    "timestamp": 1700000561,
     "dwell_s": 4
   },
   {
     "stop_idx": 6,
     "seg_idx": 55,
-    "timestamp": 1700000654,
-    "dwell_s": 10
+    "timestamp": 1700000639,
+    "dwell_s": 8
   },
   {
     "stop_idx": 7,
     "seg_idx": 65,
-    "timestamp": 1700000796,
-    "dwell_s": 9
+    "timestamp": 1700000780,
+    "dwell_s": 2
   },
   {
     "stop_idx": 8,
     "seg_idx": 75,
-    "timestamp": 1700000922,
-    "dwell_s": 7
+    "timestamp": 1700000899,
+    "dwell_s": 13
   },
   {
     "stop_idx": 9,
     "seg_idx": 79,
-    "timestamp": 1700000950,
-    "dwell_s": 8
+    "timestamp": 1700000933,
+    "dwell_s": 9
   },
   {
     "stop_idx": 10,
     "seg_idx": 83,
-    "timestamp": 1700001021,
-    "dwell_s": 9
+    "timestamp": 1700001006,
+    "dwell_s": 7
   },
   {
     "stop_idx": 11,
     "seg_idx": 95,
-    "timestamp": 1700001148,
-    "dwell_s": 10
+    "timestamp": 1700001133,
+    "dwell_s": 4
   },
   {
     "stop_idx": 12,
     "seg_idx": 103,
-    "timestamp": 1700001269,
-    "dwell_s": 9
+    "timestamp": 1700001248,
+    "dwell_s": 11
   },
   {
     "stop_idx": 13,
     "seg_idx": 111,
-    "timestamp": 1700001389,
-    "dwell_s": 5
+    "timestamp": 1700001368,
+    "dwell_s": 8
   },
   {
     "stop_idx": 14,
     "seg_idx": 130,
-    "timestamp": 1700001691,
-    "dwell_s": 8
+    "timestamp": 1700001665,
+    "dwell_s": 9
   },
   {
     "stop_idx": 15,
     "seg_idx": 147,
-    "timestamp": 1700001876,
-    "dwell_s": 12
+    "timestamp": 1700001853,
+    "dwell_s": 9
   },
   {
     "stop_idx": 16,
     "seg_idx": 162,
-    "timestamp": 1700002063,
-    "dwell_s": 8
+    "timestamp": 1700002044,
+    "dwell_s": 9
   },
   {
     "stop_idx": 17,
     "seg_idx": 234,
-    "timestamp": 1700002807,
-    "dwell_s": 11
+    "timestamp": 1700002785,
+    "dwell_s": 5
   },
   {
     "stop_idx": 18,
     "seg_idx": 247,
-    "timestamp": 1700002889,
-    "dwell_s": 17
+    "timestamp": 1700002862,
+    "dwell_s": 8
   },
   {
     "stop_idx": 19,
     "seg_idx": 267,
-    "timestamp": 1700003022,
-    "dwell_s": 6
+    "timestamp": 1700002983,
+    "dwell_s": 10
   },
   {
     "stop_idx": 20,
     "seg_idx": 273,
-    "timestamp": 1700003067,
-    "dwell_s": 7
+    "timestamp": 1700003034,
+    "dwell_s": 13
   },
   {
     "stop_idx": 21,
     "seg_idx": 276,
-    "timestamp": 1700003100,
-    "dwell_s": 14
+    "timestamp": 1700003072,
+    "dwell_s": 3
   },
   {
     "stop_idx": 22,
     "seg_idx": 280,
-    "timestamp": 1700003131,
-    "dwell_s": 6
+    "timestamp": 1700003091,
+    "dwell_s": 12
   },
   {
     "stop_idx": 23,
     "seg_idx": 347,
-    "timestamp": 1700003441,
-    "dwell_s": 2
+    "timestamp": 1700003403,
+    "dwell_s": 8
   },
   {
     "stop_idx": 24,
     "seg_idx": 409,
-    "timestamp": 1700003724,
-    "dwell_s": 9
+    "timestamp": 1700003691,
+    "dwell_s": 11
   },
   {
     "stop_idx": 25,
     "seg_idx": 419,
-    "timestamp": 1700003835,
+    "timestamp": 1700003810,
     "dwell_s": 13
   },
   {
     "stop_idx": 26,
     "seg_idx": 437,
-    "timestamp": 1700003997,
-    "dwell_s": 9
+    "timestamp": 1700003974,
+    "dwell_s": 8
   },
   {
     "stop_idx": 27,
     "seg_idx": 470,
-    "timestamp": 1700004393,
-    "dwell_s": 10
+    "timestamp": 1700004365,
+    "dwell_s": 7
   },
   {
     "stop_idx": 28,
     "seg_idx": 506,
-    "timestamp": 1700004844,
-    "dwell_s": 11
+    "timestamp": 1700004827,
+    "dwell_s": 8
   }
 ]
