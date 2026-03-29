@@ -1517,8 +1517,8 @@ $$\theta^* = \arg\max_\theta F_1\text{-score}(\theta)$$
 
 **檔案變更：**
 - `preprocessor/src/stops.rs`：新增 `preprocess_close_stop_corridors()`
-- `arrival_detector/src/probability.rs`：新增 `arrival_probability_adaptive()`
-- `arrival_detector/src/main.rs`：傳遞 sequential next_stop
+- `crates/pipeline/detection/src/probability.rs`：新增 `arrival_probability_adaptive()`
+- `crates/pipeline/detection/src/main.rs`：傳遞 sequential next_stop
 
 ---
 
@@ -1555,7 +1555,7 @@ $$\theta^* = \arg\max_\theta F_1\text{-score}(\theta)$$
 - trace_validator：新增單次到站規則驗證，偵測重複到站問題
 
 **檔案變更：**
-- `arrival_detector/src/state_machine.rs`：新增 `announced` 欄位，停用 reactivation
+- `crates/pipeline/detection/src/state_machine.rs`：新增 `announced` 欄位，停用 reactivation
 - `arrival_detector/tests/`：更新測試以反映新行為
 - `trace_validator/src/`：新增 `state_transitions` 追蹤與重複到站驗證
 
@@ -1810,7 +1810,7 @@ $$\theta^* = \arg\max_\theta F_1\text{-score}(\theta)$$
   4. 向後相容性
 
 **變更原因：**
-- 實際程式碼（`simulator/src/map_match.rs`）使用點積投影法計算距離
+- 實際程式碼（`crates/pipeline/gps_processor/src/map_match.rs`）使用點積投影法計算距離
 - 點積投影法對線段邊界處理更直觀（投影點 clamp 至路段範圍）
 - 與線性距離公式在數學上等價，但實作更清晰
 
