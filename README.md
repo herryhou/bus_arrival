@@ -12,10 +12,10 @@ This system processes GPS NMEA data to detect bus arrivals and departures at pre
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│ NMEA Log    │────▶│ Pipeline         │────▶│ Arrivals/       │
-│ (GPS data)  │     │ (Phase 2 + 3)    │     │ Departures      │
-└─────────────┘     └──────────────────┘     └─────────────────┘
+┌─────────────┐     ┌──────────────────┐     
+│ NMEA Log    │────▶│ Pipeline         │────▶ Arrivals/ Departures
+│ (GPS data)  │     │ (Phase 2 + 3)    │
+└─────────────┘     └──────────────────┘
                             │
                             │ --trace --▶ Debug Output
                             │ --announce --▶ Voice Events
@@ -38,10 +38,10 @@ cargo build --release
 
 ```bash
 # Generate route data from GeoJSON
-cargo run -p preprocessor -- tools/data/ty225_route.json tools/data/ty225_stops.json route_data.bin
+cargo run -p preprocessor -- test_data/ty225_route.json test_data/ty225_stops.json ty225.bin
 
 # Run pipeline to detect arrivals/departures
-cargo run -p pipeline -- gps.nmea route_data.bin arrivals.jsonl --trace trace.jsonl
+cargo run -p pipeline -- ty225.nmea ty225.bin arrivals.jsonl --trace trace.jsonl
 ```
 
 ### 3. Visualize Results
@@ -52,7 +52,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173/ and upload `route_data.bin` and `trace.jsonl`.
+Open http://localhost:5173/ and upload `ty225.bin` and `trace.jsonl`.
 
 ## Pipeline Usage
 
