@@ -195,8 +195,12 @@ impl<'a> LocalizationState<'a> {
 pub struct DetectionState {
     /// Per-stop state machines
     stop_states: Vec<StopState>,
-    /// Time counter for announcements
-    time_counter: u64,
+    /// Current GPS timestamp counter (for trace output)
+    current_timestamp: u64,
+    /// Track which stops arrived this frame (for trace output)
+    arrived_this_frame: Vec<u8>,
+    /// Active stop indices from last update (for trace output)
+    active_indices: Vec<usize>,
 }
 
 impl DetectionState {
@@ -208,8 +212,15 @@ impl DetectionState {
         }
         Self {
             stop_states,
-            time_counter: 0,
+            current_timestamp: 0,
+            arrived_this_frame: Vec::new(),
+            active_indices: Vec::new(),
         }
+    }
+
+    /// Increment timestamp for each GPS record processed
+    pub fn tick(&mut self) {
+        self.current_timestamp += 1;
     }
 
     /// Process a GPS record and update result with arrivals/departures
@@ -219,24 +230,27 @@ impl DetectionState {
         route_data: &RouteData,
         result: &mut PipelineResult,
     ) {
-        self.time_counter = record.time;
+        self.current_timestamp = record.time;
+
+        // Reset per-frame tracking
+        self.arrived_this_frame.clear();
+        self.active_indices.clear();
 
         let s_cm = record.s_cm;
         let v_cms = record.v_cms;
         let stops = route_data.stops();
 
         // Find active stops (corridor filter)
-        let mut active_indices = Vec::new();
         for (idx, stop) in stops.iter().enumerate() {
             if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm {
-                active_indices.push(idx);
+                self.active_indices.push(idx);
             }
         }
 
         // Process each active stop
-        for idx in active_indices {
-            let stop = &stops[idx];
-            let stop_state = &mut self.stop_states[idx];
+        for idx in &self.active_indices {
+            let stop = &stops[*idx];
+            let stop_state = &mut self.stop_states[*idx];
 
             // Compute probability
             let probability = detection::probability::compute_probability(
@@ -258,9 +272,10 @@ impl DetectionState {
             // Handle events
             match event {
                 StopEvent::Arrived => {
+                    self.arrived_this_frame.push(*idx as u8);
                     result.arrivals.push(ArrivalEvent {
                         time: record.time,
-                        stop_idx: idx as u8,
+                        stop_idx: *idx as u8,
                         s_cm: record.s_cm as i32,
                         v_cms: record.v_cms,
                         probability,
@@ -269,7 +284,7 @@ impl DetectionState {
                 StopEvent::Departed => {
                     result.departures.push(DepartureEvent {
                         time: record.time,
-                        stop_idx: idx as u8,
+                        stop_idx: *idx as u8,
                         s_cm: record.s_cm as i32,
                         v_cms: record.v_cms,
                     });
@@ -291,6 +306,45 @@ impl DetectionState {
                 }
             }
         }
+    }
+
+    /// Get trace information for the last processed GPS record
+    pub fn get_trace_info(&self, record: &gps::GpsRecord, route_data: &RouteData) -> (Vec<u8>, Vec<StopTraceState>) {
+        let stops = route_data.stops();
+
+        // Build active_stops list
+        let active_stops: Vec<u8> = self.active_indices.iter().map(|i| *i as u8).collect();
+
+        // Build stop_states list for active stops
+        let stop_states: Vec<StopTraceState> = self.active_indices.iter().map(|&idx| {
+            let stop = &stops[idx];
+            let stop_state = &self.stop_states[idx];
+
+            // Re-compute probability for trace output
+            let probability = detection::probability::compute_probability(
+                record.s_cm,
+                record.v_cms,
+                stop.progress_cm,
+                stop_state.dwell_time_s,
+            );
+
+            StopTraceState {
+                stop_idx: idx as u8,
+                distance_cm: (record.s_cm - stop.progress_cm) as i32,
+                fsm_state: format!("{:?}", stop_state.fsm_state),
+                dwell_time_s: stop_state.dwell_time_s,
+                probability,
+                features: FeatureScores {
+                    p1: 0, // TODO: compute actual feature scores
+                    p2: 0,
+                    p3: 0,
+                    p4: 0,
+                },
+                just_arrived: self.arrived_this_frame.contains(&(idx as u8)),
+            }
+        }).collect();
+
+        (active_stops, stop_states)
     }
 }
 
@@ -363,13 +417,13 @@ impl Pipeline {
             if let Some(gps) = loc_state.nmea.parse_sentence(&line) {
                 // Phase 2: Localization (Kalman + Map Matching)
                 if let Some(gps_record) = loc_state.process_gps(&gps, route_data) {
-                    // Add trace record if enabled
-                    if config.enable_trace {
-                        result.add_trace_record(&gps_record);
-                    }
-
                     // Phase 3: Arrival Detection
                     det_state.process_gps_record(&gps_record, route_data, &mut result);
+
+                    // Add trace record if enabled (after detection so we have stop states)
+                    if config.enable_trace {
+                        result.add_trace_record(&gps_record, &det_state, route_data);
+                    }
                 }
             }
         }
@@ -416,8 +470,10 @@ impl PipelineResult {
     }
 
     /// Add a trace record (only if trace is enabled)
-    fn add_trace_record(&mut self, record: &gps::GpsRecord) {
+    fn add_trace_record(&mut self, record: &gps::GpsRecord, det_state: &DetectionState, route_data: &RouteData) {
         if let Some(ref mut trace) = self.trace_records {
+            let (active_stops, stop_states) = det_state.get_trace_info(record, route_data);
+
             trace.push(TraceRecord {
                 time: record.time,
                 lat: record.lat,
@@ -425,10 +481,10 @@ impl PipelineResult {
                 s_cm: record.s_cm as i32,
                 v_cms: record.v_cms,
                 heading_cdeg: record.heading_cdeg,
-                active_stops: Vec::new(),
-                stop_states: Vec::new(),
-                gps_jump: false,
-                recovery_idx: None,
+                active_stops,
+                stop_states,
+                gps_jump: false,  // TODO: implement GPS jump detection
+                recovery_idx: None, // TODO: implement recovery
             });
         }
     }

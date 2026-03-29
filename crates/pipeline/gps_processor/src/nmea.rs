@@ -40,6 +40,16 @@ impl NmeaState {
             return None;
         }
 
+        // Parse time (hhmmss) - field 1
+        // Note: NMEA time is UTC only, we use it as a relative counter
+        let time_str = parts[1];
+        if time_str.len() >= 6 {
+            let hh: u64 = time_str[0..2].parse().unwrap_or(0);
+            let mm: u64 = time_str[2..4].parse().unwrap_or(0);
+            let ss: u64 = time_str[4..6].parse().unwrap_or(0);
+            self.point.timestamp = hh * 3600 + mm * 60 + ss;
+        }
+
         // Status 'V' = Warning, 'A' = Valid
         let status = parts[2];
         if status != "A" {
@@ -90,6 +100,15 @@ impl NmeaState {
         // $GPGGA,123519,v,ddmm.mm,s,dddmm.mm,a,xx,yy,z.z,h.h,M*hh
         if parts.len() < 9 {
             return None;
+        }
+
+        // Parse time (hhmmss) - field 1
+        let time_str = parts[1];
+        if time_str.len() >= 6 {
+            let hh: u64 = time_str[0..2].parse().unwrap_or(0);
+            let mm: u64 = time_str[2..4].parse().unwrap_or(0);
+            let ss: u64 = time_str[4..6].parse().unwrap_or(0);
+            self.point.timestamp = hh * 3600 + mm * 60 + ss;
         }
 
         // Quality indicator
@@ -197,6 +216,7 @@ mod tests {
         assert!((state.point.lon - 121.28649666666667).abs() < 1e-10);
         assert_eq!(state.point.speed_cms, 432); // 8.4 knots * 51.44
         assert_eq!(state.point.heading_cdeg, 8050); // 80.5° * 100
+        assert_eq!(state.point.timestamp, 22 * 3600 + 13 * 60 + 20); // 221320 -> 22:13:20
     }
 
     #[test]
@@ -216,6 +236,7 @@ mod tests {
         assert!(point.has_fix);
         assert!((point.lat - 25.004303333333333).abs() < 1e-10);
         assert!((point.lon - 121.28649666666667).abs() < 1e-10);
+        assert_eq!(point.timestamp, 22 * 3600 + 13 * 60 + 20); // 221320 -> 22:13:20
     }
 
     #[test]
@@ -241,6 +262,7 @@ mod tests {
         assert!((point.lat - 25.004303333333333).abs() < 1e-10);
         assert!((point.lon - 121.28649666666667).abs() < 1e-10);
         assert_eq!(point.hdop_x10, 12); // 1.2 * 10
+        assert_eq!(point.timestamp, 22 * 3600 + 13 * 60 + 20); // Timestamp from RMC
     }
 
     #[test]
