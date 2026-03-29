@@ -257,27 +257,3 @@ fn should_refine_segment(
 
     false
 }
-
-/// Recursively subdivide a segment until it meets the maximum length requirement
-fn subdivide_recursive(
-    p1: (i64, i64),
-    p2: (i64, i64),
-    result: &mut Vec<(i64, i64)>,
-    max_len: f64,
-) {
-    let mid = (
-        (p1.0 + p2.0) / 2,
-        (p1.1 + p2.1) / 2,
-    );
-
-    let dist = distance(p1, p2);
-
-    if dist > max_len {
-        // Subdivide first half
-        subdivide_recursive(p1, mid, result, max_len);
-        result.push(mid);
-        // Subdivide second half
-        subdivide_recursive(mid, p2, result, max_len);
-    }
-    // If dist <= max_len, do nothing - caller handles p1, p2
-}
