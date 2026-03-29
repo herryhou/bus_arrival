@@ -7,7 +7,8 @@
 // - ε_general = 700 cm (default tolerance)
 // - ε_curve = 250 cm (for turns > 20°)
 // - Stop protection radius = ±3000 cm
-// - Max segment length = 3000 cm (insert node if exceeded)
+// - Max segment length = 10000 cm (100m, default for general segments)
+// - Adaptive segment length = 3000 cm (30m, near stops/sharp turns)
 
 use std::collections::HashSet;
 
@@ -24,7 +25,7 @@ pub fn simplify_and_interpolate(
     if points.len() <= 2 {
         let mut result = vec![points[0]];
         if points.len() == 2 {
-            interpolate_recursive(points[0], points[1], &mut result);
+            interpolate_recursive(points[0], points[1], &mut result, 10000.0);
             result.push(points[1]);
         }
         return result;
@@ -65,19 +66,30 @@ pub fn simplify_and_interpolate(
         let p1 = points[kept_indices[i]];
         let p2 = points[kept_indices[i+1]];
         final_points.push(p1);
-        interpolate_recursive(p1, p2, &mut final_points);
+        interpolate_recursive(p1, p2, &mut final_points, 10000.0);
     }
     final_points.push(points[*kept_indices.last().unwrap()]);
 
     final_points
 }
 
-fn interpolate_recursive(p1: (i64, i64), p2: (i64, i64), result: &mut Vec<(i64, i64)>) {
+/// Recursively subdivide a segment using geometric midpoint insertion
+///
+/// # Arguments
+/// * `p1` - Start point of segment (x_cm, y_cm)
+/// * `p2` - End point of segment (x_cm, y_cm)
+/// * `result` - Vector to accumulate intermediate points
+/// * `max_len` - Maximum segment length in centimeters (e.g., 10000.0 = 100m)
+///
+/// # Algorithm
+/// Uses geometric midpoint splitting: if segment length > max_len,
+/// recursively splits at midpoint and adds it to result.
+fn interpolate_recursive(p1: (i64, i64), p2: (i64, i64), result: &mut Vec<(i64, i64)>, max_len: f64) {
     let dx = p2.0 - p1.0;
     let dy = p2.1 - p1.1;
     let dist = ((dx * dx + dy * dy) as f64).sqrt();
 
-    if dist > 3000.0 {
+    if dist > max_len {
         // Geometric midpoint
         let mid = (
             (p1.0 + p2.0) / 2,
@@ -85,10 +97,10 @@ fn interpolate_recursive(p1: (i64, i64), p2: (i64, i64), result: &mut Vec<(i64, 
         );
         
         // Recursive split first half
-        interpolate_recursive(p1, mid, result);
+        interpolate_recursive(p1, mid, result, max_len);
         result.push(mid);
         // Recursive split second half
-        interpolate_recursive(mid, p2, result);
+        interpolate_recursive(mid, p2, result, max_len);
     }
 }
 
