@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 shared = { path = "../shared" }
-arrival_detector = { path = "../arrival_detector" }
+detection = { path = "../pipeline/detection" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 anyhow = "1.0"

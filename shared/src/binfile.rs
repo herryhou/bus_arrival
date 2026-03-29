@@ -27,6 +27,21 @@ pub enum BusError {
     IoError,
 }
 
+impl std::fmt::Display for BusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BusError::InvalidMagic => write!(f, "Invalid magic bytes"),
+            BusError::InvalidVersion => write!(f, "Invalid version"),
+            BusError::InvalidLength => write!(f, "Invalid length"),
+            BusError::ChecksumMismatch => write!(f, "Checksum mismatch"),
+            BusError::OutOfBounds => write!(f, "Out of bounds"),
+            BusError::IoError => write!(f, "I/O error"),
+        }
+    }
+}
+
+impl std::error::Error for BusError {}
+
 /// A read-only view into the spatial grid index.
 /// Enables O(1) cell access directly from Flash memory.
 pub struct SpatialGridView<'a> {

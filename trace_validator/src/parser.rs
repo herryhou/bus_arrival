@@ -1,4 +1,4 @@
-use arrival_detector::trace::TraceRecord;
+use detection::trace::TraceRecord;
 use anyhow::{anyhow, bail, Result};
 use std::{collections::HashMap, fs::File, io::{BufRead, BufReader}, path::Path};
 

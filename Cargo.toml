@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["shared", "preprocessor", "preprocessor/dp_mapper", "simulator", "arrival_detector", "trace_validator"]
+members = ["shared", "preprocessor", "preprocessor/dp_mapper", "trace_validator", "pipeline"]
 
 [workspace.package]
 version = "0.1.0"

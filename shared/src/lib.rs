@@ -280,7 +280,7 @@ pub enum FsmState {
 }
 
 /// Arrival event emitted when bus reaches a stop
-#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Debug, Clone, serde::Serialize))]
 pub struct ArrivalEvent {
     /// GPS update timestamp (seconds since epoch)
     pub time: u64,
@@ -295,7 +295,7 @@ pub struct ArrivalEvent {
 }
 
 /// Departure event emitted when bus leaves a stop
-#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Debug, Clone, serde::Serialize))]
 pub struct DepartureEvent {
     /// GPS update timestamp (seconds since epoch)
     pub time: u64,

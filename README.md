@@ -5,24 +5,55 @@ GPS-based bus arrival detection system for RP2350 microcontroller with web-based
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌──────────────────┐     ┌─────────────┐
-│ NMEA Log    │────▶│ Simulator    │────▶│ Arrival_Detector │────▶│ Arrivals    │
-│ (GPS data)  │     │ (Phase 2)    │     │                  │     │ Output      │
-└─────────────┘     └──────────────┘     │ (Phase 3)        │     └─────────────┘
-                                         │                  │
-                                         │ ┌──────────────┐ │
-                                         │ │ Trace Output │ │
-                                         │ └──────────────┘ │
-                                         └──────────────────┘
-                                                   │
-                                                   ▼
-                                            ┌─────────────┐
-                                            │ Visualizer  │
-                                            │ (Web UI)    │
-                                            └─────────────┘
+┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐     ┌─────────────┐
+│ NMEA Log    │────▶│ Pipeline         │────▶│ Arrivals        │────▶│ Output      │
+│ (GPS data)  │     │ (Phase 2 + 3)    │     │ Departures      │     │ Files       │
+└─────────────┘     └──────────────────┘     └─────────────────┘     └─────────────┘
+                            │
+                            │ ┌──────────────┐
+                            │ │ Trace Output │ │
+                            │ └──────────────┘ │
+                            └──────────────────┘
+                                      │
+                                      ▼
+                               ┌─────────────┐
+                               │ Visualizer  │
+                               │ (Web UI)    │
+                               └─────────────┘
 ```
 
 ## Quick Start
+
+### Using the Unified Pipeline (Recommended)
+
+The `pipeline` binary combines Phase 2 (localization) and Phase 3 (arrival detection) into a single command:
+
+```bash
+# Using Makefile (recommended)
+make run ROUTE_NAME=ty225 SCENARIO=normal
+
+# Or directly
+cargo run -p pipeline -- gps.nmea route_data.bin arrivals.jsonl --trace trace.jsonl --announce announce.jsonl
+```
+
+## Quick Start
+
+### Using the Unified Pipeline (Recommended)
+
+The `pipeline` binary combines Phase 2 (localization) and Phase 3 (arrival detection) into a single command:
+
+```bash
+# Process NMEA → Arrivals/Departures directly
+cargo run -p pipeline -- gps.nmea route_data.bin arrivals.jsonl --trace --announce
+
+# Or using the Makefile
+make pipeline ROUTE_NAME=ty225 SCENARIO=normal
+```
+
+**Output files:**
+- `arrivals.jsonl` - Arrival and departure events
+- `trace.jsonl` - Debug trace (if `--trace` is specified)
+- `announce.jsonl` - Voice announcement events (if `--announce` is specified)
 
 ### Pre-generated Test Data
 
@@ -37,9 +68,13 @@ The project includes working test data for immediate visualizer testing:
 
 
 ### To manually verify the fixes work:
-  1. Generate trace: cargo run -p simulator -- ty225.nmea ty225.bin ty225.jsonl
-  2. Run arrival detector: cargo run -p arrival_detector -- ty225.jsonl ty225.bin ty225_arrivals.jsonl --trace ty225_trace.jsonl
-  3. Visualize: Use ty225_trace.jsonl (not ty225.jsonl) in the visualizer to see events
+
+```bash
+# Run the unified pipeline
+make run ROUTE_NAME=ty225 SCENARIO=normal
+
+# Visualize: Use ty225_normal_trace.jsonl in the visualizer
+```
 
 **Test Data Summary:**
 - 3 stops at positions: 300m, 600m, 900m
@@ -87,40 +122,32 @@ CRC32: 0x12345678
 Wrote route_data.bin (13908 bytes)
 ```
 
-#### Step 2: Generate `phase2.jsonl` (from NMEA log)
+#### Step 2: Generate `arrivals.jsonl` and `trace.jsonl` (from NMEA log)
+
+**Using the unified pipeline (recommended):**
 
 ```bash
-# From GPS NMEA log
-cargo run -p simulator -- ty225.nmea ty225.bin ty225.jsonl
+# From GPS NMEA log - single command
+cargo run -p pipeline -- ty225.nmea ty225.bin arrivals.jsonl --trace trace.jsonl
 ```
 
 **Output:**
 ```
-Phase 2: Localization Pipeline
-  NMEA input:   test.nmea
-  Route data:   route_data.bin
-  Output:       phase2.jsonl
-
-Loaded 255 nodes, 23 stops
+=== Pipeline Complete ===
 Processed 1234 GPS updates
+Detected 23 arrivals
+Detected 23 departures
+Generated 23 announce events
 ```
 
-#### Step 3: Generate `trace.jsonl` (for visualizer)
+**Or using separate binaries:**
 
 ```bash
-# Run arrival detector with --trace flag
-cargo run -p arrival_detector -- phase2.jsonl route_data.bin arrivals.jsonl --trace trace.jsonl
-```
+# Phase 2: Generate GPS localization output
+cargo run -p simulator -- ty225.nmea ty225.bin phase2.jsonl
 
-**Output:**
-```
-Phase 3: Arrival Detection
-  Input:  phase2.jsonl
-  Route:  route_data.bin
-  Output: arrivals.jsonl
-  Trace:  trace.jsonl
-
-Processed 1234 records, detected 23 arrivals
+# Phase 3: Run arrival detector with --trace flag
+cargo run -p arrival_detector -- phase2.jsonl ty225.bin arrivals.jsonl --trace trace.jsonl
 ```
 
 ### Run the Visualizer
@@ -204,8 +231,10 @@ Detected arrival events:
 bus_arrival/
 ├── shared/           # Shared types and binary format
 ├── preprocessor/     # Phase 1: Route simplification & binary packing
-├── simulator/        # Phase 2: GPS localization (Kalman filter)
-├── arrival_detector/ # Phase 3: Bayesian arrival detection
+├── simulator/        # Phase 2: GPS localization (library only, binary deprecated)
+├── arrival_detector/ # Phase 3: Bayesian arrival detection (library only, binary deprecated)
+├── pipeline/         # Unified pipeline (Phase 2 + 3) - RECOMMENDED
+├── trace_validator/  # Trace validation tool
 ├── visualizer/       # Web-based debugging UI
 ├── tools/            # Test data generation
 │   ├── data/         # Sample route/stop GeoJSON files
@@ -215,10 +244,16 @@ bus_arrival/
 
 ## Binaries
 
-After `cargo build`, binaries are in `target/debug/`:
+After `cargo build`, binaries are in `target/debug/` or `target/release/`:
+- `pipeline` - **(Recommended)** Unified NMEA → Arrivals/Departures processor
 - `preprocessor` - Generate `route_data.bin`
-- `simulator` - Generate `phase2.jsonl` from NMEA
-- `arrival_detector` - Generate arrivals and trace output
+- `trace_validator` - Validate trace output against ground truth
+
+**Library-only crates** (binaries deprecated, use `pipeline` instead):
+- `simulator` - Phase 2: GPS localization (Kalman filter)
+- `arrival_detector` - Phase 3: Bayesian arrival detection
+
+These crates are still built as libraries and can be used for testing, but their CLI binaries have been deprecated in favor of the unified `pipeline` binary.
 
 ## Development
 

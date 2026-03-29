@@ -140,6 +140,32 @@ pub fn compute_feature_scores(
     FeatureScores { p1, p2, p3, p4 }
 }
 
+/// Compute arrival probability (0-255) with built-in LUTs.
+///
+/// Simplified interface that builds LUTs on first use.
+pub fn compute_probability(
+    s_cm: DistCm,
+    v_cms: SpeedCms,
+    stop_progress: DistCm,
+    dwell_time_s: u16,
+) -> Prob8 {
+    use std::sync::OnceLock;
+
+    static GAUSSIAN_LUT: OnceLock<[u8; 256]> = OnceLock::new();
+    static LOGISTIC_LUT: OnceLock<[u8; 128]> = OnceLock::new();
+
+    let g_lut = GAUSSIAN_LUT.get_or_init(build_gaussian_lut);
+    let l_lut = LOGISTIC_LUT.get_or_init(build_logistic_lut);
+
+    let stop = shared::Stop {
+        progress_cm: stop_progress,
+        corridor_start_cm: 0,
+        corridor_end_cm: 0,
+    };
+
+    arrival_probability(s_cm, v_cms, &stop, dwell_time_s, g_lut, l_lut)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,5 +1,5 @@
 use crate::types::{StopAnalysis, ValidationResult, StopEvent, StateTransition};
-use arrival_detector::trace::TraceRecord;
+use detection::trace::TraceRecord;
 use shared::FsmState;
 
 pub struct Analyzer;
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn test_analyze_with_stop_states() {
-        use arrival_detector::trace::{StopTraceState, FeatureScores};
+        use detection::trace::{StopTraceState, FeatureScores};
 
         let records = vec![TraceRecord {
             time: 100,
