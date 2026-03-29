@@ -2,169 +2,129 @@
 
 GPS-based bus arrival detection system for RP2350 microcontroller with web-based debugging visualizer.
 
+## Overview
+
+This system processes GPS NMEA data to detect bus arrivals and departures at predefined stops using:
+- **Phase 1**: Route preprocessing and simplification (Douglas-Peucker algorithm)
+- **Phase 2**: GPS localization with Kalman filtering and map matching
+- **Phase 3**: Bayesian arrival detection with finite state machine
+
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐     ┌─────────────┐
-│ NMEA Log    │────▶│ Pipeline         │────▶│ Arrivals        │────▶│ Output      │
-│ (GPS data)  │     │ (Phase 2 + 3)    │     │ Departures      │     │ Files       │
-└─────────────┘     └──────────────────┘     └─────────────────┘     └─────────────┘
+┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│ NMEA Log    │────▶│ Pipeline         │────▶│ Arrivals/       │
+│ (GPS data)  │     │ (Phase 2 + 3)    │     │ Departures      │
+└─────────────┘     └──────────────────┘     └─────────────────┘
                             │
-                            │ ┌──────────────┐
-                            │ │ Trace Output │ │
-                            │ └──────────────┘ │
-                            └──────────────────┘
-                                      │
-                                      ▼
-                               ┌─────────────┐
-                               │ Visualizer  │
-                               │ (Web UI)    │
-                               └─────────────┘
+                            │ --trace --▶ Debug Output
+                            │ --announce --▶ Voice Events
+                            ▼
+                     ┌─────────────┐
+                     │ Visualizer  │
+                     │ (Web UI)    │
+                     └─────────────┘
 ```
 
 ## Quick Start
 
-### Using the Unified Pipeline (Recommended)
-
-The `pipeline` binary combines Phase 2 (localization) and Phase 3 (arrival detection) into a single command:
+### 1. Build the Project
 
 ```bash
-# Using Makefile (recommended)
-make run ROUTE_NAME=ty225 SCENARIO=normal
-
-# Or directly
-cargo run -p pipeline -- gps.nmea route_data.bin arrivals.jsonl --trace trace.jsonl --announce announce.jsonl
+cargo build --release
 ```
 
-## Quick Start
-
-### Using the Unified Pipeline (Recommended)
-
-The `pipeline` binary combines Phase 2 (localization) and Phase 3 (arrival detection) into a single command:
+### 2. Process GPS Data
 
 ```bash
-# Process NMEA → Arrivals/Departures directly
-cargo run -p pipeline -- gps.nmea route_data.bin arrivals.jsonl --trace --announce
+# Generate route data from GeoJSON
+cargo run -p preprocessor -- tools/data/ty225_route.json tools/data/ty225_stops.json route_data.bin
 
-# Or using the Makefile
-make pipeline ROUTE_NAME=ty225 SCENARIO=normal
+# Run pipeline to detect arrivals/departures
+cargo run -p pipeline -- gps.nmea route_data.bin arrivals.jsonl --trace trace.jsonl
 ```
 
-**Output files:**
-- `arrivals.jsonl` - Arrival and departure events
-- `trace.jsonl` - Debug trace (if `--trace` is specified)
-- `announce.jsonl` - Voice announcement events (if `--announce` is specified)
-
-### Pre-generated Test Data
-
-The project includes working test data for immediate visualizer testing:
-
-| File | Description |
-|------|-------------|
-| `route_test.bin` | Binary route data with 3 stops |
-| `phase2_test.jsonl` | GPS localization output (197 records) |
-| `trace_test.jsonl` | Full detector trace for visualizer (197 records) |
-| `arrivals_test.jsonl` | Detected arrival events (3 arrivals) |
-
-
-### To manually verify the fixes work:
-
-```bash
-# Run the unified pipeline
-make run ROUTE_NAME=ty225 SCENARIO=normal
-
-# Visualize: Use ty225_normal_trace.jsonl in the visualizer
-```
-
-**Test Data Summary:**
-- 3 stops at positions: 300m, 600m, 900m
-- Bus travels 950m along route
-- All 3 stops detected with probability 246/255 (96%)
-
-To use with the visualizer, upload:
-- `route_test.bin`
-- `trace_test.jsonl`
-
-### Generate Custom Test Data Files
-
-The visualizer requires two input files:
-
-1. **`route_data.bin`** - Binary route data with precomputed coefficients
-2. **`trace.jsonl`** - Debug trace from arrival detector with internal state
-
-
-
-#### Step 0: Prepare GeoJSON Files
-Create `route.json` and `stops.json` in `tools/data/` with your desired route and stop configurations.
-`route.json` (contains route_points) and `stops.json` (contains stop lat/lon coordinates).
-
-Example:
-
-```bash
-node ./tools/gen_nmea/gen_nmea.js generate --route ./tools/data/ty225_route.json --stops ./tools/data/ty225_stops.json --scenario normal --out_nmea ty225.nmea --out_gt ty225_gt.json
-```
-
-#### Step 1: Generate `route_data.bin`
-
-```bash
-# From GeoJSON files (route and stops)
-cargo run -p preprocessor -- tools/data/ty225_route.json tools/data/ty225_stops.json ty225.bin
-```
-
-**Output:**
-```
-Loaded 638 waypoints, 23 stops
-Simplified to 255 nodes
-Built spatial grid: 9x8 cells
-Packed 255 RouteNodes (52 bytes each) = 13260 bytes
-Packed 23 Stops (12 bytes each) = 276 bytes
-CRC32: 0x12345678
-Wrote route_data.bin (13908 bytes)
-```
-
-#### Step 2: Generate `arrivals.jsonl` and `trace.jsonl` (from NMEA log)
-
-**Using the unified pipeline (recommended):**
-
-```bash
-# From GPS NMEA log - single command
-cargo run -p pipeline -- ty225.nmea ty225.bin arrivals.jsonl --trace trace.jsonl
-```
-
-**Output:**
-```
-=== Pipeline Complete ===
-Processed 1234 GPS updates
-Detected 23 arrivals
-Detected 23 departures
-Generated 23 announce events
-```
-
-**Or using separate binaries:**
-
-```bash
-# Phase 2: Generate GPS localization output
-cargo run -p simulator -- ty225.nmea ty225.bin phase2.jsonl
-
-# Phase 3: Run arrival detector with --trace flag
-cargo run -p arrival_detector -- phase2.jsonl ty225.bin arrivals.jsonl --trace trace.jsonl
-```
-
-### Run the Visualizer
+### 3. Visualize Results
 
 ```bash
 cd visualizer
-npm install  # First time only
+npm install
 npm run dev
 ```
 
-Open http://localhost:5173/ and upload:
-- `route_data.bin`
-- `trace.jsonl`
+Open http://localhost:5173/ and upload `route_data.bin` and `trace.jsonl`.
+
+## Pipeline Usage
+
+```bash
+pipeline [OPTIONS] <nmea> <route_data> <output>
+
+Arguments:
+  <nmea>       NMEA log file (GPS data)
+  <route_data> Route data binary file
+  <output>     Output JSONL file for arrivals/departures
+
+Options:
+  --trace <file>    Enable trace output to file (for debugging)
+  --announce <file> Enable announce event output to file
+  -h, --help        Show this help message
+```
+
+### Output Files
+
+| File | Description |
+|------|-------------|
+| `arrivals.jsonl` | Arrival and departure events (one per line) |
+| `trace.jsonl` | Debug trace with internal state (if `--trace` specified) |
+| `announce.jsonl` | Voice announcement events (if `--announce` specified) |
+
+## Generating Test Data
+
+### Step 1: Prepare GeoJSON Files
+
+Create route and stop GeoJSON files in `tools/data/`:
+
+```bash
+# Example: Generate NMEA test data
+node tools/gen_nmea/gen_nmea.js generate \
+  --route tools/data/ty225_route.json \
+  --stops tools/data/ty225_stops.json \
+  --scenario normal \
+  --out_nmea ty225.nmea \
+  --out_gt ty225_gt.json
+```
+
+### Step 2: Generate Route Data
+
+```bash
+cargo run -p preprocessor -- \
+  tools/data/ty225_route.json \
+  tools/data/ty225_stops.json \
+  route_data.bin
+```
+
+**Output:**
+```
+Loaded 638 waypoints, 58 stops
+Computed average latitude: 24.99°
+Simplified route: 638 → 805 nodes
+Built route graph with 805 nodes
+Built spatial grid: 38x36 cells
+Successfully wrote route_data.bin
+```
+
+### Step 3: Run Pipeline
+
+```bash
+cargo run -p pipeline -- ty225.nmea route_data.bin arrivals.jsonl \
+  --trace trace.jsonl --announce announce.jsonl
+```
 
 ## Data Formats
 
 ### `route_data.bin` (Binary)
+
+Binary format with precomputed route coefficients:
 
 ```
 Header (16 bytes):
@@ -174,8 +134,7 @@ Header (16 bytes):
   - y0_cm: i32
 
 Nodes array (node_count × 52 bytes):
-  - RouteNode: repr(C, packed) struct
-  - Contains precomputed segment coefficients
+  - RouteNode with precomputed segment coefficients
 
 Stops array (stop_count × 12 bytes):
   - Stop: progress_cm, corridor_start_cm, corridor_end_cm
@@ -183,106 +142,111 @@ Stops array (stop_count × 12 bytes):
 CRC32: u32 (4 bytes)
 ```
 
-### `phase2.jsonl` (JSON Lines)
+### `arrivals.jsonl` (JSON Lines)
 
-One JSON object per line, GPS update:
+One JSON object per line:
 ```json
-{"time":1234567890,"s_cm":123456,"v_cms":150,"seg_idx":42,"valid":true}
-{"time":1234567891,"s_cm":123606,"v_cms":150,"seg_idx":42,"valid":true}
-...
+{"time":1234567900,"stop_idx":5,"s_cm":123500,"v_cms":10,"probability":210}
 ```
 
-### `trace.jsonl` (JSON Lines - Visualizer Input)
+### `trace.jsonl` (JSON Lines)
 
 Full internal state for debugging:
 ```json
 {
   "time": 1234567890,
+  "lat": 25.0,
+  "lon": 121.0,
   "s_cm": 123456,
   "v_cms": 150,
   "active_stops": [5, 6],
-  "stop_states": [
-    {
-      "stop_idx": 5,
-      "distance_cm": 250,
-      "fsm_state": "Arriving",
-      "dwell_time_s": 0,
-      "probability": 210,
-      "features": {"p1": 200, "p2": 180, "p3": 190, "p4": 100},
-      "just_arrived": false
-    }
-  ],
+  "stop_states": [{
+    "stop_idx": 5,
+    "distance_cm": 250,
+    "fsm_state": "Arriving",
+    "dwell_time_s": 0,
+    "probability": 210,
+    "features": {"p1": 200, "p2": 180, "p3": 190, "p4": 100},
+    "just_arrived": false
+  }],
   "gps_jump": false,
   "recovery_idx": null
 }
-```
-
-### `arrivals.jsonl` (JSON Lines - Final Output)
-
-Detected arrival events:
-```json
-{"time":1234567900,"stop_idx":5,"s_cm":123500,"v_cms":10,"probability":210}
-...
 ```
 
 ## Project Structure
 
 ```
 bus_arrival/
-├── crates/           # Rust workspace
-│   ├── shared/       # Shared types and binary format
-│   ├── preprocessor/ # Phase 1: Route simplification & binary packing
-│   ├── pipeline/     # Unified pipeline (Phase 2 + 3) - RECOMMENDED
-│   │   ├── gps_processor/    # GPS localization library
-│   │   └── detection/        # Arrival detection library
-│   └── trace_validator/ # Trace validation tool
-├── visualizer/       # Web-based debugging UI
-├── tools/            # Test data generation
-│   ├── data/         # Sample route/stop GeoJSON files
-│   └── gen_nmea/     # NMEA test data generator
-└── target/           # Compiled binaries
+├── crates/                  # Rust workspace
+│   ├── shared/              # Shared types and binary format
+│   ├── preprocessor/        # Phase 1: Route simplification
+│   ├── pipeline/            # Phase 2 + 3: Unified pipeline
+│   │   ├── gps_processor/   # GPS localization library
+│   │   └── detection/       # Arrival detection library
+│   └── trace_validator/     # Trace validation tool
+├── tools/                   # Test data generation
+│   ├── data/                # Sample route/stop GeoJSON files
+│   └── gen_nmea/            # NMEA test data generator
+├── docs/                    # Technical documentation
+├── test_data/               # Test fixtures
+├── scripts/                 # Utility scripts
+└── visualizer/              # Web-based debugging UI
 ```
 
-## Binaries
+## Available Binaries
 
-After `cargo build`, binaries are in `target/debug/` or `target/release/`:
-- `pipeline` - **(Recommended)** Unified NMEA → Arrivals/Departures processor
-- `preprocessor` - Generate `route_data.bin`
-- `trace_validator` - Validate trace output against ground truth
+| Binary | Description |
+|--------|-------------|
+| `pipeline` | **Recommended** - Unified NMEA → Arrivals/Departures processor |
+| `preprocessor` | Generate `route_data.bin` from GeoJSON |
+| `trace_validator` | Validate trace output against ground truth |
 
-**Library-only crates** (no binaries, use `pipeline` instead):
-- `gps_processor` - Phase 2: GPS localization (Kalman filter)
-- `detection` - Phase 3: Bayesian arrival detection
-
-These libraries are used by the `pipeline` crate and can be used for testing, but do not have standalone binaries.
-
-## Development
-
-### Build All
+## Makefile Targets
 
 ```bash
-cargo build
-```
-
-### Run Tests
-
-```bash
-cargo test
-```
-
-### Build Visualizer
-
-```bash
-cd visualizer
-npm run build  # Static output in build/
+make build              # Build all crates
+make run                # Run pipeline with test data
+make validate-trace     # Validate trace against ground truth
+make clean              # Clean build artifacts
 ```
 
 ## Visualizer Features
 
-- **Route Map** - MapLibre GL JS map with route line and stop markers
-- **Timeline Charts** - Speed, probability, distance over time (Chart.js)
+- **Route Map** - Interactive map with route line and stop markers
+- **Timeline Charts** - Speed, probability, and distance over time
 - **FSM Inspector** - State machine details per stop
 - **Feature Breakdown** - Bayesian probability feature scores (p1-p4)
+
+## Development
+
+### Build
+
+```bash
+cargo build              # Debug build
+cargo build --release    # Release build
+```
+
+### Test
+
+```bash
+cargo test               # Run all tests
+cargo test -p pipeline   # Test specific crate
+```
+
+### Format
+
+```bash
+cargo fmt                # Format code
+cargo clippy             # Lint code
+```
+
+## Technical Documentation
+
+See `docs/` for detailed technical documentation:
+- `bus_arrival_tech_report_v8.md` - Complete technical specification
+- `core_data_flow.md` - Data flow overview
+- `dev_guide.md` - Development guide
 
 ## License
 
