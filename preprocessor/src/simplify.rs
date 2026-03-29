@@ -74,6 +74,9 @@ pub fn simplify_and_interpolate(
     }
     final_points.push(points[*kept_indices.last().unwrap()]);
 
+    // Apply adaptive segmentation for stop proximity and sharp turns
+    final_points = adaptive_segmentation(&final_points, stop_indices, &kept_indices);
+
     final_points
 }
 
