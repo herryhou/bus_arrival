@@ -4,7 +4,7 @@
 
 **目標受眾：** Embedded Rust 開發團隊  
 **硬體平台：** Raspberry Pi Pico 2（RP2350）  
-**文件版本：** v8.6（新增：近距離站點檢測修正 / 三層架構解決站距 <120m 的檢測失敗問題）
+**文件版本：** v8.6（修正：重複到站問題與近距離站點檢測 / 單次到站規則與三層架構）
 
 ---
 
@@ -1025,6 +1025,66 @@ Departed:                 if current_stop_index + 1 < stops.len()
 
 若 GPS 突然跳至較遠站點（跳過 stop $i$，直接指向 stop $i+2$），狀態機要求必須先進入 stop $i$ 的 `Approaching` 才能觸發到站或播報，否則忽略。跳點經 Module ⑥/⑦ 過濾後通常不會通過廊道入口條件，加上去重保護（`announced`），播報不會誤觸發。
 
+### 14.4 單次到站規則（v8.6 新增）
+
+**規則：公車在一個趟次裡只能到站（報站）一次。**
+
+一旦站點觸發 `AtStop` 狀態（`just_arrived = true`），該站在本趟行程中將無法再次觸發到站事件，即使路線有迴圈經過同一站點。
+
+**實作機制：**
+
+```rust
+pub struct StopState {
+    // ... 其他欄位
+    /// 是否已在本趟行程中到站過（v8.6 新增）
+    /// 一旦設為 true，整趟行程無法清除
+    pub announced: bool,
+}
+```
+
+1. **`announced` 欄位：**
+   - 在 `Arriving → AtStop` 轉移時設為 `true`
+   - 整趟行程永不重置
+
+2. **`can_reactivate()` 函數：**
+   - v8.6 之前：允許 `Departed` 狀態的站點重新啟動（用於路線迴圈）
+   - v8.6 之後：**永遠返回 `false`**，防止重複到站
+
+3. **`reset()` 函數：**
+   - v8.6 之前：重置狀態為 `Idle`
+   - v8.6 之後：**No-op**，不改變 FSM 狀態
+
+**問題背景：**
+
+tpF805 路線 Stop #33 發生重複到站問題：
+- 第一次到站：time 8733, s_cm=2587371, just_arrived=true ✓
+- 離站：time 8745, s_cm=2591734, state=Departed ✓
+- **重複到站（BUG）：**time 8765, s_cm=2591376, state=Approaching ❌
+
+**根本原因：**
+
+GPS 雜訊導致公車位置「後退」3.58m（2591734 → 2591376），重新進入廊道觸發 `can_reactivate()`。
+
+**解決方案：**
+
+單次到站規則徹底解決此問題：
+- 每個站在一趟行程中只能到站一次
+- 無論是 GPS 雜訊或路線迴圈，都不會觸發第二次到站
+- 符合實際營運需求：同一趟次不需要重複報站
+
+**測試驗證：**
+
+- `test_one_time_announcement_rule`：驗證 `announced` 標記正確設置
+- `test_departed_state_prevents_reactivation`：驗證 `can_reactivate()` 永遠返回 false
+- `test_reset_is_noop`：驗證 `reset()` 不改變狀態
+
+**影響評估：**
+
+- ✅ 解決 GPS 雜訊導致的重複到站問題
+- ✅ 簡化狀態機邏輯（移除複雜的 reactivation 判斷）
+- ✅ 符合實際營運需求
+- ⚠️ 路線有迴圈時，第二次經過同一站點不會報站（預期行為）
+
 ---
 
 ## 15. 站序復原演算法（模組 ⑫）
@@ -1409,11 +1469,17 @@ $$\theta^* = \arg\max_\theta F_1\text{-score}(\theta)$$
 
 ## 版本更新記錄
 
-### v8.6（本版本）← v8.5 (2026-03-25)
+### v8.6（本版本）← v8.5 (2026-03-29)
 
-**新增：近距離站點檢測修正（Close-Stop Fix）**
+**修正：重複到站問題與近距離站點檢測**
 
-解決站距 <120m 時，因廊道重疊保護導致第二站檢測失敗的問題。
+本版本包含兩項重要修正，皆在 tpF805 路線測試中發現並修正：
+
+---
+
+#### 修正 1：重複到站問題（Duplicate Arrival Fix）
+
+解決 GPS 雜訊導致同一站點在一趟行程中被重複檢測的問題。
 
 **問題背景：**
 
@@ -1453,6 +1519,56 @@ $$\theta^* = \arg\max_\theta F_1\text{-score}(\theta)$$
 - `preprocessor/src/stops.rs`：新增 `preprocess_close_stop_corridors()`
 - `arrival_detector/src/probability.rs`：新增 `arrival_probability_adaptive()`
 - `arrival_detector/src/main.rs`：傳遞 sequential next_stop
+
+---
+
+#### 修正 1 補充：重複到站問題（Duplicate Arrival Fix）
+
+**問題背景：**
+
+- tpF805 路線 Stop #33 發生重複到站
+- 第一次到站：time 8733, s_cm=2587371, just_arrived=true ✓
+- 離站：time 8745, s_cm=2591734, state=Departed ✓
+- **重複到站（BUG）：**time 8765, s_cm=2591376, state=Approaching ❌
+
+**根本原因：**
+
+1. `can_reactivate()` 函數允許 `Departed` 狀態的站點在重新進入廊道時重新啟動
+2. GPS 雜訊導致公車位置「後退」3.58m（2591734 → 2591376）
+3. 重新進入廊道觸發 `can_reactivate()`，造成重複到站
+
+**解決方案：單次到站規則（One-Time Announcement Rule）**
+
+**規則：公車在一個趟次裡只能到站（報站）一次。**（詳見 Section 14.4）
+
+實作變更：
+1. **新增 `announced` 欄位**：在 `Arriving → AtStop` 轉移時設為 `true`，整趟行程永不重置
+2. **停用 `can_reactivate()`**：函數永遠返回 `false`，防止站點重新啟動
+3. **`reset()` 改為 No-op**：不再重置狀態為 `Idle`，保持 `Departed` 狀態
+
+**測試結果：**
+
+- 修復前：Stop #33 在 time 8765 重新進入 `Approaching` 狀態 ❌
+- 修復後：Stop #33 保持 `Departed` 狀態，無重複到站 ✓
+- 單元測試：新增 `test_one_time_announcement_rule` 等 12 個狀態機測試
+- BDD 測試：更新 `scenario_stop_reactivation` 與 `scenario_one_time_announcement_prevents_reactivation`
+- trace_validator：新增單次到站規則驗證，偵測重複到站問題
+
+**檔案變更：**
+- `arrival_detector/src/state_machine.rs`：新增 `announced` 欄位，停用 reactivation
+- `arrival_detector/tests/`：更新測試以反映新行為
+- `trace_validator/src/`：新增 `state_transitions` 追蹤與重複到站驗證
+
+---
+
+**綜合影響評估（v8.6 整體）：**
+
+- ✅ 解決 GPS 雜訊導致的重複到站問題
+- ✅ 解決近距離站點檢測失敗問題
+- ✅ 簡化狀態機邏輯（移除複雜的 reactivation 判斷）
+- ✅ 符合實際營運需求（一趟次一次報站）
+- ✅ 向後相容，二進制格式不變
+- ⚠️ 路線有迴圈時，第二次經過同一站點不會報站（預期行為）
 
 ---
 
