@@ -222,3 +222,38 @@ fn segment_near_point(p1: (i64, i64), p2: (i64, i64), point: (i64, i64), thresho
     let dist_sq = (px - closest_x).powi(2) + (py - closest_y).powi(2);
     dist_sq.sqrt() <= threshold_cm
 }
+
+/// Determine if a segment needs refinement based on stop proximity and sharp turns
+fn should_refine_segment(
+    p1: (i64, i64),
+    p2: (i64, i64),
+    route: &[(i64, i64)],
+    stop_indices: &[usize],
+    kept_indices: &[usize],
+) -> bool {
+    // Check proximity to stops
+    for &stop_idx in stop_indices {
+        if stop_idx < route.len() {
+            let stop = route[stop_idx];
+            if segment_near_point(p1, p2, stop, 10000.0) {
+                return true;
+            }
+        }
+    }
+
+    // Check for sharp turn at p1
+    if let Some(p1_route_idx) = route.iter().position(|&p| p == p1) {
+        if let Some(&prev_idx) = kept_indices.iter().rev().find(|&&i| i < p1_route_idx) {
+            if prev_idx > 0 && prev_idx < route.len() - 1 {
+                // Find b_idx (index of p2)
+                if let Some(p2_route_idx) = route.iter().position(|&p| p == p2) {
+                    if is_sharp_turn(route, prev_idx, p1_route_idx, p2_route_idx) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
