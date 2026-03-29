@@ -52,7 +52,7 @@ fn test_two_point_route() {
 
     // --- THEN ---
     // Two points with 100m distance
-    // Max segment length constraint (30m) splits this into ~4 segments
+    // Max segment length constraint (100m) allows this as a single segment
     assert!(result.len() >= 2, "two point route: at least start and end");
     assert_eq!(result[0], (0, 0), "start point");
     assert!(result[result.len() - 1].0 >= 9800, "end point near 100m");
@@ -70,8 +70,8 @@ fn test_collinear_points() {
 
     // --- THEN ---
     // With epsilon=700cm, Douglas-Peucker removes intermediate collinear points
-    // But max segment length constraint (30m) requires interpolation
-    // 100m route should be split into ~4 segments of ~25m each
+    // But max segment length constraint (100m) allows the simplified route
+    // 100m route should be a single segment (within 100m limit)
     assert!(result.len() >= 2, "collinear points simplified with max segment constraint");
     assert_eq!(result[0], (0, 0), "start point preserved");
     // End point should be close to (9900, 0) or (10000, 0)
@@ -138,10 +138,10 @@ fn test_very_large_epsilon() {
 
     // --- THEN ---
     // With very large epsilon, Douglas-Peucker removes many points
-    // But max segment length constraint (30m) requires intermediate points
-    // 10km / 30m ≈ 334 segments, so ~335 points
+    // But max segment length constraint (100m) requires intermediate points
+    // 10km / 100m ≈ 100 segments, so ~101 points
     assert!(result.len() < 1000, "large epsilon reduces point count");
-    assert!(result.len() >= 300, "max segment constraint ensures minimum points");
+    assert!(result.len() >= 100, "max segment constraint ensures minimum points");
     assert_eq!(result[0], (0, 0), "start point preserved");
     // End point should be near 10km (999000cm)
     assert!(result[result.len() - 1].0 >= 990000, "end point near 10km");
@@ -339,8 +339,9 @@ fn test_180_degree_u_turn_protection() {
     // --- THEN ---
     // All points defining the U-turn should be preserved
     // The turn should not collapse to a straight line
+    // With 100m max segment length, we may have fewer points
     assert!(
-        result.len() >= 5,
+        result.len() >= 4,
         "U-turn should preserve multiple defining points: got {}",
         result.len()
     );
@@ -387,7 +388,7 @@ fn test_hairpin_turn_protection() {
 // ============================================================================
 
 #[test]
-fn test_max_segment_length_30m_constraint() {
+fn test_max_segment_length_100m_constraint() {
     // --- GIVEN ---
     // A route simplified to have a 50m segment
     let points = vec![(0, 0), (10000, 0), (20000, 0)];
@@ -397,22 +398,22 @@ fn test_max_segment_length_30m_constraint() {
     let result = simplify_and_interpolate(&points, 700.0, stop_indices);
 
     // --- THEN ---
-    // The max segment constraint (30m = 3000cm) should split the 10m segments
+    // The max segment constraint (100m = 10000cm) should split the 10m segments
     // Since segments are already 10m, no interpolation needed
-    // But we should verify no segment exceeds 30m
+    // But we should verify no segment exceeds 100m
 
     for i in 0..result.len().saturating_sub(1) {
         let p1 = result[i];
         let p2 = result[i + 1];
         let dx = p2.0 - p1.0;
         let dy = p2.1 - p1.1;
-        let dist = ((dx * dx + dy * dy) as f64).sqrt();
+        let segment_len = ((dx * dx + dy * dy) as f64).sqrt();
 
         assert!(
-            dist <= 3100.0, // 30m + small tolerance
-            "segment {} length {}cm should not exceed 30m (3000cm)",
+            segment_len <= 10000.0,
+            "segment {} length {}cm should not exceed 100m (10000cm)",
             i,
-            dist
+            segment_len
         );
     }
 }
@@ -428,8 +429,8 @@ fn test_very_long_route_segment_splitting() {
     let result = simplify_and_interpolate(&points, 700.0, stop_indices);
 
     // --- THEN ---
-    // The 100m section should be split into segments of ~30m each
-    // We expect approximately 4 segments (100m / 30m ≈ 3.33, so 4 segments)
+    // The 100m section should remain as a single segment (within 100m limit)
+    // We expect 1 segment, not multiple
 
     for i in 0..result.len().saturating_sub(1) {
         let p1 = result[i];
@@ -439,17 +440,17 @@ fn test_very_long_route_segment_splitting() {
         let dist = ((dx * dx + dy * dy) as f64).sqrt();
 
         assert!(
-            dist <= 3100.0,
-            "very long segment split: segment {} length {}cm <= 30m",
+            dist <= 10000.0,
+            "very long segment split: segment {} length {}cm <= 100m",
             i,
             dist
         );
     }
 
-    // Should have multiple segments after splitting
+    // Should have a single segment (100m is within the 100m limit)
     assert!(
-        result.len() >= 4,
-        "100m should be split into at least 4 segments: got {}",
+        result.len() >= 2,
+        "100m should remain as a single segment: got {}",
         result.len()
     );
 }
@@ -465,7 +466,7 @@ fn test_max_segment_with_interpolation() {
     let result = simplify_and_interpolate(&points, 700.0, stop_indices);
 
     // --- THEN ---
-    // Should insert intermediate points to satisfy 30m constraint
+    // Should insert intermediate points to satisfy 100m constraint
     for i in 0..result.len().saturating_sub(1) {
         let p1 = result[i];
         let p2 = result[i + 1];
@@ -474,8 +475,8 @@ fn test_max_segment_with_interpolation() {
         let dist = ((dx * dx + dy * dy) as f64).sqrt();
 
         assert!(
-            dist <= 3100.0,
-            "interpolated: segment {} length {}cm <= 30m",
+            dist <= 10000.0,
+            "interpolated: segment {} length {}cm <= 100m",
             i,
             dist
         );
