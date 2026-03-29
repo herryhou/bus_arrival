@@ -214,7 +214,7 @@ function parseArgs(argv) {
 // ─── 常數 / 場景設定 ─────────────────────────────────────────────────────────
 
 const SCENARIOS = {
-  normal: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: false, outage: false, canyon: false },
+  normal: { hdop: 3.5, sigmaM: 15, sigmaHeading: 5.0, sats: 8, jump: false, outage: false, canyon: false },
   drift: { hdop: 7.0, sigmaM: 35, sigmaHeading: 15.0, sats: 5, jump: false, outage: false, canyon: true },
   jump: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: true, outage: false, canyon: false },
   outage: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: false, outage: true, canyon: false },
@@ -556,7 +556,7 @@ GLOBAL FLAGS:
   --force                   Skip confirmation prompts (currently: none)
 
 SCENARIOS:
-  normal    HDOP=3.5, σ(pos)=18m, σ(heading)=5°, 8 sats, no anomalies
+  normal    HDOP=3.5, σ(pos)=15m, σ(heading)=5°, 8 sats, no anomalies (GPS output: 1 Hz)
   drift     HDOP=7.0, σ(pos)=35m, σ(heading)=15°, 5 sats, urban canyon drift
   jump      Normal GPS, but with 100m+ position jump at 30% distance
   outage    GPS signal outage on segments 15-17
