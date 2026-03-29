@@ -1,7 +1,7 @@
 // Douglas-Peucker polyline simplification algorithm
 //
 // Implements the Ramer-Douglas-Peucker algorithm for reducing the number of points
-// in a polyline while preserving its overall geometry. 
+// in a polyline while preserving its overall geometry.
 //
 // v8 Spec Enhancements:
 // - ε_general = 700 cm (default tolerance)
@@ -11,6 +11,10 @@
 // - Adaptive segment length = 3000 cm (30m, near stops/sharp turns)
 
 use std::collections::HashSet;
+
+/// Adaptive segment length for critical areas in cm (30m = 3000cm)
+/// Used near stops and sharp turns for precise arrival detection
+const ADAPTIVE_SEGMENT_LENGTH_CM: f64 = 3000.0;
 
 /// Simplify a polyline and ensure max segment length by interpolating synthetic points if needed.
 pub fn simplify_and_interpolate(
@@ -256,4 +260,40 @@ fn should_refine_segment(
     }
 
     false
+}
+
+/// Apply adaptive segmentation to a route
+///
+/// Segments within 100m of stops or at sharp turns are refined to 30m max length.
+/// Other segments can be up to 100m in length.
+fn adaptive_segmentation(
+    route: &[(i64, i64)],
+    stop_indices: &[usize],
+    kept_indices: &[usize],
+) -> Vec<(i64, i64)> {
+    if route.len() <= 2 {
+        return route.to_vec();
+    }
+
+    let mut result = Vec::new();
+
+    for i in 0..route.len() - 1 {
+        let p1 = route[i];
+        let p2 = route[i + 1];
+
+        let segment_len = distance(p1, p2);
+        let needs_refinement = should_refine_segment(p1, p2, route, stop_indices, kept_indices);
+
+        if segment_len > ADAPTIVE_SEGMENT_LENGTH_CM && needs_refinement {
+            // Refine to 30m max for critical areas - use existing interpolate_recursive
+            result.push(p1);
+            interpolate_recursive(p1, p2, &mut result, ADAPTIVE_SEGMENT_LENGTH_CM);
+        } else {
+            // No refinement needed, just push start point
+            result.push(p1);
+        }
+    }
+
+    result.push(route[route.len() - 1]);
+    result
 }
