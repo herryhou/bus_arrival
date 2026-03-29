@@ -133,7 +133,10 @@ fn scenario_dense_stops_adjacent_corridors() {
 }
 
 #[test]
-fn scenario_stop_reactivation_after_loop() {
+fn scenario_one_time_announcement_prevents_reactivation() {
+    // v8.6: One-time announcement rule - a stop can only be announced once per trip
+    // Even if the route has loops and the bus passes the same stop again,
+    // it should not trigger another arrival announcement.
     use shared::FsmState;
 
     // Given: a stop with corridor [2000, 14000]
@@ -153,16 +156,22 @@ fn scenario_stop_reactivation_after_loop() {
     // When: bus arrives at stop
     state.update(10000, 0, stop.progress_cm, stop.corridor_start_cm, 200); // High probability triggers arrival
     assert_eq!(state.fsm_state, FsmState::AtStop);
+    assert!(state.announced, "announced flag should be set after arrival");
 
     // When: bus departs (moves past stop)
     state.update(15000, 500, stop.progress_cm, stop.corridor_start_cm, 0);
     assert_eq!(state.fsm_state, FsmState::Departed);
+    assert!(state.announced, "announced flag should remain true after departure");
 
-    // When: bus loops back and enters corridor again (e.g., circular route)
+    // v8.6: One-time announcement rule - even if bus loops back, it cannot be announced again
     let can_reset = state.can_reactivate(5000, stop.progress_cm);
-    assert!(can_reset, "Should be able to re-enter corridor after loop");
+    assert!(!can_reset, "Should NOT be able to re-enter corridor after loop (one-time announcement rule)");
 
+    // reset() is a no-op, state remains unchanged
+    let original_state = state.fsm_state;
+    let original_dwell = state.dwell_time_s;
     state.reset();
-    assert_eq!(state.fsm_state, FsmState::Idle);
-    assert_eq!(state.dwell_time_s, 0, "Dwell time should reset");
+    assert_eq!(state.fsm_state, original_state, "reset() should not change FSM state");
+    assert_eq!(state.dwell_time_s, original_dwell, "reset() should not change dwell time");
+    assert!(state.announced, "announced flag should remain true after reset()");
 }

@@ -26,6 +26,9 @@ pub struct StopState {
     /// Last announced stop (v8.4: announcement tracking)
     /// Uses u8::MAX (255) as uninitialized value
     pub last_announced_stop: u8,
+    /// Whether this stop has been announced in this trip (v8.6: one-time announcement)
+    /// Once true, this stop can never be announced again in the same trip
+    pub announced: bool,
 }
 
 impl StopState {
@@ -36,16 +39,18 @@ impl StopState {
             dwell_time_s: 0,
             last_probability: 0,
             last_announced_stop: u8::MAX,
+            announced: false,
         }
     }
 
     /// Reset state for re-entry into corridor (after departure)
+    ///
+    /// v8.6: This is NO-OP for one-time announcement rule.
+    /// Once a stop has been announced, it can never be announced again in the same trip.
+    /// The reset() function is kept for compatibility but does nothing.
     pub fn reset(&mut self) {
-        self.fsm_state = FsmState::Idle;
-        self.dwell_time_s = 0;
-        self.last_probability = 0;
-        // Note: last_announced_stop is NOT reset to allow re-announcement
-        // if the bus circles back to a previously visited stop
+        // NO-OP: Do not reset state to prevent duplicate announcements
+        // Once announced, always announced for this trip
     }
 
     /// Update state and return any event (arrival or departure)
@@ -99,6 +104,7 @@ impl StopState {
                     self.fsm_state = FsmState::AtStop;
                     self.dwell_time_s += 1;
                     self.last_probability = probability;
+                    self.announced = true;  // Mark as announced - one-time announcement rule
                     return StopEvent::Arrived; // Just arrived!
                 }
                 if d_to_stop > 4000 && s_cm > stop_progress {
@@ -155,10 +161,13 @@ impl StopState {
     }
 
     /// Check if stop can be re-activated (after departure)
-    pub fn can_reactivate(&self, s_cm: DistCm, stop_progress: DistCm) -> bool {
-        matches!(self.fsm_state, FsmState::Departed)
-            && s_cm >= stop_progress - 8000  // Back in corridor
-            && s_cm <= stop_progress + 4000
+    ///
+    /// v8.6: Always returns false - one-time announcement rule.
+    /// Once a stop has been announced, it can never be announced again in the same trip.
+    /// This prevents duplicate arrivals caused by GPS noise or route loops.
+    #[allow(dead_code)]
+    pub fn can_reactivate(&self, _s_cm: DistCm, _stop_progress: DistCm) -> bool {
+        false  // Never allow reactivation - one-time announcement per trip
     }
 
     /// Check if this is the terminal trip-completed state
@@ -209,7 +218,7 @@ mod tests {
         state.fsm_state = FsmState::TripComplete;
         assert!(state.is_trip_complete());
 
-        // Cannot reactivate from TripComplete
+        // v8.6: can_reactivate always returns false (one-time announcement rule)
         assert!(!state.can_reactivate(10000, 10000));
     }
 
@@ -251,16 +260,17 @@ mod tests {
     }
 
     #[test]
-    fn test_departed_state_allows_reactivation() {
-        // v8.5: Departed state can be reactivated, but TripComplete cannot
+    fn test_departed_state_prevents_reactivation() {
+        // v8.6: Departed state CANNOT be reactivated (one-time announcement rule)
+        // Once a stop has been announced, it can never be announced again in the same trip
         let mut state = StopState::new(10);
         state.fsm_state = FsmState::Departed;
         let stop_progress = 10000;
 
-        // Departed should allow reactivation within corridor
-        assert!(state.can_reactivate(stop_progress - 8000, stop_progress));
-        assert!(state.can_reactivate(stop_progress, stop_progress));
-        assert!(state.can_reactivate(stop_progress + 4000, stop_progress));
+        // Departed should NOT allow reactivation - one-time announcement per trip
+        assert!(!state.can_reactivate(stop_progress - 8000, stop_progress));
+        assert!(!state.can_reactivate(stop_progress, stop_progress));
+        assert!(!state.can_reactivate(stop_progress + 4000, stop_progress));
     }
 
     #[test]
@@ -369,8 +379,9 @@ mod tests {
     }
 
     #[test]
-    fn test_reset_returns_to_idle() {
-        // v8.5: reset() should return state to Idle, not Approaching
+    fn test_reset_is_noop() {
+        // v8.6: reset() is a no-op (one-time announcement rule)
+        // Once a stop has been announced, it can never be announced again
         let mut state = StopState::new(0);
         let stop_progress = 10000;
         let corridor_start_cm = 2000;
@@ -381,10 +392,53 @@ mod tests {
         state.fsm_state = FsmState::AtStop;
         state.dwell_time_s = 10;
 
-        // Reset should return to Idle
+        // Store original state values
+        let original_fsm_state = state.fsm_state;
+        let original_dwell_time = state.dwell_time_s;
+        let original_probability = state.last_probability;
+
+        // Reset should be a no-op - state should remain unchanged
         state.reset();
-        assert_eq!(state.fsm_state, FsmState::Idle);
-        assert_eq!(state.dwell_time_s, 0);
-        assert_eq!(state.last_probability, 0);
+        assert_eq!(state.fsm_state, original_fsm_state);
+        assert_eq!(state.dwell_time_s, original_dwell_time);
+        assert_eq!(state.last_probability, original_probability);
+    }
+
+    #[test]
+    fn test_one_time_announcement_rule() {
+        // v8.6: A stop can only be announced once per trip
+        let mut state = StopState::new(0);
+        let stop_progress = 10000;
+        let corridor_start_cm = 2000;
+
+        // Initially not announced
+        assert!(!state.announced);
+
+        // Enter corridor (Approaching)
+        let event = state.update(2000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(event, StopEvent::None);
+        assert!(!state.announced);
+
+        // Move to Arriving zone
+        let event = state.update(6000, 100, stop_progress, corridor_start_cm, 100);
+        assert_eq!(event, StopEvent::None);
+        assert!(!state.announced);
+
+        // First arrival should set announced flag
+        let event = state.update(14050, 100, stop_progress, corridor_start_cm, 200);
+        assert_eq!(event, StopEvent::Arrived);
+        assert!(state.announced, "announced flag should be set after arrival");
+
+        // Depart from stop
+        let event = state.update(15000, 500, stop_progress, corridor_start_cm, 10);
+        assert_eq!(event, StopEvent::Departed);
+        assert!(state.announced, "announced flag should remain true after departure");
+
+        // Even if we re-enter the corridor, can_reactivate returns false
+        assert!(!state.can_reactivate(stop_progress, stop_progress));
+
+        // reset() is a no-op, won't clear the announced flag
+        state.reset();
+        assert!(state.announced, "reset() should not clear announced flag");
     }
 }

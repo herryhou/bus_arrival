@@ -33,6 +33,7 @@ fn scenario_premature_departure() {
 
 #[test]
 fn scenario_stop_reactivation() {
+    // v8.6: One-time announcement rule - stops cannot be reactivated
     let stop = Stop {
         progress_cm: 10000,
         corridor_start_cm: 2000,
@@ -43,19 +44,17 @@ fn scenario_stop_reactivation() {
     // Given: stop is already in Departed state
     state.fsm_state = FsmState::Departed;
 
-    // When: bus moves back into the corridor (e.g. after a loop)
-    // d = |5000 - 10000| = 5000. 
-    // can_reactivate check: s_cm >= 10000 - 8000 = 2000 and s_cm <= 10000 + 4000 = 14000
+    // When: bus moves back into the corridor (e.g. after a loop or GPS noise)
+    // d = |5000 - 10000| = 5000.
+    // v8.6: can_reactivate always returns false (one-time announcement rule)
     let can_reset = state.can_reactivate(5000, stop.progress_cm);
-    assert!(can_reset);
+    assert!(!can_reset, "Should NOT be able to reactivate after departure");
 
-    if can_reset {
-        state.reset();
-    }
+    // Even if we call reset() (which should not happen in normal operation)
+    state.reset();
 
-    // Then: state should be Idle again
-    assert_eq!(state.fsm_state, FsmState::Idle);
-    assert_eq!(state.dwell_time_s, 0);
+    // Then: state should remain Departed (reset() is a no-op)
+    assert_eq!(state.fsm_state, FsmState::Departed, "reset() should not change FSM state");
 }
 
 #[test]
