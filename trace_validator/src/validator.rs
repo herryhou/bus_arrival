@@ -46,6 +46,9 @@ fn validate_stop(analysis: &mut StopAnalysis, gt_dwell: Option<u64>) {
         }
     }
 
+    // v8.6: Check one-time announcement rule - no duplicate arrivals
+    validate_one_time_announcement(analysis);
+
     // Temporal ordering check
     let state_order = [
         FsmState::Idle,
@@ -104,6 +107,45 @@ fn validate_stop(analysis: &mut StopAnalysis, gt_dwell: Option<u64>) {
                                actual_dwell, expected_dwell, diff),
             });
         }
+    }
+}
+
+/// v8.6: Validate one-time announcement rule
+/// Each stop should only be announced once per trip (no duplicate AtStop with just_arrived=true)
+fn validate_one_time_announcement(analysis: &mut StopAnalysis) {
+    let arrival_count = analysis.state_transitions
+        .iter()
+        .filter(|t| t.state == FsmState::AtStop && t.just_arrived)
+        .count();
+
+    if arrival_count > 1 {
+        analysis.issues.push(Issue {
+            severity: Severity::Critical,
+            stop_idx: Some(analysis.stop_idx),
+            message: format!(
+                "Duplicate arrival detected: stop announced {} times (one-time announcement rule violation)",
+                arrival_count
+            ),
+        });
+    }
+
+    // Also check for suspicious patterns: AtStop appearing multiple times
+    // (even if just_arrived is only true once, multiple AtStop entries suggest re-entry)
+    let at_stop_entries = analysis.state_transitions
+        .iter()
+        .filter(|t| t.state == FsmState::AtStop)
+        .count();
+
+    if at_stop_entries > 2 {
+        // Allow some tolerance for brief departures, but flag suspicious patterns
+        analysis.issues.push(Issue {
+            severity: Severity::Warning,
+            stop_idx: Some(analysis.stop_idx),
+            message: format!(
+                "Suspicious pattern: AtStop state appears {} times (possible corridor re-entry)",
+                at_stop_entries
+            ),
+        });
     }
 }
 

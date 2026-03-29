@@ -17,6 +17,8 @@ pub struct StopEvent {
 pub struct StopAnalysis {
     pub stop_idx: u8,
     pub events: BTreeMap<FsmState, StopEvent>,
+    /// All state transitions in chronological order (for duplicate detection)
+    pub state_transitions: Vec<StateTransition>,
     pub first_seen_time: Option<u64>,
     pub at_stop_first_time: Option<u64>,
     pub at_stop_last_time: Option<u64>,
@@ -29,11 +31,20 @@ pub struct StopAnalysis {
     pub in_corridor: bool,
 }
 
+/// A single FSM state transition for tracking all occurrences
+#[derive(Debug, Clone, Serialize)]
+pub struct StateTransition {
+    pub time: u64,
+    pub state: FsmState,
+    pub just_arrived: bool,
+}
+
 impl StopAnalysis {
     pub fn new(stop_idx: u8) -> Self {
         StopAnalysis {
             stop_idx,
             events: BTreeMap::new(),
+            state_transitions: Vec::new(),
             first_seen_time: None,
             at_stop_first_time: None,
             at_stop_last_time: None,

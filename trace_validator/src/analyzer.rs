@@ -1,4 +1,4 @@
-use crate::types::{StopAnalysis, ValidationResult, StopEvent};
+use crate::types::{StopAnalysis, ValidationResult, StopEvent, StateTransition};
 use arrival_detector::trace::TraceRecord;
 use shared::FsmState;
 
@@ -27,7 +27,8 @@ impl Analyzer {
                     .or_insert_with(|| StopAnalysis::new(stop_idx));
 
                 record_event(analysis, record.time, stop_state.fsm_state,
-                             stop_state.distance_cm, record.s_cm, record.v_cms);
+                             stop_state.distance_cm, record.s_cm, record.v_cms,
+                             stop_state.just_arrived);
                 track_corridor(analysis, record.time, stop_state.distance_cm);
             }
         }
@@ -40,11 +41,19 @@ impl Analyzer {
 }
 
 fn record_event(analysis: &mut StopAnalysis, time: u64, state: FsmState,
-                 distance_cm: i32, s_cm: i32, v_cms: i32) {
+                 distance_cm: i32, s_cm: i32, v_cms: i32, just_arrived: bool) {
     if analysis.first_seen_time.is_none() {
         analysis.first_seen_time = Some(time);
     }
 
+    // Record all state transitions for duplicate detection
+    analysis.state_transitions.push(StateTransition {
+        time,
+        state,
+        just_arrived,
+    });
+
+    // Record first occurrence of each state
     analysis.events.entry(state).or_insert_with(|| StopEvent {
         time, state, s_cm, v_cms, distance_cm
     });

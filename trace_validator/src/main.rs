@@ -64,11 +64,51 @@ fn print_summary(result: &trace_validator::ValidationResult) {
     println!("  With AtStop:       {}/{}", result.stops_with_at_stop(), result.total_stops());
     println!("  GPS jumps:         {}", result.gps_jump_count);
 
-    if !result.global_issues.is_empty() {
-        println!("\nGLOBAL ISSUES");
-        for issue in &result.global_issues {
-            println!("  - {}", issue.message);
+    // Collect all critical issues
+    let mut critical_issues: Vec<_> = Vec::new();
+    let mut warning_issues: Vec<_> = Vec::new();
+
+    for issue in &result.global_issues {
+        match issue.severity {
+            trace_validator::Severity::Critical => critical_issues.push(issue),
+            trace_validator::Severity::Warning => warning_issues.push(issue),
+            _ => {}
         }
+    }
+
+    for analysis in result.stops_analyzed.values() {
+        for issue in &analysis.issues {
+            match issue.severity {
+                trace_validator::Severity::Critical => critical_issues.push(issue),
+                trace_validator::Severity::Warning => warning_issues.push(issue),
+                _ => {}
+            }
+        }
+    }
+
+    if !critical_issues.is_empty() {
+        println!("\nCRITICAL ISSUES");
+        for issue in &critical_issues {
+            if let Some(stop_idx) = issue.stop_idx {
+                println!("  [Stop #{}] {}", stop_idx, issue.message);
+            } else {
+                println!("  - {}", issue.message);
+            }
+        }
+    }
+
+    if !warning_issues.is_empty() && warning_issues.len() <= 10 {
+        // Show warnings if there are 10 or fewer
+        println!("\nWARNINGS");
+        for issue in &warning_issues {
+            if let Some(stop_idx) = issue.stop_idx {
+                println!("  [Stop #{}] {}", stop_idx, issue.message);
+            } else {
+                println!("  - {}", issue.message);
+            }
+        }
+    } else if !warning_issues.is_empty() {
+        println!("\nWARNINGS: {} issues (see HTML report for details)", warning_issues.len());
     }
 
     let health = result.stops_with_at_stop() * 100 / result.total_stops();
