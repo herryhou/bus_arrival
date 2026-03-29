@@ -166,3 +166,10 @@ fn is_sharp_turn(points: &[(i64, i64)], a_idx: usize, m_idx: usize, b_idx: usize
 
     theta > 20.0
 }
+
+/// Calculate Euclidean distance between two points in centimeters
+fn distance(p1: (i64, i64), p2: (i64, i64)) -> f64 {
+    let dx = p2.0 - p1.0;
+    let dy = p2.1 - p1.1;
+    ((dx * dx + dy * dy) as f64).sqrt()
+}
