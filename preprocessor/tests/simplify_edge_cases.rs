@@ -529,3 +529,154 @@ fn test_very_small_route() {
     assert_eq!(result[0], (0, 0));
     assert_eq!(result[result.len() - 1], (100, 0));
 }
+
+// ============================================================================
+// Adaptive Segmentation Tests
+// ============================================================================
+
+#[test]
+fn test_adaptive_segmentation_near_stops() {
+    // --- GIVEN ---
+    // Route: 0m ---- 100m (stop at 80m) ---- 200m
+    let points = vec![
+        (0, 0),
+        (10000, 0),  // 100m segment, stop nearby
+        (20000, 0),
+    ];
+
+    let stop_indices = vec![1];  // Stop at middle point
+
+    // --- WHEN ---
+    let result = simplify_and_interpolate(&points, 700.0, &stop_indices);
+
+    // --- THEN ---
+    // Verify: segments near stop (within 100m) should be <=30m
+    for i in 0..result.len() - 1 {
+        let p1 = result[i];
+        let p2 = result[i + 1];
+        let dx = p2.0 - p1.0;
+        let dy = p2.1 - p1.1;
+        let dist = ((dx * dx + dy * dy) as f64).sqrt();
+
+        // Check if segment is near stop
+        let near_stop = stop_indices.iter().any(|&idx| {
+            let stop = points[idx];
+            segment_near_point_test(p1, p2, stop, 10000.0)
+        });
+
+        if near_stop {
+            assert!(
+                dist <= 3000.0,
+                "Segment near stop should be <=30m, got {}cm",
+                dist
+            );
+        }
+    }
+}
+
+#[test]
+fn test_no_refinement_far_from_stops() {
+    // --- GIVEN ---
+    // Route: 0m ---------- 100m ---------- 200m (no stops)
+    let points = vec![
+        (0, 0),
+        (10000, 0),
+        (20000, 0),
+    ];
+
+    let stop_indices = vec![];  // No stops
+
+    // --- WHEN ---
+    let result = simplify_and_interpolate(&points, 700.0, &stop_indices);
+
+    // --- THEN ---
+    // Verify: segments can be up to 100m when no stops nearby
+    let max_segment_len = result.iter().zip(result.iter().skip(1))
+        .map(|(p1, p2)| {
+            let dx = p2.0 - p1.0;
+            let dy = p2.1 - p1.1;
+            ((dx * dx + dy * dy) as f64).sqrt()
+        })
+        .max_by(|a, b| a.partial_cmp(b).unwrap())
+        .unwrap_or(0.0);
+
+    assert!(
+        max_segment_len <= 10000.0,
+        "Max segment length should be <=100m, got {}cm",
+        max_segment_len
+    );
+
+    // With no stops and straight route, 100m segments are allowed
+    // The route has two 100m segments, both should remain as-is
+    assert_eq!(result.len(), 3, "Route should remain unchanged with no stops");
+}
+
+#[test]
+fn test_adaptive_segmentation_sharp_turn() {
+    // --- GIVEN ---
+    // L-shaped route with 100m segments
+    // (0,0) -> (10000, 0) -> (10000, 10000)
+    let points = vec![
+        (0, 0),
+        (10000, 0),   // 90 degree turn here
+        (10000, 10000),
+    ];
+
+    let stop_indices = vec![];
+
+    // --- WHEN ---
+    let result = simplify_and_interpolate(&points, 700.0, &stop_indices);
+
+    // --- THEN ---
+    // Verify: segments at sharp turn should be refined
+    // The corner point should be preserved
+    assert!(result.contains(&(10000, 0)), "Corner point should be preserved");
+
+    // Verify no segment exceeds 100m
+    for i in 0..result.len() - 1 {
+        let p1 = result[i];
+        let p2 = result[i + 1];
+        let dx = p2.0 - p1.0;
+        let dy = p2.1 - p1.1;
+        let dist = ((dx * dx + dy * dy) as f64).sqrt();
+
+        assert!(
+            dist <= 10000.0,
+            "All segments should be <=100m, got {}cm",
+            dist
+        );
+    }
+}
+
+// ============================================================================
+// Test Helper Functions
+// ============================================================================
+
+/// Test helper for segment-point distance calculation.
+/// Returns true if the minimum distance from point to segment is <= threshold.
+fn segment_near_point_test(p1: (i64, i64), p2: (i64, i64), point: (i64, i64), threshold: f64) -> bool {
+    let px = point.0 as f64;
+    let py = point.1 as f64;
+    let x1 = p1.0 as f64;
+    let y1 = p1.1 as f64;
+    let x2 = p2.0 as f64;
+    let y2 = p2.1 as f64;
+
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let ldx = px - x1;
+    let ldy = py - y1;
+
+    let seg_len2 = dx * dx + dy * dy;
+    let t = if seg_len2 < 1e-10 {
+        0.0
+    } else {
+        ((ldx * dx + ldy * dy) / seg_len2).clamp(0.0, 1.0)
+    };
+
+    let closest_x = x1 + t * dx;
+    let closest_y = y1 + t * dy;
+    let dist_sq = (px - closest_x).powi(2) + (py - closest_y).powi(2);
+
+    dist_sq.sqrt() <= threshold
+}
