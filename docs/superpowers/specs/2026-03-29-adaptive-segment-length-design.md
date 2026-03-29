@@ -22,7 +22,7 @@ Reduce binary size by increasing default route segment length from 30m to 100m, 
 |-----------|-------|-------------|
 | `MAX_SEGMENT_LENGTH_CM` | 10000 cm (100m) | Default maximum segment length |
 | `ADAPTIVE_SEGMENT_LENGTH_CM` | 3000 cm (30m) | Maximum segment length in critical areas |
-| `STOP_PROXIMITY_THRESHOLD_CM` | 5000 cm (50m) | Distance threshold for stop proximity |
+| `STOP_PROXIMITY_THRESHOLD_CM` | 10000 cm (100m) | Distance threshold for stop proximity |
 | `SHARP_TURN_DEGREES` | 20.0° | Turn angle threshold for refinement |
 
 ### Data Flow
@@ -44,7 +44,7 @@ pub const MAX_SEGMENT_LENGTH_CM: i32 = 10000;  // was 3000
 
 // New constants for adaptive segmentation
 pub const ADAPTIVE_SEGMENT_LENGTH_CM: i32 = 3000;  // 30m for critical areas
-pub const STOP_PROXIMITY_THRESHOLD_CM: f64 = 5000.0;  // 50m
+pub const STOP_PROXIMITY_THRESHOLD_CM: f64 = 10000.0;  // 100m - covers entire pre-stop corridor
 pub const SHARP_TURN_DEGREES: f64 = 20.0;
 ```
 
@@ -96,21 +96,22 @@ fn adaptive_segmentation(
 #### Add `should_refine_segment` function
 
 A segment needs refinement if **ANY** of these are true:
-1. Any point on the segment is within 50m of a stop
+1. Any point on the segment is within 100m of a stop (covers entire pre-stop corridor)
 2. The segment forms a turn >20° with adjacent segments
 
 ## Algorithm Details
 
 ### Refinement Criteria
 
-1. **Stop Proximity:** Check if segment passes within 50m of any stop
+1. **Stop Proximity:** Check if segment passes within 100m of any stop (ensures entire pre-stop corridor uses 30m segments for precise arrival detection)
 2. **Sharp Turn:** Check if the angle at segment start/end exceeds 20°
 
 ### Segmentation Strategy
 
 - **Non-critical areas:** Allow segments up to 100m
-- **Critical areas (near stops/sharp turns):** Subdivide to max 30m
+- **Critical areas (within 100m of stops or sharp turns):** Subdivide to max 30m
 - **Subdivision:** Recursive midpoint splitting until threshold met
+- **Rationale:** 100m stop proximity ensures the entire pre-stop corridor uses refined segments for maximum arrival detection precision
 
 ## Error Handling & Edge Cases
 
@@ -127,7 +128,7 @@ A segment needs refinement if **ANY** of these are true:
 
 After adaptive segmentation, verify:
 1. No segment exceeds `MAX_SEGMENT_LENGTH_CM` (100m)
-2. Segments within 50m of stops don't exceed `ADAPTIVE_SEGMENT_LENGTH_CM` (30m)
+2. Segments within 100m of stops don't exceed `ADAPTIVE_SEGMENT_LENGTH_CM` (30m)
 3. All original stop positions are preserved
 4. Route start and end points remain unchanged
 
