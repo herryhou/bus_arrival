@@ -4,7 +4,7 @@
 // stop-to-segment mapping while preserving monotonicity.
 
 use shared::{RouteNode, SpatialGrid};
-use dp_mapper::map_stops;
+use dp_mapper::map_stops_with_names;
 
 /// Result of validation pass with complete segment mapping
 #[derive(Debug)]
@@ -31,10 +31,17 @@ pub struct ReversalInfo {
 }
 
 /// Validate stop sequence for monotonicity using globally optimal DP mapping.
+///
+/// # Arguments
+/// * `stops_cm` - Stop coordinates in centimeters
+/// * `stop_names` - Optional stop names for warning messages
+/// * `route_nodes` - Route nodes for projection
+/// * `_grid` - Spatial grid (unused - map_stops_with_names builds its own grid)
 pub fn validate_stop_sequence(
     stops_cm: &[(i64, i64)],
+    stop_names: &[Option<String>],
     route_nodes: &[RouteNode],
-    _grid: &SpatialGrid, // Grid is built internally by dp_mapper for now
+    _grid: &SpatialGrid,
 ) -> ValidationResult {
     if stops_cm.is_empty() {
         return ValidationResult {
@@ -45,8 +52,8 @@ pub fn validate_stop_sequence(
         };
     }
 
-    // Use dp_mapper for globally optimal mapping
-    let candidates = map_stops(stops_cm, route_nodes, Some(15));
+    // Use dp_mapper for globally optimal mapping (with warnings)
+    let candidates = map_stops_with_names(stops_cm, stop_names, route_nodes, None);
 
     if candidates.is_empty() && !stops_cm.is_empty() {
         // This should not happen with snap-forward fallback, but handle it

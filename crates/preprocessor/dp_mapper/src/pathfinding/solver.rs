@@ -1,9 +1,20 @@
 //! DP solver implementation
 
-use shared::RouteNode;
-use crate::candidate::{Candidate, generate_candidates, generate_candidates_with_snap};
 use crate::candidate::generator::SNAP_PENALTY_CM2;
+use crate::candidate::{generate_candidates, generate_candidates_with_snap, Candidate};
 use crate::grid::SpatialGrid;
+use shared::RouteNode;
+
+/// Threshold for warning about large projection errors (30m = 3000cm)
+const PROJECTION_WARN_THRESHOLD_CM2: i64 = 1_000_000; // (1000 cm)²
+
+/// Format stop identifier with index and optional name
+fn format_stop_id(index: usize, name: Option<&str>) -> String {
+    match name {
+        Some(n) if !n.is_empty() => format!("{} ({})", index + 1, n),
+        _ => format!("{}", index + 1),
+    }
+}
 
 /// DP layer for one stop: contains candidate states and running minimum
 #[derive(Debug, Clone)]
@@ -36,6 +47,27 @@ pub struct SortedCandidate {
 /// Candidates in INPUT ORDER (validated, non-decreasing progress)
 pub fn map_stops_dp(
     stops_cm: &[(i64, i64)],
+    route_nodes: &[RouteNode],
+    grid: &SpatialGrid,
+    k: usize,
+) -> Vec<Candidate> {
+    map_stops_dp_with_names(stops_cm, &[], route_nodes, grid, k)
+}
+
+/// Map stops to route using dynamic programming with stop names for warnings
+///
+/// # Arguments
+/// * `stops_cm` - Stop coordinates in centimeter coordinates (x, y)
+/// * `stop_names` - Optional stop names for warning messages
+/// * `route_nodes` - Linearized route nodes
+/// * `grid` - Spatial grid for candidate lookup
+/// * `k` - Number of candidates per stop
+///
+/// # Returns
+/// Candidates in INPUT ORDER (validated, non-decreasing progress)
+pub fn map_stops_dp_with_names(
+    stops_cm: &[(i64, i64)],
+    stop_names: &[Option<String>],
     route_nodes: &[RouteNode],
     grid: &SpatialGrid,
     k: usize,
@@ -74,7 +106,7 @@ pub fn map_stops_dp(
     }
 
     // Backtrack to find optimal path
-    dp_backtrack(&layers)
+    dp_backtrack(&layers, stop_names)
 }
 
 /// DP forward pass: compute minimum cost transitions from previous layer to current
@@ -92,10 +124,7 @@ pub fn map_stops_dp(
 ///
 /// # Returns
 /// New DpLayer with computed best_cost and best_prev
-pub fn dp_forward_pass(
-    prev_layer: Option<&DpLayer>,
-    curr_candidates: Vec<Candidate>,
-) -> DpLayer {
+pub fn dp_forward_pass(prev_layer: Option<&DpLayer>, curr_candidates: Vec<Candidate>) -> DpLayer {
     let n = curr_candidates.len();
 
     // Base case: no previous layer (first stop)
@@ -176,7 +205,10 @@ pub fn dp_forward_pass(
         if let Some((min_cost, prev_idx)) = running_min {
             let new_cost = min_cost.saturating_add(curr_dist);
             if new_cost == i64::MAX {
-                eprintln!("WARNING: Cost saturation at stop layer - min_cost={}, curr_dist={}", min_cost, curr_dist);
+                eprintln!(
+                    "WARNING: Cost saturation at stop layer - min_cost={}, curr_dist={}",
+                    min_cost, curr_dist
+                );
             }
             best_cost[curr_idx] = new_cost;
             best_prev[curr_idx] = Some(prev_idx);
@@ -197,9 +229,13 @@ pub fn dp_forward_pass(
 /// 2. Follow best_prev pointers back to first stop
 /// 3. Extract candidates in forward order
 ///
+/// # Arguments
+/// * `layers` - DP layers from forward pass
+/// * `stop_names` - Optional stop names for warning messages
+///
 /// # Returns
 /// Candidates for optimal path (in input order)
-pub fn dp_backtrack(layers: &[DpLayer]) -> Vec<Candidate> {
+pub fn dp_backtrack(layers: &[DpLayer], stop_names: &[Option<String>]) -> Vec<Candidate> {
     if layers.is_empty() {
         return vec![];
     }
@@ -236,12 +272,28 @@ pub fn dp_backtrack(layers: &[DpLayer]) -> Vec<Candidate> {
     // Reverse to get forward order
     path.reverse();
 
-    // Check for snap candidates in optimal path and warn
+    // Check for snap candidates and large projection errors in optimal path
     for (i, cand) in path.iter().enumerate() {
+        let stop_name = stop_names
+            .get(i)
+            .and_then(|n| n.as_ref())
+            .map(|s| s.as_str());
+
+        // Check for snap candidate usage
         if cand.dist_sq_cm2 == SNAP_PENALTY_CM2 {
             eprintln!(
                 "WARN: Stop {}: DP only selects snap candidate when no other valid transitions",
-                i + 1
+                format_stop_id(i, stop_name)
+            );
+        }
+
+        // Check for large projection errors (> 30m)
+        if cand.dist_sq_cm2 > PROJECTION_WARN_THRESHOLD_CM2 {
+            let dist_m = (cand.dist_sq_cm2 as f64).sqrt() / 100.0;
+            eprintln!(
+                "WARN: Stop {}: projection error {:.1}m from input GPS location - check route geometry or stop position",
+                format_stop_id(i, stop_name),
+                dist_m
             );
         }
     }
@@ -304,11 +356,13 @@ mod tests {
         // All should succeed without snap
         assert_eq!(result.len(), 4);
         for (i, cand) in result.iter().enumerate() {
-            assert!(cand.dist_sq_cm2 < SNAP_PENALTY_CM2,
-                    "Stop {} should not use snap candidate", i + 1);
+            assert!(
+                cand.dist_sq_cm2 < SNAP_PENALTY_CM2,
+                "Stop {} should not use snap candidate",
+                i + 1
+            );
         }
     }
-
 
     /// Test that normal stops don't trigger snap warning
     #[test]
@@ -348,8 +402,10 @@ mod tests {
 
         // None should be snap candidates (all should have small distance)
         for cand in &result {
-            assert!(cand.dist_sq_cm2 < SNAP_PENALTY_CM2,
-                    "Normal stops should not use snap candidates");
+            assert!(
+                cand.dist_sq_cm2 < SNAP_PENALTY_CM2,
+                "Normal stops should not use snap candidates"
+            );
         }
     }
 }

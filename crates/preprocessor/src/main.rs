@@ -130,18 +130,10 @@ fn main() {
         (x as i64, y as i64)
     }).collect();
 
-    // Validate stop sequence (always complete for debugging)
-    let validation = validate_stop_sequence(&stop_pts_cm, &route_nodes, &grid);
+    let stop_names: Vec<Option<String>> = stops_input.stops.iter().map(|s| s.stop_name.clone()).collect();
 
-    // Print stop-segment mapping for all stops
-    println!("[STOP-SEGMENT MAPPING]");
-    for (i, ((seg_idx, t), progress)) in validation.segment_indices.iter()
-        .zip(validation.t_values.iter())
-        .zip(validation.progress_values.iter())
-        .enumerate() {
-        println!("  Stop {:03}: segment={:5}, t={:.4}, progress={} cm",
-                 i + 1, seg_idx, t, progress);
-    }
+    // Validate stop sequence (always complete for debugging)
+    let validation = validate_stop_sequence(&stop_pts_cm, &stop_names, &route_nodes, &grid);
 
     // Check validation result
     let projected_stops = match &validation.reversal_info {

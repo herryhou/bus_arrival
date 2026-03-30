@@ -4,7 +4,7 @@
 // Ensures corridors don't overlap with minimum separation constraints.
 
 pub mod validation;
-pub use validation::{ValidationResult, ReversalInfo, validate_stop_sequence};
+pub use validation::validate_stop_sequence;
 
 use shared::Stop;
 use crate::input;

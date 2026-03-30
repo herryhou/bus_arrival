@@ -38,6 +38,9 @@ pub struct StopLocation {
     pub lat: f64,
     /// Longitude in decimal degrees
     pub lon: f64,
+    /// Stop name (optional)
+    #[serde(rename = "stopName")]
+    pub stop_name: Option<String>,
 }
 
 #[cfg(test)]
