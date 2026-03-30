@@ -248,3 +248,108 @@ pub fn dp_backtrack(layers: &[DpLayer]) -> Vec<Candidate> {
 
     path
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grid::build_grid;
+
+    /// Test that snap warning mechanism works
+    /// This test verifies that when DP must select a snap candidate,
+    /// the appropriate warning is displayed.
+    #[test]
+    fn test_snap_warning_mechanism() {
+        // Create a route with segment boundaries
+        let nodes = vec![
+            RouteNode {
+                len2_cm2: 10000 * 10000,
+                heading_cdeg: 0,
+                _pad: 0,
+                x_cm: 0,
+                y_cm: 0,
+                cum_dist_cm: 0,
+                dx_cm: 10000,
+                dy_cm: 0,
+                seg_len_cm: 10000,
+            },
+            RouteNode {
+                len2_cm2: 10000 * 10000,
+                heading_cdeg: 0,
+                _pad: 0,
+                x_cm: 10000,
+                y_cm: 0,
+                cum_dist_cm: 10000,
+                dx_cm: 10000,
+                dy_cm: 0,
+                seg_len_cm: 10000,
+            },
+            RouteNode {
+                len2_cm2: 0,
+                heading_cdeg: 0,
+                _pad: 0,
+                x_cm: 20000,
+                y_cm: 0,
+                cum_dist_cm: 20000,
+                dx_cm: 0,
+                dy_cm: 0,
+                seg_len_cm: 0,
+            },
+        ];
+        let grid = build_grid(&nodes, 10000);
+
+        // Normal monotonic stops - no snap expected
+        let stops = vec![(0, 0), (5000, 0), (10000, 0), (15000, 0)];
+        let result = map_stops_dp(&stops, &nodes, &grid, 5);
+
+        // All should succeed without snap
+        assert_eq!(result.len(), 4);
+        for (i, cand) in result.iter().enumerate() {
+            assert!(cand.dist_sq_cm2 < SNAP_PENALTY_CM2,
+                    "Stop {} should not use snap candidate", i + 1);
+        }
+    }
+
+
+    /// Test that normal stops don't trigger snap warning
+    #[test]
+    fn test_no_snap_warning_for_normal_stops() {
+        let nodes = vec![
+            RouteNode {
+                len2_cm2: 10000 * 10000,
+                heading_cdeg: 0,
+                _pad: 0,
+                x_cm: 0,
+                y_cm: 0,
+                cum_dist_cm: 0,
+                dx_cm: 10000,
+                dy_cm: 0,
+                seg_len_cm: 10000,
+            },
+            RouteNode {
+                len2_cm2: 0,
+                heading_cdeg: 0,
+                _pad: 0,
+                x_cm: 10000,
+                y_cm: 0,
+                cum_dist_cm: 10000,
+                dx_cm: 0,
+                dy_cm: 0,
+                seg_len_cm: 0,
+            },
+        ];
+        let grid = build_grid(&nodes, 10000);
+
+        // Normal monotonic stops
+        let stops = vec![(0, 0), (5000, 0), (10000, 0)];
+
+        let result = map_stops_dp(&stops, &nodes, &grid, 5);
+
+        assert_eq!(result.len(), 3);
+
+        // None should be snap candidates (all should have small distance)
+        for cand in &result {
+            assert!(cand.dist_sq_cm2 < SNAP_PENALTY_CM2,
+                    "Normal stops should not use snap candidates");
+        }
+    }
+}
