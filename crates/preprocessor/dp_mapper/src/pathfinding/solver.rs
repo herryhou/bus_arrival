@@ -2,6 +2,7 @@
 
 use shared::RouteNode;
 use crate::candidate::{Candidate, generate_candidates, generate_candidates_with_snap};
+use crate::candidate::generator::SNAP_PENALTY_CM2;
 use crate::grid::SpatialGrid;
 
 /// DP layer for one stop: contains candidate states and running minimum
@@ -234,5 +235,16 @@ pub fn dp_backtrack(layers: &[DpLayer]) -> Vec<Candidate> {
 
     // Reverse to get forward order
     path.reverse();
+
+    // Check for snap candidates in optimal path and warn
+    for (i, cand) in path.iter().enumerate() {
+        if cand.dist_sq_cm2 == SNAP_PENALTY_CM2 {
+            eprintln!(
+                "WARN: Stop {}: DP only selects snap candidate when no other valid transitions",
+                i + 1
+            );
+        }
+    }
+
     path
 }

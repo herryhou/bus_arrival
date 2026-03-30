@@ -4,6 +4,9 @@ use super::Candidate;
 use shared::RouteNode;
 use crate::grid::{SpatialGrid, query_neighbors};
 
+// Snap penalty: ~316 km² (100× larger than worst legitimate projection)
+pub const SNAP_PENALTY_CM2: i64 = 1_000_000_000_000;
+
 // Constants
 const GRID_RADIUS_MAX: u32 = 3;
 
@@ -80,9 +83,6 @@ pub fn generate_candidates(
 
     candidates
 }
-
-// Snap penalty: ~316 km² (100× larger than worst legitimate projection)
-const SNAP_PENALTY_CM2: i64 = 1_000_000_000_000;
 
 /// Generate candidates with snap-forward fallback
 pub fn generate_candidates_with_snap(
