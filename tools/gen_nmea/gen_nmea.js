@@ -43,6 +43,16 @@ const GENERATE_SCHEMA = {
       "enum": ["normal", "drift", "jump", "outage"],
       "default": "normal"
     },
+    "outage_start_seg": {
+      "type": "number",
+      "description": "Starting segment index for GPS outage (only used when scenario= outage)",
+      "default": 15
+    },
+    "outage_end_seg": {
+      "type": "number",
+      "description": "Ending segment index for GPS outage (only used when scenario=outage)",
+      "default": 17
+    },
     "out_nmea": {
       "type": "string",
       "description": "Output path for NMEA sentences file",
@@ -113,6 +123,8 @@ function parseArgs(argv) {
     commandArgs: [],
     route: 'route.json',
     scenario: 'normal',
+    outage_start_seg: 15,
+    outage_end_seg: 17,
     out_nmea: 'test.nmea',
     out_gt: 'ground_truth.json',
   };
@@ -138,8 +150,28 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === '--out_nmea') {
+    if (arg === '--outage-start-seg') {
+      args.outage_start_seg = parseInt(argv[++i]);
+      continue;
+    }
+
+    if (arg === '--outage-end-seg') {
+      args.outage_end_seg = parseInt(argv[++i]);
+      continue;
+    }
+
+    if (arg === '--out-nmea' || arg === '--out_nmea') {
       args.out_nmea = argv[++i];
+      continue;
+    }
+
+    if (arg === '--out-gt' || arg === '--out_gt') {
+      args.out_gt = argv[++i];
+      continue;
+    }
+
+    if (arg === '--scenario') {
+      args.scenario = argv[++i];
       continue;
     }
 
@@ -195,17 +227,14 @@ function parseArgs(argv) {
     }
 
     // Legacy flag support for backwards compatibility (before any command)
-    switch (arg) {
-      case '--route':
-      case '--stops':
-      case '--scenario':
-      case '--out-nmea':
-      case '--out-gt':
-        const key = arg.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-        args[key === 'outNmea' ? 'out_nmea' : key === 'outGt' ? 'out_gt' : key] = argv[++i];
-        break;
-      default:
+    // Note: Most flags are now handled above, this is just for unknown flags
+    if (arg.startsWith('--')) {
+      // Convert hyphenated to snake_case for known options
+      const knownOptions = ['route', 'stops', 'scenario', 'outage-start-seg', 'outage-end-seg', 'out-nmea', 'out-gt',
+                            'outage_start_seg', 'outage_end_seg', 'out_nmea', 'out_gt', 'json-payload'];
+      if (!knownOptions.includes(arg.slice(2)) && !knownOptions.includes(arg.replace(/-/g, '_').slice(2))) {
         exitError(1, `Unknown option: ${arg}`, [`Use --help for usage information`]);
+      }
     }
   }
   return args;
@@ -403,16 +432,13 @@ function simulate(route, cfg) {
   const segs = buildSegments(route_points, stops, traffic_lights || []);
   const totalDist = segs.reduce((s, g) => s + g.dist, 0);
 
-  const { hdop, sigmaM, sigmaHeading, sats } = cfg;
+  const { hdop, sigmaM, sigmaHeading, sats, outageStartSeg, outageEndSeg } = cfg;
   const noiseN = new AR1Noise(sigmaM);
   const noiseE = new AR1Noise(sigmaM);
   const noiseHeading = new AR1Noise(sigmaHeading);
 
   const jumpDistTarget = totalDist * 0.30;
   let jumpInjected = false;
-
-  const OUTAGE_SEG_START = 15;
-  const OUTAGE_SEG_END = 17;
 
   const nmeaLines = [];
   const groundTruth = [];
@@ -435,7 +461,7 @@ function simulate(route, cfg) {
 
   for (let si = 0; si < segs.length; si++) {
     const seg = segs[si];
-    const isOutage = cfg.outage && si >= OUTAGE_SEG_START && si <= OUTAGE_SEG_END;
+    const isOutage = cfg.outage && si >= outageStartSeg && si <= outageEndSeg;
     const prevSeg = si > 0 ? segs[si - 1] : null;
 
     // ── 在本段起點處理停靠 / 紅燈 ───────────────────────────────────────────
@@ -545,6 +571,8 @@ GENERATE OPTIONS:
   --route <path>                                           Route JSON file (default: route.json)
   --stops <path>                                           Stops JSON file with lat/lon (optional, uses route.stops if not provided)
   --scenario <name>                                        Scenario: normal, drift, jump, outage (default: normal)
+  --outage-start-seg <num>                                 Starting segment index for GPS outage (default: 15)
+  --outage-end-seg <num>                                   Ending segment index for GPS outage (default: 17)
   --out-nmea <path>                                        NMEA output file (default: test.nmea)
   --out-gt <path>                                          Ground truth output file (default: ground_truth.json)
 
@@ -608,10 +636,16 @@ function cmdGenerate(args) {
   if (globalFlags.verbose) logs.push('Starting NMEA generation...');
 
   // Validate scenario
-  const cfg = SCENARIOS[args.scenario];
+  let cfg = { ...SCENARIOS[args.scenario] };
   if (!cfg) {
     exitError(1, `Unknown scenario: ${args.scenario}`,
       [`Available scenarios: ${Object.keys(SCENARIOS).join(', ')}`]);
+  }
+
+  // Add custom outage parameters for outage scenario
+  if (args.scenario === 'outage') {
+    cfg.outageStartSeg = args.outage_start_seg;
+    cfg.outageEndSeg = args.outage_end_seg;
   }
 
   // Load route file
