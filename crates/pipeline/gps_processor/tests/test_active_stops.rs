@@ -15,28 +15,26 @@ fn setup_test_route_with_stop() -> (Vec<u8>, i32, i32) {
     // Create a 200m route with a stop at 100m
     // Segment 0: 200m North
     nodes.push(RouteNode {
-        len2_cm2: 20000 * 20000,
-        heading_cdeg: 0,
-        _pad: 0,
+        seg_len_mm: 200000, // 200m = 20000cm = 200000mm
         x_cm: start_x,
         y_cm: start_y,
         cum_dist_cm: 0,
         dx_cm: 0,
         dy_cm: 20000,
-        seg_len_cm: 20000,
+        heading_cdeg: 0,
+        _pad: 0,
     });
 
     // End node
     nodes.push(RouteNode {
-        len2_cm2: 0,
-        heading_cdeg: 0,
-        _pad: 0,
+        seg_len_mm: 0,
         x_cm: start_x,
         y_cm: start_y + 20000,
         cum_dist_cm: 20000,
         dx_cm: 0,
         dy_cm: 0,
-        seg_len_cm: 0,
+        heading_cdeg: 0,
+        _pad: 0,
     });
 
     // Create a stop at 100m (progress_cm = 10000)
@@ -174,27 +172,25 @@ fn test_active_stops_with_multiple_stops() {
     let start_y = 1000000;
 
     nodes.push(RouteNode {
-        len2_cm2: 30000 * 30000,
-        heading_cdeg: 0,
-        _pad: 0,
+        seg_len_mm: 300000, // 300m = 30000cm = 300000mm
         x_cm: start_x,
         y_cm: start_y,
         cum_dist_cm: 0,
         dx_cm: 0,
         dy_cm: 30000,
-        seg_len_cm: 30000,
+        heading_cdeg: 0,
+        _pad: 0,
     });
 
     nodes.push(RouteNode {
-        len2_cm2: 0,
-        heading_cdeg: 0,
-        _pad: 0,
+        seg_len_mm: 0,
         x_cm: start_x,
         y_cm: start_y + 30000,
         cum_dist_cm: 30000,
         dx_cm: 0,
         dy_cm: 0,
-        seg_len_cm: 0,
+        heading_cdeg: 0,
+        _pad: 0,
     });
 
     let stops = vec![
