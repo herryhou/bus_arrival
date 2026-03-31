@@ -31,7 +31,7 @@ pub fn generate_candidates(
             let node = &route_nodes[seg_idx];
 
             // Skip zero-length segments
-            if node.seg_len_cm == 0 || node.len2_cm2 == 0 {
+            if node.seg_len_mm == 0 {
                 continue;
             }
 
@@ -39,9 +39,13 @@ pub fn generate_candidates(
             let dx = stop.0 - node.x_cm as i64;
             let dy = stop.1 - node.y_cm as i64;
 
+            // Compute len2_cm2 at runtime: (seg_len_mm / 10)^2
+            let seg_len_cm = (node.seg_len_mm / 10) as i32;
+            let len2_cm2 = seg_len_cm as i64 * seg_len_cm as i64;
+
             // t = [(P - A) · (B - A)] / |B - A|²
             let t_num = dx * node.dx_cm as i64 + dy * node.dy_cm as i64;
-            let t = (t_num as f64 / node.len2_cm2 as f64).clamp(0.0, 1.0);
+            let t = (t_num as f64 / len2_cm2 as f64).clamp(0.0, 1.0);
 
             // Closest point on segment
             let px = node.x_cm as f64 + t * node.dx_cm as f64;
@@ -53,7 +57,7 @@ pub fn generate_candidates(
             let dist_sq_cm2 = (dist_x * dist_x + dist_y * dist_y) as i64;
 
             // Progress along route
-            let progress_cm = node.cum_dist_cm + (t * node.seg_len_cm as f64).round() as i32;
+            let progress_cm = node.cum_dist_cm + (t * seg_len_cm as f64).round() as i32;
 
             candidates.push(Candidate {
                 seg_idx,
@@ -98,7 +102,7 @@ pub fn generate_candidates_with_snap(
     // Find first segment whose END is past max_prev_progress_cm
     let snap_seg_idx = route_nodes
         .iter()
-        .position(|n| n.cum_dist_cm + n.seg_len_cm >= max_prev_progress_cm)
+        .position(|n| n.cum_dist_cm + (n.seg_len_mm / 10) as i32 >= max_prev_progress_cm)
         .unwrap_or(route_nodes.len().saturating_sub(2));
 
     // Create snap candidate at segment start

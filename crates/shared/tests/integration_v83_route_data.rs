@@ -1,11 +1,12 @@
 /// Integration test for loading real route_data.bin files
 ///
-/// This test verifies that the v8.5 binary format (40-byte RouteNode with repr(C))
+/// This test verifies that the v8.7 binary format (32-byte RouteNode with repr(C))
 /// can be correctly loaded and parsed.
 ///
-/// Note: v8.5 changed from repr(C, packed) to repr(C) to avoid UB with field references.
-/// This increased RouteNode size from 36 to 40 bytes and requires VERSION 3.
-/// Existing route_data.bin files need to be regenerated with the preprocessor.
+/// Note: v8.7 optimized the RouteNode structure to 32 bytes (28 data + 4 padding)
+/// by removing len2_cm2 (now computed at runtime) and changing seg_len_cm to seg_len_mm.
+/// This requires VERSION 4. Existing route_data.bin files need to be regenerated
+/// with the preprocessor.
 
 use std::fs;
 use shared::binfile::RouteData;
@@ -26,11 +27,11 @@ fn test_load_ty225_route_data() {
     assert!(data.len() > 30_000, "File too small to be valid route data");
     assert!(data.len() < 100_000, "File too large");
 
-    // Load the binary (will fail if VERSION is not 3)
+    // Load the binary (will fail if VERSION is not 4)
     let route_data = match RouteData::load(&data) {
         Ok(data) => data,
         Err(shared::binfile::BusError::InvalidVersion) => {
-            eprintln!("Skipping test: route_data.bin is VERSION 2, needs to be regenerated to VERSION 3");
+            eprintln!("Skipping test: route_data.bin is VERSION 3, needs to be regenerated to VERSION 4");
             return;
         }
         Err(e) => panic!("Failed to load route data: {:?}", e),
@@ -42,8 +43,11 @@ fn test_load_ty225_route_data() {
 
     // Verify we can access nodes (copy packed fields to locals)
     let first_node = route_data.get_node(0).expect("Failed to get first node");
-    let len2_cm2 = first_node.len2_cm2;
-    assert_eq!(len2_cm2, 3_945_265, "Unexpected len2_cm2");
+    let seg_len_mm = first_node.seg_len_mm;
+    // In v8.7, seg_len_mm is in millimeters with 10x precision
+    // The old len2_cm2 value was 3_945_265 cm²
+    // The segment length in mm should be approximately sqrt(3_945_265) * 10 ≈ 19863 mm
+    assert!(seg_len_mm > 19000 && seg_len_mm < 21000, "Unexpected seg_len_mm: {}", seg_len_mm);
 
     // Verify we can access stops
     let first_stop = route_data.get_stop(0).expect("Failed to get first stop");
@@ -67,10 +71,10 @@ fn test_load_ty225_route_data() {
     // Just verify the value is reasonable (positive and not excessive)
     assert!(last_cum_dist > 1_000_000, "Last node cum_dist too small");
 
-    println!("✓ Successfully loaded and validated route_data.bin (v8.5 VERSION 3)");
-    println!("  Nodes: {} × 40 bytes = {} KB",
+    println!("✓ Successfully loaded and validated route_data.bin (v8.7 VERSION 4)");
+    println!("  Nodes: {} × 32 bytes = {} KB",
         route_data.node_count,
-        route_data.node_count * 40 / 1024
+        route_data.node_count * 32 / 1024
     );
     println!("  Stops: {} × 12 bytes = {} KB",
         route_data.stop_count,

@@ -44,11 +44,11 @@ pub type Dist2 = i64;
 ///
 /// Field ordering: i64 fields placed first to satisfy 8-byte alignment
 /// without compiler-inserted padding on ARM Cortex-M33.
-/// Total size = 28 bytes (with repr(C) alignment).
+/// Total size = 32 bytes (28 data + 4 padding).
 ///
 /// # Layout (v8.7 - 28 bytes)
 /// ```text
-/// offset  0: seg_len_mm   i64   8 bytes  (|P[i+1]-P[i]|, mm)
+/// offset  0: seg_len_mm   i64   8 bytes  (|P\[i+1\]-P\[i\]|, mm)
 /// offset  8: x_cm         i32   4 bytes
 /// offset 12: y_cm         i32   4 bytes
 /// offset 16: cum_dist_cm  i32   4 bytes
@@ -80,9 +80,9 @@ pub struct RouteNode {
     pub cum_dist_cm: DistCm,
 
     // ── i16 fields (2-byte aligned) ────────────────────────────────
-    /// Segment vector X: x[i+1] - x[i] in cm
+    /// Segment vector X: x\[i+1\] - x\[i\] in cm
     pub dx_cm: i16,
-    /// Segment vector Y: y[i+1] - y[i] in cm
+    /// Segment vector Y: y\[i+1\] - y\[i\] in cm
     pub dy_cm: i16,
     /// Segment heading in 0.01° (e.g., 9000 = 90°)
     pub heading_cdeg: HeadCdeg,

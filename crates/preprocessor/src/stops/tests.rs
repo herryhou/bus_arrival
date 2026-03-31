@@ -10,32 +10,32 @@ mod tests {
         let mut cum_dist = 0i32;
 
         for i in 0..coords.len() {
-            let (dx, dy, len2, seg_len, heading) = if i < coords.len() - 1 {
+            let (dx, dy, seg_len_mm, heading) = if i < coords.len() - 1 {
                 let curr = coords[i];
                 let next = coords[i + 1];
                 let dx = next.0 - curr.0;
                 let dy = next.1 - curr.1;
                 let len2 = dx * dx + dy * dy;
-                let seg_len = (len2 as f64).sqrt() as i32;
+                let seg_len_cm = (len2 as f64).sqrt() as i32;
+                let seg_len_mm = seg_len_cm as i64 * 10;
                 let heading = (dy as f64).atan2(dx as f64).to_degrees() as i16 * 100;
-                (dx, dy, len2, seg_len, heading)
+                (dx, dy, seg_len_mm, heading)
             } else {
-                (0, 0, 0, 0, 0)
+                (0, 0, 0, 0)
             };
 
             nodes.push(RouteNode {
-                len2_cm2: len2,
-                heading_cdeg: heading,
-                _pad: 0,
+                seg_len_mm,
                 x_cm: coords[i].0 as i32,
                 y_cm: coords[i].1 as i32,
                 cum_dist_cm: cum_dist,
-                dx_cm: dx as i32,
-                dy_cm: dy as i32,
-                seg_len_cm: seg_len,
+                dx_cm: dx as i16,
+                dy_cm: dy as i16,
+                heading_cdeg: heading,
+                _pad: 0,
             });
 
-            cum_dist += seg_len;
+            cum_dist += (seg_len_mm / 10) as i32;
         }
         nodes
     }
@@ -60,7 +60,8 @@ mod tests {
         let nodes = make_test_nodes(&[(0, 0), (1000, 0), (2000, 0), (3000, 0)]);
         let grid = make_test_grid(&nodes);
 
-        let result = validate_stop_sequence(&stops, &nodes, &grid);
+        let stop_names = vec![None; stops.len()];
+        let result = validate_stop_sequence(&stops, &stop_names, &nodes, &grid);
 
         // All stops should project with increasing progress
         assert!(result.reversal_info.is_none(), "Expected no reversal but got: {:?}", result.reversal_info);
@@ -76,7 +77,8 @@ mod tests {
         let nodes = make_test_nodes(&[(0, 0), (2000, 0)]);
         let grid = make_test_grid(&nodes);
 
-        let result = validate_stop_sequence(&stops, &nodes, &grid);
+        let stop_names = vec![None; stops.len()];
+        let result = validate_stop_sequence(&stops, &stop_names, &nodes, &grid);
 
         assert!(result.reversal_info.is_none());
         assert_eq!(result.progress_values.len(), 1);
@@ -88,7 +90,8 @@ mod tests {
         let nodes = make_test_nodes(&[(0, 0)]);
         let grid = make_test_grid(&nodes);
 
-        let result = validate_stop_sequence(&stops, &nodes, &grid);
+        let stop_names = vec![None; stops.len()];
+        let result = validate_stop_sequence(&stops, &stop_names, &nodes, &grid);
 
         assert!(result.reversal_info.is_none());
         assert_eq!(result.progress_values.len(), 0);
@@ -104,7 +107,8 @@ mod tests {
         let nodes = make_test_nodes(&[(0, 0), (1000, 0), (2000, 0), (3000, 0)]);
         let grid = make_test_grid(&nodes);
 
-        let result = validate_stop_sequence(&stops, &nodes, &grid);
+        let stop_names = vec![None; stops.len()];
+        let result = validate_stop_sequence(&stops, &stop_names, &nodes, &grid);
 
         // Both stops should be on the route with increasing progress
         assert!(result.reversal_info.is_none(), "Expected no reversal but got: {:?}", result.reversal_info);
