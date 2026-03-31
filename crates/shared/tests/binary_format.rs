@@ -8,7 +8,7 @@ use shared::binfile::{RouteData, MAGIC, VERSION};
 fn test_header_magic_and_version() {
     // Verify we can identify valid magic bytes and version
     assert_eq!(MAGIC, 0x42555341); // "BUSA"
-    assert_eq!(VERSION, 4); // v4: v8.7 RouteNode optimization
+    assert_eq!(VERSION, 5); // v5: v8.8 Grid optimization (bitmask + u16 offsets)
 }
 
 #[test]

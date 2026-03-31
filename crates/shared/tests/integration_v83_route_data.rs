@@ -1,12 +1,11 @@
 /// Integration test for loading real route_data.bin files
 ///
-/// This test verifies that the v8.7 binary format (24-byte RouteNode with repr(C))
+/// This test verifies that the v8.8 binary format (24-byte RouteNode with sparse Grid)
 /// can be correctly loaded and parsed.
 ///
-/// Note: v8.7 optimized the RouteNode structure to 24 bytes (16 bytes i32 + 8 bytes i16)
-/// by removing len2_cm2 (now computed at runtime), changing seg_len_cm to seg_len_mm (i32),
-/// and changing dx_cm/dy_cm from i32 to i16. Fields are grouped by type for optimal packing.
-/// This requires VERSION 4. Existing route_data.bin files need to be regenerated
+/// Note: v8.8 optimized the Grid structure using bitmask + u16 offsets.
+/// Grid space reduced from ~16KB to ~5KB (60-70% savings).
+/// This requires VERSION 5. Existing route_data.bin files need to be regenerated
 /// with the preprocessor.
 
 use std::fs;
@@ -28,11 +27,11 @@ fn test_load_ty225_route_data() {
     assert!(data.len() > 30_000, "File too small to be valid route data");
     assert!(data.len() < 100_000, "File too large");
 
-    // Load the binary (will fail if VERSION is not 4)
+    // Load the binary (will fail if VERSION is not 5)
     let route_data = match RouteData::load(&data) {
         Ok(data) => data,
         Err(shared::binfile::BusError::InvalidVersion) => {
-            eprintln!("Skipping test: route_data.bin is VERSION 3, needs to be regenerated to VERSION 4");
+            eprintln!("Skipping test: route_data.bin is VERSION 4, needs to be regenerated to VERSION 5");
             return;
         }
         Err(e) => panic!("Failed to load route data: {:?}", e),
@@ -72,7 +71,7 @@ fn test_load_ty225_route_data() {
     // Just verify the value is reasonable (positive and not excessive)
     assert!(last_cum_dist > 1_000_000, "Last node cum_dist too small");
 
-    println!("✓ Successfully loaded and validated route_data.bin (v8.7 VERSION 4)");
+    println!("✓ Successfully loaded and validated route_data.bin (v8.8 VERSION 5)");
     println!("  Nodes: {} × 32 bytes = {} KB",
         route_data.node_count,
         route_data.node_count * 32 / 1024

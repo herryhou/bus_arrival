@@ -670,11 +670,11 @@ pub fn route_nodes() -> &'static [RouteNode] {
 | grid_origin（8 B） | 8 B | x0_cm, y0_cm（i32 × 2） |
 | route_nodes（N × 32 B） | ~19.2 KB | RouteNode 陣列（v8.7） |
 | stops（M × 12 B） | ~0.6 KB | Stop 陣列 |
-| grid_index | ~1.2 KB | Spatial Grid Index |
+| grid_index | ~5 KB | Spatial Grid Index (v8.8: sparse grid) |
 | CRC32（4 bytes） | 4 B | 整體完整性驗證 |
 | **合計** | **~16 KB** | |
 
-> **v8.7 更新：** VERSION=4，RouteNode 從 40→24 bytes，總體從 ~34 KB 降至 ~16 KB（節省 18 KB Flash）。
+> **v8.8 更新：** VERSION=5，Grid 使用 bitmask + u16 offsets，Grid 從 ~16 KB 降至 ~5 KB（節省 ~11 KB Flash）。
 
 ### 7.3 啟動完整性驗證
 

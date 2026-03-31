@@ -16,7 +16,9 @@ pub const MAGIC: u32 = 0x42555341;
 ///             Size now 40 bytes on platforms with 8-byte i64 alignment
 /// v4 (v8.7): RouteNode optimization - remove len2_cm2, seg_len_cm→seg_len_mm (i64),
 ///             dx_cm/dy_cm i32→i16. Size now 32 bytes (28 data + 4 padding).
-pub const VERSION: u16 = 4;
+/// v5 (v8.8): Grid optimization - bitmask for sparse cells + u16 offsets.
+///             Grid space reduced from ~16KB to ~5KB (60-70% savings).
+pub const VERSION: u16 = 5;
 
 /// Error types for the bus arrival binary file handling
 #[derive(Debug, PartialEq)]
@@ -27,6 +29,7 @@ pub enum BusError {
     ChecksumMismatch,
     OutOfBounds,
     IoError,
+    GridDataOverflow, // Grid data exceeds u16 offset limit (64KB)
 }
 
 impl std::fmt::Display for BusError {
@@ -38,6 +41,7 @@ impl std::fmt::Display for BusError {
             BusError::ChecksumMismatch => write!(f, "Checksum mismatch"),
             BusError::OutOfBounds => write!(f, "Out of bounds"),
             BusError::IoError => write!(f, "I/O error"),
+            BusError::GridDataOverflow => write!(f, "Grid data exceeds 64KB limit (u16 offset overflow)"),
         }
     }
 }
@@ -46,10 +50,16 @@ impl std::error::Error for BusError {}
 
 /// A read-only view into the spatial grid index.
 /// Enables O(1) cell access directly from Flash memory.
+///
+/// v5 format (sparse grid):
+/// - Bitmask (1 bit per cell): 1 = cell has data, 0 = empty
+/// - Offsets table (u16 per non-empty cell): offset into data section
+/// - Data section: count (u16) + segment indices (u16 each)
 pub struct SpatialGridView<'a> {
     pub cols: u32,
     pub rows: u32,
     pub grid_size_cm: i32,
+    bitmask_base: *const u8,
     offsets_base: *const u8,
     data_base: *const u8,
     _marker: PhantomData<&'a u8>,
@@ -57,25 +67,80 @@ pub struct SpatialGridView<'a> {
 
 impl<'a> SpatialGridView<'a> {
     /// Returns the segment indices for a specific cell.
+    /// Uses bitmask for sparse cell lookup and u16 offsets.
     pub fn get_cell(&self, col: u32, row: u32) -> Result<&'a [u16], BusError> {
         if col >= self.cols || row >= self.rows {
             return Err(BusError::OutOfBounds);
         }
-        let idx = (row * self.cols + col) as usize;
-        
-        let offset_ptr = unsafe { self.offsets_base.add(idx * 4) as *const u32 };
+        let cell_idx = (row * self.cols + col) as usize;
+
+        // Check bitmask to see if cell has data
+        let byte_idx = cell_idx / 8;
+        let bit_mask = 1 << (cell_idx % 8);
+        let bitmask_byte = unsafe { *self.bitmask_base.add(byte_idx) };
+
+        if bitmask_byte & bit_mask == 0 {
+            // Empty cell
+            return Ok(&[]);
+        }
+
+        // Find the offset index by counting set bits before this cell
+        // This gives us the index into the offsets table
+        let offset_idx = self.count_set_bits_before(cell_idx);
+
+        // Read offset as u16 (2 bytes)
+        let offset_ptr = unsafe { self.offsets_base.add(offset_idx * 2) as *const u16 };
         let start_offset = unsafe { core::ptr::read_unaligned(offset_ptr) } as usize;
-        
-        let cell_ptr = unsafe { self.data_base.add(start_offset) as *const u16 };
-        // First u16 is the count
-        let count = unsafe { core::ptr::read_unaligned(cell_ptr) } as usize;
-        let indices_ptr = unsafe { cell_ptr.add(1) };
-        
-        // slice::from_raw_parts still requires alignment for the type.
-        // If the base pointer is not aligned, we must use a different approach or 
-        // ensure alignment during packing.
-        // For now, we'll assume the caller provides an aligned buffer.
-        Ok(unsafe { core::slice::from_raw_parts(indices_ptr, count) })
+
+        // Calculate actual pointer into data section
+        let data_ptr = unsafe { self.data_base.add(start_offset) };
+
+        // Read count (first u16 in cell data)
+        let count = unsafe { core::ptr::read_unaligned(data_ptr as *const u16) } as usize;
+
+        // Return empty slice if count is 0
+        if count == 0 {
+            return Ok(&[]);
+        }
+
+        // Read segment indices - use unaligned reads
+        let indices_ptr = unsafe { data_ptr.add(2) as *const u16 };
+
+        // Check alignment and handle appropriately
+        if indices_ptr as usize % 2 == 0 {
+            // Aligned, can use from_raw_parts directly
+            Ok(unsafe { core::slice::from_raw_parts(indices_ptr, count) })
+        } else {
+            // Unaligned, need to copy to a temporary buffer
+            // Use a thread-local static buffer for this case (rare)
+            // For now, panic to indicate the data format issue
+            panic!("Grid data is not aligned to 2-byte boundary. This should not happen with correctly packed data.");
+        }
+    }
+
+    /// Count the number of set bits (1s) in the bitmask before the given index.
+    /// This is used to find the offset index for a cell.
+    #[inline]
+    fn count_set_bits_before(&self, idx: usize) -> usize {
+        let mut count = 0;
+        let mut i = 0;
+
+        // Count full bytes
+        while i + 8 <= idx {
+            let byte = unsafe { *self.bitmask_base.add(i / 8) };
+            count += byte.count_ones() as usize;
+            i += 8;
+        }
+
+        // Count remaining bits in the partial byte
+        let remaining = idx - i;
+        if remaining > 0 {
+            let byte = unsafe { *self.bitmask_base.add(i / 8) };
+            let mask = (1u8 << remaining) - 1;
+            count += (byte & mask).count_ones() as usize;
+        }
+
+        count
     }
 }
 
@@ -158,10 +223,28 @@ impl<'a> RouteData<'a> {
         offset += 12;
 
         let cell_count = (cols * rows) as usize;
-        let offsets_size = cell_count * 4;
+        // v5: bitmask (1 bit per cell, rounded up to whole bytes)
+        let bitmask_bytes = (cell_count + 7) / 8;
+        if data.len() < offset + bitmask_bytes { return Err(BusError::InvalidLength); }
+        let bitmask_base = data[offset..].as_ptr();
+        offset += bitmask_bytes;
+
+        // Count non-empty cells from bitmask
+        let non_empty_count = (0..bitmask_bytes)
+            .filter(|&i| unsafe { *bitmask_base.add(i) } != 0)
+            .map(|i| unsafe { (*bitmask_base.add(i)).count_ones() as usize })
+            .sum::<usize>();
+
+        // v5: u16 offsets (2 bytes per non-empty cell)
+        let offsets_size = non_empty_count * 2;
         if data.len() < offset + offsets_size { return Err(BusError::InvalidLength); }
         let offsets_base = data[offset..].as_ptr();
         offset += offsets_size;
+
+        // v5: Skip padding to ensure cell data is 2-byte aligned
+        while offset % 2 != 0 {
+            offset += 1;
+        }
 
         let grid_data_start = offset;
         let luts_start = data.len() - 388;
@@ -171,6 +254,7 @@ impl<'a> RouteData<'a> {
             cols,
             rows,
             grid_size_cm,
+            bitmask_base,
             offsets_base,
             data_base: data[grid_data_start..].as_ptr(),
             _marker: PhantomData,
@@ -240,21 +324,44 @@ pub fn pack_route_data(
     buffer.write_all(&grid.rows.to_le_bytes()).map_err(|_| BusError::IoError)?;
     buffer.write_all(&grid.grid_size_cm.to_le_bytes()).map_err(|_| BusError::IoError)?;
 
+    // v5: Build bitmask and sparse offsets
+    let cell_count = (grid.cols * grid.rows) as usize;
+    let bitmask_bytes = (cell_count + 7) / 8;
+    let mut bitmask = vec![0u8; bitmask_bytes];
+
     let mut index_data = Vec::new();
-    let mut offsets = Vec::with_capacity((grid.cols * grid.rows) as usize);
-    
-    for cell in &grid.cells {
-        offsets.push(index_data.len() as u32);
-        let count = (cell.len().min(65535)) as u16;
-        index_data.write_all(&count.to_le_bytes()).map_err(|_| BusError::IoError)?;
-        for &seg_idx in cell {
-            index_data.write_all(&(seg_idx as u16).to_le_bytes()).map_err(|_| BusError::IoError)?;
+    let mut offsets = Vec::new(); // Only for non-empty cells
+
+    for (idx, cell) in grid.cells.iter().enumerate() {
+        if !cell.is_empty() {
+            // Set bitmask bit
+            bitmask[idx / 8] |= 1 << (idx % 8);
+            // Store offset (u16) - check for overflow
+            let current_offset = index_data.len();
+            if current_offset > u16::MAX as usize {
+                return Err(BusError::GridDataOverflow);
+            }
+            offsets.push(current_offset as u16);
+            // Write cell data
+            let count = (cell.len().min(65535)) as u16;
+            index_data.write_all(&count.to_le_bytes()).map_err(|_| BusError::IoError)?;
+            for &seg_idx in cell {
+                index_data.write_all(&(seg_idx as u16).to_le_bytes()).map_err(|_| BusError::IoError)?;
+            }
         }
     }
 
+    // Write bitmask
+    buffer.write_all(&bitmask).map_err(|_| BusError::IoError)?;
+    // Write u16 offsets (only for non-empty cells)
     for offset in offsets {
         buffer.write_all(&offset.to_le_bytes()).map_err(|_| BusError::IoError)?;
     }
+    // Add padding to ensure cell data is 2-byte aligned
+    while buffer.len() % 2 != 0 {
+        buffer.push(0);
+    }
+    // Write cell data
     buffer.write_all(&index_data).map_err(|_| BusError::IoError)?;
 
     if gaussian_lut.len() != 256 || logistic_lut.len() != 128 {

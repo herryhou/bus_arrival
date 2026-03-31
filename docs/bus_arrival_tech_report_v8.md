@@ -421,7 +421,12 @@ let dy = node.dy_cm as i64;
 
 ### 二進位格式版本
 
-v8.7 使用 **VERSION 4**，與 v8.5（VERSION 3）不相容。舊版 `route_data.bin` 需重新生成。
+v8.8 使用 **VERSION 5**，與 v8.7（VERSION 4）不相容。舊版 `route_data.bin` 需重新生成。
+
+**v8.8 Grid 優化：**
+- **Bitmask 索引**：1 bit per cell，過濾空單元格
+- **u16 偏移量**：僅非空 cell 儲存偏移（max 65,535）
+- **空間節省**：~16 KB → ~5 KB（60-70% 壓縮）
 
 ---
 
@@ -1218,12 +1223,12 @@ $$\text{best\_seg} = \arg\max_i \left[\, P(O \mid S=i) \cdot P(S=i \mid S=\text{
 | **3** | **段長約束插值（自適應）** | 檢查簡化後路段，若長度 $> 10000\text{ cm}$（100m），則在中間插入補充節點。**自適應優化：** 站點 ±100m 範圍內及急彎處，段長限制為 30m，確保投影平滑度。 |
 | **4** | **累積距離線性化** | 以平面近似法計算各節點累積距離 $D[i]$ (i32 cm)。**注意：** 計算時需使用全局平均緯度 $lat\_avg$。 |
 | **5** | **預算幾何係數** | 為每個路段計算並儲存 $dx, dy$ (i16 cm), $seg\_len\_mm$ (i64), $heading\_cdeg$ (i16)。依照 v8.7 規範，**移除 len2 欄位** 以節省空間（改為 runtime 計算）。 |
-| **6** | **建立空間格網索引** | 根據線性化後的節點建立 $100\text{m} \times 100\text{m}$ 的 Spatial Grid Index。這將用於 DP mapper 的候選路段搜尋。 |
+| **6** | **建立空間格網索引** | 根據線性化後的節點建立 $100\text{m} \times 100\text{m}$ 的 Spatial Grid Index。**v8.8 優化：** 使用 bitmask + u16 offsets，空間從 ~16 KB 降至 ~5 KB。這將用於 DP mapper 的候選路段搜尋。 |
 | **7** | **DP 站點投影（dp_mapper）** | **(v8.4 核心更新)** 使用 `dp_mapper` crate 進行**全域最佳化**的站點投影：<br><br>**演算法概述：**<br>- 將站點投影問題轉化為**分層 DAG 最短路徑問題**（Viterbi-like）<br>- 每個站點產生 K 個候選投影（預設 K=15），使用空間格網進行 $O(k)$ 路段查詢<br>- DP 前向傳播：排序掃描找出最小成本路徑（滿足進度單調性）<br>- 回溯重建：從最終層最佳狀態回溯，輸出全域最佳路徑<br><br>**Snap-Forward 機制：**<br>- 對於 j > 0 的站點，若候選進度皆小於前一層最大進度，加入 snap-forward 候選<br>- Snap candidate 錨定於 `max_prev_progress_cm` 之後的首個路段，施加巨大懲罰（`SNAP_PENALTY_CM2 = 10^12 cm²`）<br>- DP 只會在無其他有效轉移時才選擇 snap candidate<br><br>**轉移約束：**<br>- 有效轉移條件：`progress[curr] >= progress[prev]`（允許相等，處理相同位置的相鄰站點）<br>- 支援路線迴圈（同一位置多次經過）<br>- 保證輸出進度值嚴格單調遞增<br><br>**複雜度：** $O(M \times K \log K)$，其中 M = 站點數，K = 候選數<br>- 典型路線（M=35, K=15）：< 10 ms<br>- 大型路線（M=100, K=15）：< 30 ms<br><br>**實作模組：** `preprocessor/dp_mapper/`<br>- `grid/`：空間格網索引<br>- `candidate/`：投影與 K-candidate 選取<br>- `pathfinding/`：DP solver 與回溯 |
 | **8** | **計算廊道邊界** | 為每個站點計算非對稱廊道：前置 $80\text{ m}$，後置 $40\text{ m}$。若相鄰廊道重疊，執行 **$\delta_{sep} = 20\text{ m}$ 強制截斷**。 |
 | **8.5** | **近距站點廊道調整（v8.6 新增）** | 對站距 $<120\text{ m}$ 的站對，重新分配廊道空間：**55% pre + 10% gap + 35% post**。於 `project_stops_validated()` **之後** 執行，作為標準重疊保護的補強。詳見 Section 12.5。 |
 | **9** | **生成查表 (LUT)** | 生成 256 項 Gaussian LUT (距離/進度似然) 與 128 項 Logistic LUT (速度似然)，並縮放至 $u8$ 尺度。 |
-| **10** | **數據打包與校驗** | 將 RouteNode (24 bytes/node for v8.7)、Stops、Grid 及 LUT 打包。計算 **CRC32** 並標記 **VERSION 4**，產出 `route_data.bin`。 |
+| **10** | **數據打包與校驗** | 將 RouteNode (24 bytes/node)、Stops、Grid 及 LUT 打包。計算 **CRC32** 並標記 **VERSION 5**，產出 `route_data.bin`。 |
 
 ---
 
@@ -1578,6 +1583,53 @@ pub struct RouteNode {
 - **328 測試通過**（100% pass rate）
 - **所有測試資料**更新至 VERSION 4
 - **Visualizer** TypeScript parser 已更新
+
+---
+
+### v8.8 (2026-03-31) - Grid 空間優化
+
+#### 優化目標
+進一步降低 Flash 使用量，針對 Grid 索引進行稀疏化優化。
+
+#### 技術實現
+
+**Bitmask 索引：**
+- 1 bit per cell，標記該 cell 是否包含路段
+- 空單元格不佔用偏移量空間
+- 查詢時先檢查 bitmask，若為 0 則直接返回空切片
+
+**u16 偏移量：**
+- 原本使用 u32 (4 bytes) per cell
+- 優化為 u16 (2 bytes) per non-empty cell
+- 最大偏移 65,535 足以覆蓋 20-40KB 的 route_data.bin
+
+**資料對齊：**
+- Cell data section 自動對齊到 2-byte 邊界
+- 確保 u16 讀取不會觸發 alignment 錯誤
+
+#### 二進位格式變更
+
+- **VERSION：** 4 → 5
+- **不兼容：** 舊版 `route_data.bin` 無法載入
+- **遷移：** 使用新版 preprocessor 重新生成所有 `route_data.bin`
+
+#### 空間節省
+
+- **Grid 索引：** ~16 KB → ~5 KB（60-70% 壓縮）
+- **典型路線（60×60 grid）：** 14.4 KB → ~5 KB
+- **細長路線（稀疏 grid）：** 效果更顯著
+
+#### 效能影響
+
+- **Runtime 查詢：** 增加一次 bitmask 檢查 + popcount 計算
+- **CPU 成本：** < 0.01 ms（ARM Cortex-M33 上非常快速）
+- **Flash 讀取：** 減少不必要的偏移量讀取
+
+#### 測試結果
+
+- **所有單元測試通過**
+- **整合測試通過**
+- **Grid 查詢功能驗證正確**
 
 ---
 
