@@ -387,6 +387,97 @@ pub struct Stop {
 
 ---
 
+## 5.5 RouteNode 結構優化（v8.7）
+
+v8.7 版本進一步優化了 `RouteNode` 結構體，從 **40 bytes** 縮減至 **32 bytes**（20% 空間節省），同時提升了長度解析度。
+
+### 新結構佈局
+
+```rust
+/// v8.7 優化後的 RouteNode 結構體（32 bytes）
+/// repr(C) 確保與二進位格式的一致性
+#[repr(C)]
+pub struct RouteNode {
+    // ── i64 fields first (8-byte aligned) ──────────────────────────
+    pub seg_len_mm: i64,       // Segment length in millimeters (10× precision)
+    // ── i32 fields (4-byte aligned) ────────────────────────────────
+    pub x_cm: i32,             // X coordinate in cm
+    pub y_cm: i32,             // Y coordinate in cm
+    pub cum_dist_cm: i32,      // Cumulative distance in cm
+    // ── i16 fields (2-byte aligned) ────────────────────────────────
+    pub dx_cm: i16,            // Segment vector X (cm), max ±100m fits in i16
+    pub dy_cm: i16,            // Segment vector Y (cm), max ±100m fits in i16
+    pub heading_cdeg: i16,     // Heading in 0.01°
+    pub _pad: i16,             // Alignment padding
+}
+
+// 編譯期驗證 — 確保結構體大小為 32 bytes
+const _: () = assert!(core::mem::size_of::<RouteNode>() == 32);
+```
+
+### 記憶體佈局表格
+
+| Offset | Field | Type | Description |
+|--------|-------|------|-------------|
+| 0 | seg_len_mm | i64 | Segment length in millimeters |
+| 8 | x_cm | i32 | X coordinate in cm |
+| 12 | y_cm | i32 | Y coordinate in cm |
+| 16 | cum_dist_cm | i32 | Cumulative distance in cm |
+| 20 | dx_cm | i16 | Segment vector X (cm) |
+| 22 | dy_cm | i16 | Segment vector Y (cm) |
+| 24 | heading_cdeg | i16 | Heading in 0.01° |
+| 26 | _pad | i16 | Alignment padding |
+
+**總大小：** 32 bytes（8 + 12 + 6 + 2 = 28 bytes 實際資料 + 4 bytes 對齊填充）
+
+### 關鍵變更（相較於 v8.5）
+
+1. **移除 `len2_cm2` (i64)**
+   - 原本儲存路段長度的平方值（cm²）
+   - 現在 runtime 計算：`(seg_len_mm / 10)^2`
+   - 節省 8 bytes
+
+2. **升級 `seg_len_cm` (i32) → `seg_len_mm` (i64)**
+   - 解析度提升 10 倍：從 cm 到 mm
+   - 減少累積誤差，提升投影精度
+   - i64 確保足夠的數值範圍（21 km 的 mm 值仍安全）
+
+3. **縮減 `dx_cm`、`dy_cm` 從 i32 → i16**
+   - 依據最大段長約束（100 m = 10,000 cm）
+   - i16 範圍 ±32,767，足夠容納最大路段向量
+   - 各節省 2 bytes，共 4 bytes
+
+### 效益分析
+
+| 指標 | v8.5 | v8.7 | 改善 |
+|------|------|------|------|
+| 結構體大小 | 40 bytes | 32 bytes | **-20%** |
+| 600 節點 Flash 佔用 | 24 KB | 19.2 KB | **-4.8 KB** |
+| 長度解析度 | 1 cm | 1 mm | **10× 提升** |
+| Runtime 計算開銷 | 基準 | +1 次乘法 | < 0.1 ms |
+
+### Runtime 相容性
+
+v8.7 的 runtime 代碼需小幅修改以支援新的結構體：
+
+```rust
+// 計算 len2（runtime）
+fn seg_len2_cm2(node: &RouteNode) -> i64 {
+    let seg_len_cm = node.seg_len_mm / 10;
+    seg_len_cm * seg_len_cm
+}
+
+// 投影計算（使用 i16 向量）
+let dx = node.dx_cm as i64;  // 自動擴展
+let dy = node.dy_cm as i64;
+```
+
+### 二進位格式版本
+
+v8.7 使用 **VERSION 4**，與 v8.5（VERSION 3）不相容。舊版 `route_data.bin` 需重新生成。
+
+---
+
 ## 6. 空間格網索引（模組 ③）
 
 ### 6.1 動機
