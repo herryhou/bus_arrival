@@ -104,7 +104,7 @@ fn distance_to_segment_squared(x: DistCm, y: DistCm, seg: &RouteNode) -> Dist2 {
 
     // Compute len2_cm2 from seg_len_mm: (mm / 10)^2 = cm^2
     let seg_len_cm = seg.seg_len_mm / 10;
-    let len2_cm2 = seg_len_cm * seg_len_cm;
+    let len2_cm2 = (seg_len_cm as i64) * (seg_len_cm as i64);
 
     // t = dot(point - P[i], segment) / |segment|²
     let t_num = dx as i64 * seg.dx_cm as i64 + dy as i64 * seg.dy_cm as i64;
@@ -142,7 +142,7 @@ pub fn project_to_route(
 
     // Compute len2_cm2 from seg_len_mm: (mm / 10)^2 = cm^2
     let seg_len_cm = seg.seg_len_mm / 10;
-    let len2_cm2 = seg_len_cm * seg_len_cm;
+    let len2_cm2 = (seg_len_cm as i64) * (seg_len_cm as i64);
 
     if len2_cm2 == 0 {
         return seg.cum_dist_cm;
@@ -152,7 +152,7 @@ pub fn project_to_route(
 
     // z = cum_dist[i] + t × seg_len_cm / len2_cm2
     let base = seg.cum_dist_cm;
-    base + ((t * seg_len_cm / len2_cm2) as DistCm)
+    base + ((t * seg_len_cm as i64 / len2_cm2) as DistCm)
 }
 
 /// Convert lat/lon to absolute cm coordinates with specified average latitude

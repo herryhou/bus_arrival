@@ -265,7 +265,7 @@ fn test_point_distance_overflow() {
     let expected_len_mm = ((2 * 10_000_000_i64 * 10_000_000_i64) as f64).sqrt() * 10.0;
     let node0_seg = route[0].seg_len_mm;
     // Allow small rounding difference
-    assert!((node0_seg - expected_len_mm as i64).abs() <= 1);
+    assert!(((node0_seg as i64) - expected_len_mm as i64).abs() <= 1);
 }
 
 // ============================================================================

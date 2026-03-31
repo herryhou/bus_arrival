@@ -160,32 +160,31 @@ fn dot_i64(ax: i32, ay: i32, bx: i32, by: i32) -> i64 {
 
 ### 4.1 RouteNode — 路線節點（含預算係數）
 
-v8.7 優化後的結構體佈局，共 **32 bytes**（20% 空間節省）。
+v8.7 優化後的結構體佈局，共 **24 bytes**（40% 空間節省）。
 
 ```rust
 /// v8.7 優化後的欄位佈局（repr(C)，ARM Cortex-M33）：
-///   offset  0: seg_len_mm   i64   8 bytes  // Segment length in mm (10× precision)
-///   offset  8: x_cm         i32   4 bytes  // X coordinate
-///   offset 12: y_cm         i32   4 bytes  // Y coordinate
-///   offset 16: cum_dist_cm  i32   4 bytes  // Cumulative distance
-///   offset 20: dx_cm        i16   2 bytes  // Segment vector X (max ±100m)
-///   offset 22: dy_cm        i16   2 bytes  // Segment vector Y (max ±100m)
-///   offset 24: heading_cdeg i16   2 bytes  // Heading in 0.01°
-///   offset 26: _pad         i16   2 bytes  // Alignment padding
-///   total: 32 bytes
+///   offset  0: x_cm         i32   4 bytes  // X coordinate
+///   offset  4: y_cm         i32   4 bytes  // Y coordinate
+///   offset  8: cum_dist_cm  i32   4 bytes  // Cumulative distance
+///   offset 12: seg_len_mm   i32   4 bytes  // Segment length in mm (10× precision)
+///   offset 16: dx_cm        i16   2 bytes  // Segment vector X (max ±100m)
+///   offset 18: dy_cm        i16   2 bytes  // Segment vector Y (max ±100m)
+///   offset 20: heading_cdeg i16   2 bytes  // Heading in 0.01°
+///   offset 22: _pad         i16   2 bytes  // Alignment padding
+///   total: 24 bytes
 ///
 /// Key Changes from v8.5:
 /// - Removed len2_cm2 (i64) - computed at runtime as (seg_len_mm / 10)^2
-/// - Upgraded seg_len_cm (i32) to seg_len_mm (i64) for 10x precision
+/// - Upgraded seg_len_cm (i32) to seg_len_mm (i32) for 10x precision
 /// - Reduced dx_cm, dy_cm from i32 to i16 (100m max segment constraint)
 #[repr(C)]
 pub struct RouteNode {
-    // ── i64 fields first（8-byte aligned）─────────────────────────────
-    pub seg_len_mm:   i64,   // Segment length in millimeters
-    // ── i32 fields（4-byte aligned）───────────────────────────────────
+    // ── i32 fields first（4-byte aligned）─────────────────────────────
     pub x_cm:         i32,
     pub y_cm:         i32,
     pub cum_dist_cm:  i32,
+    pub seg_len_mm:   i32,   // Segment length in millimeters
     // ── i16 fields（2-byte aligned）───────────────────────────────────
     pub dx_cm:        i16,   // Segment vector X (max ±100m fits in i16)
     pub dy_cm:        i16,   // Segment vector Y (max ±100m fits in i16)
@@ -194,12 +193,12 @@ pub struct RouteNode {
 }
 
 // 編譯期驗證 — 欄位重排導致尺寸改變時立即失敗
-const _: () = assert!(core::mem::size_of::<RouteNode>() == 32);
+const _: () = assert!(core::mem::size_of::<RouteNode>() == 24);
 ```
 
-> **v8.7 優化說明：** 進一步優化結構體從 40 → 32 bytes（20% 空間節省）。移除 `len2_cm2`（runtime 計算），升級 `seg_len_cm` → `seg_len_mm`（10× 精度），縮減 `dx_cm/dy_cm` 為 i16。**600 節點節省 4.8 KB Flash**，同時提升長度解析度。
+> **v8.7 優化說明：** 進一步優化結構體從 40 → 24 bytes（40% 空間節省）。移除 `len2_cm2`（runtime 計算），升級 `seg_len_cm` → `seg_len_mm`（10× 精度），縮減 `dx_cm/dy_cm` 為 i16。**600 節點節省 9.6 KB Flash**，同時提升長度解析度。
 
-記憶體佔用：600 節點 × 32 bytes = **19.2 KB**（Flash）
+記憶體佔用：600 節點 × 24 bytes = **14.4 KB**（Flash）
 
 ### 4.2 Stop — 站點資料
 
@@ -673,9 +672,9 @@ pub fn route_nodes() -> &'static [RouteNode] {
 | stops（M × 12 B） | ~0.6 KB | Stop 陣列 |
 | grid_index | ~1.2 KB | Spatial Grid Index |
 | CRC32（4 bytes） | 4 B | 整體完整性驗證 |
-| **合計** | **~22 KB** | |
+| **合計** | **~16 KB** | |
 
-> **v8.7 更新：** VERSION=4，RouteNode 從 40→32 bytes，總體從 ~34 KB 降至 ~22 KB（節省 12 KB Flash）。
+> **v8.7 更新：** VERSION=4，RouteNode 從 40→24 bytes，總體從 ~34 KB 降至 ~16 KB（節省 18 KB Flash）。
 
 ### 7.3 啟動完整性驗證
 

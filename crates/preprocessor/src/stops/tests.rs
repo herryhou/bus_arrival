@@ -17,7 +17,7 @@ mod tests {
                 let dy = next.1 - curr.1;
                 let len2 = dx * dx + dy * dy;
                 let seg_len_cm = (len2 as f64).sqrt() as i32;
-                let seg_len_mm = seg_len_cm as i64 * 10;
+                let seg_len_mm = seg_len_cm * 10;
                 let heading = (dy as f64).atan2(dx as f64).to_degrees() as i16 * 100;
                 (dx, dy, seg_len_mm, heading)
             } else {

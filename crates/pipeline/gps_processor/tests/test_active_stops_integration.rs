@@ -28,10 +28,11 @@ fn test_active_stops_functionality() {
         Err(e) => panic!("Failed to load route data: {:?}", e),
     };
 
-    // Test case 1: GPS at Stop 55's progress position
-    // Stop 55 (index 55) has progress=1634632cm with corridor [1626632, 1638632]cm
-    let stop_55 = route_data.get_stop(55).unwrap();
-    let gps_s_cm = stop_55.progress_cm as i32;
+    // Test case 1: GPS at Stop 53's progress position (last stop)
+    // Stop 53 (index 53) has progress at end of route
+    let last_stop_idx = route_data.stop_count - 1;
+    let stop_last = route_data.get_stop(last_stop_idx).unwrap();
+    let gps_s_cm = stop_last.progress_cm as i32;
     let stops = route_data.stops();
     let active_stops: Vec<usize> = stops.iter()
         .enumerate()
@@ -42,8 +43,8 @@ fn test_active_stops_functionality() {
     assert!(!active_stops.is_empty(),
         "GPS at s_cm={} should have at least one active stop (had none)", gps_s_cm);
 
-    assert!(active_stops.contains(&55),
-        "GPS at s_cm={} should be in Stop 55's corridor", gps_s_cm);
+    assert!(active_stops.contains(&last_stop_idx),
+        "GPS at s_cm={} should be in Stop {}'s corridor", gps_s_cm, last_stop_idx);
 
     // Test case 2: GPS at the beginning of the route (near first stop)
     let gps_s_cm_start = 30000i32;
@@ -83,9 +84,10 @@ fn test_stop_states_content() {
         Err(e) => panic!("Failed to load route data: {:?}", e),
     };
 
-    // Use Stop 55's actual progress position
-    let stop_55 = route_data.get_stop(55).unwrap();
-    let gps_s_cm = stop_55.progress_cm as i32;
+    // Use the last stop's actual progress position
+    let last_stop_idx = route_data.stop_count - 1;
+    let stop_last = route_data.get_stop(last_stop_idx).unwrap();
+    let gps_s_cm = stop_last.progress_cm as i32;
     let stops = route_data.stops();
 
     // Find active stops and check their properties

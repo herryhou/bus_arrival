@@ -103,16 +103,16 @@ export type AnnounceData = AnnounceEvent[];
  * Route data from binary route_data.bin file
  */
 
-/** Route node with precomputed segment coefficients (v8.7 format - 32 bytes) */
+/** Route node with precomputed segment coefficients (v8.7 format - 24 bytes) */
 export interface RouteNode {
-	/** Segment length: |P[i+1] - P[i]| in millimeters */
-	seg_len_mm: bigint;
 	/** X coordinate (absolute, from fixed origin 120°E, 20°N) in cm */
 	x_cm: number;
 	/** Y coordinate (absolute, from fixed origin 120°E, 20°N) in cm */
 	y_cm: number;
 	/** Cumulative distance from route start in cm */
 	cum_dist_cm: number;
+	/** Segment length: |P[i+1] - P[i]| in millimeters */
+	seg_len_mm: number;
 	/** Segment vector X: x[i+1] - x[i] in cm (i16) */
 	dx_cm: number;
 	/** Segment vector Y: y[i+1] - y[i] in cm (i16) */

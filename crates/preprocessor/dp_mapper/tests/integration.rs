@@ -69,7 +69,7 @@ fn make_straight_route(length_cm: i32, num_segments: usize) -> Vec<RouteNode> {
         let cum_dist = x_cm;
         let dx_cm = if i < num_segments { seg_len } else { 0 };
         let seg_len_mm = if i < num_segments {
-            (seg_len as i64) * 10
+            seg_len * 10
         } else {
             0
         };
@@ -911,7 +911,7 @@ fn build_route_nodes_from_cm(points: &[(i32, i32)]) -> Vec<RouteNode> {
                 .round() as i32;
 
             nodes.push(RouteNode {
-                seg_len_mm: (seg_len_cm as i64) * 10,
+                seg_len_mm: seg_len_cm * 10,
                 heading_cdeg: 0,
                 _pad: 0,
                 x_cm,

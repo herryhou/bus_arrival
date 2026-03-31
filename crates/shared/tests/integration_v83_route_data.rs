@@ -1,10 +1,11 @@
 /// Integration test for loading real route_data.bin files
 ///
-/// This test verifies that the v8.7 binary format (32-byte RouteNode with repr(C))
+/// This test verifies that the v8.7 binary format (24-byte RouteNode with repr(C))
 /// can be correctly loaded and parsed.
 ///
-/// Note: v8.7 optimized the RouteNode structure to 32 bytes (28 data + 4 padding)
-/// by removing len2_cm2 (now computed at runtime) and changing seg_len_cm to seg_len_mm.
+/// Note: v8.7 optimized the RouteNode structure to 24 bytes (16 bytes i32 + 8 bytes i16)
+/// by removing len2_cm2 (now computed at runtime), changing seg_len_cm to seg_len_mm (i32),
+/// and changing dx_cm/dy_cm from i32 to i16. Fields are grouped by type for optimal packing.
 /// This requires VERSION 4. Existing route_data.bin files need to be regenerated
 /// with the preprocessor.
 

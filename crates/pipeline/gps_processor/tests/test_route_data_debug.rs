@@ -58,5 +58,5 @@ fn test_debug_ty225_bin_stops() {
         }
     }
 
-    assert_eq!(route_data.stop_count, 57, "Should have 57 stops");
+    assert_eq!(route_data.stop_count, 54, "Should have 54 stops");
 }

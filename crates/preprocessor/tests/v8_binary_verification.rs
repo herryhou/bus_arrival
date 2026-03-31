@@ -47,7 +47,7 @@ fn test_v8_binary_loader_integration() {
     let seg_len_mm = n.seg_len_mm;
     // Calculate expected length in mm from dx,dy (in cm)
     let expected_len_mm = ((dx_cm as i64 * dx_cm as i64 + dy_cm as i64 * dy_cm as i64) as f64).sqrt() * 10.0;
-    assert!((seg_len_mm - expected_len_mm as i64).abs() <= 1, "Length invariant must hold");
+    assert!(((seg_len_mm as i64) - expected_len_mm as i64).abs() <= 1, "Length invariant must hold");
 
     // Verify LUTs are present
     assert_eq!(route_data.gaussian_lut.len(), 256);

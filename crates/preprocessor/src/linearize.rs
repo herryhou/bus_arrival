@@ -93,7 +93,8 @@ pub fn linearize_route(nodes_cm: &[(i64, i64)]) -> Vec<RouteNode> {
         let len2_cm2 = (dx_cm_i32 as i64 * dx_cm_i32 as i64) + (dy_cm_i32 as i64 * dy_cm_i32 as i64);
 
         // Segment length in mm (10x precision for runtime use)
-        let seg_len_mm = ((len2_cm2 as f64).sqrt() * MM_PRECISION).round() as i64;
+        // i32 is sufficient: max segment 100m = 100,000 mm << i32::MAX (~2 billion)
+        let seg_len_mm = ((len2_cm2 as f64).sqrt() * MM_PRECISION).round() as i32;
 
         // Segment length in cm (for cumulative distance)
         let seg_len_cm = (seg_len_mm / 10) as i32;
@@ -133,11 +134,11 @@ mod tests {
 
     #[test]
     fn test_route_node_size() {
-        // v8.7: Changed to 32 bytes (28 bytes data + 4 bytes alignment padding)
+        // v8.7: Changed to 24 bytes (all fields packed efficiently)
         // - Removed len2_cm2 (i64) - computed at runtime
-        // - Changed seg_len_cm (i32) to seg_len_mm (i64)
+        // - Changed seg_len_cm (i32) to seg_len_mm (i32) for 10x precision
         // - Changed dx_cm, dy_cm from i32 to i16
-        // - Reordered fields for optimal packing
-        assert_eq!(std::mem::size_of::<RouteNode>(), 32);
+        // - Reordered fields: i32 grouped, i16 grouped for optimal packing
+        assert_eq!(std::mem::size_of::<RouteNode>(), 24);
     }
 }

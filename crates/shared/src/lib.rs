@@ -42,42 +42,40 @@ pub type Dist2 = i64;
 
 /// Route node with precomputed segment coefficients for runtime GPS matching.
 ///
-/// Field ordering: i64 fields placed first to satisfy 8-byte alignment
+/// Field ordering: i32 fields grouped first to satisfy 4-byte alignment
 /// without compiler-inserted padding on ARM Cortex-M33.
-/// Total size = 32 bytes (28 data + 4 padding).
+/// Total size = 24 bytes (no padding required).
 ///
-/// # Layout (v8.7 - 28 bytes)
+/// # Layout (v8.7 - 24 bytes)
 /// ```text
-/// offset  0: seg_len_mm   i64   8 bytes  (|P\[i+1\]-P\[i\]|, mm)
-/// offset  8: x_cm         i32   4 bytes
-/// offset 12: y_cm         i32   4 bytes
-/// offset 16: cum_dist_cm  i32   4 bytes
-/// offset 20: dx_cm        i16   2 bytes  (segment vector x)
-/// offset 22: dy_cm        i16   2 bytes  (segment vector y)
-/// offset 24: heading_cdeg i16   2 bytes
-/// offset 26: _pad         i16   2 bytes  (alignment padding to 8-byte boundary)
-/// total: 28 bytes (aligned to 8-byte boundary for i64 field)
+/// offset  0: x_cm         i32   4 bytes
+/// offset  4: y_cm         i32   4 bytes
+/// offset  8: cum_dist_cm  i32   4 bytes
+/// offset 12: seg_len_mm   i32   4 bytes  (|P\[i+1\]-P\[i\]|, mm)
+/// offset 16: dx_cm        i16   2 bytes  (segment vector x)
+/// offset 18: dy_cm        i16   2 bytes  (segment vector y)
+/// offset 20: heading_cdeg i16   2 bytes
+/// offset 22: _pad         i16   2 bytes  (alignment padding to 4-byte boundary)
+/// total: 24 bytes
 /// ```
 ///
 /// # Changes from v8.5
 /// - Removed `len2_cm2` (i64) - computed at runtime as (seg_len_mm / 10)^2
-/// - Changed `seg_len_cm` (i32) to `seg_len_mm` (i64) for 10x precision
+/// - Changed `seg_len_cm` (i32) to `seg_len_mm` (i32) for 10x precision
 /// - Changed `dx_cm`, `dy_cm` from i32 to i16 (max segment length 100m = 10,000 cm fits in i16)
-/// - Reordered fields for optimal packing
+/// - Reordered fields for optimal packing (24 bytes total)
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct RouteNode {
-    // ── i64 fields first (8-byte aligned) ──────────────────────────
-    /// Segment length: |P[i+1] - P[i]| in millimeters
-    pub seg_len_mm: i64,
-
-    // ── i32 fields (4-byte aligned) ────────────────────────────────
+    // ── i32 fields first (4-byte aligned) ──────────────────────────
     /// X coordinate (relative to grid origin) in cm
     pub x_cm: DistCm,
     /// Y coordinate (relative to grid origin) in cm
     pub y_cm: DistCm,
     /// Cumulative distance from route start in cm
     pub cum_dist_cm: DistCm,
+    /// Segment length: |P[i+1] - P[i]| in millimeters
+    pub seg_len_mm: i32,
 
     // ── i16 fields (2-byte aligned) ────────────────────────────────
     /// Segment vector X: x\[i+1\] - x\[i\] in cm
@@ -86,7 +84,7 @@ pub struct RouteNode {
     pub dy_cm: i16,
     /// Segment heading in 0.01° (e.g., 9000 = 90°)
     pub heading_cdeg: HeadCdeg,
-    /// Padding to align struct size to 8-byte boundary
+    /// Padding to align struct size to 4-byte boundary
     pub _pad: i16,
 }
 
@@ -304,8 +302,8 @@ pub struct DepartureEvent {
     pub v_cms: SpeedCms,
 }
 
-// Compile-time assertion — v8.7: 32 bytes (28 bytes data + 4 bytes alignment padding)
-const _: () = assert!(core::mem::size_of::<RouteNode>() == 32);
+// Compile-time assertion — v8.7: 24 bytes (no padding)
+const _: () = assert!(core::mem::size_of::<RouteNode>() == 24);
 const _: () = assert!(core::mem::size_of::<Stop>() == 12);
 
 #[cfg(test)]

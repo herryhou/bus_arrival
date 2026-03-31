@@ -15,7 +15,7 @@ use shared::RouteNode;
 fn make_u_route(horizontal_cm: i32, vertical_cm: i32) -> Vec<RouteNode> {
     vec![
         RouteNode {
-            seg_len_mm: (horizontal_cm as i64) * 10,
+            seg_len_mm: horizontal_cm * 10,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -25,7 +25,7 @@ fn make_u_route(horizontal_cm: i32, vertical_cm: i32) -> Vec<RouteNode> {
             dy_cm: 0,
         },
         RouteNode {
-            seg_len_mm: (vertical_cm as i64) * 10,
+            seg_len_mm: vertical_cm * 10,
             heading_cdeg: 9000,
             _pad: 0,
             x_cm: horizontal_cm,
@@ -35,7 +35,7 @@ fn make_u_route(horizontal_cm: i32, vertical_cm: i32) -> Vec<RouteNode> {
             dy_cm: vertical_cm as i16,
         },
         RouteNode {
-            seg_len_mm: (horizontal_cm as i64) * 10,
+            seg_len_mm: horizontal_cm * 10,
             heading_cdeg: 18000,
             _pad: 0,
             x_cm: horizontal_cm,
@@ -60,7 +60,7 @@ fn make_u_route(horizontal_cm: i32, vertical_cm: i32) -> Vec<RouteNode> {
 fn make_figure8_route(size_cm: i32) -> Vec<RouteNode> {
     vec![
         RouteNode {
-            seg_len_mm: (size_cm as i64) * 10,
+            seg_len_mm: size_cm * 10,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -70,7 +70,7 @@ fn make_figure8_route(size_cm: i32) -> Vec<RouteNode> {
             dy_cm: 0,
         },
         RouteNode {
-            seg_len_mm: (size_cm as i64) * 10,
+            seg_len_mm: size_cm * 10,
             heading_cdeg: 9000,
             _pad: 0,
             x_cm: size_cm,
@@ -80,7 +80,7 @@ fn make_figure8_route(size_cm: i32) -> Vec<RouteNode> {
             dy_cm: size_cm as i16,
         },
         RouteNode {
-            seg_len_mm: (size_cm as i64) * 10,
+            seg_len_mm: size_cm * 10,
             heading_cdeg: 18000,
             _pad: 0,
             x_cm: size_cm,
@@ -90,7 +90,7 @@ fn make_figure8_route(size_cm: i32) -> Vec<RouteNode> {
             dy_cm: 0,
         },
         RouteNode {
-            seg_len_mm: (size_cm as i64) * 10,
+            seg_len_mm: size_cm * 10,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -100,7 +100,7 @@ fn make_figure8_route(size_cm: i32) -> Vec<RouteNode> {
             dy_cm: 0,
         },
         RouteNode {
-            seg_len_mm: (size_cm as i64) * 10,
+            seg_len_mm: size_cm * 10,
             heading_cdeg: -9000,
             _pad: 0,
             x_cm: size_cm,
@@ -140,7 +140,7 @@ fn make_zigzag_route(num_segments: usize, segment_length_cm: i32) -> Vec<RouteNo
             (0, segment_length_cm, 9000)
         };
 
-        let seg_len_mm = if is_last { 0 } else { (segment_length_cm as i64) * 10 };
+        let seg_len_mm = if is_last { 0 } else { segment_length_cm * 10 };
 
         nodes.push(RouteNode {
             seg_len_mm,
