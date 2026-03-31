@@ -26,7 +26,7 @@
     2.  `x_cm`, `y_cm`, `cum_dist_cm` (3 × i32): 12 bytes
     3.  `dx_cm`, `dy_cm`, `heading_cdeg` (3 × i16): 6 bytes
     4.  對齊填充 (`_pad` i16): 2 bytes
-    *   **總計：28 bytes**。
+    *   **總計：32 bytes（28 bytes data + 4 bytes padding）**。
 *   **總體效益**：空間縮減約 **30%**，使一條 12km 路線的節點資料體積降至約 **16.8 KB**。
 
 #### **3.2 精確度補償 (Precision Improvement)**

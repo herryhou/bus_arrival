@@ -675,7 +675,7 @@ pub fn route_nodes() -> &'static [RouteNode] {
 | CRC32（4 bytes） | 4 B | 整體完整性驗證 |
 | **合計** | **~22 KB** | |
 
-> **v8.7 更新：** VERSION=4，RouteNode 從 36→32 bytes，總體從 ~34 KB 降至 ~22 KB（節省 12 KB Flash）。
+> **v8.7 更新：** VERSION=4，RouteNode 從 40→32 bytes，總體從 ~34 KB 降至 ~22 KB（節省 12 KB Flash）。
 
 ### 7.3 啟動完整性驗證
 
