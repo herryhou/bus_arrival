@@ -268,16 +268,16 @@ $$d = \frac{|A \cdot x + B \cdot y + C|}{\sqrt{A^2 + B^2}}$$
 
 ### 4.5 效果
 
-| 指標 | 優化前 | 優化後（含預算係數） |
+| 指標 | 優化前 | 優化後（v8.7） |
 |------|--------|----------------|
 | 節點數 | 7,200 | ~640 |
-| Flash 佔用 | ~86 KB | ~28 KB |
-| Runtime 幾何重算 | 每次需算 A/B/C/len2 | 零重算（全預載） |
+| Flash 佔用 | ~86 KB | ~22 KB |
+| Runtime 幾何重算 | 每次需算 A/B/C/len2 | 零重算（全預載，len2 v8.7 改為 runtime） |
 | Map Matching 穩定性 | 抖動明顯 | 顯著改善 |
 
 ---
 
-## 5. 路線線性化（模組 ②）
+## 5. 路線線性化（模組 ②） {#5-路線線性化模組-}
 
 ### 5.1 概念
 
@@ -331,9 +331,9 @@ $$s_\text{stop} = D[i] + \delta \cdot \|P_{i+1} - P_i\|$$
 
 此編碼確保站點座標嚴格單調遞增，站序永遠正確。
 
-### 5.4 資料結構（Embedded Rust）
+### 5.4a RouteNode 結構（v8.5/v8.6 - 已廢棄） {#54a-routenode-結構v85v86-已廢棄}
 
-> **v8.7 更新：** 本節記錄 v8.5/v8.6 的結構體定義（40 bytes）。v8.7 優化後的結構請見 [Section 5.5](#55-routenode-結構優化v87)。
+> **v8.7 更新：** 本節記錄 v8.5/v8.6 的結構體定義（40 bytes，已廢棄）。v8.7 優化後的結構請見 [Section 5.5](#55-routenode-結構優化v87)。
 
 ```rust
 /// Route node with precomputed segment coefficients for runtime GPS matching.
@@ -392,7 +392,7 @@ pub struct Stop {
 
 ---
 
-## 5.5 RouteNode 結構優化（v8.7）
+## 5.5 RouteNode 結構優化（v8.7） {#55-routenode-結構優化v87}
 
 v8.7 版本進一步優化了 `RouteNode` 結構體，從 **40 bytes** 縮減至 **32 bytes**（20% 空間節省），同時提升了長度解析度。
 
@@ -1283,7 +1283,7 @@ $$\text{best\_seg} = \arg\max_i \left[\, P(O \mid S=i) \cdot P(S=i \mid S=\text{
 | **8** | **計算廊道邊界** | 為每個站點計算非對稱廊道：前置 $80\text{ m}$，後置 $40\text{ m}$。若相鄰廊道重疊，執行 **$\delta_{sep} = 20\text{ m}$ 強制截斷**。 |
 | **8.5** | **近距站點廊道調整（v8.6 新增）** | 對站距 $<120\text{ m}$ 的站對，重新分配廊道空間：**55% pre + 10% gap + 35% post**。於 `project_stops_validated()` **之後** 執行，作為標準重疊保護的補強。詳見 Section 12.5。 |
 | **9** | **生成查表 (LUT)** | 生成 256 項 Gaussian LUT (距離/進度似然) 與 128 項 Logistic LUT (速度似然)，並縮放至 $u8$ 尺度。 |
-| **10** | **數據打包與校驗** | 將 RouteNode (32 bytes/node for v8.7)、Stops、Grid 及 LUT 打包。計算 **CRC32** 並標記 **VERSION 2**，產出 `route_data.bin`。 |
+| **10** | **數據打包與校驗** | 將 RouteNode (32 bytes/node for v8.7)、Stops、Grid 及 LUT 打包。計算 **CRC32** 並標記 **VERSION 4**，產出 `route_data.bin`。 |
 
 ---
 
