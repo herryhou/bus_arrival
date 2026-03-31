@@ -103,27 +103,24 @@ export type AnnounceData = AnnounceEvent[];
  * Route data from binary route_data.bin file
  */
 
-/** Route node with precomputed segment coefficients (v8.5 format - 40 bytes) */
+/** Route node with precomputed segment coefficients (v8.7 format - 32 bytes) */
 export interface RouteNode {
-	/** Squared segment length: |P[i+1] - P[i]|² in cm² */
-	len2_cm2: bigint;
-	/** Segment heading in 0.01° */
-	heading_cdeg: number;
-	/** Padding for alignment */
-	_pad: number;
+	/** Segment length: |P[i+1] - P[i]| in millimeters */
+	seg_len_mm: bigint;
 	/** X coordinate (absolute, from fixed origin 120°E, 20°N) in cm */
 	x_cm: number;
 	/** Y coordinate (absolute, from fixed origin 120°E, 20°N) in cm */
 	y_cm: number;
 	/** Cumulative distance from route start in cm */
 	cum_dist_cm: number;
-	/** Segment vector X: x[i+1] - x[i] in cm */
+	/** Segment vector X: x[i+1] - x[i] in cm (i16) */
 	dx_cm: number;
-	/** Segment vector Y: y[i+1] - y[i] in cm */
+	/** Segment vector Y: y[i+1] - y[i] in cm (i16) */
 	dy_cm: number;
-	/** Segment length in cm */
-	seg_len_cm: number;
-	/** Note: v8.5 changed from repr(C, packed) to repr(C) - 40 bytes with alignment padding */
+	/** Segment heading in 0.01° */
+	heading_cdeg: number;
+	/** Padding for alignment */
+	_pad: number;
 }
 
 /** Bus stop with precomputed corridor boundaries */

@@ -25,6 +25,7 @@
 	});
 
 	const stateColors: Record<FsmState, string> = {
+		Idle: '#9ca3af',
 		Approaching: '#3b82f6',
 		Arriving: '#f59e0b',
 		AtStop: '#22c55e',
@@ -33,6 +34,7 @@
 	};
 
 	const stateBgColors: Record<FsmState, string> = {
+		Idle: 'rgba(156, 163, 175, 0.15)',
 		Approaching: 'rgba(59, 130, 246, 0.15)',
 		Arriving: 'rgba(245, 158, 11, 0.15)',
 		AtStop: 'rgba(34, 197, 94, 0.15)',
