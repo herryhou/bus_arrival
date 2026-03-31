@@ -5,8 +5,8 @@ mod tests {
 
     fn make_simple_route() -> (Vec<shared::RouteNode>, SpatialGrid) {
         let nodes = vec![
-            shared::RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 10000, dy_cm: 0, seg_len_cm: 10000 },
-            shared::RouteNode { len2_cm2: 0, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 0, dy_cm: 0, seg_len_cm: 0 },
+            shared::RouteNode { seg_len_mm: 100000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 10000, dy_cm: 0 },
+            shared::RouteNode { seg_len_mm: 0, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 0, dy_cm: 0 },
         ];
         let grid = build_grid(&nodes, 10000);
         (nodes, grid)
@@ -74,10 +74,10 @@ mod tests {
     #[test]
     fn test_snap_reachability() {
         let nodes = vec![
-            shared::RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 5000, dy_cm: 0, seg_len_cm: 5000 },
-            shared::RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 5000, y_cm: 0, cum_dist_cm: 5000, dx_cm: 5000, dy_cm: 0, seg_len_cm: 5000 },
-            shared::RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 5000, dy_cm: 0, seg_len_cm: 5000 },
-            shared::RouteNode { len2_cm2: 0, heading_cdeg: 0, _pad: 0, x_cm: 15000, y_cm: 0, cum_dist_cm: 15000, dx_cm: 0, dy_cm: 0, seg_len_cm: 0 },
+            shared::RouteNode { seg_len_mm: 50000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 5000, dy_cm: 0 },
+            shared::RouteNode { seg_len_mm: 50000, heading_cdeg: 0, _pad: 0, x_cm: 5000, y_cm: 0, cum_dist_cm: 5000, dx_cm: 5000, dy_cm: 0 },
+            shared::RouteNode { seg_len_mm: 50000, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 5000, dy_cm: 0 },
+            shared::RouteNode { seg_len_mm: 0, heading_cdeg: 0, _pad: 0, x_cm: 15000, y_cm: 0, cum_dist_cm: 15000, dx_cm: 0, dy_cm: 0 },
         ];
         let grid = build_grid(&nodes, 10000);
 

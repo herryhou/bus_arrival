@@ -147,7 +147,7 @@ fn test_dp_backtrack() {
         },
     ];
 
-    let result = dp_backtrack(&layers);
+    let result = dp_backtrack(&layers, &[]);
 
     // Should return progress values for optimal path
     assert_eq!(result.len(), 2);

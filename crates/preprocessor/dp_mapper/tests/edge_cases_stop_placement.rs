@@ -22,22 +22,21 @@ fn make_straight_route(length_cm: i32, num_segments: usize) -> Vec<RouteNode> {
         let x_cm = i as i32 * seg_len;
         let cum_dist = x_cm;
         let dx_cm = if i < num_segments { seg_len } else { 0 };
-        let len2_cm2 = if i < num_segments {
-            (seg_len as i64) * (seg_len as i64)
+        let seg_len_mm = if i < num_segments {
+            (seg_len as i64) * 10
         } else {
             0
         };
 
         nodes.push(RouteNode {
-            len2_cm2,
+            seg_len_mm,
             heading_cdeg: 0,
             _pad: 0,
             x_cm,
             y_cm: 0,
             cum_dist_cm: cum_dist,
-            dx_cm,
+            dx_cm: dx_cm as i16,
             dy_cm: 0,
-            seg_len_cm: if i < num_segments { seg_len } else { 0 },
         });
     }
 
@@ -55,7 +54,7 @@ fn test_stops_at_exact_segment_boundaries() {
     // Stops are placed exactly at segment boundaries (0m, 10m, 20m, 30m)
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -63,10 +62,9 @@ fn test_stops_at_exact_segment_boundaries() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -74,10 +72,9 @@ fn test_stops_at_exact_segment_boundaries() {
             cum_dist_cm: 10000,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 20000,
@@ -85,10 +82,9 @@ fn test_stops_at_exact_segment_boundaries() {
             cum_dist_cm: 20000,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 30000,
@@ -96,7 +92,6 @@ fn test_stops_at_exact_segment_boundaries() {
             cum_dist_cm: 30000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -128,7 +123,7 @@ fn test_stops_1cm_from_segment_boundaries() {
     // This tests numerical stability near boundaries
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -136,10 +131,9 @@ fn test_stops_1cm_from_segment_boundaries() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -147,10 +141,9 @@ fn test_stops_1cm_from_segment_boundaries() {
             cum_dist_cm: 10000,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 20000,
@@ -158,7 +151,6 @@ fn test_stops_1cm_from_segment_boundaries() {
             cum_dist_cm: 20000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -206,7 +198,7 @@ fn test_stops_at_node_t_zero_and_t_one() {
     // Stops at exact node positions (t=0.0 and t=1.0)
     let route = vec![
         RouteNode {
-            len2_cm2: 25000000,
+            seg_len_mm: 50000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -214,10 +206,9 @@ fn test_stops_at_node_t_zero_and_t_one() {
             cum_dist_cm: 0,
             dx_cm: 5000,
             dy_cm: 0,
-            seg_len_cm: 5000,
         },
         RouteNode {
-            len2_cm2: 64000000,
+            seg_len_mm: 80000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 5000,
@@ -225,10 +216,9 @@ fn test_stops_at_node_t_zero_and_t_one() {
             cum_dist_cm: 5000,
             dx_cm: 8000,
             dy_cm: 0,
-            seg_len_cm: 8000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 13000,
@@ -236,7 +226,6 @@ fn test_stops_at_node_t_zero_and_t_one() {
             cum_dist_cm: 13000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 

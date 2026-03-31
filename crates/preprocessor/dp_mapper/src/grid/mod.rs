@@ -30,7 +30,7 @@ mod tests {
         use shared::RouteNode;
         let nodes = vec![
             RouteNode {
-                len2_cm2: 10000,
+                seg_len_mm: 1000,
                 heading_cdeg: 0,
                 _pad: 0,
                 x_cm: 0,
@@ -38,10 +38,9 @@ mod tests {
                 cum_dist_cm: 0,
                 dx_cm: 100,
                 dy_cm: 0,
-                seg_len_cm: 100,
             },
             RouteNode {
-                len2_cm2: 0,
+                seg_len_mm: 0,
                 heading_cdeg: 0,
                 _pad: 0,
                 x_cm: 100,
@@ -49,7 +48,6 @@ mod tests {
                 cum_dist_cm: 100,
                 dx_cm: 0,
                 dy_cm: 0,
-                seg_len_cm: 0,
             },
         ];
         let grid = builder::build_grid(&nodes, 10000);
@@ -62,9 +60,9 @@ mod tests {
     fn test_multi_segment_grid() {
         use shared::RouteNode;
         let nodes = vec![
-            RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 10000, dy_cm: 0, seg_len_cm: 10000 },
-            RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 0, dy_cm: 10000, seg_len_cm: 10000 },
-            RouteNode { len2_cm2: 0, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 10000, cum_dist_cm: 20000, dx_cm: 0, dy_cm: 0, seg_len_cm: 0 },
+            RouteNode { seg_len_mm: 100000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 10000, dy_cm: 0 },
+            RouteNode { seg_len_mm: 100000, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 0, dy_cm: 10000 },
+            RouteNode { seg_len_mm: 0, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 10000, cum_dist_cm: 20000, dx_cm: 0, dy_cm: 0 },
         ];
         let grid = builder::build_grid(&nodes, 10000);
         // Should have 2x1 grid (x: 0-10000, y: 0-10000)
@@ -78,9 +76,9 @@ mod tests {
     fn test_query_neighbors_radius_1() {
         use shared::RouteNode;
         let nodes = vec![
-            RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 10000, dy_cm: 0, seg_len_cm: 10000 },
-            RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 0, dy_cm: 10000, seg_len_cm: 10000 },
-            RouteNode { len2_cm2: 0, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 10000, cum_dist_cm: 20000, dx_cm: 0, dy_cm: 0, seg_len_cm: 0 },
+            RouteNode { seg_len_mm: 100000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 10000, dy_cm: 0 },
+            RouteNode { seg_len_mm: 100000, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 0, dy_cm: 10000 },
+            RouteNode { seg_len_mm: 0, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 10000, cum_dist_cm: 20000, dx_cm: 0, dy_cm: 0 },
         ];
         let grid = builder::build_grid(&nodes, 10000);
 
@@ -94,9 +92,9 @@ mod tests {
     fn test_query_neighbors_dedup() {
         use shared::RouteNode;
         let nodes = vec![
-            RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 10000, dy_cm: 0, seg_len_cm: 10000 },
-            RouteNode { len2_cm2: 100000000, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 0, dy_cm: 10000, seg_len_cm: 10000 },
-            RouteNode { len2_cm2: 0, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 10000, cum_dist_cm: 20000, dx_cm: 0, dy_cm: 0, seg_len_cm: 0 },
+            RouteNode { seg_len_mm: 100000, heading_cdeg: 0, _pad: 0, x_cm: 0, y_cm: 0, cum_dist_cm: 0, dx_cm: 10000, dy_cm: 0 },
+            RouteNode { seg_len_mm: 100000, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 0, cum_dist_cm: 10000, dx_cm: 0, dy_cm: 10000 },
+            RouteNode { seg_len_mm: 0, heading_cdeg: 0, _pad: 0, x_cm: 10000, y_cm: 10000, cum_dist_cm: 20000, dx_cm: 0, dy_cm: 0 },
         ];
         let grid = builder::build_grid(&nodes, 10000);
 

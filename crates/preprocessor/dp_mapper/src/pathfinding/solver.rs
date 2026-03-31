@@ -314,7 +314,7 @@ mod tests {
         // Create a route with segment boundaries
         let nodes = vec![
             RouteNode {
-                len2_cm2: 10000 * 10000,
+                seg_len_mm: 100000,
                 heading_cdeg: 0,
                 _pad: 0,
                 x_cm: 0,
@@ -322,10 +322,9 @@ mod tests {
                 cum_dist_cm: 0,
                 dx_cm: 10000,
                 dy_cm: 0,
-                seg_len_cm: 10000,
             },
             RouteNode {
-                len2_cm2: 10000 * 10000,
+                seg_len_mm: 100000,
                 heading_cdeg: 0,
                 _pad: 0,
                 x_cm: 10000,
@@ -333,10 +332,9 @@ mod tests {
                 cum_dist_cm: 10000,
                 dx_cm: 10000,
                 dy_cm: 0,
-                seg_len_cm: 10000,
             },
             RouteNode {
-                len2_cm2: 0,
+                seg_len_mm: 0,
                 heading_cdeg: 0,
                 _pad: 0,
                 x_cm: 20000,
@@ -344,7 +342,6 @@ mod tests {
                 cum_dist_cm: 20000,
                 dx_cm: 0,
                 dy_cm: 0,
-                seg_len_cm: 0,
             },
         ];
         let grid = build_grid(&nodes, 10000);
@@ -369,7 +366,7 @@ mod tests {
     fn test_no_snap_warning_for_normal_stops() {
         let nodes = vec![
             RouteNode {
-                len2_cm2: 10000 * 10000,
+                seg_len_mm: 100000,
                 heading_cdeg: 0,
                 _pad: 0,
                 x_cm: 0,
@@ -377,10 +374,9 @@ mod tests {
                 cum_dist_cm: 0,
                 dx_cm: 10000,
                 dy_cm: 0,
-                seg_len_cm: 10000,
             },
             RouteNode {
-                len2_cm2: 0,
+                seg_len_mm: 0,
                 heading_cdeg: 0,
                 _pad: 0,
                 x_cm: 10000,
@@ -388,7 +384,6 @@ mod tests {
                 cum_dist_cm: 10000,
                 dx_cm: 0,
                 dy_cm: 0,
-                seg_len_cm: 0,
             },
         ];
         let grid = build_grid(&nodes, 10000);

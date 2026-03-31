@@ -34,7 +34,7 @@ fn test_single_segment_grid() {
     // --- GIVEN ---
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 50000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -42,10 +42,9 @@ fn test_single_segment_grid() {
             cum_dist_cm: 0,
             dx_cm: 5000,
             dy_cm: 0,
-            seg_len_cm: 5000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 5000,
@@ -53,7 +52,6 @@ fn test_single_segment_grid() {
             cum_dist_cm: 5000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
     let grid_size_cm = 10000;
@@ -72,22 +70,61 @@ fn test_single_segment_grid() {
 #[test]
 fn test_route_crossing_grid_boundaries() {
     // --- GIVEN ---
-    // A route with a 50m segment
+    // A route with a 50m segment (broken into 5 segments of 10m each to fit i16)
     // Grid cell size is 10m
     let route = vec![
         RouteNode {
-            len2_cm2: 2500000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
             y_cm: 0,
             cum_dist_cm: 0,
-            dx_cm: 50000,
+            dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 50000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 100000,
+            heading_cdeg: 0,
+            _pad: 0,
+            x_cm: 10000,
+            y_cm: 0,
+            cum_dist_cm: 10000,
+            dx_cm: 10000,
+            dy_cm: 0,
+        },
+        RouteNode {
+            seg_len_mm: 100000,
+            heading_cdeg: 0,
+            _pad: 0,
+            x_cm: 20000,
+            y_cm: 0,
+            cum_dist_cm: 20000,
+            dx_cm: 10000,
+            dy_cm: 0,
+        },
+        RouteNode {
+            seg_len_mm: 100000,
+            heading_cdeg: 0,
+            _pad: 0,
+            x_cm: 30000,
+            y_cm: 0,
+            cum_dist_cm: 30000,
+            dx_cm: 10000,
+            dy_cm: 0,
+        },
+        RouteNode {
+            seg_len_mm: 100000,
+            heading_cdeg: 0,
+            _pad: 0,
+            x_cm: 40000,
+            y_cm: 0,
+            cum_dist_cm: 40000,
+            dx_cm: 10000,
+            dy_cm: 0,
+        },
+        RouteNode {
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 50000,
@@ -95,7 +132,6 @@ fn test_route_crossing_grid_boundaries() {
             cum_dist_cm: 50000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
     let grid_size_cm = 10000; // 10m cells
@@ -116,21 +152,60 @@ fn test_route_crossing_grid_boundaries() {
 #[test]
 fn test_vertical_segment_crossing_rows() {
     // --- GIVEN ---
-    // A vertical segment crossing multiple rows
+    // A vertical segment crossing multiple rows (5 segments of 10m each)
     let route = vec![
         RouteNode {
-            len2_cm2: 2500000000,
+            seg_len_mm: 100000,
             heading_cdeg: 9000,
             _pad: 0,
             x_cm: 5000,
             y_cm: 0,
             cum_dist_cm: 0,
             dx_cm: 0,
-            dy_cm: 50000,
-            seg_len_cm: 50000,
+            dy_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 100000,
+            heading_cdeg: 9000,
+            _pad: 0,
+            x_cm: 5000,
+            y_cm: 10000,
+            cum_dist_cm: 10000,
+            dx_cm: 0,
+            dy_cm: 10000,
+        },
+        RouteNode {
+            seg_len_mm: 100000,
+            heading_cdeg: 9000,
+            _pad: 0,
+            x_cm: 5000,
+            y_cm: 20000,
+            cum_dist_cm: 20000,
+            dx_cm: 0,
+            dy_cm: 10000,
+        },
+        RouteNode {
+            seg_len_mm: 100000,
+            heading_cdeg: 9000,
+            _pad: 0,
+            x_cm: 5000,
+            y_cm: 30000,
+            cum_dist_cm: 30000,
+            dx_cm: 0,
+            dy_cm: 10000,
+        },
+        RouteNode {
+            seg_len_mm: 100000,
+            heading_cdeg: 9000,
+            _pad: 0,
+            x_cm: 5000,
+            y_cm: 40000,
+            cum_dist_cm: 40000,
+            dx_cm: 0,
+            dy_cm: 10000,
+        },
+        RouteNode {
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 5000,
@@ -138,7 +213,6 @@ fn test_vertical_segment_crossing_rows() {
             cum_dist_cm: 50000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
     let grid_size_cm = 10000;
@@ -153,21 +227,40 @@ fn test_vertical_segment_crossing_rows() {
 #[test]
 fn test_diagonal_segment_crossing_both() {
     // --- GIVEN ---
-    // A diagonal segment crossing both columns and rows
+    // A diagonal segment crossing both columns and rows (3 segments of ~14.14m each)
     let route = vec![
         RouteNode {
-            len2_cm2: 2000000000,
+            seg_len_mm: 141421,
             heading_cdeg: 4500,
             _pad: 0,
             x_cm: 0,
             y_cm: 0,
             cum_dist_cm: 0,
-            dx_cm: 30000,
-            dy_cm: 30000,
-            seg_len_cm: 42426,
+            dx_cm: 10000,
+            dy_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 141421,
+            heading_cdeg: 4500,
+            _pad: 0,
+            x_cm: 10000,
+            y_cm: 10000,
+            cum_dist_cm: 14142,
+            dx_cm: 10000,
+            dy_cm: 10000,
+        },
+        RouteNode {
+            seg_len_mm: 141421,
+            heading_cdeg: 4500,
+            _pad: 0,
+            x_cm: 20000,
+            y_cm: 20000,
+            cum_dist_cm: 28284,
+            dx_cm: 10000,
+            dy_cm: 10000,
+        },
+        RouteNode {
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 30000,
@@ -175,7 +268,6 @@ fn test_diagonal_segment_crossing_both() {
             cum_dist_cm: 42426,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
     let grid_size_cm = 10000;
@@ -198,7 +290,6 @@ fn test_query_outside_grid_bounds() {
     // --- GIVEN ---
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -206,10 +297,9 @@ fn test_query_outside_grid_bounds() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
+            seg_len_mm: (10000 * 10),
         },
         RouteNode {
-            len2_cm2: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -217,7 +307,7 @@ fn test_query_outside_grid_bounds() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
+            seg_len_mm: (0 * 10),
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -239,7 +329,6 @@ fn test_query_at_negative_coordinates() {
     // --- GIVEN ---
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 5000,
@@ -247,10 +336,9 @@ fn test_query_at_negative_coordinates() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
+            seg_len_mm: (10000 * 10),
         },
         RouteNode {
-            len2_cm2: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 15000,
@@ -258,7 +346,7 @@ fn test_query_at_negative_coordinates() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
+            seg_len_mm: (0 * 10),
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -279,7 +367,6 @@ fn test_query_with_radius_larger_than_grid() {
     // --- GIVEN ---
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -287,10 +374,9 @@ fn test_query_with_radius_larger_than_grid() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
+            seg_len_mm: (10000 * 10),
         },
         RouteNode {
-            len2_cm2: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -298,7 +384,7 @@ fn test_query_with_radius_larger_than_grid() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
+            seg_len_mm: (0 * 10),
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -319,7 +405,6 @@ fn test_query_with_zero_radius() {
     // --- GIVEN ---
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -327,10 +412,9 @@ fn test_query_with_zero_radius() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
+            seg_len_mm: (10000 * 10),
         },
         RouteNode {
-            len2_cm2: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -338,7 +422,7 @@ fn test_query_with_zero_radius() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
+            seg_len_mm: (0 * 10),
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -358,21 +442,60 @@ fn test_query_with_zero_radius() {
 #[test]
 fn test_duplicate_segment_deduplication() {
     // --- GIVEN ---
-    // A segment that spans multiple grid cells
+    // A segment that spans multiple grid cells (5 segments of 10m each)
     let route = vec![
         RouteNode {
-            len2_cm2: 2500000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
             y_cm: 0,
             cum_dist_cm: 0,
-            dx_cm: 50000,
+            dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 50000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 100000,
+            heading_cdeg: 0,
+            _pad: 0,
+            x_cm: 10000,
+            y_cm: 0,
+            cum_dist_cm: 10000,
+            dx_cm: 10000,
+            dy_cm: 0,
+        },
+        RouteNode {
+            seg_len_mm: 100000,
+            heading_cdeg: 0,
+            _pad: 0,
+            x_cm: 20000,
+            y_cm: 0,
+            cum_dist_cm: 20000,
+            dx_cm: 10000,
+            dy_cm: 0,
+        },
+        RouteNode {
+            seg_len_mm: 100000,
+            heading_cdeg: 0,
+            _pad: 0,
+            x_cm: 30000,
+            y_cm: 0,
+            cum_dist_cm: 30000,
+            dx_cm: 10000,
+            dy_cm: 0,
+        },
+        RouteNode {
+            seg_len_mm: 100000,
+            heading_cdeg: 0,
+            _pad: 0,
+            x_cm: 40000,
+            y_cm: 0,
+            cum_dist_cm: 40000,
+            dx_cm: 10000,
+            dy_cm: 0,
+        },
+        RouteNode {
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 50000,
@@ -380,7 +503,6 @@ fn test_duplicate_segment_deduplication() {
             cum_dist_cm: 50000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -402,7 +524,6 @@ fn test_multiple_segments_same_cell() {
     // Multiple segments in the same cell
     let route = vec![
         RouteNode {
-            len2_cm2: 25000000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -410,10 +531,9 @@ fn test_multiple_segments_same_cell() {
             cum_dist_cm: 0,
             dx_cm: 5000,
             dy_cm: 0,
-            seg_len_cm: 5000,
+            seg_len_mm: (5000 * 10),
         },
         RouteNode {
-            len2_cm2: 25000000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 5000,
@@ -421,10 +541,9 @@ fn test_multiple_segments_same_cell() {
             cum_dist_cm: 5000,
             dx_cm: 5000,
             dy_cm: 0,
-            seg_len_cm: 5000,
+            seg_len_mm: (5000 * 10),
         },
         RouteNode {
-            len2_cm2: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -432,7 +551,7 @@ fn test_multiple_segments_same_cell() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
+            seg_len_mm: (0 * 10),
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -457,7 +576,6 @@ fn test_grid_with_negative_coordinates() {
     // Route with negative coordinates
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: -5000,
@@ -465,10 +583,9 @@ fn test_grid_with_negative_coordinates() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
+            seg_len_mm: (10000 * 10),
         },
         RouteNode {
-            len2_cm2: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 5000,
@@ -476,7 +593,7 @@ fn test_grid_with_negative_coordinates() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
+            seg_len_mm: (0 * 10),
         },
     ];
     let grid_size_cm = 10000;
@@ -496,7 +613,6 @@ fn test_grid_offset_origin() {
     // Route not starting at origin
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 100000,
@@ -504,10 +620,9 @@ fn test_grid_offset_origin() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
+            seg_len_mm: (10000 * 10),
         },
         RouteNode {
-            len2_cm2: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 110000,
@@ -515,7 +630,7 @@ fn test_grid_offset_origin() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
+            seg_len_mm: (0 * 10),
         },
     ];
     let grid_size_cm = 10000;
@@ -538,7 +653,6 @@ fn test_very_small_grid_cells() {
     // --- GIVEN ---
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -546,10 +660,9 @@ fn test_very_small_grid_cells() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
+            seg_len_mm: (10000 * 10),
         },
         RouteNode {
-            len2_cm2: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -557,7 +670,7 @@ fn test_very_small_grid_cells() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
+            seg_len_mm: (0 * 10),
         },
     ];
     let grid_size_cm = 100; // 1m cells - very small
@@ -575,7 +688,6 @@ fn test_very_large_grid_cells() {
     // --- GIVEN ---
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -583,10 +695,9 @@ fn test_very_large_grid_cells() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
+            seg_len_mm: (10000 * 10),
         },
         RouteNode {
-            len2_cm2: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -594,7 +705,7 @@ fn test_very_large_grid_cells() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
+            seg_len_mm: (0 * 10),
         },
     ];
     let grid_size_cm = 100000; // 1km cells - very large
@@ -617,7 +728,6 @@ fn test_query_at_exact_cell_boundary() {
     // --- GIVEN ---
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -625,10 +735,9 @@ fn test_query_at_exact_cell_boundary() {
             cum_dist_cm: 0,
             dx_cm: 20000,
             dy_cm: 0,
-            seg_len_cm: 20000,
+            seg_len_mm: (20000 * 10),
         },
         RouteNode {
-            len2_cm2: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 20000,
@@ -636,7 +745,7 @@ fn test_query_at_exact_cell_boundary() {
             cum_dist_cm: 20000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
+            seg_len_mm: (0 * 10),
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -655,7 +764,6 @@ fn test_query_at_segment_endpoint() {
     // --- GIVEN ---
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -663,10 +771,9 @@ fn test_query_at_segment_endpoint() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
+            seg_len_mm: (10000 * 10),
         },
         RouteNode {
-            len2_cm2: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -674,7 +781,7 @@ fn test_query_at_segment_endpoint() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
+            seg_len_mm: (0 * 10),
         },
     ];
     let grid = build_grid(&route, 10000);

@@ -68,22 +68,21 @@ fn make_straight_route(length_cm: i32, num_segments: usize) -> Vec<RouteNode> {
         let x_cm = i as i32 * seg_len;
         let cum_dist = x_cm;
         let dx_cm = if i < num_segments { seg_len } else { 0 };
-        let len2_cm2 = if i < num_segments {
-            (seg_len * seg_len) as i64
+        let seg_len_mm = if i < num_segments {
+            (seg_len as i64) * 10
         } else {
             0
         };
 
         nodes.push(RouteNode {
-            len2_cm2,
+            seg_len_mm,
             heading_cdeg: 0,
             _pad: 0,
             x_cm,
             y_cm: 0,
             cum_dist_cm: cum_dist,
-            dx_cm,
+            dx_cm: dx_cm as i16,
             dy_cm: 0,
-            seg_len_cm: if i < num_segments { seg_len } else { 0 },
         });
     }
 
@@ -129,7 +128,7 @@ fn test_integration_l_shaped_route() {
     // L-shaped route: goes east, then north
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -137,10 +136,9 @@ fn test_integration_l_shaped_route() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 9000,
             _pad: 0,
             x_cm: 10000,
@@ -148,10 +146,9 @@ fn test_integration_l_shaped_route() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 10000,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -159,7 +156,6 @@ fn test_integration_l_shaped_route() {
             cum_dist_cm: 20000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -271,7 +267,7 @@ fn test_integration_snap_forward_usage() {
     // Route: segments 0-2 at increasing progress
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 50000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -279,10 +275,9 @@ fn test_integration_snap_forward_usage() {
             cum_dist_cm: 0,
             dx_cm: 5000,
             dy_cm: 0,
-            seg_len_cm: 5000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 50000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 5000,
@@ -290,10 +285,9 @@ fn test_integration_snap_forward_usage() {
             cum_dist_cm: 5000,
             dx_cm: 5000,
             dy_cm: 0,
-            seg_len_cm: 5000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 50000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -301,10 +295,9 @@ fn test_integration_snap_forward_usage() {
             cum_dist_cm: 10000,
             dx_cm: 5000,
             dy_cm: 0,
-            seg_len_cm: 5000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 15000,
@@ -312,7 +305,6 @@ fn test_integration_snap_forward_usage() {
             cum_dist_cm: 15000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -337,7 +329,7 @@ fn test_integration_route_loops_back() {
     let route = vec![
         // Leg 1: East 0 → 10000
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -345,11 +337,10 @@ fn test_integration_route_loops_back() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         // Leg 2: North 0 → 5000
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 50000,
             heading_cdeg: 9000,
             _pad: 0,
             x_cm: 10000,
@@ -357,11 +348,10 @@ fn test_integration_route_loops_back() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 5000,
-            seg_len_cm: 5000,
         },
         // Leg 3: West 10000 → 0 (returns to x=0)
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 18000,
             _pad: 0,
             x_cm: 10000,
@@ -369,10 +359,9 @@ fn test_integration_route_loops_back() {
             cum_dist_cm: 15000,
             dx_cm: -10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -380,7 +369,6 @@ fn test_integration_route_loops_back() {
             cum_dist_cm: 25000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -421,7 +409,7 @@ fn test_integration_route_crosses_itself() {
     let route = vec![
         // Loop 1: Quadrant I
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 50000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -429,10 +417,9 @@ fn test_integration_route_crosses_itself() {
             cum_dist_cm: 0,
             dx_cm: 5000,
             dy_cm: 0,
-            seg_len_cm: 5000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 50000,
             heading_cdeg: 9000,
             _pad: 0,
             x_cm: 5000,
@@ -440,10 +427,9 @@ fn test_integration_route_crosses_itself() {
             cum_dist_cm: 5000,
             dx_cm: 0,
             dy_cm: 5000,
-            seg_len_cm: 5000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 50000,
             heading_cdeg: 18000,
             _pad: 0,
             x_cm: 5000,
@@ -451,11 +437,10 @@ fn test_integration_route_crosses_itself() {
             cum_dist_cm: 10000,
             dx_cm: -5000,
             dy_cm: 0,
-            seg_len_cm: 5000,
         },
         // Back to origin
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 50000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -463,11 +448,10 @@ fn test_integration_route_crosses_itself() {
             cum_dist_cm: 15000,
             dx_cm: 5000,
             dy_cm: 0,
-            seg_len_cm: 5000,
         },
         // Loop 2: Quadrant IV (different direction)
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 50000,
             heading_cdeg: -9000,
             _pad: 0,
             x_cm: 5000,
@@ -475,10 +459,9 @@ fn test_integration_route_crosses_itself() {
             cum_dist_cm: 20000,
             dx_cm: 0,
             dy_cm: -5000,
-            seg_len_cm: 5000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 5000,
@@ -486,7 +469,6 @@ fn test_integration_route_crosses_itself() {
             cum_dist_cm: 25000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -576,7 +558,7 @@ fn test_integration_stops_at_segment_boundaries() {
     // This tests floating point precision at t=0.0 and t=1.0 boundaries
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -584,10 +566,9 @@ fn test_integration_stops_at_segment_boundaries() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -595,10 +576,9 @@ fn test_integration_stops_at_segment_boundaries() {
             cum_dist_cm: 10000,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 20000,
@@ -606,10 +586,9 @@ fn test_integration_stops_at_segment_boundaries() {
             cum_dist_cm: 20000,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 30000,
@@ -617,7 +596,6 @@ fn test_integration_stops_at_segment_boundaries() {
             cum_dist_cm: 30000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -646,7 +624,7 @@ fn test_integration_stops_near_segment_boundaries() {
     // This checks for numerical stability in t-clamping
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -654,10 +632,9 @@ fn test_integration_stops_near_segment_boundaries() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -665,10 +642,9 @@ fn test_integration_stops_near_segment_boundaries() {
             cum_dist_cm: 10000,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 20000,
@@ -676,7 +652,6 @@ fn test_integration_stops_near_segment_boundaries() {
             cum_dist_cm: 20000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -896,8 +871,9 @@ fn position_at_progress(route_nodes: &[RouteNode], progress_cm: i32) -> (i32, i3
     let offset_cm = progress_cm - node.cum_dist_cm;
 
     // t = offset / seg_len (clamped to [0, 1])
-    let t = if node.seg_len_cm > 0 {
-        (offset_cm as f64 / node.seg_len_cm as f64).clamp(0.0, 1.0)
+    let seg_len_cm = (node.seg_len_mm / 10) as i32;
+    let t = if seg_len_cm > 0 {
+        (offset_cm as f64 / seg_len_cm as f64).clamp(0.0, 1.0)
     } else {
         0.0
     };
@@ -933,25 +909,22 @@ fn build_route_nodes_from_cm(points: &[(i32, i32)]) -> Vec<RouteNode> {
                 .sqrt()
                 .round() as i32;
 
-            let len2_cm2 = (seg_len_cm as i64) * (seg_len_cm as i64);
-
             nodes.push(RouteNode {
-                len2_cm2,
+                seg_len_mm: (seg_len_cm as i64) * 10,
                 heading_cdeg: 0,
                 _pad: 0,
                 x_cm,
                 y_cm,
                 cum_dist_cm,
-                dx_cm,
-                dy_cm,
-                seg_len_cm,
+                dx_cm: dx_cm as i16,
+                dy_cm: dy_cm as i16,
             });
 
             cum_dist_cm += seg_len_cm;
         } else {
             // Last node: no outgoing segment
             nodes.push(RouteNode {
-                len2_cm2: 0,
+                seg_len_mm: 0,
                 heading_cdeg: 0,
                 _pad: 0,
                 x_cm,
@@ -959,7 +932,6 @@ fn build_route_nodes_from_cm(points: &[(i32, i32)]) -> Vec<RouteNode> {
                 cum_dist_cm,
                 dx_cm: 0,
                 dy_cm: 0,
-                seg_len_cm: 0,
             });
         }
     }

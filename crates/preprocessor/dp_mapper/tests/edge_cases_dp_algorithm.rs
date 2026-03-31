@@ -21,22 +21,21 @@ fn make_straight_route(length_cm: i32, num_segments: usize) -> Vec<RouteNode> {
         let x_cm = i as i32 * seg_len;
         let cum_dist = x_cm;
         let dx_cm = if i < num_segments { seg_len } else { 0 };
-        let len2_cm2 = if i < num_segments {
-            (seg_len as i64) * (seg_len as i64)
+        let seg_len_mm = if i < num_segments {
+            (seg_len as i64) * 10
         } else {
             0
         };
 
         nodes.push(RouteNode {
-            len2_cm2,
+            seg_len_mm,
             heading_cdeg: 0,
             _pad: 0,
             x_cm,
             y_cm: 0,
             cum_dist_cm: cum_dist,
-            dx_cm,
+            dx_cm: dx_cm as i16,
             dy_cm: 0,
-            seg_len_cm: if i < num_segments { seg_len } else { 0 },
         });
     }
 
@@ -157,7 +156,7 @@ fn test_single_node_route() {
     // --- GIVEN ---
     // Route with only one node (degenerate case)
     let route = vec![RouteNode {
-        len2_cm2: 0,
+        seg_len_mm: 0,
         heading_cdeg: 0,
         _pad: 0,
         x_cm: 0,
@@ -165,7 +164,6 @@ fn test_single_node_route() {
         cum_dist_cm: 0,
         dx_cm: 0,
         dy_cm: 0,
-        seg_len_cm: 0,
     }];
     let stops = vec![(0, 0)];
 
@@ -215,7 +213,7 @@ fn test_k_1_with_complex_route() {
     // L-shaped route with K=1
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -223,10 +221,9 @@ fn test_k_1_with_complex_route() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 9000,
             _pad: 0,
             x_cm: 10000,
@@ -234,10 +231,9 @@ fn test_k_1_with_complex_route() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 10000,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -245,7 +241,6 @@ fn test_k_1_with_complex_route() {
             cum_dist_cm: 20000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -377,7 +372,7 @@ fn test_monotonicity_with_u_turn() {
     // U-turn route with stops that would violate monotonicity without snap-forward
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -385,10 +380,9 @@ fn test_monotonicity_with_u_turn() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 50000,
             heading_cdeg: 9000,
             _pad: 0,
             x_cm: 10000,
@@ -396,10 +390,9 @@ fn test_monotonicity_with_u_turn() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 5000,
-            seg_len_cm: 5000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 18000,
             _pad: 0,
             x_cm: 10000,
@@ -407,10 +400,9 @@ fn test_monotonicity_with_u_turn() {
             cum_dist_cm: 15000,
             dx_cm: -10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -418,7 +410,6 @@ fn test_monotonicity_with_u_turn() {
             cum_dist_cm: 25000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -479,7 +470,7 @@ fn test_zero_length_route() {
     // Route with zero length (both points at origin)
     let route = vec![
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -487,10 +478,9 @@ fn test_zero_length_route() {
             cum_dist_cm: 0,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -498,7 +488,6 @@ fn test_zero_length_route() {
             cum_dist_cm: 0,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -523,7 +512,7 @@ fn test_single_segment_multiple_stops() {
     // Route with only one segment
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -531,10 +520,9 @@ fn test_single_segment_multiple_stops() {
             cum_dist_cm: 0,
             dx_cm: 10000,
             dy_cm: 0,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 10000,
@@ -542,7 +530,6 @@ fn test_single_segment_multiple_stops() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 

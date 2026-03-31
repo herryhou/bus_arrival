@@ -15,40 +15,37 @@ use shared::RouteNode;
 fn make_u_route(horizontal_cm: i32, vertical_cm: i32) -> Vec<RouteNode> {
     vec![
         RouteNode {
-            len2_cm2: (horizontal_cm as i64) * (horizontal_cm as i64),
+            seg_len_mm: (horizontal_cm as i64) * 10,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
             y_cm: 0,
             cum_dist_cm: 0,
-            dx_cm: horizontal_cm,
+            dx_cm: horizontal_cm as i16,
             dy_cm: 0,
-            seg_len_cm: horizontal_cm,
         },
         RouteNode {
-            len2_cm2: (vertical_cm as i64) * (vertical_cm as i64),
+            seg_len_mm: (vertical_cm as i64) * 10,
             heading_cdeg: 9000,
             _pad: 0,
             x_cm: horizontal_cm,
             y_cm: 0,
             cum_dist_cm: horizontal_cm,
             dx_cm: 0,
-            dy_cm: vertical_cm,
-            seg_len_cm: vertical_cm,
+            dy_cm: vertical_cm as i16,
         },
         RouteNode {
-            len2_cm2: (horizontal_cm as i64) * (horizontal_cm as i64),
+            seg_len_mm: (horizontal_cm as i64) * 10,
             heading_cdeg: 18000,
             _pad: 0,
             x_cm: horizontal_cm,
             y_cm: vertical_cm,
             cum_dist_cm: horizontal_cm + vertical_cm,
-            dx_cm: -horizontal_cm,
+            dx_cm: -(horizontal_cm as i16),
             dy_cm: 0,
-            seg_len_cm: horizontal_cm,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -56,7 +53,6 @@ fn make_u_route(horizontal_cm: i32, vertical_cm: i32) -> Vec<RouteNode> {
             cum_dist_cm: 2 * horizontal_cm + vertical_cm,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ]
 }
@@ -64,62 +60,57 @@ fn make_u_route(horizontal_cm: i32, vertical_cm: i32) -> Vec<RouteNode> {
 fn make_figure8_route(size_cm: i32) -> Vec<RouteNode> {
     vec![
         RouteNode {
-            len2_cm2: (size_cm as i64) * (size_cm as i64),
+            seg_len_mm: (size_cm as i64) * 10,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
             y_cm: 0,
             cum_dist_cm: 0,
-            dx_cm: size_cm,
+            dx_cm: size_cm as i16,
             dy_cm: 0,
-            seg_len_cm: size_cm,
         },
         RouteNode {
-            len2_cm2: (size_cm as i64) * (size_cm as i64),
+            seg_len_mm: (size_cm as i64) * 10,
             heading_cdeg: 9000,
             _pad: 0,
             x_cm: size_cm,
             y_cm: 0,
             cum_dist_cm: size_cm,
             dx_cm: 0,
-            dy_cm: size_cm,
-            seg_len_cm: size_cm,
+            dy_cm: size_cm as i16,
         },
         RouteNode {
-            len2_cm2: (size_cm as i64) * (size_cm as i64),
+            seg_len_mm: (size_cm as i64) * 10,
             heading_cdeg: 18000,
             _pad: 0,
             x_cm: size_cm,
             y_cm: size_cm,
             cum_dist_cm: 2 * size_cm,
-            dx_cm: -size_cm,
+            dx_cm: -(size_cm as i16),
             dy_cm: 0,
-            seg_len_cm: size_cm,
         },
         RouteNode {
-            len2_cm2: (size_cm as i64) * (size_cm as i64),
+            seg_len_mm: (size_cm as i64) * 10,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
             y_cm: 0,
             cum_dist_cm: 3 * size_cm,
-            dx_cm: size_cm,
+            dx_cm: size_cm as i16,
             dy_cm: 0,
-            seg_len_cm: size_cm,
         },
         RouteNode {
-            len2_cm2: (size_cm as i64) * (size_cm as i64),
+            seg_len_mm: (size_cm as i64) * 10,
             heading_cdeg: -9000,
             _pad: 0,
             x_cm: size_cm,
             y_cm: 0,
             cum_dist_cm: 4 * size_cm,
             dx_cm: 0,
-            dy_cm: -size_cm,
-            seg_len_cm: size_cm,
+            dy_cm: -(size_cm as i16),
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: size_cm,
@@ -127,7 +118,6 @@ fn make_figure8_route(size_cm: i32) -> Vec<RouteNode> {
             cum_dist_cm: 5 * size_cm,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ]
 }
@@ -150,27 +140,21 @@ fn make_zigzag_route(num_segments: usize, segment_length_cm: i32) -> Vec<RouteNo
             (0, segment_length_cm, 9000)
         };
 
-        let seg_len_cm = if is_last { 0 } else { segment_length_cm };
-        let len2_cm2 = if is_last {
-            0
-        } else {
-            (segment_length_cm as i64) * (segment_length_cm as i64)
-        };
+        let seg_len_mm = if is_last { 0 } else { (segment_length_cm as i64) * 10 };
 
         nodes.push(RouteNode {
-            len2_cm2,
+            seg_len_mm,
             heading_cdeg,
             _pad: 0,
             x_cm,
             y_cm,
             cum_dist_cm,
-            dx_cm,
-            dy_cm,
-            seg_len_cm,
+            dx_cm: dx_cm as i16,
+            dy_cm: dy_cm as i16,
         });
 
         if !is_last {
-            cum_dist_cm += seg_len_cm;
+            cum_dist_cm += segment_length_cm;
             x_cm += dx_cm;
             y_cm += dy_cm;
             going_east = !going_east;
@@ -385,7 +369,7 @@ fn test_route_with_180_degree_turn() {
     let route = vec![
         // Northward segment
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -393,11 +377,10 @@ fn test_route_with_180_degree_turn() {
             cum_dist_cm: 0,
             dx_cm: 0,
             dy_cm: 10000,
-            seg_len_cm: 10000,
         },
         // U-turn point
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 18000,
             _pad: 0,
             x_cm: 0,
@@ -405,11 +388,10 @@ fn test_route_with_180_degree_turn() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: -10000,
-            seg_len_cm: 10000,
         },
         // Back toward start
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -417,7 +399,6 @@ fn test_route_with_180_degree_turn() {
             cum_dist_cm: 20000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -447,7 +428,7 @@ fn test_route_with_hairpin_turns() {
     let route = vec![
         // Start going northeast
         RouteNode {
-            len2_cm2: 50000000,
+            seg_len_mm: 100000,
             heading_cdeg: 4500,
             _pad: 0,
             x_cm: 0,
@@ -455,11 +436,10 @@ fn test_route_with_hairpin_turns() {
             cum_dist_cm: 0,
             dx_cm: 7071,
             dy_cm: 7071,
-            seg_len_cm: 10000,
         },
         // Hairpin 1: turn back southwest
         RouteNode {
-            len2_cm2: 50000000,
+            seg_len_mm: 100000,
             heading_cdeg: -13500,
             _pad: 0,
             x_cm: 7071,
@@ -467,11 +447,10 @@ fn test_route_with_hairpin_turns() {
             cum_dist_cm: 10000,
             dx_cm: -7071,
             dy_cm: -7071,
-            seg_len_cm: 10000,
         },
         // Near start again
         RouteNode {
-            len2_cm2: 50000000,
+            seg_len_mm: 100000,
             heading_cdeg: 4500,
             _pad: 0,
             x_cm: 0,
@@ -479,11 +458,10 @@ fn test_route_with_hairpin_turns() {
             cum_dist_cm: 20000,
             dx_cm: 7071,
             dy_cm: 7071,
-            seg_len_cm: 10000,
         },
         // Continue northeast again
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 7071,
@@ -491,7 +469,6 @@ fn test_route_with_hairpin_turns() {
             cum_dist_cm: 30000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
@@ -524,7 +501,7 @@ fn test_self_intersecting_route_complex() {
     // Route that forms a bowtie pattern (two triangles sharing a vertex)
     let route = vec![
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 3000,
             _pad: 0,
             x_cm: 0,
@@ -532,10 +509,9 @@ fn test_self_intersecting_route_complex() {
             cum_dist_cm: 0,
             dx_cm: 5000,
             dy_cm: 8660,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: 9000,
             _pad: 0,
             x_cm: 5000,
@@ -543,11 +519,10 @@ fn test_self_intersecting_route_complex() {
             cum_dist_cm: 10000,
             dx_cm: -5000,
             dy_cm: 8660,
-            seg_len_cm: 10000,
         },
         // Back to y-axis (crossing point)
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: -15000,
             _pad: 0,
             x_cm: 0,
@@ -555,10 +530,9 @@ fn test_self_intersecting_route_complex() {
             cum_dist_cm: 20000,
             dx_cm: 5000,
             dy_cm: -8660,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 100000000,
+            seg_len_mm: 100000,
             heading_cdeg: -9000,
             _pad: 0,
             x_cm: 5000,
@@ -566,10 +540,9 @@ fn test_self_intersecting_route_complex() {
             cum_dist_cm: 30000,
             dx_cm: -5000,
             dy_cm: -8660,
-            seg_len_cm: 10000,
         },
         RouteNode {
-            len2_cm2: 0,
+            seg_len_mm: 0,
             heading_cdeg: 0,
             _pad: 0,
             x_cm: 0,
@@ -577,7 +550,6 @@ fn test_self_intersecting_route_complex() {
             cum_dist_cm: 40000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_cm: 0,
         },
     ];
 
