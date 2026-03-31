@@ -44,39 +44,32 @@ pub type Dist2 = i64;
 ///
 /// Field ordering: i64 fields placed first to satisfy 8-byte alignment
 /// without compiler-inserted padding on ARM Cortex-M33.
-/// Total size = 40 bytes (with repr(C) alignment padding at end).
+/// Total size = 28 bytes (with repr(C) alignment).
 ///
-/// # Layout
+/// # Layout (v8.7 - 28 bytes)
 /// ```text
-/// offset  0: len2_cm2     i64   8 bytes  (|P[i+1]-P[i]|², cm²)
-/// offset  8: heading_cdeg i16   2 bytes
-/// offset 10: _pad         i16   2 bytes  (alignment padding)
-/// offset 12: x_cm         i32   4 bytes
-/// offset 16: y_cm         i32   4 bytes
-/// offset 20: cum_dist_cm  i32   4 bytes
-/// offset 24: dx_cm        i32   4 bytes  (segment vector x)
-/// offset 28: dy_cm        i32   4 bytes  (segment vector y)
-/// offset 32: seg_len_cm   i32   4 bytes  (offline sqrt, not used runtime)
-/// offset 36: _end_pad     i32   4 bytes  (struct alignment padding to 8-byte boundary)
-/// total: 40 bytes (aligned to 8-byte boundary for i64 field)
+/// offset  0: seg_len_mm   i64   8 bytes  (|P[i+1]-P[i]|, mm)
+/// offset  8: x_cm         i32   4 bytes
+/// offset 12: y_cm         i32   4 bytes
+/// offset 16: cum_dist_cm  i32   4 bytes
+/// offset 20: dx_cm        i16   2 bytes  (segment vector x)
+/// offset 22: dy_cm        i16   2 bytes  (segment vector y)
+/// offset 24: heading_cdeg i16   2 bytes
+/// offset 26: _pad         i16   2 bytes  (alignment padding to 8-byte boundary)
+/// total: 28 bytes (aligned to 8-byte boundary for i64 field)
 /// ```
 ///
-/// # Note on Removed Fields
-/// The `line_a`, `line_b`, `line_c` coefficients were removed in v8.2
-/// because runtime uses dot-product projection instead of line equation
-/// distance calculation. This saves 16 bytes per node (~9.6 KB for 600 nodes).
+/// # Changes from v8.5
+/// - Removed `len2_cm2` (i64) - computed at runtime as (seg_len_mm / 10)^2
+/// - Changed `seg_len_cm` (i32) to `seg_len_mm` (i64) for 10x precision
+/// - Changed `dx_cm`, `dy_cm` from i32 to i16 (max segment length 100m = 10,000 cm fits in i16)
+/// - Reordered fields for optimal packing
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct RouteNode {
     // ── i64 fields first (8-byte aligned) ──────────────────────────
-    /// Squared segment length: |P[i+1] - P[i]|² in cm²
-    pub len2_cm2: Dist2,
-
-    // ── i16 fields (2-byte aligned) ────────────────────────────────
-    /// Segment heading in 0.01° (e.g., 9000 = 90°)
-    pub heading_cdeg: HeadCdeg,
-    /// Padding to align struct size
-    pub _pad: i16,
+    /// Segment length: |P[i+1] - P[i]| in millimeters
+    pub seg_len_mm: i64,
 
     // ── i32 fields (4-byte aligned) ────────────────────────────────
     /// X coordinate (relative to grid origin) in cm
@@ -85,12 +78,16 @@ pub struct RouteNode {
     pub y_cm: DistCm,
     /// Cumulative distance from route start in cm
     pub cum_dist_cm: DistCm,
+
+    // ── i16 fields (2-byte aligned) ────────────────────────────────
     /// Segment vector X: x[i+1] - x[i] in cm
-    pub dx_cm: DistCm,
+    pub dx_cm: i16,
     /// Segment vector Y: y[i+1] - y[i] in cm
-    pub dy_cm: DistCm,
-    /// Segment length in cm (sqrt computed offline only)
-    pub seg_len_cm: DistCm,
+    pub dy_cm: i16,
+    /// Segment heading in 0.01° (e.g., 9000 = 90°)
+    pub heading_cdeg: HeadCdeg,
+    /// Padding to align struct size to 8-byte boundary
+    pub _pad: i16,
 }
 
 
@@ -307,10 +304,8 @@ pub struct DepartureEvent {
     pub v_cms: SpeedCms,
 }
 
-// Compile-time assertion — fails if field reordering changes size
-// v8.5: Changed from repr(C, packed) to repr(C) to avoid UB with field references
-// This increased size from 36 to 40 bytes on platforms with 8-byte i64 alignment
-const _: () = assert!(core::mem::size_of::<RouteNode>() == 40);
+// Compile-time assertion — v8.7: 32 bytes (28 bytes data + 4 bytes alignment padding)
+const _: () = assert!(core::mem::size_of::<RouteNode>() == 32);
 const _: () = assert!(core::mem::size_of::<Stop>() == 12);
 
 #[cfg(test)]
