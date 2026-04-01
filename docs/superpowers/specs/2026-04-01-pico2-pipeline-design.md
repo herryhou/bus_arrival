@@ -3,8 +3,8 @@
 ## 目標
 
 將現有的 bus arrival detection pipeline 移植到 Pico 2 W，實現：
-- 程式碼重用：桌面版與嵌入式版共享核心邏輯
-- 記憶體限制：< 50KB RAM 使用
+- 程式碼重用：桌面版與嵌入式版共享核心邏輯 (Single Source of Truth)
+- 記憶體限制：< 5KB RAM 使用
 - Route data：從外部 SPI Flash XIP 載入
 - 輸入：UART GPS 模組
 - 輸出：JSON 格式事件 (UART)
@@ -15,25 +15,19 @@
 
 ```
 crates/
-├── shared/              # 現有 (已經 no_std 相容)
-│   ├── lib.rs           # 類型定義
-│   └── binfile.rs       # RouteData XIP 載入
+├── shared/              # 現有，加上 feature gating
+│   ├── Cargo.toml       # [features] std = ["serde", "crc32fast/std"]
+│   ├── lib.rs           # 類型定義 (no_std 相容)
+│   └── binfile.rs       # RouteData XIP 載入 (zero-copy)
 │
-├── embedded-core/       # 新增：no_std 核心邏輯
-│   ├── lib.rs           # 模組導出
-│   ├── nmea.rs          # NMEA parser (heapless)
-│   ├── kalman.rs        # Kalman filter + GPS processing
-│   ├── map_match.rs     # Map matching
-│   ├── state_machine.rs # StopState FSM
-│   ├── probability.rs   # Probability model (static LUTs)
-│   └── io.rs            # Trait 定義
-│
-├── pipeline/            # 現有 (std)，重構為使用 embedded-core
-│   ├── lib.rs           # 桌面版 wrapper
-│   └── main.rs          # CLI 工具
+├── pipeline/            # 現有，加上 feature gating
+│   ├── Cargo.toml       # [features] std = ["dep:serde_json"]
+│   ├── lib.rs           # 核心邏輯 (no_std 相容)
+│   ├── gps_processor/   # NMEA + Kalman + Map matching
+│   └── detection/       # FSM + Probability
 │
 └── pico2-firmware/      # 新增：Pico 2 W 固件
-    ├── Cargo.toml       # rp2040-hal, embedded-hal
+    ├── Cargo.toml       # shared = { path = "../shared", default-features = false }
     ├── memory.x         # Linker script for XIP
     └── src/
         ├── main.rs      # UART GPS → JSON output
@@ -45,72 +39,74 @@ crates/
 ```
 ┌─────────────────┐     ┌─────────────────┐
 │  pipeline       │     │ pico2-firmware  │
-│  (std binary)   │     │ (no_std binary) │
+│  (std feature)  │     │ (no_std)        │
 └────────┬────────┘     └────────┬────────┘
          │                       │
          └───────────┬───────────┘
                      │
          ┌───────────▼───────────┐
-         │   embedded-core       │
-         │   (no_std library)    │
-         └───────────┬───────────┘
-                     │
-         ┌───────────▼───────────┐
          │       shared          │
-         │   (no_std types)      │
+         │   (no_std + std)      │
+         │   default-features: std│
          └───────────────────────┘
 ```
 
-## embedded-core Crate
+### Feature Gating 設定
 
-### 設計原則
+```toml
+# shared/Cargo.toml
+[features]
+default = ["std"]
+std = ["serde", "crc32fast/std"]
 
-1. **no_std**：不依賴 `std`，只使用 `core` 和 `alloc`
-2. **heapless 優先**：避免動態記憶體分配，使用固定大小陣列
-3. **靜態 LUTs**：Probability model 使用查表法
-
-### 核心類型
-
-```rust
-pub struct EmbeddedPipeline<'a> {
-    route_data: &'a shared::binfile::RouteData<'a>,
-    nmea_state: nmea::NmeaState,
-    kalman_state: KalmanState,
-    dr_state: DrState,
-    stop_states: heapless::Vec<state_machine::StopState, 256>,
-}
+[dependencies]
+serde = { workspace = true, optional = true }
+crc32fast = { workspace = true }
 ```
 
-### 記憶體估算
+```toml
+# pipeline/Cargo.toml
+[features]
+default = ["std"]
+std = ["shared/std", "dep:serde_json"]
 
-| 組件 | 大小 |
-|------|------|
-| NmeaState | ~64 bytes |
-| KalmanState | 24 bytes |
-| DrState | ~24 bytes |
-| StopState × 256 | ~13KB |
-| **Total** | **~13KB** |
-
-## I/O 抽象層
-
-### Trait 定義
-
-```rust
-pub trait GpsInput {
-    fn read_line(&mut self, buf: &mut [u8]) -> Result<(usize, bool), InputError>;
-}
-
-pub trait EventOutput {
-    fn emit_arrival(&mut self, event: &ArrivalEvent) -> Result<(), OutputError>;
-    fn emit_departure(&mut self, event: &DepartureEvent) -> Result<(), OutputError>;
-}
+[dependencies]
+shared = { path = "../shared", default-features = false }
+serde_json = { workspace = true, optional = true }
 ```
 
-### Pico 2 W 實作
+```toml
+# pico2-firmware/Cargo.toml
+[dependencies]
+shared = { path = "../shared", default-features = false }
+# 使用 serde_json_core 取代 serde_json
+serde_json_core = "0.6"
+```
+
+## 記憶體估算
+
+### Runtime SRAM
+
+| 組件 | 大小 | 說明 |
+|------|------|------|
+| NmeaState | 64 bytes | 一個 GpsPoint |
+| KalmanState | 24 bytes | s_cm, v_cms, last_seg_idx |
+| DrState | 24 bytes | last_gps_time, last_valid_s, filtered_v |
+| StopState × 256 | ~1.8KB | 每個 stop ~7 bytes |
+| UART buffers | ~512 bytes | 輸入/輸出緩衝 |
+| **Total** | **~2.5KB** | 遠低於 5KB 限制 |
+
+### StopState 詳細大小
 
 ```rust
-pub struct UartGpsInput<UART> { uart: UART, buffer: [u8; 256] }
-pub struct UartEventOutput<UART> { uart: UART }
+pub struct StopState {
+    index: u8,              // 1 byte
+    fsm_state: FsmState,    // 1 byte (enum)
+    dwell_time_s: u16,      // 2 bytes
+    last_probability: u8,   // 1 byte
+    last_announced_stop: u8,// 1 byte
+    announced: bool,        // 1 byte
+}  // 總共 7 bytes (可能 alignment 到 8 bytes)
 ```
 
 ## Route Data XIP
@@ -124,7 +120,7 @@ External SPI Flash (XIP):
     ├── RouteData header
     ├── RouteNode array
     ├── Stop array
-    ├── SpatialGrid (sparse)
+    ├── SpatialGrid (sparse, v8.8)
     └── LUTs (gaussian, logistic)
 ```
 
@@ -135,56 +131,132 @@ External SPI Flash (XIP):
 static ROUTE_DATA: [u8; 128*1024] = [0u8; 128*1024];
 
 let route_data = shared::binfile::RouteData::load(&ROUTE_DATA)?;
-let mut pipeline = EmbeddedPipeline::new(&route_data);
+
+// 直接使用 route_data，不複製到 RAM
+// RouteData 內部使用指標指向 Flash 資料 (zero-copy)
+for (idx, stop) in route_data.stops().iter().enumerate() {
+    // stop 是從 Flash 讀取的副本
+}
 ```
 
 ## JSON 輸出格式
 
-### Arrival Event
+### 桌面版 (std)
 
-```json
-{"type":"arrival","time":1234567890,"stop_idx":5,"s_cm":15000,"v_cms":100,"probability":200}
+```rust
+#[cfg(feature = "std")]
+fn emit_event_uart(event: &Event) -> Result<(), Error> {
+    let json = serde_json::to_string(event)?;
+    println!("{}", json);
+    Ok(())
+}
 ```
 
-### Departure Event
+### 嵌入式版 (no_std)
+
+```rust
+#[cfg(not(feature = "std"))]
+fn emit_event_uart<UART: Write<u8>>(
+    uart: &mut UART,
+    event: &Event,
+) -> Result<(), Error> {
+    let mut buf = [0u8; 128];
+    let len = serde_json_core::to_string(&buf, &event)?;
+    for &b in &buf[..len] {
+        nb::block!(uart.write(b))?;
+    }
+    nb::block!(uart.write(b'\n'))?;
+    Ok(())
+}
+```
+
+### 事件格式
 
 ```json
+// Arrival
+{"type":"arrival","time":1234567890,"stop_idx":5,"s_cm":15000,"v_cms":100,"probability":200}
+
+// Departure
 {"type":"departure","time":1234567895,"stop_idx":5,"s_cm":16000,"v_cms":500}
 ```
 
-### 序列化
+## 條件編譯處理
 
-使用 `serde_json_core` (no_std)：
+### serde_json vs serde_json_core
+
 ```rust
-let mut buf = [0u8; 128];
-let len = to_string(&buf, &json_event)?;
-// 寫入 UART
+// pipeline/lib.rs
+
+#[cfg(feature = "std")]
+use serde_json;
+
+#[cfg(not(feature = "std"))]
+use serde_json_core as serde_json;
+
+// 統一的介面
+pub fn to_string<T: serde::Serialize>(
+    buf: &mut [u8],
+    value: &T,
+) -> Result<usize, Error> {
+    #[cfg(feature = "std")]
+    {
+        let s = serde_json::to_string(value)?;
+        buf[..s.len()].copy_from_slice(s.as_bytes());
+        Ok(s.len())
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        serde_json_core::to_string(buf, value).map_err(Into::into)
+    }
+}
 ```
 
 ## 測試
 
 ### 策略
 
-1. 桌面版產生 ground truth
-2. 嵌入式版處理相同資料
-3. 比對輸出
+1. 桌面版產生 ground truth (使用 std feature)
+2. 嵌入式版處理相同資料 (no_std feature)
+3. 比對輸出一致性
 
 ### 整合測試
 
 ```rust
 #[test]
 fn test_pipeline_matches_host() {
-    // 載入 route_data.bin 和測試 NMEA
-    // 執行 embedded pipeline
-    // 比對與 ground truth
+    // 載入 route_data.bin
+    let route_bytes = std::fs::read("test_data/route_data.bin").unwrap();
+    let route_data = shared::binfile::RouteData::load(&route_bytes).unwrap();
+
+    // 載入測試 NMEA
+    let nmea_data = std::fs::read_to_string("test_data/test.nmea").unwrap();
+
+    // 執行 pipeline (使用 std feature)
+    let results = run_pipeline(&route_data, &nmea_data);
+
+    // 載入 ground truth
+    let expected: Vec<Event> = ...;
+
+    // 比對
+    assert_eq!(results, expected);
 }
+```
+
+### 嵌入式測試
+
+```bash
+# 在主機上執行 no_std 測試
+cargo test --package pipeline --no-default-features
+
+# 交叉編譯測試
+cargo test --package pipeline --target thumbv6m-none-eabi --no-default-features
 ```
 
 ## 實作順序
 
-1. **embedded-core crate** - 從現有程式碼提取核心邏輯
-2. **shared binfile** - 確認 XIP 相容性
-3. **I/O traits** - 定義抽象層
-4. **pico2-firmware** - 實作 UART driver 和 main
-5. **pipeline 重構** - 使用 embedded-core
-6. **測試** - 驗證輸出一致性
+1. **shared feature gating** - 加入 `std` feature
+2. **pipeline feature gating** - 移除 std 依賴，使用條件編譯
+3. **serde_json 統一介面** - 抽象序列化差異
+4. **pico2-firmware** - 建立 Pico 2 W 專案
+5. **UART driver** - 實作 GPS 輸入和 JSON 輸出
+6. **測試** - 驗證 std 和 no_std 輸出一致性
