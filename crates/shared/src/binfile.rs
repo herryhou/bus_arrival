@@ -393,6 +393,7 @@ pub fn pack_route_data(
 mod tests {
     use super::*;
 
+    #[cfg(feature = "std")]
     #[test]
     fn test_pack_and_load() {
         let nodes = vec![];
@@ -416,6 +417,7 @@ mod tests {
         assert_eq!(loaded.node_count, 0);
     }
 
+    #[cfg(feature = "std")]
     #[test]
     fn test_crc_mismatch() {
         let mut buffer = Vec::new();
