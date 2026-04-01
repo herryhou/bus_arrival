@@ -1,9 +1,25 @@
-# v8.7 Migration Guide: RouteNode Optimization
+# Binary Format Migration Guide
 
 ## Summary
-v8.7 optimizes the RouteNode struct from 40 to 24 bytes (40% reduction) through field type refinement and removal of computed values.
+This guide covers binary format changes from v8.5 through v8.8, including RouteNode optimization (v8.7), sparse grid optimization (v8.8), and XIP alignment fix (v8.8.1).
+
+## Current Version: 5.1 (v8.8.1)
 
 ## Breaking Changes
+
+### v5.1 (v8.8.1) - XIP Alignment Fix
+- **Behavior change:** Grid `get_cell()` now handles misaligned flash addresses
+- **No breaking change:** Binary format unchanged, still VERSION 5
+- **Runtime impact:** Misaligned access incurs heap allocation (rare)
+- **Recommendation:** Ensure linker places bin file at even address
+
+### v5 (v8.8) - Sparse Grid Optimization
+- Binary format version changed from 4 to 5
+- Old `route_data.bin` files are incompatible
+- Grid format changed from dense to sparse (bitmask + u16 offsets)
+- **Flash savings:** ~16 KB → ~5 KB (60-70% reduction)
+
+### v4 (v8.7) - RouteNode Optimization
 - Binary format version changed from 3 to 4
 - Old `route_data.bin` files are incompatible
 - Field types changed (though API remains compatible)
@@ -53,9 +69,16 @@ offset 22: _pad         i16   2 bytes  (alignment padding)
 - **_pad**: Padding to align struct size to 4-byte boundary
 
 ## Migration Steps
+
+### For v5 (v8.8) - Sparse Grid
 1. Regenerate all `route_data.bin` files using the updated preprocessor
-2. Update visualizer to VERSION=4
+2. Update visualizer to VERSION=5
 3. Rebuild embedded firmware with new shared crate
+
+### For v5.1 (v8.8.1) - XIP Alignment Fix
+1. Update `shared` crate to latest version
+2. Rebuild embedded firmware (no `route_data.bin` regeneration needed)
+3. **Optional:** Configure linker script to place bin file at even address for optimal performance
 
 ## Verification Steps
 
@@ -69,7 +92,13 @@ assert!(size_of::<RouteNode>() == 24);
 Verify the version byte in generated `route_data.bin` files:
 ```bash
 xxd -l 6 route_data.bin
-# Bytes 4-5 should show: 04 00 (VERSION=4 in little-endian)
+# Bytes 4-5 should show: 05 00 (VERSION=5 in little-endian)
+```
+
+### XIP Alignment Test
+The `test_grid_misaligned_access` test verifies grid can be read from misaligned addresses:
+```bash
+cargo test -p shared test_grid_misaligned_access
 ```
 
 ## Compatibility
@@ -92,3 +121,15 @@ xxd -l 6 route_data.bin
 - RouteNode optimization
 - Field type refinement and computed value removal
 - Size reduction: 40 → 24 bytes
+
+### v5 (v8.8) - Sparse Grid Optimization
+- **Bitmask indexing:** 1 bit per cell to mark non-empty cells
+- **u16 offsets:** Only non-empty cells store offset (max 65,535 bytes)
+- **Flash savings:** Grid ~16 KB → ~5 KB (60-70% reduction)
+- **Performance:** +1 popcount operation, negligible CPU impact
+
+### v5.1 (v8.8.1) - XIP Alignment Fix
+- **Problem:** Bin file at odd flash address causes misaligned grid data access
+- **Solution:** `get_cell()` detects misalignment and falls back to element-by-element unaligned reads
+- **Performance:** Aligned (fast path) = zero-copy; Misaligned (slow path) = heap alloc + copy
+- **Mitigation:** Ensure linker places bin file at even address for production

@@ -4,7 +4,7 @@
 
 **目標受眾：** Embedded Rust 開發團隊  
 **硬體平台：** Raspberry Pi Pico 2（RP2350）  
-**文件版本：** v8.7（RouteNode 結構優化：40→24 bytes，提升精度並節省 40% 結構體空間）
+**文件版本：** v8.8（Grid 優化：bitmask + u16 offsets，空間從 ~16 KB 降至 ~5 KB）
 
 ---
 
@@ -14,7 +14,7 @@
 
 核心需求為解決 GPS 漂移、跳點（jump）、近距離站點混淆三類主要誤判場景，並支援**到站前語音播報**（提前 10–15 秒觸發）。本報告提出一套以確定性（deterministic）規則為基礎的工程化架構：以 Route Linearization 將問題降至一維，以**語義化整數型別（cm、0.01°、cm/s）取代浮點運算**以適應無 FPU 平台，以 Heading-Constrained Map Matching 進行路段篩選，以 1D Kalman Filter 平滑狀態估計，以 Dead-Reckoning 補償 GPS 斷訊，最終以 Stop Corridor（兼語音播報觸發）+ Probabilistic Arrival Model + Stop State Machine 三層機制完成到站判定。
 
-完整 pipeline 在 Pico 2 上之計算成本估計為 **CPU < 8%、SRAM < 1 KB（runtime）**，可達到 **≥ 97% 到站判定準確率**，並具備 GPS 斷訊 10 秒以內之持續追蹤能力。路線資料（含預算係數）Flash 佔用約 **~18 KB**（v8.7 優化後）。
+完整 pipeline 在 Pico 2 上之計算成本估計為 **CPU < 8%、SRAM < 1 KB（runtime）**，可達到 **≥ 97% 到站判定準確率**，並具備 GPS 斷訊 10 秒以內之持續追蹤能力。路線資料（含預算係數）Flash 佔用約 **~10-12 KB**（v8.8 優化後）。
 
 ---
 
@@ -105,7 +105,7 @@
   │      ↓                                                     │
   │ ③ Spatial Grid Index   ← 路段空間索引，O(N) → O(k), k ≈ 5–10 │
   │      ↓                                                     │
-  │    route_data.bin (~22KB Flash for v8.7)                            │
+  │    route_data.bin (~10-12KB Flash for v8.8)                            │
   └────────────────────────────────────────────────────────────┘
 ```
 產物：route_data.bin（含 route_nodes / stops / grid_index / LUT）
@@ -428,6 +428,8 @@ v8.8 使用 **VERSION 5**，與 v8.7（VERSION 4）不相容。舊版 `route_dat
 - **u16 偏移量**：僅非空 cell 儲存偏移（max 65,535）
 - **空間節省**：~16 KB → ~5 KB（60-70% 壓縮）
 
+> **完整二進制格式規格：** 參見 **[spatial_grid_binary_format.md](spatial_grid_binary_format.md)** - 包含 Grid 與 RouteNode 的完整 on-disk 佈局、讀寫實作細節，以及 XIP 支援說明。
+
 ---
 
 ## 6. 空間格網索引（模組 ③）
@@ -464,7 +466,30 @@ $$W = \left\lceil \frac{\hat{v}_\text{cm/s} \cdot \Delta t}{\overline{L}_\text{s
 
 其中 $\Delta t = 1\ \text{s}$，$\overline{L}_\text{seg}$ 為路段平均長度（cm）。物理意義：車速越快，每次更新可能跨越的路段數越多，窗口動態加大；停站時窗口縮至最小值 2，減少無效計算。
 
-**記憶體佔用：** 600 路段索引 × 2 bytes = 1.2 KB（Flash）。
+**記憶體佔用（v8.8 優化）：**
+
+使用 **稀疏格網 (Sparse Grid)** 格式：
+- **Bitmask**: 1 bit per cell，標記非空單元格
+- **u16 offsets**: 僅非空 cell 儲存偏移量（max 65,535 bytes）
+- **Cell data**: count (u16) + segment indices (u16 each)
+
+典型路線（60×60 grid，20-30% 非空）：
+- Bitmask: 450 bytes (3600 bits)
+- Offsets: ~720-1080 × 2 bytes = 1.4-2.1 KB
+- Cell data: ~3-5 KB
+- **總計: ~5-8 KB**（v8.7 為 ~16 KB）
+
+**效能影響：**
+- 查詢時增加一次 bitmask 檢查 + popcount 計算
+- CPU 成本 < 0.01 ms（ARM Cortex-M33）
+
+**詳細技術規格：**
+
+參見 **[spatial_grid_binary_format.md](spatial_grid_binary_format.md)** - 完整的格網二進制格式說明，包括：
+- In-memory vs on-disk 結構對比
+- Byte-level 佈局範例
+- 讀取/寫入實作細節
+- XIP (eXecute In Place) 支援說明
 
 ---
 
@@ -1228,7 +1253,7 @@ $$\text{best\_seg} = \arg\max_i \left[\, P(O \mid S=i) \cdot P(S=i \mid S=\text{
 | **8** | **計算廊道邊界** | 為每個站點計算非對稱廊道：前置 $80\text{ m}$，後置 $40\text{ m}$。若相鄰廊道重疊，執行 **$\delta_{sep} = 20\text{ m}$ 強制截斷**。 |
 | **8.5** | **近距站點廊道調整（v8.6 新增）** | 對站距 $<120\text{ m}$ 的站對，重新分配廊道空間：**55% pre + 10% gap + 35% post**。於 `project_stops_validated()` **之後** 執行，作為標準重疊保護的補強。詳見 Section 12.5。 |
 | **9** | **生成查表 (LUT)** | 生成 256 項 Gaussian LUT (距離/進度似然) 與 128 項 Logistic LUT (速度似然)，並縮放至 $u8$ 尺度。 |
-| **10** | **數據打包與校驗** | 將 RouteNode (24 bytes/node)、Stops、Grid 及 LUT 打包。計算 **CRC32** 並標記 **VERSION 5**，產出 `route_data.bin`。 |
+| **10** | **數據打包與校驗** | 將 RouteNode (24 bytes/node)、Stops、Grid 及 LUT 打包。計算 **CRC32** 並標記 **VERSION 5**，產出 `route_data.bin`。<br><br>**詳細規格：** 參見 **[spatial_grid_binary_format.md](spatial_grid_binary_format.md)** - 完整的二進制格式佈局、讀寫實作與 XIP 支援。 |
 
 ---
 

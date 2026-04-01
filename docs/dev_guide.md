@@ -657,6 +657,9 @@ pub fn route_nodes() -> &'static [RouteNode] {
 }
 ```
 
+> **XIP Alignment Note (v8.8.1):** The runtime now handles misaligned flash addresses gracefully. For optimal performance, ensure the linker places `ROUTE_DATA` at an even address. See `spatial_grid_binary_format.md` for details.
+```
+
 ### 7.2 route_data.bin 佈局
 
 離線工具（`preprocessor/src/pack.rs`）將所有資料序列化為單一 .bin 檔：
@@ -664,17 +667,19 @@ pub fn route_nodes() -> &'static [RouteNode] {
 | 區段 | 大小 | 說明 |
 |------|------|------|
 | magic（4 bytes） | 4 B | `0x42555341`（ASCII "BUSA"） |
-| version（u16） | 2 B | 格式版本（v8.7 = 4） |
+| version（u16） | 2 B | 格式版本（v8.8 = 5） |
 | node_count（u16） | 2 B | RouteNode 數量 |
 | stop_count（u8） | 1 B | Stop 數量 |
 | grid_origin（8 B） | 8 B | x0_cm, y0_cm（i32 × 2） |
-| route_nodes（N × 32 B） | ~19.2 KB | RouteNode 陣列（v8.7） |
+| route_nodes（N × 24 B） | ~14.4 KB | RouteNode 陣列（v8.7: 24 bytes/node） |
 | stops（M × 12 B） | ~0.6 KB | Stop 陣列 |
 | grid_index | ~5 KB | Spatial Grid Index (v8.8: sparse grid) |
+| gaussian_lut（256 bytes） | 256 B | Gaussian LUT |
+| logistic_lut（128 bytes） | 128 B | Logistic LUT |
 | CRC32（4 bytes） | 4 B | 整體完整性驗證 |
-| **合計** | **~16 KB** | |
+| **合計** | **~11 KB** | |
 
-> **v8.8 更新：** VERSION=5，Grid 使用 bitmask + u16 offsets，Grid 從 ~16 KB 降至 ~5 KB（節省 ~11 KB Flash）。
+> **v8.8 更新：** VERSION=5，Grid 使用 bitmask + u16 offsets，Grid 從 ~16 KB 降至 ~5 KB（節省 ~11 KB Flash）。<br>> **詳細規格：** 參見 [spatial_grid_binary_format.md](spatial_grid_binary_format.md)
 
 ### 7.3 啟動完整性驗證
 

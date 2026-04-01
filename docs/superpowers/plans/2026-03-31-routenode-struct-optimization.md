@@ -615,7 +615,7 @@ git commit -m "test: verify v8.7 RouteNode optimization complete
 ### Task 9: Create Migration Guide
 
 **Files:**
-- Create: `docs/v8.7_migration_guide.md`
+- Create: `docs/binary_format_migration_guide.md` (renamed from `v8.7_migration_guide.md` in v8.8.1)
 
 - [ ] **Step 1: Write migration guide**
 
@@ -642,8 +642,8 @@ v8.7 optimizes the RouteNode struct from 40 to 28 bytes (30% reduction).
 - [ ] **Step 2: Commit**
 
 ```bash
-git add docs/v8.7_migration_guide.md
-git commit -m "docs: add v8.7 migration guide"
+git add docs/binary_format_migration_guide.md
+git commit -m "docs: add binary format migration guide (v8.7, v8.8, v8.8.1)"
 ```
 
 ---

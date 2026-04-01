@@ -111,10 +111,20 @@ impl<'a> SpatialGridView<'a> {
             // Aligned, can use from_raw_parts directly
             Ok(unsafe { core::slice::from_raw_parts(indices_ptr, count) })
         } else {
-            // Unaligned, need to copy to a temporary buffer
-            // Use a thread-local static buffer for this case (rare)
-            // For now, panic to indicate the data format issue
-            panic!("Grid data is not aligned to 2-byte boundary. This should not happen with correctly packed data.");
+            // Unaligned - need to handle XIP scenario where bin file is at odd address
+            // Use unaligned reads for each element into a leaked Vec
+            // This is rare but necessary for compatibility
+            let vec: Vec<u16> = (0..count)
+                .map(|i| unsafe { core::ptr::read_unaligned(indices_ptr.add(i)) })
+                .collect();
+
+            // Leak the Vec to get a &'static reference, then transmute to &'a [u16]
+            // This is safe because:
+            // 1. The data is a copy of flash contents (not modifying flash)
+            // 2. The leaked Vec lives forever (same as flash lifetime)
+            // 3. The 'a lifetime is valid because the original data outlives 'a
+            let leaked: &'static [u16] = vec.leak();
+            Ok(unsafe { core::mem::transmute::<&'static [u16], &'a [u16]>(leaked) })
         }
     }
 
@@ -431,6 +441,47 @@ mod tests {
         let buffer = vec![0u8; 100];
         let result = RouteData::load(&buffer);
         assert_eq!(result.err(), Some(BusError::InvalidMagic));
+    }
+
+    #[test]
+    fn test_grid_misaligned_access() {
+        // Test XIP scenario: grid data at odd memory address
+        // When bin file is loaded at odd flash address, data section becomes misaligned
+        // The fix handles this by copying to a heap-allocated Vec
+
+        // Create grid data with a known pattern
+        let mut grid_data = vec![0u8; 16];
+        grid_data[0..2].copy_from_slice(&2u16.to_le_bytes()); // count = 2
+        grid_data[2..4].copy_from_slice(&42u16.to_le_bytes()); // index[0] = 42
+        grid_data[4..6].copy_from_slice(&99u16.to_le_bytes()); // index[1] = 99
+
+        // Try to create a buffer where grid_data starts at odd offset
+        let mut misaligned_result: Option<(Vec<u8>, SpatialGridView)> = None;
+
+        for prefix_len in [1usize, 3, 5, 7] {
+            let mut buf = vec![0u8; prefix_len];
+            buf.extend_from_slice(&grid_data);
+            let data_base = buf[prefix_len..].as_ptr();
+
+            if data_base as usize % 2 != 0 {
+                misaligned_result = Some((buf, SpatialGridView {
+                    cols: 1, rows: 1, grid_size_cm: 10000,
+                    bitmask_base: [1u8].as_ptr(),
+                    offsets_base: [0u8, 0u8].as_ptr(),
+                    data_base, _marker: PhantomData,
+                }));
+                break;
+            }
+        }
+
+        let (_buf, misaligned_grid) = match misaligned_result {
+            Some(t) => t,
+            None => return, // Skip if allocator is too aligned (rare)
+        };
+
+        // Should handle misaligned access without panic
+        let cell_data = misaligned_grid.get_cell(0, 0).unwrap();
+        assert_eq!(cell_data, &[42, 99], "Data should match even when misaligned");
     }
 }
 
