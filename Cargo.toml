@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/shared", "crates/preprocessor", "crates/preprocessor/dp_mapper", "crates/trace_validator", "crates/pipeline"]
+members = ["crates/shared", "crates/preprocessor", "crates/preprocessor/dp_mapper", "crates/trace_validator", "crates/pipeline", "crates/pico2-firmware"]
 
 [workspace.package]
 version = "0.1.0"

@@ -1,0 +1,33 @@
+[package]
+name = "pico2-firmware"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["dev"]
+# Feature for host builds (cargo check on development machine)
+# Enables std to avoid panic_impl conflict with panic_halt
+dev = ["shared/std", "gps_processor/std", "detection/std"]
+
+[dependencies]
+shared = { path = "../shared", default-features = false, features = ["serde"] }
+gps_processor = { path = "../pipeline/gps_processor", default-features = false }
+detection = { path = "../pipeline/detection", default-features = false }
+serde = { workspace = true }
+serde-json-core = "0.6"
+
+# Pico 2 W HAL
+rp2040-hal = { version = "0.12", features = ["critical-section-impl"] }
+rp2040-boot2 = "0.3"
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+
+# Embedded traits
+embedded-hal = "1.0"
+nb = "1.0"
+
+# Panic handler
+panic-halt = "1.0"
+
+[dev-dependencies]
+critical-section = "1.0"

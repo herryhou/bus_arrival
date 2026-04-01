@@ -1,0 +1,24 @@
+MEMORY {
+    BOOT2 : ORIGIN = 0x10000000, LENGTH = 0x100
+    FLASH : ORIGIN = 0x10000100, LENGTH = 2048K - 0x100
+    ROUTE_DATA : ORIGIN = 0x10000000 + 2048K - 128K, LENGTH = 128K
+    RAM : ORIGIN = 0x20000000, LENGTH = 520K
+}
+
+SECTIONS {
+    .boot2 ORIGIN(BOOT2) : {
+        KEEP(*(.boot2));
+    } > BOOT2
+} INSERT AFTER .text;
+
+SECTIONS {
+    .route_data : {
+        KEEP(*(.route_data));
+    } > ROUTE_DATA
+}
+
+SECTIONS {
+    .bss (NOLOAD) : {
+        *(.bss .bss.*);
+    } > RAM
+}
