@@ -1,20 +1,21 @@
 //! UART driver for GPS input and JSON output
 
-use core::fmt::Write;
-use embedded_hal::uart::{Read, Write as UartWrite};
 use nb::block;
 
 const UART_BUF_SIZE: usize = 256;
 
-/// GPS input from UART
-pub struct GpsInput<UART> {
-    uart: UART,
+/// GPS input from UART (borrows UART mutably)
+pub struct GpsInput<'a, UART> {
+    uart: &'a mut UART,
     buffer: [u8; UART_BUF_SIZE],
     pos: usize,
 }
 
-impl<UART: Read<u8>> GpsInput<UART> {
-    pub fn new(uart: UART) -> Self {
+impl<'a, UART> GpsInput<'a, UART>
+where
+    UART: embedded_hal_nb::serial::Read<u8>,
+{
+    pub fn new(uart: &'a mut UART) -> Self {
         Self {
             uart,
             buffer: [0; UART_BUF_SIZE],
@@ -46,14 +47,17 @@ impl<UART: Read<u8>> GpsInput<UART> {
     }
 }
 
-/// JSON event output to UART
-pub struct EventOutput<UART> {
-    uart: UART,
+/// JSON event output to UART (borrows UART mutably)
+pub struct EventOutput<'a, UART> {
+    uart: &'a mut UART,
     buffer: [u8; 128],
 }
 
-impl<UART: UartWrite<u8>> EventOutput<UART> {
-    pub fn new(uart: UART) -> Self {
+impl<'a, UART> EventOutput<'a, UART>
+where
+    UART: embedded_hal_nb::serial::Write<u8>,
+{
+    pub fn new(uart: &'a mut UART) -> Self {
         Self {
             uart,
             buffer: [0; 128],
@@ -65,20 +69,12 @@ impl<UART: UartWrite<u8>> EventOutput<UART> {
         &mut self,
         event: &shared::ArrivalEvent,
     ) -> Result<(), &'static str> {
-        use serde_json_core::ser::SliceWrite;
-
-        let mut writer = SliceWrite::new(&mut self.buffer);
-        let mut ser = serde_json_core::ser::Serializer::new(&mut writer);
-
-        // Manual JSON serialization for arrival event
-        use serde::ser::Serialize;
-        event.serialize(&mut ser)
+        // Serialize to buffer using serde_json_core::to_slice
+        let len = serde_json_core::to_slice(event, &mut self.buffer)
             .map_err(|_| "serialize failed")?;
 
-        let json_bytes = writer.bytes();
-
         // Write to UART
-        for &b in json_bytes {
+        for &b in &self.buffer[..len] {
             block!(self.uart.write(b)).map_err(|_| "uart write failed")?;
         }
         block!(self.uart.write(b'\n')).map_err(|_| "uart write failed")?;
@@ -91,18 +87,12 @@ impl<UART: UartWrite<u8>> EventOutput<UART> {
         &mut self,
         event: &shared::DepartureEvent,
     ) -> Result<(), &'static str> {
-        use serde_json_core::ser::SliceWrite;
-
-        let mut writer = SliceWrite::new(&mut self.buffer);
-        let mut ser = serde_json_core::ser::Serializer::new(&mut writer);
-
-        use serde::ser::Serialize;
-        event.serialize(&mut ser)
+        // Serialize to buffer using serde_json_core::to_slice
+        let len = serde_json_core::to_slice(event, &mut self.buffer)
             .map_err(|_| "serialize failed")?;
 
-        let json_bytes = writer.bytes();
-
-        for &b in json_bytes {
+        // Write to UART
+        for &b in &self.buffer[..len] {
             block!(self.uart.write(b)).map_err(|_| "uart write failed")?;
         }
         block!(self.uart.write(b'\n')).map_err(|_| "uart write failed")?;

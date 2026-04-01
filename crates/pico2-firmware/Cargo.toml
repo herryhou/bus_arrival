@@ -15,6 +15,7 @@ gps_processor = { path = "../pipeline/gps_processor", default-features = false }
 detection = { path = "../pipeline/detection", default-features = false }
 serde = { workspace = true }
 serde-json-core = "0.6"
+heapless = "0.8"
 
 # Pico 2 W HAL
 rp2040-hal = { version = "0.12", features = ["critical-section-impl"] }
@@ -24,6 +25,7 @@ cortex-m-rt = "0.7"
 
 # Embedded traits
 embedded-hal = "1.0"
+embedded-hal-nb = "1.0"
 nb = "1.0"
 
 # Panic handler
