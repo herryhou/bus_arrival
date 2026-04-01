@@ -1,6 +1,8 @@
 //! 4-feature Bayesian arrival probability model
 
 use shared::{DistCm, SpeedCms, Prob8};
+
+#[cfg(feature = "std")]
 use crate::trace::FeatureScores;
 
 /// Normalized Gaussian LUT: exp(-x²/2)
@@ -113,6 +115,7 @@ pub fn arrival_probability_adaptive(
 }
 
 /// Compute individual feature scores for trace output
+#[cfg(feature = "std")]
 pub fn compute_feature_scores(
     s_cm: DistCm,
     v_cms: SpeedCms,
@@ -143,27 +146,63 @@ pub fn compute_feature_scores(
 /// Compute arrival probability (0-255) with built-in LUTs.
 ///
 /// Simplified interface that builds LUTs on first use.
+///
+/// In no_std environments, use [`compute_probability_with_luts`] instead.
+#[cfg(feature = "std")]
 pub fn compute_probability(
     s_cm: DistCm,
     v_cms: SpeedCms,
     stop_progress: DistCm,
     dwell_time_s: u16,
 ) -> Prob8 {
+    compute_probability_with_luts(s_cm, v_cms, stop_progress, dwell_time_s, &gaussian_lut(), &logistic_lut())
+}
+
+/// Get or build the Gaussian LUT (cached in std environments)
+#[cfg(feature = "std")]
+fn gaussian_lut() -> &'static [u8; 256] {
     use std::sync::OnceLock;
-
     static GAUSSIAN_LUT: OnceLock<[u8; 256]> = OnceLock::new();
+    GAUSSIAN_LUT.get_or_init(build_gaussian_lut)
+}
+
+/// Get or build the logistic LUT (cached in std environments)
+#[cfg(feature = "std")]
+fn logistic_lut() -> &'static [u8; 128] {
+    use std::sync::OnceLock;
     static LOGISTIC_LUT: OnceLock<[u8; 128]> = OnceLock::new();
+    LOGISTIC_LUT.get_or_init(build_logistic_lut)
+}
 
-    let g_lut = GAUSSIAN_LUT.get_or_init(build_gaussian_lut);
-    let l_lut = LOGISTIC_LUT.get_or_init(build_logistic_lut);
-
+/// Compute arrival probability (0-255) with provided LUTs.
+///
+/// This is the no_std-compatible version. In std environments, you can use
+/// [`compute_probability`] which manages LUTs internally.
+///
+/// For embedded/no_std usage, you should build the LUTs once at startup
+/// and reuse them:
+///
+/// ```ignore
+/// let g_lut = build_gaussian_lut();
+/// let l_lut = build_logistic_lut();
+/// // ... later ...
+/// let prob = compute_probability_with_luts(s_cm, v_cms, stop_progress, dwell_time_s, &g_lut, &l_lut);
+/// ```
+pub fn compute_probability_with_luts(
+    s_cm: DistCm,
+    v_cms: SpeedCms,
+    stop_progress: DistCm,
+    dwell_time_s: u16,
+    gaussian_lut: &[u8; 256],
+    logistic_lut: &[u8; 128],
+) -> Prob8 {
     let stop = shared::Stop {
         progress_cm: stop_progress,
         corridor_start_cm: 0,
         corridor_end_cm: 0,
     };
 
-    arrival_probability(s_cm, v_cms, &stop, dwell_time_s, g_lut, l_lut)
+    arrival_probability(s_cm, v_cms, &stop, dwell_time_s, gaussian_lut, logistic_lut)
 }
 
 #[cfg(test)]
