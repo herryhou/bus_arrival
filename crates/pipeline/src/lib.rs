@@ -21,12 +21,16 @@
 //! ```
 
 pub mod gps;
+pub mod serde;
 
 use shared::binfile::RouteData;
 use shared::{GpsPoint, KalmanState, DrState};
-use std::path::Path;
-use std::io::{BufRead, Write};
 use thiserror::Error;
+
+#[cfg(feature = "std")]
+use std::path::Path;
+#[cfg(feature = "std")]
+use std::io::{BufRead, Write};
 
 // Re-export from sub-crates
 pub use gps_processor::nmea::NmeaState;
@@ -58,8 +62,10 @@ pub struct PipelineResult {
     /// Departure events detected
     pub departures: Vec<DepartureEvent>,
     /// Trace records (if enabled)
+    #[cfg(feature = "std")]
     pub trace_records: Option<Vec<TraceRecord>>,
     /// Announce events (if enabled)
+    #[cfg(feature = "std")]
     pub announce_events: Option<Vec<AnnounceEvent>>,
 }
 
@@ -70,7 +76,8 @@ pub type ArrivalEvent = shared::ArrivalEvent;
 pub type DepartureEvent = shared::DepartureEvent;
 
 /// Trace record for debugging
-#[derive(Debug, Clone, serde::Serialize)]
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, ::serde::Serialize)]
 pub struct TraceRecord {
     pub time: u64,
     pub lat: f64,
@@ -85,7 +92,8 @@ pub struct TraceRecord {
 }
 
 /// Stop state in trace
-#[derive(Debug, Clone, serde::Serialize)]
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, ::serde::Serialize)]
 pub struct StopTraceState {
     pub stop_idx: u8,
     pub distance_cm: i32,
@@ -97,7 +105,8 @@ pub struct StopTraceState {
 }
 
 /// Feature scores for probability model
-#[derive(Debug, Clone, serde::Serialize)]
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, ::serde::Serialize)]
 pub struct FeatureScores {
     pub p1: u8,
     pub p2: u8,
@@ -106,7 +115,8 @@ pub struct FeatureScores {
 }
 
 /// Announce event
-#[derive(Debug, Clone, serde::Serialize)]
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, ::serde::Serialize)]
 pub struct AnnounceEvent {
     pub time: u64,
     pub stop_idx: u8,
@@ -122,6 +132,12 @@ pub enum PipelineError {
 
     #[error("Failed to load route data: {0:?}")]
     RouteDataError(#[from] shared::binfile::BusError),
+
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+
+    #[error("Buffer too small for serialization")]
+    BufferTooSmall,
 }
 
 /// Pipeline processor
@@ -294,6 +310,7 @@ impl DetectionState {
         }
 
         // Check for announcements (v8.4: corridor entry announcement)
+        #[cfg(feature = "std")]
         if result.announce_events.is_some() {
             for (idx, stop_state) in self.stop_states.iter_mut().enumerate() {
                 if stop_state.should_announce(s_cm, stops[idx].corridor_start_cm) {
@@ -309,6 +326,7 @@ impl DetectionState {
     }
 
     /// Get trace information for the last processed GPS record
+    #[cfg(feature = "std")]
     pub fn get_trace_info(&self, record: &gps::GpsRecord, route_data: &RouteData) -> (Vec<u8>, Vec<StopTraceState>) {
         let stops = route_data.stops();
 
@@ -357,6 +375,7 @@ impl Pipeline {
     /// * `route_data_path` - Path to route_data.bin
     /// * `output_path` - Path to write arrival/departure events
     /// * `config` - Pipeline configuration
+    #[cfg(feature = "std")]
     pub fn process_nmea_file(
         nmea_path: impl AsRef<Path>,
         route_data_path: impl AsRef<Path>,
@@ -397,6 +416,7 @@ impl Pipeline {
     /// # Returns
     ///
     /// Returns `PipelineResult` containing arrivals, departures, and optional trace/announce events
+    #[cfg(feature = "std")]
     pub fn process_nmea_reader<R: BufRead>(
         reader: R,
         route_data: &RouteData,
@@ -421,6 +441,7 @@ impl Pipeline {
                     det_state.process_gps_record(&gps_record, route_data, &mut result);
 
                     // Add trace record if enabled (after detection so we have stop states)
+                    #[cfg(feature = "std")]
                     if config.enable_trace {
                         result.add_trace_record(&gps_record, &det_state, route_data);
                     }
@@ -431,6 +452,7 @@ impl Pipeline {
         Ok(result)
     }
 
+    #[cfg(feature = "std")]
     fn write_output(result: &PipelineResult, output_path: impl AsRef<Path>) -> Result<(), PipelineError> {
         use std::fs::File;
         use std::io::BufWriter;
@@ -460,6 +482,7 @@ impl Pipeline {
 
 impl PipelineResult {
     /// Create new PipelineResult with optional trace/announce based on config
+    #[cfg(feature = "std")]
     fn new(config: &PipelineConfig) -> Self {
         Self {
             arrivals: Vec::new(),
@@ -469,7 +492,17 @@ impl PipelineResult {
         }
     }
 
+    /// Create new PipelineResult (no_std version)
+    #[cfg(not(feature = "std"))]
+    fn new(_config: &PipelineConfig) -> Self {
+        Self {
+            arrivals: Vec::new(),
+            departures: Vec::new(),
+        }
+    }
+
     /// Add a trace record (only if trace is enabled)
+    #[cfg(feature = "std")]
     fn add_trace_record(&mut self, record: &gps::GpsRecord, det_state: &DetectionState, route_data: &RouteData) {
         if let Some(ref mut trace) = self.trace_records {
             let (active_stops, stop_states) = det_state.get_trace_info(record, route_data);

@@ -3,14 +3,21 @@ name = "pipeline"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["std"]
+std = ["shared/std", "dep:serde_json"]
+no_std = ["dep:serde-json-core"]
+
 [dependencies]
-shared = { path = "../shared", features = ["std"] }
+shared = { path = "../shared", default-features = false, features = ["serde"] }
 thiserror = "2.0"
 gps_processor = { path = "gps_processor" }
 detection = { path = "detection" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, optional = true }
+serde-json-core = { version = "0.6", optional = true }
 
 [[bin]]
 name = "pipeline"
 path = "src/main.rs"
+required-features = ["std"]

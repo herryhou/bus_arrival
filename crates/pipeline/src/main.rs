@@ -3,11 +3,14 @@
 //! Single binary that processes NMEA → Arrivals/Departures directly.
 //! Wraps the complete pipeline library.
 
+#[cfg(feature = "std")]
 use std::path::PathBuf;
-use pipeline::{Pipeline, PipelineConfig};
-use std::io::Write;
 
+#[cfg(feature = "std")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use pipeline::{Pipeline, PipelineConfig};
+    use std::io::Write;
+
     let args = parse_args()?;
 
     // Build configuration
@@ -59,6 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(feature = "std")]
 struct Args {
     nmea: PathBuf,
     route_data: PathBuf,
@@ -67,6 +71,7 @@ struct Args {
     announce: Option<PathBuf>,
 }
 
+#[cfg(feature = "std")]
 fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     let mut nmea = None;
     let mut route_data = None;
@@ -127,6 +132,7 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     })
 }
 
+#[cfg(feature = "std")]
 fn print_help() {
     println!("Bus Arrival Detection Pipeline");
     println!();
