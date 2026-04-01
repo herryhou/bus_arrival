@@ -84,7 +84,7 @@ function parseStop(dataView: DataView, offset: number): Stop {
 }
 
 /**
- * Parse route_data.bin file from ArrayBuffer (v8.7 format)
+ * Parse route_data.bin file from ArrayBuffer (v8.8 format)
  *
  * @param buffer - ArrayBuffer containing binary file data
  * @returns Parsed RouteData
@@ -111,7 +111,7 @@ export function parseRouteData(buffer: ArrayBuffer): RouteData {
 	const version = dataView.getUint16(offset, true);
 	offset += 2;
 	if (version !== VERSION) {
-		throw new Error(`Unsupported version: ${version}, expected ${VERSION} (v8.7 format). Please regenerate route_data.bin with the latest preprocessor.`);
+		throw new Error(`Unsupported version: ${version}, expected ${VERSION} (v8.8 format). Please regenerate route_data.bin with the latest preprocessor.`);
 	}
 
 	// Read node count (u16)

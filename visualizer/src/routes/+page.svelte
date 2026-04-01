@@ -12,6 +12,7 @@
 
 	let routeData = $state<RouteData | null>(null);
 	let traceData = $state<TraceData | null>(null);
+	let routeFileName = $state<string | null>(null);
 
 	let selectedStop = $state<number | null>(null);
 
@@ -64,6 +65,7 @@
 		loading = true;
 		try {
 			routeData = await loadRouteData(file);
+			routeFileName = file.name;
 			checkReady();
 		} catch (e) {
 			error = `Failed to load route: ${e instanceof Error ? e.message : String(e)}`;
@@ -140,6 +142,7 @@
 		routeData = null;
 		traceData = null;
 		selectedStop = null;
+		routeFileName = null;
 		showUpload = true;
 		error = null;
 	}
@@ -198,7 +201,7 @@
 			<header class="dashboard-header">
 				<div class="brand">
 					<span class="logo">🚌</span>
-					<h1>Bus Arrival Lab <span class="version">v2.0</span></h1>
+					<h1>Bus Arrival Lab <span class="version">v2.0</span>{#if routeFileName} <span class="route-file">{routeFileName}</span>{/if}</h1>
 				</div>
 				<div class="controls">
 					<button onclick={resetUpload} class="btn-outline">New Session</button>
@@ -359,6 +362,7 @@
 	.brand { display: flex; align-items: center; gap: 0.75rem; }
 	.brand h1 { font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.1em; margin: 0; }
 	.brand .version { color: #444; font-size: 0.6rem; }
+	.brand .route-file { color: #3b82f6; font-size: 0.7rem; margin-left: 0.5rem; }
 
 	.btn-outline {
 		background: none;
