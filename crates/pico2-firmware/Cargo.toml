@@ -6,7 +6,7 @@ edition.workspace = true
 [features]
 default = []
 # Host testing feature (enables std, dev-only)
-dev = ["shared/std", "gps_processor/std", "detection/std", "defmt"]
+dev = ["shared/std", "gps_processor/std", "detection/std"]
 
 [dependencies]
 shared = { path = "../shared", default-features = false }
