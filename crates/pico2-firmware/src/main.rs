@@ -10,7 +10,7 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 
 // HAL imports
-use embassy_rp::uart::{self, Config as UartConfig};
+use embassy_rp::uart::Config as UartConfig;
 use embassy_rp::block::ImageDef;
 
 // Local UART module for GPS I/O
@@ -67,9 +67,9 @@ async fn main(spawner: Spawner) {
 
     // Static UART for embassy-rp
     // TODO: Refactor to use async UART with DMA
-    static mut UART: Option<embassy_rp::uart::Uart<'static, embassy_rp::uart::Blocking>> = None;
+    static mut UART: Option<embassy_rp::uart::Uart<'static, embassy_rp::peripherals::UART0, embassy_rp::uart::Blocking>> = None;
 
-    let uart = unsafe {
+    let mut uart = unsafe {
         UART = Some(embassy_rp::uart::Uart::new_blocking(
             p.UART0,
             p.PIN_0, // TX

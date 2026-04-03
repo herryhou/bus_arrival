@@ -19,10 +19,10 @@ PREPROCESSOR := target/release/preprocessor
 PIPELINE := target/release/pipeline
 TRACE_VALIDATOR := target/release/trace_validator
 
-# Pico 2 W firmware
-FIRMWARE := target/thumbv6m-none-eabi/release/pico2-firmware
+# Pico 2 W firmware (RP2350, Cortex-M33)
+FIRMWARE := target/thumbv8m.main-none-eabi/release/pico2-firmware
 FIRMWARE_UF2 := target/pico2-firmware.uf2
-FIRMWARE_ELF := target/thumbv6m-none-eabi/release/pico2-firmware
+FIRMWARE_ELF := target/thumbv8m.main-none-eabi/release/pico2-firmware
 
 # Deprecated: Use unified pipeline instead
 # SIMULATOR := target/release/simulator
@@ -82,14 +82,13 @@ build: build-firmware
 	@echo "=== Building Rust binaries ==="
 	cargo build --release
 
-# Build Pico 2 W firmware (dev mode with std)
-# Note: True no_std build requires embassy-rp migration
-# Target: thumbv8m.main-none-eabi (RP2350, Cortex-M33)
-# See: docs/superpowers/specs/2026-04-03-pico2-no-std-migration-design.md
+# Build Pico 2 W firmware (true no_std with embassy-rp)
+# Target: thumbv8m.main-none-eabi (RP2350, ARM Cortex-M33)
+# Uses embassy-rp async framework with defmt logging
 build-firmware:
-	@echo "=== Building Pico 2 W firmware (dev mode with std) ==="
-	cargo build --release --bin pico2-firmware
-	@echo "Firmware binary: target/release/pico2-firmware"
+	@echo "=== Building Pico 2 W firmware (no_std, embassy-rp) ==="
+	cargo build --release --target thumbv8m.main-none-eabi -p pico2-firmware
+	@echo "Firmware binary: $(FIRMWARE)"
 
 # Convert firmware ELF to UF2 format for USB flashing
 firmware-uf2: build-firmware
@@ -104,15 +103,11 @@ firmware-uf2: build-firmware
 
 # Flash firmware to connected Pico 2 W via probe-rs
 flash-firmware: build-firmware
-	@echo "=== Flashing firmware to Pico 2 W ==="
+	@echo "=== Flashing firmware to Pico 2 W (RP2350) ==="
 	@if command -v probe-rs >/dev/null 2>&1; then \
-		probe-rs flash $(FIRMWARE_ELF) --chip RP2040; \
-	elif command -v rp2040-flash >/dev/null 2>&1; then \
-		rp2040-flash $(FIRMWARE_ELF); \
+		probe-rs flash $(FIRMWARE_ELF) --chip RP2350; \
 	else \
-		echo "Error: No flashing tool found. Install one of:"; \
-		echo "  - probe-rs:  cargo install probe-rs --features-cli"; \
-		echo "  - rp2040-flash: pip install rp2040-flash"; \
+		echo "Error: probe-rs not found. Install with: cargo install probe-rs --features-cli"; \
 		exit 1; \
 	fi
 
@@ -183,9 +178,9 @@ help:
 	@echo ""
 	@echo "Build Targets:"
 	@echo "  make build                                       Build all Rust binaries (host + firmware)"
-	@echo "  make build-firmware                              Build Pico 2 W firmware"
+	@echo "  make build-firmware                              Build Pico 2 W firmware (no_std, embassy-rp)"
 	@echo "  make firmware-uf2                                 Convert firmware to UF2 for USB flashing"
-	@echo "  make flash-firmware                              Flash firmware to connected Pico 2 W"
+	@echo "  make flash-firmware                              Flash firmware to connected Pico 2 W (RP2350)"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  make clean                                       Remove generated files"
@@ -203,12 +198,11 @@ help:
 	@echo "  make pipeline ROUTE_NAME=tpF805 SCENARIO=normal"
 	@echo ""
 	@echo "Firmware:"
-	@echo "  make build-firmware        # Build firmware (dev mode with std)"
+	@echo "  make build-firmware        # Build firmware (no_std, embassy-rp, RP2350)"
 	@echo "  make firmware-uf2           # Create UF2 for drag-and-drop flashing"
-	@echo "  make flash-firmware         # Flash via probe-rs"
+	@echo "  make flash-firmware         # Flash via probe-rs to RP2350"
 	@echo ""
-	@echo "Note: True no_std build is blocked by transitive dependencies (memchr, serde)"
-	@echo "      from rp2040-hal's PIO proc-macro and USB stack. Consider embassy-rp"
+	@echo "Note: Firmware uses embassy-rp async framework with true no_std support."
 
 # Trace validation targets
 .PHONY: validate-trace validate-ty225 validate-all
