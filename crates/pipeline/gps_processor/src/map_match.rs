@@ -3,6 +3,21 @@
 use shared::{RouteNode, HeadCdeg, SpeedCms, DistCm, Dist2};
 use shared::binfile::RouteData;
 
+// Import libm functions for no_std
+#[cfg(not(feature = "std"))]
+use libm::{cos as f64_cos, round as f64_round};
+
+// Helper functions for floating-point operations
+#[cfg(feature = "std")]
+fn f64_cos(x: f64) -> f64 { x.cos() }
+#[cfg(feature = "std")]
+fn f64_round(x: f64) -> f64 { x.round() }
+
+// Helper for to_radians
+fn to_radians_compat(degrees: f64) -> f64 {
+    degrees * core::f64::consts::PI / 180.0
+}
+
 /// Find best route segment for GPS point with preference for segments near last_idx
 pub fn find_best_segment_restricted(
     gps_x: DistCm,
@@ -160,19 +175,19 @@ pub fn project_to_route(
 pub fn latlon_to_cm_absolute_with_lat_avg(lat: f64, lon: f64, lat_avg_deg: f64) -> (DistCm, DistCm) {
     use shared::{EARTH_R_CM, FIXED_ORIGIN_LON_DEG};
 
-    let lat_rad = lat.to_radians();
-    let lon_rad = lon.to_radians();
-    let lat_avg_rad = lat_avg_deg.to_radians();
-    let cos_lat = lat_avg_rad.cos();
+    let lat_rad = to_radians_compat(lat);
+    let lon_rad = to_radians_compat(lon);
+    let lat_avg_rad = to_radians_compat(lat_avg_deg);
+    let cos_lat = f64_cos(lat_avg_rad);
 
     let x_abs = EARTH_R_CM * lon_rad * cos_lat;
     let y_abs = EARTH_R_CM * lat_rad;
 
-    let x0_abs = (FIXED_ORIGIN_LON_DEG.to_radians() * EARTH_R_CM) * cos_lat;
+    let x0_abs = (to_radians_compat(FIXED_ORIGIN_LON_DEG) * EARTH_R_CM) * cos_lat;
     let y0_abs = shared::FIXED_ORIGIN_Y_CM as f64;
 
-    let dx_cm = (x_abs - x0_abs).round() as i64;
-    let dy_cm = (y_abs - y0_abs).round() as i64;
+    let dx_cm = f64_round(x_abs - x0_abs) as i64;
+    let dy_cm = f64_round(y_abs - y0_abs) as i64;
 
     (dx_cm as DistCm, dy_cm as DistCm)
 }

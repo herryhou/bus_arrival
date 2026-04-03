@@ -3,8 +3,14 @@
 //! All physical quantities use semantic integer types to prevent unit confusion
 //! and enable zero-cost runtime behavior on no_std targets.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+// Import Ord trait for .max() method (needed for no_std)
+use core::cmp::Ord;
+use core::option::Option::{self, None, Some};
 
 /// Earth's radius in centimeters
 pub const EARTH_R_CM: f64 = 637_100_000.0;
@@ -187,6 +193,7 @@ impl KalmanState {
 }
 
 /// Spatial grid for O(k) map matching (used by preprocessor to build).
+#[cfg(feature = "std")]
 #[derive(Debug, Clone)]
 pub struct SpatialGrid {
     pub cells: Vec<Vec<usize>>,
@@ -197,6 +204,7 @@ pub struct SpatialGrid {
     pub y0_cm: DistCm,
 }
 
+#[cfg(feature = "std")]
 impl SpatialGrid {
     /// Create an empty spatial grid
     pub fn empty() -> Self {

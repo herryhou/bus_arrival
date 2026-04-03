@@ -3,6 +3,7 @@
 use shared::{Stop, DistCm};
 
 /// Find stops whose corridor contains the current route progress
+#[cfg(feature = "std")]
 pub fn find_active_stops(s_cm: DistCm, stops: &[Stop]) -> Vec<usize> {
     stops.iter()
         .enumerate()

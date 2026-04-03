@@ -9,6 +9,7 @@ const GPS_JUMP_THRESHOLD: DistCm = 20000;  // 200 m
 ///
 /// Implements scoring formula from Tech Report Section 15.2:
 /// score(i) = |s_i - s| + 5000 * max(0, last_index - i)
+#[cfg(feature = "std")]
 pub fn find_stop_index(
     s_cm: DistCm,
     stops: &[Stop],

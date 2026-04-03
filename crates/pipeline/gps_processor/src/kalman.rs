@@ -1,5 +1,7 @@
 //! Kalman filter and GPS processing pipeline
 
+use core::cmp::Ord;
+
 use crate::route_data::RouteData;
 use shared::{DistCm, DrState, GpsPoint, KalmanState, SpeedCms};
 

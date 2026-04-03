@@ -2,6 +2,22 @@
 
 use shared::{GpsPoint, SpeedCms, HeadCdeg};
 
+// Import libm functions for no_std
+#[cfg(not(feature = "std"))]
+use libm::{round as f64_round, trunc as f64_trunc};
+
+// Helper functions for floating-point operations
+#[cfg(feature = "std")]
+fn f64_round(x: f64) -> f64 { x.round() }
+#[cfg(feature = "std")]
+fn f64_trunc(x: f64) -> f64 { x.trunc() }
+
+// NMEA sentences typically have < 20 fields
+const MAX_NMEA_FIELDS: usize = 20;
+
+// Note: We don't use the type alias approach since we need different types for std/no_std
+// The code inline uses conditional compilation instead
+
 /// NMEA parser state (accumulates data across sentences)
 pub struct NmeaState {
     point: GpsPoint,
@@ -20,16 +36,22 @@ impl NmeaState {
             return None;
         }
 
+        #[cfg(feature = "std")]
         let parts: Vec<&str> = sentence.split(',').collect();
+        #[cfg(not(feature = "std"))]
+        let parts: heapless::Vec<&str, MAX_NMEA_FIELDS> = sentence.split(',').collect();
 
         if parts.is_empty() {
             return None;
         }
 
-        match parts[0] {
-            "$GPRMC" => self.parse_rmc(&parts),
-            "$GNGSA" => self.parse_gsa(&parts),
-            "$GPGGA" => self.parse_gga(&parts),
+        // Convert to slice for parsing functions
+        let parts_slice: &[&str] = &parts;
+
+        match parts_slice.first() {
+            Some(&"$GPRMC") => self.parse_rmc(parts_slice),
+            Some(&"$GNGSA") => self.parse_gsa(parts_slice),
+            Some(&"$GPGGA") => self.parse_gga(parts_slice),
             _ => None,
         }
     }
@@ -64,7 +86,7 @@ impl NmeaState {
 
         // Convert NMEA heading (0-360°) to HeadCdeg range (-18000 to 18000)
         // to avoid overflow for headings > 180°
-        let heading_cdeg = (heading_deg * 100.0).round() as i32;
+        let heading_cdeg = f64_round(heading_deg * 100.0) as i32;
         let heading_cdeg = if heading_cdeg > 18000 {
             heading_cdeg - 36000
         } else {
@@ -90,10 +112,10 @@ impl NmeaState {
         // HDOP is second-to-last field (index -2)
         let hdop_idx = parts.len() - 2;
         let hdop: f64 = parts[hdop_idx].parse().unwrap_or(99.0);
-        self.point.hdop_x10 = (hdop * 10.0).round() as u16;
+        self.point.hdop_x10 = f64_round(hdop * 10.0) as u16;
 
         // Return complete point
-        Some(std::mem::replace(&mut self.point, GpsPoint::new()))
+        Some(core::mem::replace(&mut self.point, GpsPoint::new()))
     }
 
     fn parse_gga(&mut self, parts: &[&str]) -> Option<GpsPoint> {
@@ -122,11 +144,11 @@ impl NmeaState {
 
         self.point.lat = lat;
         self.point.lon = lon;
-        self.point.hdop_x10 = (hdop * 10.0).round() as u16;
+        self.point.hdop_x10 = f64_round(hdop * 10.0) as u16;
         self.point.has_fix = true;
 
         // GGA alone is enough to complete the point
-        Some(std::mem::replace(&mut self.point, GpsPoint::new()))
+        Some(core::mem::replace(&mut self.point, GpsPoint::new()))
     }
 }
 
@@ -149,20 +171,20 @@ fn verify_checksum(sentence: &str) -> bool {
 /// Parse latitude from NMEA format (ddmm.mmmm)
 fn parse_lat(deg_min: &str, ns: &str) -> Option<f64> {
     let dm: f64 = deg_min.parse().ok()?;
-    let degrees = (dm / 100.0).trunc() + (dm % 100.0) / 60.0;
+    let degrees = f64_trunc(dm / 100.0) + (dm % 100.0) / 60.0;
     Some(if ns == "N" { degrees } else { -degrees })
 }
 
 /// Parse longitude from NMEA format (dddmm.mmmm)
 fn parse_lon(deg_min: &str, ew: &str) -> Option<f64> {
     let dm: f64 = deg_min.parse().ok()?;
-    let degrees = (dm / 100.0).trunc() + (dm % 100.0) / 60.0;
+    let degrees = f64_trunc(dm / 100.0) + (dm % 100.0) / 60.0;
     Some(if ew == "E" { degrees } else { -degrees })
 }
 
 /// Convert knots to cm/s: 1 knot = 51.44 cm/s
 fn knots_to_cms(knots: f64) -> SpeedCms {
-    (knots * 51.44).round() as SpeedCms
+    f64_round(knots * 51.44) as SpeedCms
 }
 
 #[cfg(test)]

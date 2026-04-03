@@ -4,9 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["std"]
-std = ["crc32fast/std", "serde"]
+default = []
+std = ["serde"]
+serde = ["dep:serde"]
 
 [dependencies]
-serde = { workspace = true, optional = true, features = ["derive"] }
-crc32fast = { workspace = true }
+serde = { workspace = true, optional = true }

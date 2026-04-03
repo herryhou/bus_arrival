@@ -1,12 +1,14 @@
 //! 4-feature Bayesian arrival probability model
 
 use shared::{DistCm, SpeedCms, Prob8};
+use core::cmp::Ord;
 
 #[cfg(feature = "std")]
 use crate::trace::FeatureScores;
 
 /// Normalized Gaussian LUT: exp(-x²/2)
 /// Index i = (x / sigma) * 64. Range [0, 4.0).
+#[cfg(feature = "std")]
 pub fn build_gaussian_lut() -> [u8; 256] {
     let mut lut = [0u8; 256];
     for i in 0..256 {
@@ -20,6 +22,7 @@ pub fn build_gaussian_lut() -> [u8; 256] {
 /// Logistic LUT for speed likelihood: 1 / (1 + exp(k * (v - v_stop)))
 /// v_stop = 200 cm/s, k = 0.01.
 /// Index i = v / 10. Range [0, 1270] cm/s.
+#[cfg(feature = "std")]
 pub fn build_logistic_lut() -> [u8; 128] {
     let mut lut = [0u8; 128];
     let k = 0.01;

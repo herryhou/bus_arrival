@@ -9,27 +9,25 @@ default = []
 dev = ["shared/std", "gps_processor/std", "detection/std"]
 
 [dependencies]
-shared = { path = "../shared", default-features = false }
-gps_processor = { path = "../pipeline/gps_processor", default-features = false }
-detection = { path = "../pipeline/detection", default-features = false }
+shared = { path = "../shared", default-features = false, features = [] }
+gps_processor = { path = "../pipeline/gps_processor", default-features = false, features = [] }
+detection = { path = "../pipeline/detection", default-features = false, features = [] }
 
 # Embassy RP (replaces rp2040-hal)
-embassy-rp = { version = "0.3", features = ["rp2350", "time-driver", "defmt", "internal-irqs"] }
-embassy-executor = { version = "0.7", features = ["arch-cortex-m", "executor-thread"] }
-embassy-time = { version = "0.4", features = ["defmt", "defmt-timestamp-uptime"] }
-embassy-embedded-hal = "0.3"
+# Note: Using minimal features to avoid problematic transitive dependencies
+embassy-rp = { version = "0.3", default-features = false, features = ["rp235xb", "time-driver"] }
+embassy-executor = { version = "0.7", default-features = false, features = ["arch-cortex-m", "executor-thread"] }
+embassy-time = { version = "0.4", default-features = false, features = [] }
+embassy-embedded-hal = { version = "0.3", default-features = false, features = [] }
 
 # Core embedded (still needed)
-cortex-m = "0.7"
-embedded-hal = "1.0"
-embedded-hal-nb = "1.0"
+cortex-m = { version = "0.7", default-features = false }
+embedded-hal = { version = "1.0", default-features = false }
+embedded-hal-nb = { version = "1.0", default-features = false }
 nb = "1.0"
 
 # Panic handler (no_std)
 panic-halt = "1.0"
-defmt = "0.3"
-heapless = { version = "0.8", default-features = false }
 
-[dev-dependencies]
-# For host-based testing
-critical-section = "1.0"
+# For fixed-size Vec in no_std
+heapless = { version = "0.8", default-features = false }

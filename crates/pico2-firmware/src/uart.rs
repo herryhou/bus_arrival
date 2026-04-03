@@ -1,8 +1,10 @@
 //! UART driver for GPS input and JSON output
 
 use nb::block;
+use core::fmt::Write;
 
 const UART_BUF_SIZE: usize = 256;
+const JSON_BUF_SIZE: usize = 128;
 
 /// GPS input from UART (borrows UART mutably)
 pub struct GpsInput<'a, UART> {
@@ -50,7 +52,8 @@ where
 /// JSON event output to UART (borrows UART mutably)
 pub struct EventOutput<'a, UART> {
     uart: &'a mut UART,
-    buffer: [u8; 128],
+    buffer: [u8; JSON_BUF_SIZE],
+    len: usize,
 }
 
 impl<'a, UART> EventOutput<'a, UART>
@@ -60,7 +63,8 @@ where
     pub fn new(uart: &'a mut UART) -> Self {
         Self {
             uart,
-            buffer: [0; 128],
+            buffer: [0; JSON_BUF_SIZE],
+            len: 0,
         }
     }
 
@@ -69,12 +73,15 @@ where
         &mut self,
         event: &shared::ArrivalEvent,
     ) -> Result<(), &'static str> {
-        // Serialize to buffer using serde_json_core::to_slice
-        let len = serde_json_core::to_slice(event, &mut self.buffer)
-            .map_err(|_| "serialize failed")?;
+        // Manual JSON serialization: {"time":123,"stop_idx":1,"s_cm":10000,"v_cms":100,"probability":200}
+        self.len = 0;
+        write!(BufferWriter(&mut self.buffer, &mut self.len),
+            "{{\"time\":{},\"stop_idx\":{},\"s_cm\":{},\"v_cms\":{},\"probability\":{}}}",
+            event.time, event.stop_idx, event.s_cm, event.v_cms, event.probability)
+            .map_err(|_| "json serialize failed")?;
 
         // Write to UART
-        for &b in &self.buffer[..len] {
+        for &b in &self.buffer[..self.len] {
             block!(self.uart.write(b)).map_err(|_| "uart write failed")?;
         }
         block!(self.uart.write(b'\n')).map_err(|_| "uart write failed")?;
@@ -87,16 +94,35 @@ where
         &mut self,
         event: &shared::DepartureEvent,
     ) -> Result<(), &'static str> {
-        // Serialize to buffer using serde_json_core::to_slice
-        let len = serde_json_core::to_slice(event, &mut self.buffer)
-            .map_err(|_| "serialize failed")?;
+        // Manual JSON serialization: {"time":123,"stop_idx":1,"s_cm":10000,"v_cms":50}
+        self.len = 0;
+        write!(BufferWriter(&mut self.buffer, &mut self.len),
+            "{{\"time\":{},\"stop_idx\":{},\"s_cm\":{},\"v_cms\":{}}}",
+            event.time, event.stop_idx, event.s_cm, event.v_cms)
+            .map_err(|_| "json serialize failed")?;
 
         // Write to UART
-        for &b in &self.buffer[..len] {
+        for &b in &self.buffer[..self.len] {
             block!(self.uart.write(b)).map_err(|_| "uart write failed")?;
         }
         block!(self.uart.write(b'\n')).map_err(|_| "uart write failed")?;
 
+        Ok(())
+    }
+}
+
+/// Helper struct to write into a fixed-size buffer
+struct BufferWriter<'a>(&'a mut [u8], &'a mut usize);
+
+impl core::fmt::Write for BufferWriter<'_> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let bytes = s.as_bytes();
+        let remaining = &mut self.0[*self.1..];
+        if remaining.len() < bytes.len() {
+            return Err(core::fmt::Error);
+        }
+        remaining[..bytes.len()].copy_from_slice(bytes);
+        *self.1 += bytes.len();
         Ok(())
     }
 }
