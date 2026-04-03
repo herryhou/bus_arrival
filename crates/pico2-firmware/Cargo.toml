@@ -14,7 +14,7 @@ gps_processor = { path = "../pipeline/gps_processor", default-features = false }
 detection = { path = "../pipeline/detection", default-features = false }
 
 # Embassy RP (replaces rp2040-hal)
-embassy-rp = { version = "0.3", features = ["_rp235x", "time-driver", "defmt"] }
+embassy-rp = { version = "0.3", features = ["rp2350", "time-driver", "defmt", "internal-irqs"] }
 embassy-executor = { version = "0.7", features = ["arch-cortex-m", "executor-thread"] }
 embassy-time = { version = "0.4", features = ["defmt", "defmt-timestamp-uptime"] }
 embassy-embedded-hal = "0.3"
@@ -27,7 +27,8 @@ nb = "1.0"
 
 # Panic handler (no_std)
 panic-halt = "1.0"
-defmt = { version = "0.3", optional = true }
+defmt = "0.3"
+heapless = { version = "0.8", default-features = false }
 
 [dev-dependencies]
 # For host-based testing
