@@ -1,23 +1,23 @@
 //! UART driver for GPS input and JSON output
 
-use nb::block;
 use core::fmt::Write;
+use embedded_hal_nb::serial::{Read, Write};
+use embassy_rp::uart::Uart;
+use embassy_rp::uart::Blocking;
+use embassy_rp::peripherals::UART0;
 
 const UART_BUF_SIZE: usize = 256;
 const JSON_BUF_SIZE: usize = 128;
 
 /// GPS input from UART (borrows UART mutably)
-pub struct GpsInput<'a, UART> {
-    uart: &'a mut UART,
+pub struct GpsInput<'a> {
+    uart: &'a mut Uart<'static, UART0, Blocking>,
     buffer: [u8; UART_BUF_SIZE],
     pos: usize,
 }
 
-impl<'a, UART> GpsInput<'a, UART>
-where
-    UART: embedded_hal_nb::serial::Read<u8>,
-{
-    pub fn new(uart: &'a mut UART) -> Self {
+impl<'a> GpsInput<'a> {
+    pub fn new(uart: &'a mut Uart<'static, UART0, Blocking>) -> Self {
         Self {
             uart,
             buffer: [0; UART_BUF_SIZE],
@@ -35,7 +35,8 @@ where
                 return None;
             }
 
-            let byte = block!(self.uart.read()).ok()?;
+            // Read byte using embedded-io Read trait
+            let byte = nb::block!(self.uart.read().map_err(|e| nb::Error::Other(e))).ok()?;
 
             self.buffer[self.pos] = byte;
             self.pos += 1;
@@ -50,17 +51,14 @@ where
 }
 
 /// JSON event output to UART (borrows UART mutably)
-pub struct EventOutput<'a, UART> {
-    uart: &'a mut UART,
+pub struct EventOutput<'a> {
+    uart: &'a mut Uart<'static, UART0, Blocking>,
     buffer: [u8; JSON_BUF_SIZE],
     len: usize,
 }
 
-impl<'a, UART> EventOutput<'a, UART>
-where
-    UART: embedded_hal_nb::serial::Write<u8>,
-{
-    pub fn new(uart: &'a mut UART) -> Self {
+impl<'a> EventOutput<'a> {
+    pub fn new(uart: &'a mut Uart<'static, UART0, Blocking>) -> Self {
         Self {
             uart,
             buffer: [0; JSON_BUF_SIZE],
@@ -80,11 +78,11 @@ where
             event.time, event.stop_idx, event.s_cm, event.v_cms, event.probability)
             .map_err(|_| "json serialize failed")?;
 
-        // Write to UART
+        // Write to UART byte by byte
         for &b in &self.buffer[..self.len] {
-            block!(self.uart.write(b)).map_err(|_| "uart write failed")?;
+            nb::block!(self.uart.write(b)).map_err(|_| "uart write failed")?;
         }
-        block!(self.uart.write(b'\n')).map_err(|_| "uart write failed")?;
+        nb::block!(self.uart.write(b'\n')).map_err(|_| "uart write failed")?;
 
         Ok(())
     }
@@ -101,11 +99,11 @@ where
             event.time, event.stop_idx, event.s_cm, event.v_cms)
             .map_err(|_| "json serialize failed")?;
 
-        // Write to UART
+        // Write to UART byte by byte
         for &b in &self.buffer[..self.len] {
-            block!(self.uart.write(b)).map_err(|_| "uart write failed")?;
+            nb::block!(self.uart.write(b)).map_err(|_| "uart write failed")?;
         }
-        block!(self.uart.write(b'\n')).map_err(|_| "uart write failed")?;
+        nb::block!(self.uart.write(b'\n')).map_err(|_| "uart write failed")?;
 
         Ok(())
     }

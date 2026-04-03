@@ -1,31 +1,35 @@
-#![cfg_attr(not(feature = "dev"), no_std)]
-#![cfg_attr(not(feature = "dev"), no_main)]
+#![no_std]
+#![no_main]
 
-#[cfg(feature = "dev")]
-use std as _;
+use defmt::*;
+use defmt_rtt as _;
+use panic_probe as _;
 
-#[cfg(not(feature = "dev"))]
-use panic_halt as _;
+// Embassy imports
+use embassy_executor::Spawner;
+use embassy_time::{Duration, Timer};
 
-#[cfg(not(feature = "dev"))]
-use rp2040_boot2::BOOT_LOADER_W25Q080;
+// HAL imports
+use embassy_rp::uart::{self, Config as UartConfig};
+use embassy_rp::block::ImageDef;
 
+// Local UART module for GPS I/O
 mod uart;
-
 use uart::{GpsInput, EventOutput};
 
-#[cfg(not(feature = "dev"))]
-#[link_section = ".boot2"]
-#[used]
-pub static BOOT2: [u8; 256] = BOOT_LOADER_W25Q080;
+// Note: embassy-rp doesn't require external bootloader
+// The RP2350 has built-in boot ROM
 
-/// Route data embedded in flash
-#[cfg(not(feature = "dev"))]
+// Image definition for memory layout
+#[used]
+#[link_section = ".bi_entries"]
+static IMAGE_DEF: ImageDef = ImageDef::secure_exe();
+
+/// Route data embedded in flash (128KB max)
 #[link_section = ".route_data"]
 static ROUTE_DATA: [u8; 128 * 1024] = [0u8; 128 * 1024];
 
 /// Global state
-#[cfg(not(feature = "dev"))]
 struct State {
     nmea: gps_processor::nmea::NmeaState,
     kalman: shared::KalmanState,
@@ -33,7 +37,6 @@ struct State {
     stop_states: heapless::Vec<detection::state_machine::StopState, 256>,
 }
 
-#[cfg(not(feature = "dev"))]
 impl State {
     fn new(route_data: &shared::binfile::RouteData) -> Self {
         use detection::state_machine::StopState;
@@ -42,7 +45,7 @@ impl State {
         let stop_count = route_data.stop_count;
         let mut stop_states = heapless::Vec::new();
         for i in 0..stop_count {
-            stop_states.push(StopState::new(i as u8)).unwrap();
+            let _ = stop_states.push(StopState::new(i as u8));
         }
 
         Self {
@@ -54,58 +57,40 @@ impl State {
     }
 }
 
-#[cfg(not(feature = "dev"))]
-#[rp2040_hal::entry]
-fn main() -> ! {
-    let mut pac = rp2040_hal::pac::Peripherals::take().unwrap();
-    let _core = cortex_m::Peripherals::take().unwrap();
+// Embassy program entry point
+#[embassy_executor::main]
+async fn main(spawner: Spawner) {
+    info!("Bus Arrival Detection System starting...");
 
-    let mut watchdog = rp2040_hal::watchdog::Watchdog::new(pac.WATCHDOG);
+    // Initialize peripherals
+    let p = embassy_rp::init(Default::default());
 
-    // Configure clocks - use external 12MHz oscillator
-    let clocks = rp2040_hal::clocks::init_clocks_and_plls(
-        12_000_000, // 12 MHz crystal
-        pac.XOSC,
-        pac.CLOCKS,
-        pac.PLL_SYS,
-        pac.PLL_USB,
-        &mut pac.RESETS,
-        &mut watchdog,
-    )
-    .ok()
-    .unwrap();
+    // Static UART for embassy-rp
+    // TODO: Refactor to use async UART with DMA
+    static mut UART: Option<embassy_rp::uart::Uart<'static, embassy_rp::uart::Blocking>> = None;
 
-    let sio = pac.SIO;
-    let pins = rp2040_hal::gpio::Pins::new(
-        pac.IO_BANK0,
-        pac.PADS_BANK0,
-        sio.gpio_bank0,
-        &mut pac.RESETS,
-    );
-
-    // UART0 on GPIO 0 (TX) and GPIO 1 (RX)
-    let uart_pins = (
-        pins.gpio0.into_function::<2>(),
-        pins.gpio1.into_function::<2>(),
-    );
-
-    let mut uart = rp2040_hal::uart::UartPeripheral::new(pac.UART0, uart_pins, &mut pac.RESETS)
-        .enable(
-            rp2040_hal::uart::UartConfig::new(115200.bps(), rp2040_hal::uart::DataBits::Eight),
-            &clocks.peripheral_clock,
-            &mut pac.RESETS,
-        )
-        .unwrap();
+    let uart = unsafe {
+        UART = Some(embassy_rp::uart::Uart::new_blocking(
+            p.UART0,
+            p.PIN_0, // TX
+            p.PIN_1, // RX
+            UartConfig::default(),
+        ));
+        UART.as_mut().unwrap()
+    };
 
     // Initialize route data from flash
     let route_data = unsafe {
-        shared::binfile::RouteData::load(&ROUTE_DATA).expect("Failed to load route data")
+        shared::binfile::RouteData::load(&ROUTE_DATA)
+            .expect("Failed to load route data")
     };
 
     // Initialize state
     let mut state = State::new(&route_data);
 
-    // Main loop
+    info!("System ready. Starting GPS processing...");
+
+    // Main processing loop
     loop {
         // Create GPS input wrapper for this iteration
         let mut gps_input = GpsInput::new(&mut uart);
@@ -125,26 +110,12 @@ fn main() -> ! {
                 };
 
                 // Emit test arrival event
-                // Note: This is a simplified version - the full implementation
-                // would process GPS through Kalman filter and update stop states
                 let mut event_output = EventOutput::new(&mut uart);
                 let _ = event_output.emit_arrival(&test_arrival);
             }
         }
+
+        // Rate limiting: 1 Hz processing
+        Timer::after(Duration::from_secs(1)).await;
     }
-}
-
-#[cfg(feature = "dev")]
-fn main() {
-    println!("Bus Arrival Detection System - Development Mode");
-    println!("This is a placeholder for host-based testing.");
-    println!("The actual firmware runs on Raspberry Pi Pico 2 (no_std).");
-
-    // TODO: Initialize UART for testing
-    // TODO: Main loop:
-    //   1. Read NMEA from UART
-    //   2. Parse with NmeaState
-    //   3. Process GPS with Kalman
-    //   4. Update StopState machines
-    //   5. Emit events to UART
 }

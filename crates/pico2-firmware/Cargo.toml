@@ -14,20 +14,22 @@ gps_processor = { path = "../pipeline/gps_processor", default-features = false, 
 detection = { path = "../pipeline/detection", default-features = false, features = [] }
 
 # Embassy RP (replaces rp2040-hal)
-# Note: Using minimal features to avoid problematic transitive dependencies
-embassy-rp = { version = "0.3", default-features = false, features = ["rp235xb", "time-driver"] }
-embassy-executor = { version = "0.7", default-features = false, features = ["arch-cortex-m", "executor-thread"] }
-embassy-time = { version = "0.4", default-features = false, features = [] }
+embassy-rp = { version = "0.3", default-features = false, features = ["rp235xb", "time-driver", "defmt"] }
+embassy-executor = { version = "0.7", default-features = false, features = ["arch-cortex-m", "executor-thread", "defmt"] }
+embassy-time = { version = "0.4", default-features = false, features = ["defmt"] }
 embassy-embedded-hal = { version = "0.3", default-features = false, features = [] }
 
-# Core embedded (still needed)
+# Core embedded
 cortex-m = { version = "0.7", default-features = false }
-embedded-hal = { version = "1.0", default-features = false }
-embedded-hal-nb = { version = "1.0", default-features = false }
+cortex-m-rt = "0.7"
 nb = "1.0"
+embedded-hal = "1.0"
+embedded-io = "0.6"
 
-# Panic handler (no_std)
-panic-halt = "1.0"
+# Logging and panic (defmt)
+defmt = "0.3"
+defmt-rtt = "0.4"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
 
 # For fixed-size Vec in no_std
 heapless = { version = "0.8", default-features = false }
