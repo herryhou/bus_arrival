@@ -1,0 +1,8 @@
+[build]
+target = "thumbv8m.main-none-eabi"
+
+[target.thumbv8m.main-none-eabi]
+runner = "probe-rs run --chip RP2350"
+
+[env]
+DEFMT_LOG = "info"

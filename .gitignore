@@ -1,7 +1,8 @@
 # Rust
 /target
 Cargo.lock
-.cargo
+.cargo/
+!.cargo/config.toml
 cargo-cache
 claude-npm-cache
 
