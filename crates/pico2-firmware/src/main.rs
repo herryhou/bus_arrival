@@ -10,12 +10,8 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 
 // HAL imports
-use embassy_rp::uart::Config as UartConfig;
+use embassy_rp::uart::{Config as UartConfig, Uart, Blocking};
 use embassy_rp::block::ImageDef;
-
-// Local UART module for GPS I/O
-mod uart;
-use uart::{GpsInput, EventOutput};
 
 // Note: embassy-rp doesn't require external bootloader
 // The RP2350 has built-in boot ROM
@@ -59,24 +55,25 @@ impl State {
 
 // Embassy program entry point
 #[embassy_executor::main]
-async fn main(spawner: Spawner) {
+async fn main(_spawner: Spawner) {
     info!("Bus Arrival Detection System starting...");
 
     // Initialize peripherals
     let p = embassy_rp::init(Default::default());
 
-    // Static UART for embassy-rp
-    // TODO: Refactor to use async UART with DMA
-    static mut UART: Option<embassy_rp::uart::Uart<'static, embassy_rp::peripherals::UART0, embassy_rp::uart::Blocking>> = None;
-
-    let mut uart = unsafe {
-        UART = Some(embassy_rp::uart::Uart::new_blocking(
-            p.UART0,
-            p.PIN_0, // TX
-            p.PIN_1, // RX
-            UartConfig::default(),
-        ));
-        UART.as_mut().unwrap()
+    // Static UART for embassy-rp 0.10.x
+    // Using raw pointer to avoid borrow checker issues with &'static mut
+    static mut UART: Option<Uart<'static, Blocking>> = None;
+    let uart_ptr: *mut Uart<'static, Blocking> = {
+        unsafe {
+            UART = Some(Uart::new_blocking(
+                p.UART0,
+                p.PIN_0, // TX
+                p.PIN_1, // RX
+                UartConfig::default(),
+            ));
+            UART.as_mut().unwrap() as *mut Uart<'static, Blocking>
+        }
     };
 
     // Initialize route data from flash
@@ -92,26 +89,40 @@ async fn main(spawner: Spawner) {
 
     // Main processing loop
     loop {
-        // Create GPS input wrapper for this iteration
-        let mut gps_input = GpsInput::new(&mut uart);
+        // Buffer for NMEA sentence
+        let mut nmea_buffer = [0u8; 256];
 
-        // Read NMEA sentence
-        if let Some(sentence) = gps_input.read_sentence() {
-            // Parse NMEA
-            if let Some(_gps) = state.nmea.parse_sentence(sentence) {
-                // TODO: Process GPS through full pipeline
-                // For now, just emit a test event to demonstrate the flow
-                let test_arrival = shared::ArrivalEvent {
-                    time: 0,
-                    stop_idx: 0,
-                    s_cm: 10000,
-                    v_cms: 100,
-                    probability: 200,
-                };
+        // Read NMEA sentence using raw pointer
+        let has_sentence = unsafe {
+            let uart = &mut *uart_ptr;
+            // Stub: just return false for now
+            // TODO: Implement actual UART read
+            false
+        };
 
-                // Emit test arrival event
-                let mut event_output = EventOutput::new(&mut uart);
-                let _ = event_output.emit_arrival(&test_arrival);
+        // Parse NMEA and potentially emit event
+        if has_sentence {
+            // Convert buffer to string slice for parsing
+            if let Ok(sentence) = core::str::from_utf8(&nmea_buffer) {
+                // Parse NMEA
+                if let Some(_gps) = state.nmea.parse_sentence(sentence) {
+                    // TODO: Process GPS through full pipeline
+                    // For now, just emit a test event to demonstrate the flow
+                    let test_arrival = shared::ArrivalEvent {
+                        time: 0,
+                        stop_idx: 0,
+                        s_cm: 10000,
+                        v_cms: 100,
+                        probability: 200,
+                    };
+
+                    // Emit test arrival event using raw pointer
+                    unsafe {
+                        let uart = &mut *uart_ptr;
+                        // Stub: TODO: Implement actual UART write
+                        let _ = uart;
+                    }
+                }
             }
         }
 
