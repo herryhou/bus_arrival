@@ -183,20 +183,26 @@ impl<'a> LocalizationState<'a> {
 
         match result {
             gps_processor::kalman::ProcessResult::Valid { s_cm, v_cms, seg_idx: _ } => {
+                // Convert centidegrees back to degrees for trace output
+                let lat = gps.lat_cdeg as f64 / 100.0;
+                let lon = gps.lon_cdeg as f64 / 100.0;
                 Some(gps::GpsRecord {
                     time: gps.timestamp,
-                    lat: gps.lat,
-                    lon: gps.lon,
+                    lat,
+                    lon,
                     s_cm,
                     v_cms,
                     heading_cdeg: Some(gps.heading_cdeg),
                 })
             }
             gps_processor::kalman::ProcessResult::DrOutage { s_cm, v_cms } => {
+                // Convert centidegrees back to degrees for trace output
+                let lat = gps.lat_cdeg as f64 / 100.0;
+                let lon = gps.lon_cdeg as f64 / 100.0;
                 Some(gps::GpsRecord {
                     time: gps.timestamp,
-                    lat: gps.lat,
-                    lon: gps.lon,
+                    lat,
+                    lon,
                     s_cm,
                     v_cms,
                     heading_cdeg: None,
