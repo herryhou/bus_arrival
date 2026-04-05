@@ -118,14 +118,15 @@ pub struct GridOrigin {
 }
 
 /// Parsed GPS data from NMEA sentences.
+/// All fields use integer types for no-FPU compatibility.
 #[derive(Debug, Clone)]
 pub struct GpsPoint {
     pub timestamp: u64, // seconds since epoch
-    pub lat: f64,
-    pub lon: f64,
-    pub heading_cdeg: HeadCdeg,
-    pub speed_cms: SpeedCms,
-    pub hdop_x10: u16,
+    pub lat_cdeg: HeadCdeg, // Latitude in 0.01° units (e.g., 235000 = 23.5000°N)
+    pub lon_cdeg: HeadCdeg, // Longitude in 0.01° units (e.g., 1205000 = 120.5000°E)
+    pub heading_cdeg: HeadCdeg, // Heading in 0.01° units
+    pub speed_cms: SpeedCms, // Speed in cm/s
+    pub hdop_x10: u16, // HDOP * 10 (e.g., 15 = 1.5)
     pub has_fix: bool,
 }
 
@@ -133,8 +134,8 @@ impl GpsPoint {
     pub fn new() -> Self {
         GpsPoint {
             timestamp: 0,
-            lat: 0.0,
-            lon: 0.0,
+            lat_cdeg: 0,
+            lon_cdeg: 0,
             heading_cdeg: 0,
             speed_cms: 0,
             hdop_x10: 0,

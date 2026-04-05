@@ -47,9 +47,12 @@ pub fn process_gps_update(
 
     // 2. Convert GPS to absolute coordinates (relative to fixed origin 120E, 20N)
     // Route nodes are stored as absolute coordinates, so GPS must also be absolute
+    // Convert centidegrees to degrees for coordinate conversion (f64 is acceptable here)
+    let lat_deg = gps.lat_cdeg as f64 / 100.0;
+    let lon_deg = gps.lon_cdeg as f64 / 100.0;
     let (gps_x, gps_y) = crate::map_match::latlon_to_cm_absolute_with_lat_avg(
-        gps.lat,
-        gps.lon,
+        lat_deg,
+        lon_deg,
         route_data.lat_avg_deg,
     );
 
