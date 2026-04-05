@@ -5,7 +5,7 @@ edition.workspace = true
 
 [features]
 default = ["std"]
-std = ["shared/std", "dep:serde_json"]
+std = ["shared/std", "dep:serde_json", "dep:serde", "gps_processor/std", "detection/std"]
 no_std = ["dep:serde-json-core"]
 
 [dependencies]

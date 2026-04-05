@@ -79,8 +79,8 @@ run-legacy: build gen_nmea preprocess simulate detect
 
 # Build all Rust binaries in release mode
 build: build-firmware
-	@echo "=== Building Rust binaries ==="
-	cargo build --release
+	@echo "=== Building Rust host binaries ==="
+	cargo build --release --bin pipeline --bin preprocessor --target $(shell rustc -vV | grep "host:" | awk '{print $$2}')
 
 # Build Pico 2 W firmware (true no_std with embassy-rp)
 # Target: thumbv8m.main-none-eabi (RP2350, ARM Cortex-M33)
