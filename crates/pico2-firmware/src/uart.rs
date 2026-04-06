@@ -77,51 +77,55 @@ pub fn read_nmea_sentence<'a>(
     uart: &mut Uart<'a, embassy_rp::uart::Blocking>,
     line_buf: &mut UartLineBuffer,
 ) -> Result<Option<&'a str>, ()> {
-    let mut byte = [0u8; 1];
+    // Loop until we have a complete line or error
+    // NMEA sentences are terminated by \r\n, so we must read all bytes
+    // before returning to avoid losing data between 1Hz main loop iterations
+    loop {
+        let mut byte = [0u8; 1];
 
-    // Try to read a single byte (blocking)
-    // embassy-rp blocking UART provides blocking_read() method
-    let result = uart.blocking_read(&mut byte);
+        // Try to read a single byte (blocking)
+        // embassy-rp blocking UART provides blocking_read() method
+        let result = uart.blocking_read(&mut byte);
 
-    match result {
-        Ok(_) => {
-            let b = byte[0];
+        match result {
+            Ok(_) => {
+                let b = byte[0];
 
-            // Skip leading NUL characters (common during startup)
-            if b == 0 && line_buf.len == 0 {
+                // Skip leading NUL characters (common during startup)
+                if b == 0 && line_buf.len == 0 {
+                    continue;
+                }
+
+                // Check for start of new sentence ($)
+                if b == b'$' && line_buf.len > 0 {
+                    defmt::warn!("Incomplete NMEA sentence before new $, resetting buffer");
+                    line_buf.reset();
+                }
+
+                // Add byte to buffer
+                if line_buf.push(b).is_err() {
+                    defmt::warn!("NMEA sentence too long, resetting buffer");
+                    line_buf.reset();
+                    return Ok(None);
+                }
+
+                // Check if we have a complete line
+                if line_buf.has_complete_line() {
+                    // We need to return a slice with the same lifetime as the buffer
+                    // This is safe because the buffer outlives this function call
+                    let sentence = unsafe {
+                        let slice = core::slice::from_raw_parts(line_buf.buffer.as_ptr(), line_buf.len - 2);
+                        core::str::from_utf8_unchecked(slice)
+                    };
+                    return Ok(Some(sentence));
+                }
+                // Continue loop to read next byte
+            }
+            Err(_) => {
+                // No data available (or error) - return None
+                // In a real system, we'd distinguish between no data and error
                 return Ok(None);
             }
-
-            // Check for start of new sentence ($)
-            if b == b'$' && line_buf.len > 0 {
-                defmt::warn!("Incomplete NMEA sentence before new $, resetting buffer");
-                line_buf.reset();
-            }
-
-            // Add byte to buffer
-            if line_buf.push(b).is_err() {
-                defmt::warn!("NMEA sentence too long, resetting buffer");
-                line_buf.reset();
-                return Ok(None);
-            }
-
-            // Check if we have a complete line
-            if line_buf.has_complete_line() {
-                // We need to return a slice with the same lifetime as the buffer
-                // This is safe because the buffer outlives this function call
-                let sentence = unsafe {
-                    let slice = core::slice::from_raw_parts(line_buf.buffer.as_ptr(), line_buf.len - 2);
-                    core::str::from_utf8_unchecked(slice)
-                };
-                return Ok(Some(sentence));
-            }
-
-            Ok(None)
-        }
-        Err(_) => {
-            // No data available (or error) - return None
-            // In a real system, we'd distinguish between no data and error
-            Ok(None)
         }
     }
 }
