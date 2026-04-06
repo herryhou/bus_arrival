@@ -49,9 +49,9 @@ impl NmeaState {
         let parts_slice: &[&str] = &parts;
 
         match parts_slice.first() {
-            Some(&"$GPRMC") => self.parse_rmc(parts_slice),
-            Some(&"$GNGSA") => self.parse_gsa(parts_slice),
-            Some(&"$GPGGA") => self.parse_gga(parts_slice),
+            Some(&"$GPRMC") | Some(&"$GNRMC") => self.parse_rmc(parts_slice),
+            Some(&"$GNGSA") | Some(&"$GPGSA") => self.parse_gsa(parts_slice),
+            Some(&"$GPGGA") | Some(&"$GNGGA") => self.parse_gga(parts_slice),
             _ => None,
         }
     }
@@ -301,5 +301,26 @@ mod tests {
         let mut state = NmeaState::new();
         let result = state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,350.5,141123,,*00");
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_gnrmc_valid() {
+        let mut state = NmeaState::new();
+        let result = state.parse_sentence("$GNRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*30");
+        assert!(result.is_none()); // RMC alone doesn't complete the point
+        assert!(state.point.has_fix);
+        assert_eq!(state.point.lat_cdeg, 2500);
+        assert_eq!(state.point.lon_cdeg, 12128); // 121.286496...° * 100 (truncated)
+    }
+
+    #[test]
+    fn parse_gngga_valid() {
+        let mut state = NmeaState::new();
+        let result = state.parse_sentence("$GNGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*55");
+        assert!(result.is_some()); // GNGGA completes the point
+        let point = result.unwrap();
+        assert!(point.has_fix);
+        assert_eq!(point.lat_cdeg, 2500);
+        assert_eq!(point.lon_cdeg, 12128); // 121.286496...° * 100 (truncated)
     }
 }
