@@ -1,17 +1,10 @@
-use std::env;
-use std::fs;
 use std::path::PathBuf;
 
 fn main() {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let route_data_path = out_dir.join("route_data.bin");
-
-    // Copy route_data.bin from test_data if it exists
-    let source_path = PathBuf::from("test_data/route_data.bin");
-    if source_path.exists() {
-        fs::copy(&source_path, &route_data_path).unwrap();
-        println!("cargo:rerun-if-changed={}", source_path.display());
+    // Track the route data file dependency for rebuild triggers
+    // The data is embedded via include_bytes! in main.rs
+    let route_data_path = PathBuf::from("test_data/ty225_normal.bin");
+    if route_data_path.exists() {
+        println!("cargo:rerun-if-changed={}", route_data_path.display());
     }
-
-    println!("cargo:rustc-link-search={}", out_dir.display());
 }
