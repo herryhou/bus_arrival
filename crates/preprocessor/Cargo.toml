@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-shared = { path = "../shared" }
+shared = { path = "../shared", features = ["std"] }
 dp_mapper = { path = "dp_mapper" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

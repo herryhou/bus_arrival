@@ -261,8 +261,6 @@ pub struct RouteData<'a> {
     nodes_ptr: *const RouteNode,
     stops_ptr: *const Stop,
     pub grid: SpatialGridView<'a>,
-    pub gaussian_lut: &'a [u8; 256],
-    pub logistic_lut: &'a [u8; 128],
 }
 
 impl<'a> RouteData<'a> {
@@ -353,9 +351,8 @@ impl<'a> RouteData<'a> {
         }
 
         let grid_data_start = offset;
-        let luts_start = data.len() - 388;
-        if luts_start < grid_data_start { return Err(BusError::InvalidLength); }
-        
+        if data.len() < grid_data_start { return Err(BusError::InvalidLength); }
+
         let grid = SpatialGridView {
             cols,
             rows,
@@ -366,9 +363,6 @@ impl<'a> RouteData<'a> {
             _marker: PhantomData,
         };
 
-        let gaussian_lut = data[luts_start..luts_start+256].try_into().unwrap();
-        let logistic_lut = data[luts_start+256..luts_start+384].try_into().unwrap();
-
         Ok(RouteData {
             x0_cm,
             y0_cm,
@@ -378,8 +372,6 @@ impl<'a> RouteData<'a> {
             nodes_ptr,
             stops_ptr,
             grid,
-            gaussian_lut,
-            logistic_lut,
         })
     }
 }
@@ -393,8 +385,6 @@ pub fn pack_route_data(
     stops: &[Stop],
     grid: &SpatialGrid,
     lat_avg_deg: f64,
-    gaussian_lut: &[u8],
-    logistic_lut: &[u8],
     output: &mut impl std::io::Write,
 ) -> Result<(), BusError> {
     use std::io::Write;
@@ -470,12 +460,6 @@ pub fn pack_route_data(
     // Write cell data
     buffer.write_all(&index_data).map_err(|_| BusError::IoError)?;
 
-    if gaussian_lut.len() != 256 || logistic_lut.len() != 128 {
-        return Err(BusError::InvalidLength);
-    }
-    buffer.write_all(gaussian_lut).map_err(|_| BusError::IoError)?;
-    buffer.write_all(logistic_lut).map_err(|_| BusError::IoError)?;
-
     let crc = crc32(&buffer);
     buffer.write_all(&crc.to_le_bytes()).map_err(|_| BusError::IoError)?;
 
@@ -502,7 +486,7 @@ mod tests {
         };
         let mut buffer = Vec::new();
         let lat_avg_deg = 25.0;
-        pack_route_data(&nodes, &stops, &grid, lat_avg_deg, &[0u8; 256], &[0u8; 128], &mut buffer).unwrap();
+        pack_route_data(&nodes, &stops, &grid, lat_avg_deg, &mut buffer).unwrap();
 
         let loaded = RouteData::load(&buffer).unwrap();
         assert_eq!(loaded.x0_cm, 100);
@@ -523,7 +507,7 @@ mod tests {
             x0_cm: 0,
             y0_cm: 0,
         };
-        pack_route_data(&[], &[], &grid, 25.0, &[0u8; 256], &[0u8; 128], &mut buffer).unwrap();
+        pack_route_data(&[], &[], &grid, 25.0, &mut buffer).unwrap();
 
         // Corrupt one byte of data (not the CRC itself)
         buffer[10] ^= 0xFF;

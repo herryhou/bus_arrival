@@ -58,10 +58,6 @@ fn test_load_ty225_route_data() {
     assert!(route_data.grid.cols > 0, "Grid should have columns");
     assert!(route_data.grid.rows > 0, "Grid should have rows");
 
-    // Verify LUTs
-    assert_eq!(route_data.gaussian_lut.len(), 256, "Gaussian LUT wrong size");
-    assert_eq!(route_data.logistic_lut.len(), 128, "Logistic LUT wrong size");
-
     // Verify RouteNode size matches v8.5 format (40 bytes)
     // by checking that the data structure is consistent
     let last_node = route_data.get_node(route_data.node_count - 1)

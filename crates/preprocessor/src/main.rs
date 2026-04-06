@@ -10,7 +10,6 @@ mod coord;
 mod grid;
 mod input;
 mod linearize;
-mod lut;
 mod pack;
 mod simplify;
 mod stops;
@@ -160,19 +159,13 @@ fn main() {
     };
     println!("Projected {} stops with corridors", projected_stops.len());
 
-    // 8. Generate LUTs
-    let gaussian_lut = lut::generate_gaussian_lut();
-    let logistic_lut = lut::generate_logistic_lut();
-
-    // 9. Pack and write binary
+    // 8. Pack and write binary
     let output_file = fs::File::create(output_bin_path).expect("Failed to create output file");
     pack::pack_v8_route_data(
         &route_nodes,
         &projected_stops,
         &grid,
         lat_avg,
-        &gaussian_lut,
-        &logistic_lut,
         &mut &output_file
     ).expect("Failed to pack route data");
 

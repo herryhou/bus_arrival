@@ -52,7 +52,8 @@ pub struct SpatialGrid {
     count: u16          (2 bytes) - number of segments in this cell
     indices: u16[count] (2×count bytes) - segment indices
 
-[followed by LUTs and CRC]
+[CRC: 4 bytes]
+  CRC32 checksum of all data before CRC
 ```
 
 ### Byte-Level Example
