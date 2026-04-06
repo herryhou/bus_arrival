@@ -33,7 +33,6 @@ static IMAGE_DEF: ImageDef = ImageDef::secure_exe();
 /// Embedded at compile time from the preprocessor-generated binary file.
 /// Format: RouteData binary format (see shared::binfile)
 /// Size: ty225_normal.bin is ~22KB (varies by route complexity)
-#[link_section = ".route_data"]
 static ROUTE_DATA: &[u8] = include_bytes!("../../../test_data/ty225_normal.bin");
 
 // Embassy program entry point
@@ -54,7 +53,7 @@ async fn main(_spawner: Spawner) {
     );
 
     // Initialize route data from flash
-    let route_data = shared::binfile::RouteData::load(&ROUTE_DATA)
+    let route_data = shared::binfile::RouteData::load(ROUTE_DATA)
         .expect("Failed to load route data");
 
     info!(
@@ -72,41 +71,46 @@ async fn main(_spawner: Spawner) {
 
     // Main processing loop (1 Hz)
     loop {
-        // Try to read NMEA sentence from GPS
-        match uart::read_nmea_sentence(&mut uart, &mut line_buf) {
-            Ok(Some(sentence)) => {
-                debug!("NMEA: {}", sentence);
+        // Drain all sentences from current GPS burst before sleeping
+        // GPS modules typically send RMC+GSA+GGA in a burst (~200ms)
+        loop {
+            match uart::read_nmea_sentence(&mut uart, &mut line_buf) {
+                Ok(Some(sentence)) => {
+                    debug!("NMEA: {}", sentence);
 
-                // Parse NMEA sentence
-                if let Some(gps) = state.nmea.parse_sentence(sentence) {
-                    debug!(
-                        "GPS: lat={}cdeg, lon={}cdeg, fix={}",
-                        gps.lat_cdeg, gps.lon_cdeg, gps.has_fix
-                    );
+                    // Parse NMEA sentence
+                    if let Some(gps) = state.nmea.parse_sentence(sentence) {
+                        debug!(
+                            "GPS: lat={}cdeg, lon={}cdeg, fix={}",
+                            gps.lat_cdeg, gps.lon_cdeg, gps.has_fix
+                        );
 
-                    // Process GPS through full pipeline
-                    if let Some(arrival) = state.process_gps(&gps) {
-                        // Emit arrival event via UART
-                        match uart::write_arrival_event(&mut uart, &arrival) {
-                            Ok(()) => {
-                                info!("Emitted arrival event for stop {}", arrival.stop_idx);
-                            }
-                            Err(e) => {
-                                defmt::warn!("Failed to write arrival event: {:?}", e);
+                        // Process GPS through full pipeline
+                        if let Some(arrival) = state.process_gps(&gps) {
+                            // Emit arrival event via UART
+                            match uart::write_arrival_event(&mut uart, &arrival) {
+                                Ok(()) => {
+                                    info!("Emitted arrival event for stop {}", arrival.stop_idx);
+                                }
+                                Err(e) => {
+                                    defmt::warn!("Failed to write arrival event: {:?}", e);
+                                }
                             }
                         }
                     }
-                }
 
-                // Reset buffer for next sentence
-                line_buf.reset();
-            }
-            Ok(None) => {
-                // No complete sentence yet, continue waiting
-            }
-            Err(e) => {
-                defmt::warn!("UART read error: {:?}", e);
-                line_buf.reset();
+                    // Reset buffer for next sentence
+                    line_buf.reset();
+                }
+                Ok(None) => {
+                    // FIFO empty, burst complete
+                    break;
+                }
+                Err(e) => {
+                    defmt::warn!("UART read error: {:?}", e);
+                    line_buf.reset();
+                    break;
+                }
             }
         }
 

@@ -42,7 +42,7 @@ pub const GAUSSIAN_LUT: [u8; 256] = [
 /// Index i = v / 10, v in range [0, 1270] cm/s
 ///
 /// Values generated using f64 precision for accuracy:
-/// - i=0 (v=0): exp(2)≈7.39 → 1/8.39≈0.119 → 30 (actual: 224 due to different formula)
+/// - i=0 (v=0): exp(-2)≈0.135 → 1/1.135≈0.881 → 224
 /// - i=20 (v=200): exp(0)=1 → 1/2=0.5 → 127
 /// - i=127 (v=1270): exp(10.7)≈44355 → ~0
 ///

@@ -237,7 +237,7 @@ mod tests {
         assert!(result.is_none()); // RMC alone doesn't complete the point
         assert!(state.point.has_fix);
         assert_eq!(state.point.lat_cdeg, 2500); // 25.00° * 100
-        assert_eq!(state.point.lon_cdeg, 12129); // 121.29° * 100 (rounded)
+        assert_eq!(state.point.lon_cdeg, 12128); // 121.28649...° * 100 (truncated)
         assert_eq!(state.point.speed_cms, 432); // 8.4 knots * 51.44
         assert_eq!(state.point.heading_cdeg, 8050); // 80.5° * 100
         assert_eq!(state.point.timestamp, 22 * 3600 + 13 * 60 + 20); // 221320 -> 22:13:20
@@ -259,7 +259,7 @@ mod tests {
         let point = result.unwrap();
         assert!(point.has_fix);
         assert_eq!(point.lat_cdeg, 2500); // 25.00° * 100
-        assert_eq!(point.lon_cdeg, 12129); // 121.29° * 100 (rounded)
+        assert_eq!(point.lon_cdeg, 12128); // 121.28649...° * 100 (truncated)
         assert_eq!(point.timestamp, 22 * 3600 + 13 * 60 + 20); // 221320 -> 22:13:20
     }
 
@@ -284,7 +284,7 @@ mod tests {
         let point = result.unwrap();
         assert!(point.has_fix);
         assert_eq!(point.lat_cdeg, 2500); // 25.00° * 100
-        assert_eq!(point.lon_cdeg, 12129); // 121.29° * 100 (rounded)
+        assert_eq!(point.lon_cdeg, 12128); // 121.28649...° * 100 (truncated)
         assert_eq!(point.hdop_x10, 12); // 1.2 * 10
         assert_eq!(point.timestamp, 22 * 3600 + 13 * 60 + 20); // Timestamp from RMC
     }
