@@ -64,14 +64,17 @@ impl<'a> State<'a> {
                 (s_cm, v_cms)
             }
             ProcessResult::Rejected(reason) => {
+                #[cfg(feature = "firmware")]
                 defmt::warn!("GPS update rejected: {}", reason);
                 return None;
             }
             ProcessResult::Outage => {
+                #[cfg(feature = "firmware")]
                 defmt::warn!("GPS outage exceeded 10 seconds");
                 return None;
             }
             ProcessResult::DrOutage { s_cm, v_cms } => {
+                #[cfg(feature = "firmware")]
                 defmt::debug!("DR mode: s={}cm, v={}cm/s", s_cm, v_cms);
                 (s_cm, v_cms)
             }
@@ -117,6 +120,7 @@ impl<'a> State<'a> {
 
             match event {
                 StopEvent::Arrived => {
+                    #[cfg(feature = "firmware")]
                     defmt::info!(
                         "Arrival at stop {}: s={}cm, v={}cm/s, p={}",
                         stop_idx,
@@ -133,6 +137,7 @@ impl<'a> State<'a> {
                     });
                 }
                 StopEvent::Departed => {
+                    #[cfg(feature = "firmware")]
                     defmt::info!(
                         "Departure from stop {}: s={}cm, v={}cm/s",
                         stop_idx,

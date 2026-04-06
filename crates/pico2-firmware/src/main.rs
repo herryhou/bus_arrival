@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![cfg(feature = "firmware")]
 
 use defmt::*;
 use defmt_rtt as _;
@@ -33,7 +34,7 @@ static IMAGE_DEF: ImageDef = ImageDef::secure_exe();
 /// Format: RouteData binary format (see shared::binfile)
 /// Size: ty225_normal.bin is ~22KB (varies by route complexity)
 #[link_section = ".route_data"]
-static ROUTE_DATA: &[u8] = include_bytes!("../../test_data/ty225_normal.bin");
+static ROUTE_DATA: &[u8] = include_bytes!("../../../test_data/ty225_normal.bin");
 
 // Embassy program entry point
 #[embassy_executor::main]

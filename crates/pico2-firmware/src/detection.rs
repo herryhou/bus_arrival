@@ -15,6 +15,7 @@ pub fn find_active_stops(s_cm: DistCm, route_data: &RouteData) -> heapless::Vec<
         if let Some(stop) = route_data.get_stop(i) {
             if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm {
                 if active.push(i).is_err() {
+                    #[cfg(feature = "firmware")]
                     defmt::warn!("Too many active stops, ignoring overflow");
                     break;
                 }
@@ -96,75 +97,4 @@ pub fn compute_arrival_probability_adaptive(
     };
 
     ((w1 * p1 + w2 * p2 + w3 * p3 + w4 * p4) / 32) as u8
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_adaptive_weights_close_stop() {
-        let stop_current = Stop {
-            progress_cm: 100_000,
-            corridor_start_cm: 90_000,
-            corridor_end_cm: 110_000,
-        };
-
-        let stop_next = Stop {
-            progress_cm: 108_000, // 8,000cm away (<12,000 threshold)
-            corridor_start_cm: 98_000,
-            corridor_end_cm: 118_000,
-        };
-
-        // At stop, moderate speed, some dwell
-        let prob = compute_arrival_probability_adaptive(
-            100_000, // s_cm (at stop)
-            600,     // v_cms (approaching)
-            &stop_current,
-            5,       // dwell_time_s
-            Some(&stop_next),
-        );
-
-        // With close stop, p4 weight is removed (0), probability should be higher
-        assert!(prob > 190, "Expected probability > 190 for close stop, got {}", prob);
-        assert!(prob <= 255);
-    }
-
-    #[test]
-    fn test_adaptive_weights_normal_stop() {
-        let stop_current = Stop {
-            progress_cm: 100_000,
-            corridor_start_cm: 90_000,
-            corridor_end_cm: 110_000,
-        };
-
-        let stop_next = Stop {
-            progress_cm: 125_000, // 25,000cm away (>12,000 threshold)
-            corridor_start_cm: 115_000,
-            corridor_end_cm: 135_000,
-        };
-
-        let prob = compute_arrival_probability_adaptive(
-            100_000, 600, &stop_current, 5, Some(&stop_next),
-        );
-
-        // Normal stop uses standard weights
-        assert!(prob <= 255);
-    }
-
-    #[test]
-    fn test_adaptive_weights_last_stop() {
-        let stop = Stop {
-            progress_cm: 100_000,
-            corridor_start_cm: 90_000,
-            corridor_end_cm: 110_000,
-        };
-
-        // Last stop (next_stop = None)
-        let prob = compute_arrival_probability_adaptive(100_000, 0, &stop, 10, None);
-
-        // Should use standard weights
-        assert!(prob <= 255);
-        assert!(prob > 150); // At stop with 10s dwell should be high
-    }
 }

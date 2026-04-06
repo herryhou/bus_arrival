@@ -2,6 +2,8 @@
 //!
 //! Provides line-buffered NMEA sentence reading and formatted arrival event writing.
 
+#![cfg(feature = "firmware")]
+
 use embassy_rp::uart::Uart;
 
 use shared::ArrivalEvent;
