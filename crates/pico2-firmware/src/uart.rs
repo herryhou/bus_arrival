@@ -73,10 +73,10 @@ impl UartLineBuffer {
 /// - Ok(Some(sentence)) - Complete NMEA sentence received
 /// - Ok(None) - No data available yet
 /// - Err(...) - I/O error
-pub fn read_nmea_sentence<'a>(
-    uart: &mut Uart<'a, embassy_rp::uart::Blocking>,
-    line_buf: &mut UartLineBuffer,
-) -> Result<Option<&'a str>, ()> {
+pub fn read_nmea_sentence<'buf>(
+    uart: &mut Uart<'_, embassy_rp::uart::Blocking>,
+    line_buf: &'buf mut UartLineBuffer,
+) -> Result<Option<&'buf str>, ()> {
     // Loop until we have a complete line or error
     // NMEA sentences are terminated by \r\n, so we must read all bytes
     // before returning to avoid losing data between 1Hz main loop iterations
@@ -111,12 +111,8 @@ pub fn read_nmea_sentence<'a>(
 
                 // Check if we have a complete line
                 if line_buf.has_complete_line() {
-                    // We need to return a slice with the same lifetime as the buffer
-                    // This is safe because the buffer outlives this function call
-                    let sentence = unsafe {
-                        let slice = core::slice::from_raw_parts(line_buf.buffer.as_ptr(), line_buf.len - 2);
-                        core::str::from_utf8_unchecked(slice)
-                    };
+                    let sentence = core::str::from_utf8(&line_buf.buffer[..line_buf.len - 2])
+                        .map_err(|_| ())?;
                     return Ok(Some(sentence));
                 }
                 // Continue loop to read next byte
