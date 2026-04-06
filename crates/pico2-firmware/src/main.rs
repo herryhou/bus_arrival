@@ -13,8 +13,12 @@ use embassy_time::{Duration, Timer};
 use embassy_rp::uart::{Config as UartConfig, Uart};
 use embassy_rp::block::ImageDef;
 
-// Pipeline imports
-use shared::{DistCm, SpeedCms, Prob8, Stop};
+// Module declarations
+mod lut;
+mod uart;
+mod detection;
+mod state;
+
 
 // Note: embassy-rp doesn't require external bootloader
 // The RP2350 has built-in boot ROM
@@ -31,441 +35,6 @@ static IMAGE_DEF: ImageDef = ImageDef::secure_exe();
 /// Current test data files are 30-53 KB.
 #[link_section = ".route_data"]
 static ROUTE_DATA: [u8; 64 * 1024] = [0u8; 64 * 1024];
-
-// ===== LUTs for Arrival Probability Computation =====
-// These are computed at compile time to avoid runtime floating point
-
-/// Build Gaussian LUT: exp(-x²/2) for arrival probability computation
-/// Index i = (x / sigma) * 64. Range [0, 4.0).
-const fn build_gaussian_lut() -> [u8; 256] {
-    let mut lut = [0u8; 256];
-    let mut i = 0;
-    while i < 256 {
-        // x = i / 64.0 (0 to 4.0)
-        // For no_std, we use a simple approximation
-        // exp(-x²/2) where x in [0, 4)
-        let x = i as i32; // x / 64.0 scaled by 64
-        let x2 = x * x;
-        // Simple approximation: 255 when x=0, decreasing
-        let val = if x2 < 64 {
-            255 - (x2 / 64) * 50
-        } else if x2 < 256 {
-            200 - ((x2 - 64) / 192) * 100
-        } else if x2 < 576 {
-            100 - ((x2 - 256) / 320) * 60
-        } else {
-            40 - ((x2 - 576) / 64) * 10
-        };
-        lut[i] = if val < 0 { 0 } else { val as u8 };
-        i += 1;
-    }
-    lut
-}
-
-/// Build logistic LUT for speed likelihood: 1 / (1 + exp(k * (v - v_stop)))
-/// v_stop = 200 cm/s, k = 0.01.
-/// Index i = v / 10. Range [0, 1270] cm/s.
-const fn build_logistic_lut() -> [u8; 128] {
-    let mut lut = [0u8; 128];
-    let mut i = 0;
-    while i < 128 {
-        let v = i as i32 * 10; // 0 to 1270 cm/s
-        // Simple logistic approximation: 1 / (1 + exp(k * (v - v_stop)))
-        // k = 0.01, v_stop = 200
-        let delta = v - 200;
-        // Approximate exp(delta / 100) for small delta
-        let exp_val = if delta < -200 {
-            0 // exp(-2) ~ 0.135, treat as 0
-        } else if delta < 0 {
-            1 // exp(negative small) ~ 1 to 2
-        } else if delta < 200 {
-            2 + (delta / 100) // exp(0 to 2) ~ 1 to 7.4
-        } else if delta < 400 {
-            4 + ((delta - 200) / 200) * 3 // exp(2 to 4) ~ 7.4 to 54.6
-        } else {
-            20 + ((delta - 400) / 100) // exp(4+) grows rapidly
-        };
-        let l = 255 / (1 + exp_val);
-        lut[i] = if l < 0 { 0 } else { l as u8 };
-        i += 1;
-    }
-    lut
-}
-
-/// Gaussian LUT for distance features
-static GAUSSIAN_LUT: [u8; 256] = build_gaussian_lut();
-
-/// Logistic LUT for speed features
-static LOGISTIC_LUT: [u8; 128] = build_logistic_lut();
-
-// ===== no_std Stop Corridor Filter =====
-
-/// Find stops whose corridor contains the current route progress
-/// no_std version - returns indices of active stops
-fn find_active_stops(s_cm: DistCm, route_data: &shared::binfile::RouteData) -> heapless::Vec<usize, 16> {
-    let mut active = heapless::Vec::new();
-    for i in 0..route_data.stop_count {
-        if let Some(stop) = route_data.get_stop(i) {
-            if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm {
-                if active.push(i).is_err() {
-                    warn!("Too many active stops, ignoring overflow");
-                    break;
-                }
-            }
-        }
-    }
-    active
-}
-
-// ===== Arrival Probability Computation =====
-
-/// Compute arrival probability using LUTs (no_std compatible)
-fn compute_arrival_probability(
-    s_cm: DistCm,
-    v_cms: SpeedCms,
-    stop: &Stop,
-    dwell_time_s: u16,
-) -> Prob8 {
-    // Feature 1: Distance likelihood (sigma_d = 2750 cm)
-    let d_cm = (s_cm - stop.progress_cm).abs();
-    let idx1 = ((d_cm as i64 * 64) / 2750).min(255) as usize;
-    let p1 = GAUSSIAN_LUT[idx1] as u32;
-
-    // Feature 2: Speed likelihood (near 0 → higher, v_stop = 200 cm/s)
-    let idx2 = (v_cms / 10).max(0).min(127) as usize;
-    let p2 = LOGISTIC_LUT[idx2] as u32;
-
-    // Feature 3: Progress difference likelihood (sigma_p = 2000 cm)
-    let idx3 = ((d_cm as i64 * 64) / 2000).min(255) as usize;
-    let p3 = GAUSSIAN_LUT[idx3] as u32;
-
-    // Feature 4: Dwell time likelihood (T_ref = 10s)
-    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
-
-    // Weighted sum: (13p₁ + 6p₂ + 10p₃ + 3p₄) / 32
-    ((13 * p1 + 6 * p2 + 10 * p3 + 3 * p4) / 32) as u8
-}
-
-/// Arrival threshold: 75% probability
-const THETA_ARRIVAL: Prob8 = 191;
-
-// ===== UART I/O for GPS and Events =====
-
-/// Maximum NMEA sentence length (standard max is 82 chars)
-const MAX_NMEA_LENGTH: usize = 128;
-
-/// Line buffer for accumulating NMEA data from UART
-struct UartLineBuffer {
-    buffer: [u8; MAX_NMEA_LENGTH],
-    len: usize,
-}
-
-impl UartLineBuffer {
-    fn new() -> Self {
-        Self {
-            buffer: [0u8; MAX_NMEA_LENGTH],
-            len: 0,
-        }
-    }
-
-    /// Reset the buffer (clear all data)
-    fn reset(&mut self) {
-        self.len = 0;
-    }
-
-    /// Add a byte to the buffer. Returns true if buffer is full.
-    fn push(&mut self, byte: u8) -> Result<(), ()> {
-        if self.len < MAX_NMEA_LENGTH {
-            self.buffer[self.len] = byte;
-            self.len += 1;
-            Ok(())
-        } else {
-            Err(()) // Buffer full
-        }
-    }
-
-    /// Check if buffer contains a complete line (ending with \r\n)
-    fn has_complete_line(&self) -> bool {
-        if self.len >= 2 {
-            self.buffer[self.len - 2] == b'\r' && self.buffer[self.len - 1] == b'\n'
-        } else {
-            false
-        }
-    }
-
-    /// Get the complete line as a string slice (without \r\n)
-    fn as_str(&self) -> Result<&str, ()> {
-        if self.len >= 2 {
-            core::str::from_utf8(&self.buffer[..self.len - 2]).map_err(|_| ())
-        } else {
-            Err(())
-        }
-    }
-}
-
-/// Read NMEA sentences from UART using blocking I/O.
-///
-/// This function reads bytes from UART until a complete NMEA sentence
-/// is received (terminated by \r\n). Returns the sentence as a string slice.
-///
-/// Returns:
-/// - Ok(Some(sentence)) - Complete NMEA sentence received
-/// - Ok(None) - No data available yet
-/// - Err(...) - I/O error
-fn read_nmea_sentence<'a>(
-    uart: &mut Uart<'a, embassy_rp::uart::Blocking>,
-    line_buf: &mut UartLineBuffer,
-) -> Result<Option<&'a str>, ()> {
-    let mut byte = [0u8; 1];
-
-    // Try to read a single byte (blocking)
-    // embassy-rp blocking UART provides blocking_read() method
-    let result = uart.blocking_read(&mut byte);
-
-    match result {
-        Ok(_) => {
-            let b = byte[0];
-
-            // Skip leading NUL characters (common during startup)
-            if b == 0 && line_buf.len == 0 {
-                return Ok(None);
-            }
-
-            // Check for start of new sentence ($)
-            if b == b'$' && line_buf.len > 0 {
-                warn!("Incomplete NMEA sentence before new $, resetting buffer");
-                line_buf.reset();
-            }
-
-            // Add byte to buffer
-            if line_buf.push(b).is_err() {
-                warn!("NMEA sentence too long, resetting buffer");
-                line_buf.reset();
-                return Ok(None);
-            }
-
-            // Check if we have a complete line
-            if line_buf.has_complete_line() {
-                // We need to return a slice with the same lifetime as the buffer
-                // This is safe because the buffer outlives this function call
-                let sentence = unsafe {
-                    let slice = core::slice::from_raw_parts(line_buf.buffer.as_ptr(), line_buf.len - 2);
-                    core::str::from_utf8_unchecked(slice)
-                };
-                return Ok(Some(sentence));
-            }
-
-            Ok(None)
-        }
-        Err(_) => {
-            // No data available (or error) - return None
-            // In a real system, we'd distinguish between no data and error
-            Ok(None)
-        }
-    }
-}
-
-/// Write arrival event to UART.
-///
-/// Format: "ARRIVAL: t=TIME, stop=IDX, s=CMS, v=CMS/S, p=PROB\n"
-fn write_arrival_event(
-    uart: &mut Uart<'_, embassy_rp::uart::Blocking>,
-    event: &shared::ArrivalEvent,
-) -> Result<(), ()> {
-    // Build a static byte buffer for the message
-    // Format: "ARRIVAL: t=12345, stop=0, s=10000cm, v=100cm/s, p=200\n"
-    let mut msg_buf = [0u8; 128];
-    let mut pos = 0;
-
-    // Helper to append bytes to buffer
-    macro_rules! append {
-        ($data:expr) => {
-            if pos + $data.len() > msg_buf.len() {
-                return Err(()); // Buffer overflow
-            }
-            msg_buf[pos..pos + $data.len()].copy_from_slice($data);
-            pos += $data.len();
-        };
-    }
-
-    // Helper to append unsigned integer as decimal string
-    fn append_u64(buf: &mut [u8], p: &mut usize, mut n: u64) -> Result<(), ()> {
-        if n == 0 {
-            if *p + 1 > buf.len() {
-                return Err(());
-            }
-            buf[*p] = b'0';
-            *p += 1;
-            return Ok(());
-        }
-
-        // Convert to string (reverse order)
-        let mut digits = [0u8; 20];
-        let mut len = 0;
-        while n > 0 {
-            digits[len] = b'0' + ((n % 10) as u8);
-            n /= 10;
-            len += 1;
-        }
-
-        // Reverse and append
-        for i in (0..len).rev() {
-            if *p + 1 > buf.len() {
-                return Err(());
-            }
-            buf[*p] = digits[i];
-            *p += 1;
-        }
-
-        Ok(())
-    }
-
-    // Build message
-    append!(b"ARRIVAL: t=");
-    append_u64(&mut msg_buf, &mut pos, event.time)?;
-    append!(b", stop=");
-    append_u64(&mut msg_buf, &mut pos, event.stop_idx as u64)?;
-    append!(b", s=");
-    append_u64(&mut msg_buf, &mut pos, event.s_cm as u64)?;
-    append!(b"cm, v=");
-    append_u64(&mut msg_buf, &mut pos, event.v_cms as u64)?;
-    append!(b"cm/s, p=");
-    append_u64(&mut msg_buf, &mut pos, event.probability as u64)?;
-    append!(b"\n");
-
-    // Write to UART using blocking_write
-    uart.blocking_write(&msg_buf[..pos]).map_err(|_| ())?;
-
-    // Flush to ensure data is sent
-    uart.blocking_flush().map_err(|_| ())?;
-
-    Ok(())
-}
-
-/// Global state for the GPS processing pipeline
-struct State<'a> {
-    nmea: gps_processor::nmea::NmeaState,
-    kalman: shared::KalmanState,
-    dr: shared::DrState,
-    stop_states: heapless::Vec<detection::state_machine::StopState, 256>,
-    route_data: &'a shared::binfile::RouteData<'a>,
-    first_fix: bool,
-}
-
-impl<'a> State<'a> {
-    fn new(route_data: &'a shared::binfile::RouteData<'a>) -> Self {
-        use detection::state_machine::StopState;
-        use gps_processor::nmea::NmeaState;
-
-        let stop_count = route_data.stop_count;
-        let mut stop_states = heapless::Vec::new();
-        for i in 0..stop_count {
-            let _ = stop_states.push(StopState::new(i as u8));
-        }
-
-        Self {
-            nmea: NmeaState::new(),
-            kalman: shared::KalmanState::new(),
-            dr: shared::DrState::new(),
-            stop_states,
-            route_data,
-            first_fix: true,
-        }
-    }
-
-    /// Process a GPS point through the full pipeline
-    /// Returns Some(arrival event) if an arrival is detected
-    fn process_gps(&mut self, gps: &shared::GpsPoint) -> Option<shared::ArrivalEvent> {
-        use gps_processor::kalman::{process_gps_update, ProcessResult};
-        use detection::state_machine::StopEvent;
-
-        // Module ④+⑤: Map matching and projection
-        // Module ⑥: Speed constraint filter
-        // Module ⑦: Kalman filter
-        // Module ⑧: Dead-reckoning
-        let result = process_gps_update(
-            &mut self.kalman,
-            &mut self.dr,
-            gps,
-            self.route_data,
-            gps.timestamp,
-            self.first_fix,
-        );
-
-        let (s_cm, v_cms) = match result {
-            ProcessResult::Valid { s_cm, v_cms, seg_idx: _ } => {
-                self.first_fix = false;
-                (s_cm, v_cms)
-            }
-            ProcessResult::Rejected(reason) => {
-                warn!("GPS update rejected: {}", reason);
-                return None;
-            }
-            ProcessResult::Outage => {
-                warn!("GPS outage exceeded 10 seconds");
-                return None;
-            }
-            ProcessResult::DrOutage { s_cm, v_cms } => {
-                debug!("DR mode: s={}cm, v={}cm/s", s_cm, v_cms);
-                (s_cm, v_cms)
-            }
-        };
-
-        // Module ⑨: Stop corridor filtering
-        let active_indices = find_active_stops(s_cm, self.route_data);
-
-        // Module ⑩+⑪: Arrival probability and state machine for each active stop
-        for stop_idx in active_indices {
-            if stop_idx >= self.stop_states.len() {
-                continue;
-            }
-
-            let stop = match self.route_data.get_stop(stop_idx) {
-                Some(s) => s,
-                None => continue,
-            };
-            let stop_state = &mut self.stop_states[stop_idx];
-
-            // Compute arrival probability
-            let probability = compute_arrival_probability(
-                s_cm,
-                v_cms,
-                &stop,
-                stop_state.dwell_time_s,
-            );
-
-            // Update state machine
-            let event = stop_state.update(
-                s_cm,
-                v_cms,
-                stop.progress_cm,
-                stop.corridor_start_cm,
-                probability,
-            );
-
-            match event {
-                StopEvent::Arrived => {
-                    info!("Arrival at stop {}: s={}cm, v={}cm/s, p={}",
-                          stop_idx, s_cm, v_cms, probability);
-                    return Some(shared::ArrivalEvent {
-                        time: gps.timestamp,
-                        stop_idx: stop_idx as u8,
-                        s_cm,
-                        v_cms,
-                        probability,
-                    });
-                }
-                StopEvent::Departed => {
-                    info!("Departure from stop {}: s={}cm, v={}cm/s",
-                          stop_idx, s_cm, v_cms);
-                }
-                StopEvent::None => {}
-            }
-        }
-
-        None
-    }
-}
 
 // Embassy program entry point
 #[embassy_executor::main]
@@ -485,43 +54,45 @@ async fn main(_spawner: Spawner) {
     );
 
     // Initialize route data from flash
-    let route_data = unsafe {
-        shared::binfile::RouteData::load(&ROUTE_DATA)
-            .expect("Failed to load route data")
-    };
+    let route_data = shared::binfile::RouteData::load(&ROUTE_DATA)
+        .expect("Failed to load route data");
 
-    info!("Route data loaded: {} nodes, {} stops",
-          route_data.node_count, route_data.stop_count);
+    info!(
+        "Route data loaded: {} nodes, {} stops",
+        route_data.node_count, route_data.stop_count
+    );
 
     // Initialize state with route data reference
-    let mut state = State::new(&route_data);
+    let mut state = state::State::new(&route_data);
 
     // Initialize line buffer for NMEA data
-    let mut line_buf = UartLineBuffer::new();
+    let mut line_buf = uart::UartLineBuffer::new();
 
     info!("System ready. Starting GPS processing...");
 
     // Main processing loop (1 Hz)
     loop {
         // Try to read NMEA sentence from GPS
-        match read_nmea_sentence(&mut uart, &mut line_buf) {
+        match uart::read_nmea_sentence(&mut uart, &mut line_buf) {
             Ok(Some(sentence)) => {
                 debug!("NMEA: {}", sentence);
 
                 // Parse NMEA sentence
                 if let Some(gps) = state.nmea.parse_sentence(sentence) {
-                    debug!("GPS: lat={}cdeg, lon={}cdeg, fix={}",
-                           gps.lat_cdeg, gps.lon_cdeg, gps.has_fix);
+                    debug!(
+                        "GPS: lat={}cdeg, lon={}cdeg, fix={}",
+                        gps.lat_cdeg, gps.lon_cdeg, gps.has_fix
+                    );
 
                     // Process GPS through full pipeline
                     if let Some(arrival) = state.process_gps(&gps) {
                         // Emit arrival event via UART
-                        match write_arrival_event(&mut uart, &arrival) {
+                        match uart::write_arrival_event(&mut uart, &arrival) {
                             Ok(()) => {
                                 info!("Emitted arrival event for stop {}", arrival.stop_idx);
                             }
                             Err(e) => {
-                                warn!("Failed to write arrival event: {:?}", e);
+                                defmt::warn!("Failed to write arrival event: {:?}", e);
                             }
                         }
                     }
@@ -534,7 +105,7 @@ async fn main(_spawner: Spawner) {
                 // No complete sentence yet, continue waiting
             }
             Err(e) => {
-                warn!("UART read error: {:?}", e);
+                defmt::warn!("UART read error: {:?}", e);
                 line_buf.reset();
             }
         }

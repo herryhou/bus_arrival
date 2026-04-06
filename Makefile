@@ -15,9 +15,10 @@ DATA_DIR := test_data
 GEN_NMEA := $(TOOLS_DIR)/gen_nmea/gen_nmea.js
 
 # Rust binaries (built with cargo)
-PREPROCESSOR := target/release/preprocessor
-PIPELINE := target/release/pipeline
-TRACE_VALIDATOR := target/release/trace_validator
+HOST_TRIPLE := $(shell rustc -vV | grep "host:" | awk '{print $$2}')
+PREPROCESSOR := target/$(HOST_TRIPLE)/release/preprocessor
+PIPELINE := target/$(HOST_TRIPLE)/release/pipeline
+TRACE_VALIDATOR := target/$(HOST_TRIPLE)/release/trace_validator
 
 # Pico 2 W firmware (RP2350, Cortex-M33)
 FIRMWARE := target/thumbv8m.main-none-eabi/release/pico2-firmware

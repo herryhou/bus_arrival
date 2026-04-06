@@ -1,0 +1,143 @@
+//! GPS processing pipeline state
+//!
+//! Manages the main state machine for processing GPS updates through
+//! the full arrival detection pipeline.
+
+use crate::detection::{compute_arrival_probability, find_active_stops};
+use gps_processor::kalman::{process_gps_update, ProcessResult};
+use shared::{binfile::RouteData, ArrivalEvent, DrState, GpsPoint, KalmanState};
+
+// ===== State Struct =====
+
+/// Global state for the GPS processing pipeline
+pub struct State<'a> {
+    pub nmea: gps_processor::nmea::NmeaState,
+    pub kalman: KalmanState,
+    pub dr: DrState,
+    pub stop_states: heapless::Vec<detection::state_machine::StopState, 256>,
+    pub route_data: &'a RouteData<'a>,
+    first_fix: bool,
+}
+
+impl<'a> State<'a> {
+    pub fn new(route_data: &'a RouteData<'a>) -> Self {
+        use detection::state_machine::StopState;
+        use gps_processor::nmea::NmeaState;
+
+        let stop_count = route_data.stop_count;
+        let mut stop_states = heapless::Vec::new();
+        for i in 0..stop_count {
+            let _ = stop_states.push(StopState::new(i as u8));
+        }
+
+        Self {
+            nmea: NmeaState::new(),
+            kalman: KalmanState::new(),
+            dr: DrState::new(),
+            stop_states,
+            route_data,
+            first_fix: true,
+        }
+    }
+
+    /// Process a GPS point through the full pipeline
+    /// Returns Some(arrival event) if an arrival is detected
+    pub fn process_gps(&mut self, gps: &GpsPoint) -> Option<ArrivalEvent> {
+        use detection::state_machine::StopEvent;
+
+        // Module ④+⑤: Map matching and projection
+        // Module ⑥: Speed constraint filter
+        // Module ⑦: Kalman filter
+        // Module ⑧: Dead-reckoning
+        let result = process_gps_update(
+            &mut self.kalman,
+            &mut self.dr,
+            gps,
+            self.route_data,
+            gps.timestamp,
+            self.first_fix,
+        );
+
+        let (s_cm, v_cms) = match result {
+            ProcessResult::Valid { s_cm, v_cms, seg_idx: _ } => {
+                self.first_fix = false;
+                (s_cm, v_cms)
+            }
+            ProcessResult::Rejected(reason) => {
+                defmt::warn!("GPS update rejected: {}", reason);
+                return None;
+            }
+            ProcessResult::Outage => {
+                defmt::warn!("GPS outage exceeded 10 seconds");
+                return None;
+            }
+            ProcessResult::DrOutage { s_cm, v_cms } => {
+                defmt::debug!("DR mode: s={}cm, v={}cm/s", s_cm, v_cms);
+                (s_cm, v_cms)
+            }
+        };
+
+        // Module ⑨: Stop corridor filtering
+        let active_indices = find_active_stops(s_cm, self.route_data);
+
+        // Module ⑩+⑪: Arrival probability and state machine for each active stop
+        for stop_idx in active_indices {
+            if stop_idx >= self.stop_states.len() {
+                continue;
+            }
+
+            let stop = match self.route_data.get_stop(stop_idx) {
+                Some(s) => s,
+                None => continue,
+            };
+            let stop_state = &mut self.stop_states[stop_idx];
+
+            // Compute arrival probability
+            let probability = compute_arrival_probability(
+                s_cm,
+                v_cms,
+                &stop,
+                stop_state.dwell_time_s,
+            );
+
+            // Update state machine
+            let event = stop_state.update(
+                s_cm,
+                v_cms,
+                stop.progress_cm,
+                stop.corridor_start_cm,
+                probability,
+            );
+
+            match event {
+                StopEvent::Arrived => {
+                    defmt::info!(
+                        "Arrival at stop {}: s={}cm, v={}cm/s, p={}",
+                        stop_idx,
+                        s_cm,
+                        v_cms,
+                        probability
+                    );
+                    return Some(ArrivalEvent {
+                        time: gps.timestamp,
+                        stop_idx: stop_idx as u8,
+                        s_cm,
+                        v_cms,
+                        probability,
+                    });
+                }
+                StopEvent::Departed => {
+                    defmt::info!(
+                        "Departure from stop {}: s={}cm, v={}cm/s",
+                        stop_idx,
+                        s_cm,
+                        v_cms
+                    );
+                }
+                StopEvent::None => {}
+            }
+        }
+
+        None
+    }
+}
