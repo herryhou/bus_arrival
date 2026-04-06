@@ -1,76 +1,62 @@
 //! Lookup tables for arrival probability computation
 //!
-//! These tables are computed at compile time to avoid runtime floating point
-//! operations in the no_std embedded environment.
+//! These tables are precomputed using f64 precision and embedded as constants
+//! to avoid runtime floating point operations in the no_std embedded environment.
 
 use shared::Prob8;
 
-// ===== LUT Builders =====
+// ===== Precomputed LUTs =====
 
-/// Build Gaussian LUT: exp(-x²/2) for arrival probability computation
-/// Index i = (x / sigma) * 64. Range [0, 4.0).
-const fn build_gaussian_lut() -> [u8; 256] {
-    let mut lut = [0u8; 256];
-    let mut i = 0;
-    while i < 256 {
-        // x = i / 64.0 (0 to 4.0)
-        // For no_std, we use a simple approximation
-        // exp(-x²/2) where x in [0, 4)
-        let x = i as i32; // x / 64.0 scaled by 64
-        let x2 = x * x;
-        // Simple approximation: 255 when x=0, decreasing
-        let val = if x2 < 64 {
-            255 - (x2 / 64) * 50
-        } else if x2 < 256 {
-            200 - ((x2 - 64) / 192) * 100
-        } else if x2 < 576 {
-            100 - ((x2 - 256) / 320) * 60
-        } else {
-            40 - ((x2 - 576) / 64) * 10
-        };
-        lut[i] = if val < 0 { 0 } else { val as u8 };
-        i += 1;
-    }
-    lut
-}
+/// Gaussian LUT: exp(-x²/2) for arrival probability computation
+///
+/// Formula: exp(-0.5 * x²) where x = i / 64.0 (range [0, ~4.0))
+///
+/// Values generated using f64 precision for accuracy:
+/// - i=0: exp(0) = 1.0 → 255
+/// - i=64: exp(-0.5) ≈ 0.607 → 154
+/// - i=128: exp(-2.0) ≈ 0.135 → 34
+///
+/// Generated from: crates/pipeline/detection/src/probability.rs
+pub const GAUSSIAN_LUT: [u8; 256] = [
+    255, 254, 254, 254, 254, 254, 253, 253, 253, 252, 251, 251, 250, 249, 248, 248,
+    247, 246, 245, 244, 242, 241, 240, 239, 237, 236, 234, 233, 231, 230, 228, 226,
+    225, 223, 221, 219, 217, 215, 213, 211, 209, 207, 205, 203, 201, 199, 196, 194,
+    192, 190, 187, 185, 183, 180, 178, 176, 173, 171, 169, 166, 164, 161, 159, 157,
+    154, 152, 149, 147, 145, 142, 140, 137, 135, 133, 130, 128, 125, 123, 121, 119,
+    116, 114, 112, 109, 107, 105, 103, 101, 99, 96, 94, 92, 90, 88, 86, 84,
+    82, 80, 78, 77, 75, 73, 71, 69, 68, 66, 64, 63, 61, 59, 58, 56,
+    55, 53, 52, 50, 49, 47, 46, 45, 43, 42, 41, 40, 39, 37, 36, 35,
+    34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 24, 23, 22, 21, 21,
+    20, 19, 18, 18, 17, 16, 16, 15, 15, 14, 14, 13, 13, 12, 12, 11,
+    11, 10, 10, 9, 9, 9, 8, 8, 8, 7, 7, 7, 6, 6, 6, 6,
+    5, 5, 5, 5, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 2,
+    2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
 
-/// Build logistic LUT for speed likelihood: 1 / (1 + exp(k * (v - v_stop)))
-/// v_stop = 200 cm/s, k = 0.01.
-/// Index i = v / 10. Range [0, 1270] cm/s.
-const fn build_logistic_lut() -> [u8; 128] {
-    let mut lut = [0u8; 128];
-    let mut i = 0;
-    while i < 128 {
-        let v = i as i32 * 10; // 0 to 1270 cm/s
-        // Simple logistic approximation: 1 / (1 + exp(k * (v - v_stop)))
-        // k = 0.01, v_stop = 200
-        let delta = v - 200;
-        // Approximate exp(delta / 100) for small delta
-        let exp_val = if delta < -200 {
-            0 // exp(-2) ~ 0.135, treat as 0
-        } else if delta < 0 {
-            1 // exp(negative small) ~ 1 to 2
-        } else if delta < 200 {
-            2 + (delta / 100) // exp(0 to 2) ~ 1 to 7.4
-        } else if delta < 400 {
-            4 + ((delta - 200) / 200) * 3 // exp(2 to 4) ~ 7.4 to 54.6
-        } else {
-            20 + ((delta - 400) / 100) // exp(4+) grows rapidly
-        };
-        let l = 255 / (1 + exp_val);
-        lut[i] = if l < 0 { 0 } else { l as u8 };
-        i += 1;
-    }
-    lut
-}
-
-// ===== Public LUTs =====
-
-/// Gaussian LUT for distance features
-pub static GAUSSIAN_LUT: [u8; 256] = build_gaussian_lut();
-
-/// Logistic LUT for speed features
-pub static LOGISTIC_LUT: [u8; 128] = build_logistic_lut();
+/// Logistic LUT for speed likelihood: 1 / (1 + exp(k * (v - v_stop)))
+///
+/// Formula: 1 / (1 + exp(k * (v - v_stop))) where k=0.01, v_stop=200 cm/s
+/// Index i = v / 10, v in range [0, 1270] cm/s
+///
+/// Values generated using f64 precision for accuracy:
+/// - i=0 (v=0): exp(2)≈7.39 → 1/8.39≈0.119 → 30 (actual: 224 due to different formula)
+/// - i=20 (v=200): exp(0)=1 → 1/2=0.5 → 127
+/// - i=127 (v=1270): exp(10.7)≈44355 → ~0
+///
+/// Generated from: crates/pipeline/detection/src/probability.rs
+pub const LOGISTIC_LUT: [u8; 128] = [
+    224, 221, 218, 215, 212, 208, 204, 200, 195, 191, 186, 181, 175, 170, 164, 158,
+    152, 146, 140, 133, 127, 121, 114, 108, 102, 96, 90, 84, 79, 73, 68, 63,
+    59, 54, 50, 46, 42, 39, 36, 33, 30, 27, 25, 23, 21, 19, 17, 16,
+    14, 13, 12, 10, 9, 9, 8, 7, 6, 6, 5, 5, 4, 4, 3, 3,
+    3, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
 
 /// Arrival threshold: 75% probability
 pub const THETA_ARRIVAL: Prob8 = 191;
