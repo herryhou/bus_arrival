@@ -27,7 +27,11 @@ impl<'a> State<'a> {
         let stop_count = route_data.stop_count;
         let mut stop_states = heapless::Vec::new();
         for i in 0..stop_count {
-            let _ = stop_states.push(StopState::new(i as u8));
+            if let Err(_) = stop_states.push(StopState::new(i as u8)) {
+                #[cfg(feature = "firmware")]
+                defmt::warn!("Route has {} stops but only 256 supported - stops beyond index 255 will be ignored", stop_count);
+                break;
+            }
         }
 
         Self {

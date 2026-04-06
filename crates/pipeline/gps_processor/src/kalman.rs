@@ -143,6 +143,6 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
 
     ProcessResult::DrOutage {
         s_cm: state.s_cm,
-        v_cms: state.v_cms,
+        v_cms: dr.filtered_v,
     }
 }

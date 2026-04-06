@@ -586,12 +586,28 @@ fn scenario_handle_gps_outage_with_dr(route_data: &RouteData, start_x: i32, star
     gps_lost.timestamp = 1002;
     let result = process_gps_update(&mut state, &mut dr, &gps_lost, &route_data, 2, false);
 
-    // Then: Dead reckoning should estimate progress
-    if let ProcessResult::DrOutage { s_cm, .. } = result {
+    // Then: Dead reckoning should estimate progress with decayed speed
+    if let ProcessResult::DrOutage { s_cm, v_cms } = result {
         // Expected: last_s(0) + v(1000) * dt(2) = 2000
-        assert_eq!(s_cm, 2000);
+        assert_eq!(s_cm, 2000, "DR position should advance by 2000cm");
+        // Expected: decayed speed = 1000 * 9/10 = 900 (first decay)
+        assert_eq!(v_cms, 900, "DR should return decayed speed (dr.filtered_v), not stale Kalman speed");
     } else {
         panic!("Expected DR result, got other");
+    }
+
+    // When: GPS remains lost for another second (3 seconds total)
+    gps_lost.timestamp = 1003;
+    let result2 = process_gps_update(&mut state, &mut dr, &gps_lost, &route_data, 3, false);
+
+    // Then: Speed should decay further: 900 * 9/10 = 810
+    if let ProcessResult::DrOutage { s_cm, v_cms } = result2 {
+        // Position: last_s(2000) + v(900) * dt(1) = 2900
+        assert_eq!(s_cm, 2900, "DR position should continue advancing");
+        // Speed: 900 * 9/10 = 810 (second decay)
+        assert_eq!(v_cms, 810, "DR speed should decay over multiple seconds");
+    } else {
+        panic!("Expected DR result for second outage");
     }
 }
 
