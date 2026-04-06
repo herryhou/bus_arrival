@@ -108,7 +108,7 @@
   │    route_data.bin (~10-12KB Flash for v8.8)                            │
   └────────────────────────────────────────────────────────────┘
 ```
-產物：route_data.bin（含 route_nodes / stops / grid_index / LUT）
+產物：route_data.bin（含 route_nodes / stops / grid_index）
 
 
 #### 定位 Pipeline（GPS loop，1 Hz）— 載入 Flash 產物後執行
@@ -229,7 +229,7 @@ pub fn heading_within(a: HeadCdeg, b: HeadCdeg, threshold: HeadCdeg) -> bool {
 | 每次 GPS 更新 CPU 時間（估計） | ~8–12 ms | ~1.5–2 ms |
 | 數值行為 | 浮點累積，難以預測 | 完全可預測 |
 | 程式碼可讀性 | 單位隱含 | 單位即型別名稱 |
-| 額外 Flash 開銷 | 0 | +0.5 KB（兩張 LUT） |
+| 額外 Flash 開銷 | 0 | +384 bytes（兩張 LUT，編譯期生成） |
 
 ---
 
@@ -1252,8 +1252,7 @@ $$\text{best\_seg} = \arg\max_i \left[\, P(O \mid S=i) \cdot P(S=i \mid S=\text{
 | **7** | **DP 站點投影（dp_mapper）** | **(v8.4 核心更新)** 使用 `dp_mapper` crate 進行**全域最佳化**的站點投影：<br><br>**演算法概述：**<br>- 將站點投影問題轉化為**分層 DAG 最短路徑問題**（Viterbi-like）<br>- 每個站點產生 K 個候選投影（預設 K=15），使用空間格網進行 $O(k)$ 路段查詢<br>- DP 前向傳播：排序掃描找出最小成本路徑（滿足進度單調性）<br>- 回溯重建：從最終層最佳狀態回溯，輸出全域最佳路徑<br><br>**Snap-Forward 機制：**<br>- 對於 j > 0 的站點，若候選進度皆小於前一層最大進度，加入 snap-forward 候選<br>- Snap candidate 錨定於 `max_prev_progress_cm` 之後的首個路段，施加巨大懲罰（`SNAP_PENALTY_CM2 = 10^12 cm²`）<br>- DP 只會在無其他有效轉移時才選擇 snap candidate<br><br>**轉移約束：**<br>- 有效轉移條件：`progress[curr] >= progress[prev]`（允許相等，處理相同位置的相鄰站點）<br>- 支援路線迴圈（同一位置多次經過）<br>- 保證輸出進度值嚴格單調遞增<br><br>**複雜度：** $O(M \times K \log K)$，其中 M = 站點數，K = 候選數<br>- 典型路線（M=35, K=15）：< 10 ms<br>- 大型路線（M=100, K=15）：< 30 ms<br><br>**實作模組：** `preprocessor/dp_mapper/`<br>- `grid/`：空間格網索引<br>- `candidate/`：投影與 K-candidate 選取<br>- `pathfinding/`：DP solver 與回溯 |
 | **8** | **計算廊道邊界** | 為每個站點計算非對稱廊道：前置 $80\text{ m}$，後置 $40\text{ m}$。若相鄰廊道重疊，執行 **$\delta_{sep} = 20\text{ m}$ 強制截斷**。 |
 | **8.5** | **近距站點廊道調整（v8.6 新增）** | 對站距 $<120\text{ m}$ 的站對，重新分配廊道空間：**55% pre + 10% gap + 35% post**。於 `project_stops_validated()` **之後** 執行，作為標準重疊保護的補強。詳見 Section 12.5。 |
-| **9** | **生成查表 (LUT)** | 生成 256 項 Gaussian LUT (距離/進度似然) 與 128 項 Logistic LUT (速度似然)，並縮放至 $u8$ 尺度。 |
-| **10** | **數據打包與校驗** | 將 RouteNode (24 bytes/node)、Stops、Grid 及 LUT 打包。計算 **CRC32** 並標記 **VERSION 5**，產出 `route_data.bin`。<br><br>**詳細規格：** 參見 **[spatial_grid_binary_format.md](spatial_grid_binary_format.md)** - 完整的二進制格式佈局、讀寫實作與 XIP 支援。 |
+| **9** | **數據打包與校驗** | 將 RouteNode (24 bytes/node)、Stops、Grid 打包。計算 **CRC32** 並標記 **VERSION 5**，產出 `route_data.bin`。<br><br>**詳細規格：** 參見 **[spatial_grid_binary_format.md](spatial_grid_binary_format.md)** - 完整的二進制格式佈局、讀寫實作與 XIP 支援。 |
 
 ---
 
@@ -1300,7 +1299,8 @@ $$\text{best\_seg} = \arg\max_i \left[\, P(O \mid S=i) \cdot P(S=i \mid S=\text{
 
 | 資料/狀態 | 佔用 |
 |---------|------|
-| 路線資料、LUT（Flash） | ~22 KB (v8.7) |
+| 路線資料（Flash） | ~20 KB (v8.8) |
+| LUT（Flash, 編譯期生成） | 384 bytes |
 | Kalman State | 8 bytes（SRAM） |
 | DR State | 16 bytes（SRAM） |
 | Stop State Machine | 50 bytes（SRAM） |
@@ -1309,6 +1309,7 @@ $$\text{best\_seg} = \arg\max_i \left[\, P(O \mid S=i) \cdot P(S=i \mid S=\text{
 | **SRAM 合計** | **< 1 KB** |
 
 > **v8.2 更新：** Flash 佔用從 ~34 KB (v8.1) 降至 ~24 KB (v8.2/v8.5/v8.6)，節省 ~10 KB（29% reduction）。
+> **v8.8 更新：** Grid 優化從 ~16 KB 降至 ~5 KB，節省 ~11 KB。LUTs 改為編譯期生成（384 bytes），不再存於 bin file。
 
 ### 18.3 準確率預估
 
@@ -1337,20 +1338,38 @@ pub type Prob8     = u8;   // 0..255，精度 1/256 已足
 pub type Dist2Cm2  = i64;  // squared distance in cm²
 ```
 
-### 19.2 LUT 生成（Build Script）
+### 19.2 LUT 生成（編譯期常數）
 
-Gaussian 與 Logistic LUT 於 `build.rs` 編譯期生成，確保與演算法參數同步：
+Gaussian 與 Logistic LUT 於編譯期以 `const fn` 生成，確保與演算法參數同步：
 
 ```rust
-// build.rs
-fn gen_gaussian_lut() -> Vec<u8> {
-    (0i32..256).flat_map(|i| {
-        let x = i as f64 / 64.0; // x ∈ [0, 4)
-        let v = ((-x * x / 2.0).exp() * 255.0).round() as u8;
-        v.to_le_bytes()
-    }).collect()
+// crates/pico2-firmware/src/lut.rs
+const fn build_gaussian_lut() -> [u8; 256] {
+    let mut lut = [0u8; 256];
+    let mut i = 0;
+    while i < 256 {
+        let x = i as i32;
+        let x2 = x * x;
+        // 簡化 exp(-x²/2) 近似
+        let val = if x2 < 64 {
+            255 - (x2 / 64) * 50
+        } else if x2 < 256 {
+            200 - ((x2 - 64) / 192) * 100
+        } else if x2 < 576 {
+            100 - ((x2 - 256) / 320) * 60
+        } else {
+            40 - ((x2 - 576) / 64) * 10
+        };
+        lut[i] = if val < 0 { 0 } else { val as u8 };
+        i += 1;
+    }
+    lut
 }
+
+pub static GAUSSIAN_LUT: [u8; 256] = build_gaussian_lut();
 ```
+
+Logistic LUT 類似生成，佔用 384 bytes Flash。
 
 ### 19.3 Flash 資料存取（XIP）
 
@@ -1401,11 +1420,12 @@ static GLOBAL_STOP_INDEX: AtomicU32 = AtomicU32::new(0);
 | GPS 斷訊容忍時間 | 10 s | Dead-Reckoning 補償 |
 | CPU 使用率 | < 8% | 1 Hz，整數全 pipeline |
 | SRAM 佔用（runtime） | < 1 KB | 路線資料存 Flash（XIP） |
-| Flash 佔用 | ~22 KB (v8.7) | 含預算係數與 LUT（v8.2 優化） |
+| Flash 佔用 | ~20 KB (v8.8) | 路線資料 + LUT（384 bytes, 編譯期生成） |
 | 每次 GPS 更新耗時 | < 1.5 ms | 全 pipeline |
 | GPS 恢復後同步時間 | < 2 s | soft correction（2/10 加權） |
 
-> **v8.2 優化：** RouteNode 從 52 → 36 bytes，Flash 佔用從 ~34 KB 降至 ~24 KB（節省 29%）。v8.7 进一步优化至 24 bytes，Flash 佔用降至 ~16 KB。
+> **v8.2 優化：** RouteNode 從 52 → 36 bytes，Flash 佔用從 ~34 KB 降至 ~24 KB（節省 29%）。v8.7 进一步优化至 24 bytes。
+> **v8.8 優化：** Grid 使用 bitmask + u16 offsets，從 ~16 KB 降至 ~5 KB。LUTs 改為編譯期生成，不再存於 bin file。
 
 ---
 

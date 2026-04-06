@@ -69,12 +69,12 @@ bus-arrival/
 ├── Cargo.toml                  # Workspace root
 ├── firmware/                   # no_std 嵌入式 crate
 │   ├── Cargo.toml
-│   ├── build.rs                # LUT 生成 + 路線資料連結
+│   ├── build.rs                # 路線資料連結
 │   ├── memory.x                # RP2350 記憶體佈局
 │   ├── src/
 │   │   ├── main.rs             # 入口，GPIO / UART 初始化
 │   │   ├── types.rs            # 語義整數型別別名
-│   │   ├── lut.rs              # Gaussian / Logistic LUT 查表
+│   │   ├── lut.rs              # Gaussian / Logistic LUT 查表（編譯期生成）
 │   │   ├── route_data.rs       # Flash 靜態資料存取（XIP）
 │   │   ├── pipeline/
 │   │   │   ├── mod.rs          # GpsPipeline 主結構
@@ -674,10 +674,8 @@ pub fn route_nodes() -> &'static [RouteNode] {
 | route_nodes（N × 24 B） | ~14.4 KB | RouteNode 陣列（v8.7: 24 bytes/node） |
 | stops（M × 12 B） | ~0.6 KB | Stop 陣列 |
 | grid_index | ~5 KB | Spatial Grid Index (v8.8: sparse grid) |
-| gaussian_lut（256 bytes） | 256 B | Gaussian LUT |
-| logistic_lut（128 bytes） | 128 B | Logistic LUT |
 | CRC32（4 bytes） | 4 B | 整體完整性驗證 |
-| **合計** | **~11 KB** | |
+| **合計** | **~20 KB** | |
 
 > **v8.8 更新：** VERSION=5，Grid 使用 bitmask + u16 offsets，Grid 從 ~16 KB 降至 ~5 KB（節省 ~11 KB Flash）。<br>> **詳細規格：** 參見 [spatial_grid_binary_format.md](spatial_grid_binary_format.md)
 
