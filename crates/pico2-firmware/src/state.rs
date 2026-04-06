@@ -3,7 +3,7 @@
 //! Manages the main state machine for processing GPS updates through
 //! the full arrival detection pipeline.
 
-use crate::detection::{compute_arrival_probability, find_active_stops};
+use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
 use gps_processor::kalman::{process_gps_update, ProcessResult};
 use shared::{binfile::RouteData, ArrivalEvent, DrState, GpsPoint, KalmanState};
 
@@ -92,12 +92,18 @@ impl<'a> State<'a> {
             };
             let stop_state = &mut self.stop_states[stop_idx];
 
-            // Compute arrival probability
-            let probability = compute_arrival_probability(
+            // Get next sequential stop for adaptive weights
+            let next_stop_idx = stop_idx.checked_add(1);
+            let next_stop_value = next_stop_idx.and_then(|idx| self.route_data.get_stop(idx));
+            let next_stop = next_stop_value.as_ref();
+
+            // Compute arrival probability with adaptive weights
+            let probability = compute_arrival_probability_adaptive(
                 s_cm,
                 v_cms,
                 &stop,
                 stop_state.dwell_time_s,
+                next_stop,
             );
 
             // Update state machine
