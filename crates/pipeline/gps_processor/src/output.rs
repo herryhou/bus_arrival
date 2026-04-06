@@ -29,16 +29,8 @@ struct StopTraceState {
     distance_cm: i32,
 }
 
-/// Find stops whose corridor contains the current route progress
-fn find_active_stops(s_cm: DistCm, stops: &[Stop]) -> Vec<usize> {
-    stops.iter()
-        .enumerate()
-        .filter(|(_, stop)| {
-            s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm
-        })
-        .map(|(i, _)| i)
-        .collect()
-}
+// Re-export find_active_stops from detection::corridor
+use detection::corridor::find_active_stops;
 
 /// Create stop_states for active stops (simplified, no arrival detection)
 fn create_stop_states(s_cm: DistCm, active_stops: &[usize], stops: &[Stop]) -> Vec<StopTraceState> {

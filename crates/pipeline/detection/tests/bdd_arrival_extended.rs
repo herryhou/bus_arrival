@@ -50,11 +50,8 @@ fn scenario_stop_reactivation() {
     let can_reset = state.can_reactivate(5000, stop.progress_cm);
     assert!(!can_reset, "Should NOT be able to reactivate after departure");
 
-    // Even if we call reset() (which should not happen in normal operation)
-    state.reset();
-
-    // Then: state should remain Departed (reset() is a no-op)
-    assert_eq!(state.fsm_state, FsmState::Departed, "reset() should not change FSM state");
+    // State remains Departed - no way to reset after departure
+    assert_eq!(state.fsm_state, FsmState::Departed);
 }
 
 #[test]

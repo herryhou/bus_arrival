@@ -5,10 +5,11 @@ edition.workspace = true
 
 [features]
 default = []
-std = ["shared/std", "serde/derive", "serde_json"]
+std = ["shared/std", "detection/std", "serde/derive", "serde_json"]
 
 [dependencies]
 shared = { path = "../../shared", default-features = false }
+detection = { path = "../detection", default-features = false }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 # For floating-point operations in no_std

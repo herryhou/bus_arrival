@@ -166,12 +166,4 @@ fn scenario_one_time_announcement_prevents_reactivation() {
     // v8.6: One-time announcement rule - even if bus loops back, it cannot be announced again
     let can_reset = state.can_reactivate(5000, stop.progress_cm);
     assert!(!can_reset, "Should NOT be able to re-enter corridor after loop (one-time announcement rule)");
-
-    // reset() is a no-op, state remains unchanged
-    let original_state = state.fsm_state;
-    let original_dwell = state.dwell_time_s;
-    state.reset();
-    assert_eq!(state.fsm_state, original_state, "reset() should not change FSM state");
-    assert_eq!(state.dwell_time_s, original_dwell, "reset() should not change dwell time");
-    assert!(state.announced, "announced flag should remain true after reset()");
 }

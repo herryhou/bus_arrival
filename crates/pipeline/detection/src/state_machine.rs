@@ -43,16 +43,6 @@ impl StopState {
         }
     }
 
-    /// Reset state for re-entry into corridor (after departure)
-    ///
-    /// v8.6: This is NO-OP for one-time announcement rule.
-    /// Once a stop has been announced, it can never be announced again in the same trip.
-    /// The reset() function is kept for compatibility but does nothing.
-    pub fn reset(&mut self) {
-        // NO-OP: Do not reset state to prevent duplicate announcements
-        // Once announced, always announced for this trip
-    }
-
     /// Update state and return any event (arrival or departure)
     ///
     /// Arrival is triggered when:
@@ -379,32 +369,6 @@ mod tests {
     }
 
     #[test]
-    fn test_reset_is_noop() {
-        // v8.6: reset() is a no-op (one-time announcement rule)
-        // Once a stop has been announced, it can never be announced again
-        let mut state = StopState::new(0);
-        let stop_progress = 10000;
-        let corridor_start_cm = 2000;
-
-        // Progress through the state machine
-        state.update(5000, 100, stop_progress, corridor_start_cm, 0);
-        state.update(5000, 100, stop_progress, corridor_start_cm, 200);
-        state.fsm_state = FsmState::AtStop;
-        state.dwell_time_s = 10;
-
-        // Store original state values
-        let original_fsm_state = state.fsm_state;
-        let original_dwell_time = state.dwell_time_s;
-        let original_probability = state.last_probability;
-
-        // Reset should be a no-op - state should remain unchanged
-        state.reset();
-        assert_eq!(state.fsm_state, original_fsm_state);
-        assert_eq!(state.dwell_time_s, original_dwell_time);
-        assert_eq!(state.last_probability, original_probability);
-    }
-
-    #[test]
     fn test_one_time_announcement_rule() {
         // v8.6: A stop can only be announced once per trip
         let mut state = StopState::new(0);
@@ -436,9 +400,5 @@ mod tests {
 
         // Even if we re-enter the corridor, can_reactivate returns false
         assert!(!state.can_reactivate(stop_progress, stop_progress));
-
-        // reset() is a no-op, won't clear the announced flag
-        state.reset();
-        assert!(state.announced, "reset() should not clear announced flag");
     }
 }
