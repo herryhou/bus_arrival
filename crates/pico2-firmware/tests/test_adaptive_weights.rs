@@ -27,7 +27,6 @@ fn test_adaptive_weights_close_stop() {
     );
 
     assert!(prob > 190, "Expected probability > 190 for close stop, got {}", prob);
-    assert!(prob <= 255);
 }
 
 #[test]
@@ -48,7 +47,8 @@ fn test_adaptive_weights_normal_stop() {
         100_000, 600, &stop_current, 5, Some(&stop_next)
     );
 
-    assert!(prob <= 255);
+    // Normal stop: verify computation succeeds
+    assert!(prob < 255); // High probability but not max (not at stop with zero speed)
 }
 
 #[test]
@@ -63,6 +63,6 @@ fn test_adaptive_weights_last_stop() {
         100_000, 0, &stop, 10, None
     );
 
-    assert!(prob <= 255);
+    // Last stop: at stop with zero speed and 10s dwell should have high probability
     assert!(prob > 150);
 }

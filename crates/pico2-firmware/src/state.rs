@@ -66,6 +66,8 @@ impl<'a> State<'a> {
             ProcessResult::Rejected(reason) => {
                 #[cfg(feature = "firmware")]
                 defmt::warn!("GPS update rejected: {}", reason);
+                #[cfg(not(feature = "firmware"))]
+                let _ = reason; // Suppress unused warning when firmware feature is disabled
                 return None;
             }
             ProcessResult::Outage => {

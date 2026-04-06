@@ -4,7 +4,7 @@
 
 **目標受眾：** Embedded Rust 開發團隊  
 **硬體平台：** Raspberry Pi Pico 2（RP2350）  
-**文件版本：** v8.8（Grid 優化：bitmask + u16 offsets，空間從 ~16 KB 降至 ~5 KB）
+**文件版本：** v8.8（Grid 優化：bitmask + u16 offsets）
 
 ---
 
