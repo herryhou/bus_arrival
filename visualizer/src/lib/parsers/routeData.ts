@@ -43,8 +43,10 @@
  * - Nodes array: node_count × 24 bytes
  * - Stops array: stop_count × 12 bytes
  * - Grid data (cols, rows, grid_size_cm, offsets, cells)
- * - LUTs: 256 bytes (gaussian) + 128 bytes (logistic)
  * - CRC32: u32 = 4 bytes
+ *
+ * Note: LUTs are no longer stored in the binary file (v8.8+).
+ * They are generated at compile time in the firmware.
  */
 
 import { projectCmToLatLon } from '$lib/parsers/projection';
@@ -156,7 +158,7 @@ export function parseRouteData(buffer: ArrayBuffer): RouteData {
 		offset += STOP_SIZE;
 	}
 
-	// Note: The v8 format has additional data after stops (grid, LUTs, CRC32)
+	// Note: The v8 format has additional data after stops (grid, CRC32)
 	// but we don't need to parse it for visualization
 
 	return {

@@ -32,9 +32,11 @@ fn test_lat_avg_deg_roundtrip() {
     for lat_avg in test_lat_avgs {
         buffer.extend_from_slice(&lat_avg.to_le_bytes());
 
-        // Add dummy data for rest of required fields
-        buffer.extend_from_slice(&[0u8; 256]); // gaussian_lut
-        buffer.extend_from_slice(&[0u8; 128]); // logistic_lut
+        // Add dummy data for rest of required fields (grid data)
+        buffer.extend_from_slice(&12u32.to_le_bytes()); // cols
+        buffer.extend_from_slice(&12u32.to_le_bytes()); // rows
+        buffer.extend_from_slice(&10000i32.to_le_bytes()); // grid_size_cm
+        buffer.extend_from_slice(&[0u8; 18]); // minimal grid bitmask + offsets + padding + cell data
 
         // Calculate CRC for what we have
         let mut hasher = crc32fast::Hasher::new();
