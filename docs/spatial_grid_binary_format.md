@@ -14,11 +14,11 @@ The spatial grid is an index for O(k) segment queries during map matching. It di
 // crates/shared/src/lib.rs
 pub struct SpatialGrid {
     pub cells: Vec<Vec<usize>>,  // Dense: one Vec per cell
-    pub grid_size_cm: i32,
+    pub grid_size_cm: DistCm,
     pub cols: u32,
     pub rows: u32,
-    pub x0_cm: i32,  // Grid origin (bounding box min)
-    pub y0_cm: i32,
+    pub x0_cm: DistCm,  // Grid origin (bounding box min)
+    pub y0_cm: DistCm,
 }
 ```
 
@@ -34,9 +34,9 @@ pub struct SpatialGrid {
 
 ```
 [Header: 12 bytes]
-  cols:         u32  (4 bytes)
-  rows:         u32  (4 bytes)
-  grid_size_cm: i32  (4 bytes)
+  cols:         u32         (4 bytes)
+  rows:         u32         (4 bytes)
+  grid_size_cm: DistCm (= i32) (4 bytes)
 
 [Bitmask: ceil(cols × rows / 8) bytes]
   1 bit per cell: 1 = has data, 0 = empty
