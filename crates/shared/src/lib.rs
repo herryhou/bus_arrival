@@ -38,6 +38,11 @@ pub type SpeedCms = i32;
 /// Range: -18000..18000 = -180°..+180°
 pub type HeadCdeg = i16;
 
+/// Geographic coordinate in hundredths of a degree.
+/// Range: -18000..18000 = -180°..+180°
+/// Used for latitude and longitude (NOT heading/direction).
+pub type GeoCdeg = i16;
+
 /// Probability scaled 0..255 (u8 = probability × 255).
 /// Precision: 1/256 ≈ 0.004 — sufficient for arrival decisions.
 pub type Prob8 = u8;
@@ -122,8 +127,8 @@ pub struct GridOrigin {
 #[derive(Debug, Clone)]
 pub struct GpsPoint {
     pub timestamp: u64, // seconds since epoch
-    pub lat_cdeg: HeadCdeg, // Latitude in 0.01° units (e.g., 235000 = 23.5000°N)
-    pub lon_cdeg: HeadCdeg, // Longitude in 0.01° units (e.g., 1205000 = 120.5000°E)
+    pub lat_cdeg: GeoCdeg, // Latitude in 0.01° units (e.g., 235000 = 23.5000°N)
+    pub lon_cdeg: GeoCdeg, // Longitude in 0.01° units (e.g., 1205000 = 120.5000°E)
     pub heading_cdeg: HeadCdeg, // Heading in 0.01° units
     pub speed_cms: SpeedCms, // Speed in cm/s
     pub hdop_x10: u16, // HDOP * 10 (e.g., 15 = 1.5)

@@ -1,6 +1,6 @@
 //! NMEA sentence parser
 
-use shared::{GpsPoint, SpeedCms, HeadCdeg};
+use shared::{GpsPoint, SpeedCms, HeadCdeg, GeoCdeg};
 
 // Import libm functions for no_std
 #[cfg(not(feature = "std"))]
@@ -94,8 +94,8 @@ impl NmeaState {
         };
 
         // Convert to integer centidegrees (0.01° units) for no-FPU runtime
-        self.point.lat_cdeg = (lat * 100.0) as HeadCdeg;
-        self.point.lon_cdeg = (lon * 100.0) as HeadCdeg;
+        self.point.lat_cdeg = (lat * 100.0) as GeoCdeg;
+        self.point.lon_cdeg = (lon * 100.0) as GeoCdeg;
         self.point.speed_cms = knots_to_cms(speed_knots);
         self.point.heading_cdeg = heading_cdeg as HeadCdeg;
         self.point.has_fix = true;
@@ -144,8 +144,8 @@ impl NmeaState {
         let hdop: f64 = parts[8].parse().unwrap_or(99.0);
 
         // Convert to integer centidegrees (0.01° units) for no-FPU runtime
-        self.point.lat_cdeg = (lat * 100.0) as HeadCdeg;
-        self.point.lon_cdeg = (lon * 100.0) as HeadCdeg;
+        self.point.lat_cdeg = (lat * 100.0) as GeoCdeg;
+        self.point.lon_cdeg = (lon * 100.0) as GeoCdeg;
         self.point.hdop_x10 = f64_round(hdop * 10.0) as u16;
         self.point.has_fix = true;
 
