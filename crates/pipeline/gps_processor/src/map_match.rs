@@ -1,7 +1,9 @@
 //! Heading-constrained map matching
 
-use shared::{RouteNode, HeadCdeg, SpeedCms, DistCm, Dist2};
 use shared::binfile::RouteData;
+use shared::{Dist2, DistCm, HeadCdeg, RouteNode, SpeedCms};
+
+use crate::SIGMA_GPS_CM;
 
 // Import libm functions for no_std
 #[cfg(not(feature = "std"))]
@@ -9,9 +11,13 @@ use libm::{cos as f64_cos, round as f64_round};
 
 // Helper functions for floating-point operations
 #[cfg(feature = "std")]
-fn f64_cos(x: f64) -> f64 { x.cos() }
+fn f64_cos(x: f64) -> f64 {
+    x.cos()
+}
 #[cfg(feature = "std")]
-fn f64_round(x: f64) -> f64 { x.round() }
+fn f64_round(x: f64) -> f64 {
+    x.round()
+}
 
 // Helper for to_radians
 fn to_radians_compat(degrees: f64) -> f64 {
@@ -29,9 +35,12 @@ pub fn find_best_segment_restricted(
 ) -> usize {
     // 1. First, search in a small window ahead of last_idx
     // Window: [last_idx - 2, last_idx + 10]
-    let start = last_idx.saturating_sub(2);
-    let end = (last_idx + 10).min(route_data.node_count.saturating_sub(1));
-    
+    const WINDOW_BACK: usize = 2; // GPS 雜訊造成的最大表觀後退路段數
+    const WINDOW_FWD: usize = 10; // V_MAX(3000 cm/s) × 最大路段長(~30m) 的 10× 緩衝
+
+    let start = last_idx.saturating_sub(WINDOW_BACK);
+    let end = (last_idx + WINDOW_FWD).min(route_data.node_count.saturating_sub(1));
+
     let mut best_idx = last_idx;
     let mut best_score = i64::MAX;
     let mut found_in_window = false;
@@ -49,7 +58,8 @@ pub fn find_best_segment_restricted(
 
     // 2. If window score is acceptable, use it (e.g. distance < 50m)
     // 50m squared = 5000^2 = 25,000,000
-    if found_in_window && best_score < 25_000_000 {
+    const MAX_DIST_SQRT: i64 = SIGMA_GPS_CM as i64 * SIGMA_GPS_CM as i64;
+    if found_in_window && best_score < MAX_DIST_SQRT {
         return best_idx;
     }
 
@@ -62,7 +72,9 @@ pub fn find_best_segment_restricted(
         for dx in 0..=2 {
             let ny = gy as i32 + dy as i32 - 1;
             let nx = gx as i32 + dx as i32 - 1;
-            if ny < 0 || nx < 0 { continue; }
+            if ny < 0 || nx < 0 {
+                continue;
+            }
 
             if let Ok(cell_indices) = route_data.grid.get_cell(nx as u32, ny as u32) {
                 for &idx in cell_indices {
@@ -108,7 +120,11 @@ fn heading_weight(v_cms: SpeedCms) -> i32 {
 /// Calculate heading difference (shortest around 360°)
 fn heading_diff_cdeg(a: HeadCdeg, b: HeadCdeg) -> HeadCdeg {
     let diff = (a as i32 - b as i32).unsigned_abs() % 36000;
-    if diff > 18000 { (36000 - diff) as HeadCdeg } else { diff as HeadCdeg }
+    if diff > 18000 {
+        (36000 - diff) as HeadCdeg
+    } else {
+        diff as HeadCdeg
+    }
 }
 
 /// Distance squared from point to segment (clamped projection)
@@ -128,7 +144,13 @@ fn distance_to_segment_squared(x: DistCm, y: DistCm, seg: &RouteNode) -> Dist2 {
         return ((x - seg.x_cm) as i64).pow(2) + ((y - seg.y_cm) as i64).pow(2);
     }
 
-    let t = if t_num < 0 { 0 } else if t_num > len2_cm2 { len2_cm2 } else { t_num };
+    let t = if t_num < 0 {
+        0
+    } else if t_num > len2_cm2 {
+        len2_cm2
+    } else {
+        t_num
+    };
 
     // Projected point
     let px = seg.x_cm + ((t * seg.dx_cm as i64 / len2_cm2) as DistCm);
@@ -163,7 +185,13 @@ pub fn project_to_route(
         return seg.cum_dist_cm;
     }
 
-    let t = if t_num < 0 { 0 } else if t_num > len2_cm2 { len2_cm2 } else { t_num };
+    let t = if t_num < 0 {
+        0
+    } else if t_num > len2_cm2 {
+        len2_cm2
+    } else {
+        t_num
+    };
 
     // z = cum_dist[i] + t × seg_len_cm / len2_cm2
     let base = seg.cum_dist_cm;
@@ -172,7 +200,11 @@ pub fn project_to_route(
 
 /// Convert lat/lon to absolute cm coordinates with specified average latitude
 /// This matches the projection used by the preprocessor
-pub fn latlon_to_cm_absolute_with_lat_avg(lat: f64, lon: f64, lat_avg_deg: f64) -> (DistCm, DistCm) {
+pub fn latlon_to_cm_absolute_with_lat_avg(
+    lat: f64,
+    lon: f64,
+    lat_avg_deg: f64,
+) -> (DistCm, DistCm) {
     use shared::{EARTH_R_CM, FIXED_ORIGIN_LON_DEG};
 
     let lat_rad = to_radians_compat(lat);
