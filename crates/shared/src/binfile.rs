@@ -2,7 +2,7 @@
 //! Defines the MAGIC bytes, versioning, and zero-copy loading logic
 //! used by both the preprocessor (for packing) and the runtime (for loading).
 
-use crate::{RouteNode, Stop};
+use crate::{RouteNode, Stop, DistCm};
 #[cfg(feature = "std")]
 use crate::SpatialGrid;
 use core::marker::PhantomData;
@@ -145,7 +145,7 @@ impl std::error::Error for BusError {}
 pub struct SpatialGridView<'a> {
     pub cols: u32,
     pub rows: u32,
-    pub grid_size_cm: i32,
+    pub grid_size_cm: DistCm,
     bitmask_base: *const u8,
     offsets_base: *const u8,
     data_base: *const u8,
@@ -252,8 +252,8 @@ impl<'a> SpatialGridView<'a> {
 
 /// The complete route data, referenced directly from a byte slice.
 pub struct RouteData<'a> {
-    pub x0_cm: i32,
-    pub y0_cm: i32,
+    pub x0_cm: DistCm,
+    pub y0_cm: DistCm,
     /// Average latitude for projection (computed from route points)
     pub lat_avg_deg: f64,
     pub node_count: usize,
