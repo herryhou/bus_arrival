@@ -1,8 +1,12 @@
 //! Stop index recovery for GPS jump handling
 
-use shared::{DistCm, Stop};
+use shared::DistCm;
+
+#[cfg(feature = "std")]
+use shared::Stop;
 
 /// Trigger conditions
+#[cfg_attr(not(feature = "std"), allow(dead_code))]
 const GPS_JUMP_THRESHOLD: DistCm = 20000;  // 200 m
 
 /// Find correct stop after GPS jump

@@ -3,9 +3,6 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-// Use libm for floating-point operations in no_std
-#[cfg(not(feature = "std"))]
-use libm::{exp as f64_exp};
 
 pub mod corridor;
 pub mod probability;

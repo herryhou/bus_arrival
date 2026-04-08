@@ -69,8 +69,6 @@ pub fn crc32(data: &[u8]) -> u32 {
     !crc
 }
 
-#[cfg(feature = "std")]
-use std::io::Write;
 
 /// Pack route data into binary format.
 ///

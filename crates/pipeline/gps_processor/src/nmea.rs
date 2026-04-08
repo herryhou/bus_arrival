@@ -12,7 +12,8 @@ fn f64_round(x: f64) -> f64 { x.round() }
 #[cfg(feature = "std")]
 fn f64_trunc(x: f64) -> f64 { x.trunc() }
 
-// NMEA sentences typically have < 20 fields
+// NMEA sentences typically have < 20 fields (only used in no_std builds)
+#[cfg_attr(feature = "std", allow(dead_code))]
 const MAX_NMEA_FIELDS: usize = 20;
 
 // Note: We don't use the type alias approach since we need different types for std/no_std

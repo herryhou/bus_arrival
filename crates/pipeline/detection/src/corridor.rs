@@ -1,6 +1,7 @@
 //! Stop corridor filter
 
-use shared::{Stop, DistCm};
+#[cfg(feature = "std")]
+use shared::{DistCm, Stop};
 
 /// Find stops whose corridor contains the current route progress
 #[cfg(feature = "std")]

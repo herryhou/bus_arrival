@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 // Import Ord trait for .max() method (needed for no_std)
 use core::cmp::Ord;
-use core::option::Option::{self, None, Some};
+use core::option::Option::{self, None};
 
 /// Earth's radius in centimeters
 pub const EARTH_R_CM: f64 = 637_100_000.0;

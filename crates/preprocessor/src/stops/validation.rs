@@ -12,8 +12,10 @@ pub struct ValidationResult {
     /// Validated stop progress values in input order
     pub progress_values: Vec<i32>,
     /// Segment index for each stop (for debugging)
+    #[allow(dead_code)]
     pub segment_indices: Vec<usize>,
     /// T-value (0.0-1.0) for each stop (for debugging)
+    #[allow(dead_code)]
     pub t_values: Vec<f64>,
     /// If validation failed, contains info for diagnostics
     pub reversal_info: Option<ReversalInfo>,
