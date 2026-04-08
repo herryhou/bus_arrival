@@ -52,6 +52,7 @@ Directory Structure
     pico2-firmware/
       src/
         detection.rs
+        lib.rs
         lut.rs
         main.rs
         state.rs
@@ -109,6 +110,7 @@ pub fn find_active_stops(s_cm: DistCm, route_data: &RouteData) -> heapless::Vec<
         if let Some(stop) = route_data.get_stop(i) {
             if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm {
                 if active.push(i).is_err() {
+                    #[cfg(feature = "firmware")]
                     defmt::warn!("Too many active stops, ignoring overflow");
                     break;
                 }
@@ -147,82 +149,130 @@ pub fn compute_arrival_probability(
     ((13 * p1 + 6 * p2 + 10 * p3 + 3 * p4) / 32) as u8
 }
 
+/// Compute arrival probability with adaptive weights for close stops.
+///
+/// When next sequential stop is < 120m away, removes dwell time (p4)
+/// weight and redistributes: (14, 7, 11, 0) instead of (13, 6, 10, 3).
+pub fn compute_arrival_probability_adaptive(
+    s_cm: DistCm,
+    v_cms: SpeedCms,
+    stop: &Stop,
+    dwell_time_s: u16,
+    next_stop: Option<&Stop>,
+) -> Prob8 {
+    // Feature 1: Distance likelihood (sigma_d = 2750 cm)
+    let d_cm = (s_cm - stop.progress_cm).abs();
+    let idx1 = ((d_cm as i64 * 64) / 2750).min(255) as usize;
+    let p1 = GAUSSIAN_LUT[idx1] as u32;
+
+    // Feature 2: Speed likelihood (near 0 -> higher, v_stop = 200 cm/s)
+    let idx2 = (v_cms / 10).max(0).min(127) as usize;
+    let p2 = LOGISTIC_LUT[idx2] as u32;
+
+    // Feature 3: Progress difference likelihood (sigma_p = 2000 cm)
+    let idx3 = ((d_cm as i64 * 64) / 2000).min(255) as usize;
+    let p3 = GAUSSIAN_LUT[idx3] as u32;
+
+    // Feature 4: Dwell time likelihood (T_ref = 10s)
+    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
+
+    // Adaptive weights based on next stop distance
+    let (w1, w2, w3, w4) = if let Some(next) = next_stop {
+        let dist_to_next = (next.progress_cm - stop.progress_cm).abs();
+        if dist_to_next < 12_000 {
+            // Close stop: remove p4, scale remaining to sum=32
+            (14, 7, 11, 0)
+        } else {
+            // Normal stop: standard weights
+            (13, 6, 10, 3)
+        }
+    } else {
+        // Last stop: standard weights
+        (13, 6, 10, 3)
+    };
+
+    ((w1 * p1 + w2 * p2 + w3 * p3 + w4 * p4) / 32) as u8
+}
+
+================
+File: ./crates/pico2-firmware/src/lib.rs
+================
+//! Pico 2 firmware library for bus arrival detection
+//!
+//! This library exposes the core firmware functionality for testing on host.
+
+#![cfg_attr(not(feature = "dev"), no_std)]
+
+pub mod detection;
+pub mod lut;
+pub mod state;
+
+// uart module depends on Embassy and is only available for firmware builds
+#[cfg(feature = "firmware")]
+pub mod uart;
+
 ================
 File: ./crates/pico2-firmware/src/lut.rs
 ================
 //! Lookup tables for arrival probability computation
 //!
-//! These tables are computed at compile time to avoid runtime floating point
-//! operations in the no_std embedded environment.
+//! These tables are precomputed using f64 precision and embedded as constants
+//! to avoid runtime floating point operations in the no_std embedded environment.
 
 use shared::Prob8;
 
-// ===== LUT Builders =====
+// ===== Precomputed LUTs =====
 
-/// Build Gaussian LUT: exp(-x²/2) for arrival probability computation
-/// Index i = (x / sigma) * 64. Range [0, 4.0).
-const fn build_gaussian_lut() -> [u8; 256] {
-    let mut lut = [0u8; 256];
-    let mut i = 0;
-    while i < 256 {
-        // x = i / 64.0 (0 to 4.0)
-        // For no_std, we use a simple approximation
-        // exp(-x²/2) where x in [0, 4)
-        let x = i as i32; // x / 64.0 scaled by 64
-        let x2 = x * x;
-        // Simple approximation: 255 when x=0, decreasing
-        let val = if x2 < 64 {
-            255 - (x2 / 64) * 50
-        } else if x2 < 256 {
-            200 - ((x2 - 64) / 192) * 100
-        } else if x2 < 576 {
-            100 - ((x2 - 256) / 320) * 60
-        } else {
-            40 - ((x2 - 576) / 64) * 10
-        };
-        lut[i] = if val < 0 { 0 } else { val as u8 };
-        i += 1;
-    }
-    lut
-}
+/// Gaussian LUT: exp(-x²/2) for arrival probability computation
+///
+/// Formula: exp(-0.5 * x²) where x = i / 64.0 (range [0, ~4.0))
+///
+/// Values generated using f64 precision for accuracy:
+/// - i=0: exp(0) = 1.0 → 255
+/// - i=64: exp(-0.5) ≈ 0.607 → 154
+/// - i=128: exp(-2.0) ≈ 0.135 → 34
+///
+/// Generated from: crates/pipeline/detection/src/probability.rs
+pub const GAUSSIAN_LUT: [u8; 256] = [
+    255, 254, 254, 254, 254, 254, 253, 253, 253, 252, 251, 251, 250, 249, 248, 248,
+    247, 246, 245, 244, 242, 241, 240, 239, 237, 236, 234, 233, 231, 230, 228, 226,
+    225, 223, 221, 219, 217, 215, 213, 211, 209, 207, 205, 203, 201, 199, 196, 194,
+    192, 190, 187, 185, 183, 180, 178, 176, 173, 171, 169, 166, 164, 161, 159, 157,
+    154, 152, 149, 147, 145, 142, 140, 137, 135, 133, 130, 128, 125, 123, 121, 119,
+    116, 114, 112, 109, 107, 105, 103, 101, 99, 96, 94, 92, 90, 88, 86, 84,
+    82, 80, 78, 77, 75, 73, 71, 69, 68, 66, 64, 63, 61, 59, 58, 56,
+    55, 53, 52, 50, 49, 47, 46, 45, 43, 42, 41, 40, 39, 37, 36, 35,
+    34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 24, 23, 22, 21, 21,
+    20, 19, 18, 18, 17, 16, 16, 15, 15, 14, 14, 13, 13, 12, 12, 11,
+    11, 10, 10, 9, 9, 9, 8, 8, 8, 7, 7, 7, 6, 6, 6, 6,
+    5, 5, 5, 5, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 2,
+    2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
 
-/// Build logistic LUT for speed likelihood: 1 / (1 + exp(k * (v - v_stop)))
-/// v_stop = 200 cm/s, k = 0.01.
-/// Index i = v / 10. Range [0, 1270] cm/s.
-const fn build_logistic_lut() -> [u8; 128] {
-    let mut lut = [0u8; 128];
-    let mut i = 0;
-    while i < 128 {
-        let v = i as i32 * 10; // 0 to 1270 cm/s
-        // Simple logistic approximation: 1 / (1 + exp(k * (v - v_stop)))
-        // k = 0.01, v_stop = 200
-        let delta = v - 200;
-        // Approximate exp(delta / 100) for small delta
-        let exp_val = if delta < -200 {
-            0 // exp(-2) ~ 0.135, treat as 0
-        } else if delta < 0 {
-            1 // exp(negative small) ~ 1 to 2
-        } else if delta < 200 {
-            2 + (delta / 100) // exp(0 to 2) ~ 1 to 7.4
-        } else if delta < 400 {
-            4 + ((delta - 200) / 200) * 3 // exp(2 to 4) ~ 7.4 to 54.6
-        } else {
-            20 + ((delta - 400) / 100) // exp(4+) grows rapidly
-        };
-        let l = 255 / (1 + exp_val);
-        lut[i] = if l < 0 { 0 } else { l as u8 };
-        i += 1;
-    }
-    lut
-}
-
-// ===== Public LUTs =====
-
-/// Gaussian LUT for distance features
-pub static GAUSSIAN_LUT: [u8; 256] = build_gaussian_lut();
-
-/// Logistic LUT for speed features
-pub static LOGISTIC_LUT: [u8; 128] = build_logistic_lut();
+/// Logistic LUT for speed likelihood: 1 / (1 + exp(k * (v - v_stop)))
+///
+/// Formula: 1 / (1 + exp(k * (v - v_stop))) where k=0.01, v_stop=200 cm/s
+/// Index i = v / 10, v in range [0, 1270] cm/s
+///
+/// Values generated using f64 precision for accuracy:
+/// - i=0 (v=0): exp(-2)≈0.135 → 1/1.135≈0.881 → 224
+/// - i=20 (v=200): exp(0)=1 → 1/2=0.5 → 127
+/// - i=127 (v=1270): exp(10.7)≈44355 → ~0
+///
+/// Generated from: crates/pipeline/detection/src/probability.rs
+pub const LOGISTIC_LUT: [u8; 128] = [
+    224, 221, 218, 215, 212, 208, 204, 200, 195, 191, 186, 181, 175, 170, 164, 158,
+    152, 146, 140, 133, 127, 121, 114, 108, 102, 96, 90, 84, 79, 73, 68, 63,
+    59, 54, 50, 46, 42, 39, 36, 33, 30, 27, 25, 23, 21, 19, 17, 16,
+    14, 13, 12, 10, 9, 9, 8, 7, 6, 6, 5, 5, 4, 4, 3, 3,
+    3, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
 
 /// Arrival threshold: 75% probability
 pub const THETA_ARRIVAL: Prob8 = 191;
@@ -232,6 +282,7 @@ File: ./crates/pico2-firmware/src/main.rs
 ================
 #![no_std]
 #![no_main]
+#![cfg(feature = "firmware")]
 
 use defmt::*;
 use defmt_rtt as _;
@@ -261,12 +312,10 @@ mod state;
 static IMAGE_DEF: ImageDef = ImageDef::secure_exe();
 
 /// Route data embedded in flash
-/// NOTE: This is a placeholder buffer. In production, this should be replaced with
-/// actual route data generated by the preprocessor. Expected size: ~10-30 KB depending
-/// on route complexity (v8.8 spatial grid format is ~5KB, total route data ~10-12 KB).
-/// Current test data files are 30-53 KB.
-#[link_section = ".route_data"]
-static ROUTE_DATA: [u8; 64 * 1024] = [0u8; 64 * 1024];
+/// Embedded at compile time from the preprocessor-generated binary file.
+/// Format: RouteData binary format (see shared::binfile)
+/// Size: ty225_normal.bin is ~22KB (varies by route complexity)
+static ROUTE_DATA: &[u8] = include_bytes!("../../../test_data/ty225_normal.bin");
 
 // Embassy program entry point
 #[embassy_executor::main]
@@ -286,7 +335,7 @@ async fn main(_spawner: Spawner) {
     );
 
     // Initialize route data from flash
-    let route_data = shared::binfile::RouteData::load(&ROUTE_DATA)
+    let route_data = shared::binfile::RouteData::load(ROUTE_DATA)
         .expect("Failed to load route data");
 
     info!(
@@ -304,41 +353,46 @@ async fn main(_spawner: Spawner) {
 
     // Main processing loop (1 Hz)
     loop {
-        // Try to read NMEA sentence from GPS
-        match uart::read_nmea_sentence(&mut uart, &mut line_buf) {
-            Ok(Some(sentence)) => {
-                debug!("NMEA: {}", sentence);
+        // Drain all sentences from current GPS burst before sleeping
+        // GPS modules typically send RMC+GSA+GGA in a burst (~200ms)
+        loop {
+            match uart::read_nmea_sentence(&mut uart, &mut line_buf) {
+                Ok(Some(sentence)) => {
+                    debug!("NMEA: {}", sentence);
 
-                // Parse NMEA sentence
-                if let Some(gps) = state.nmea.parse_sentence(sentence) {
-                    debug!(
-                        "GPS: lat={}cdeg, lon={}cdeg, fix={}",
-                        gps.lat_cdeg, gps.lon_cdeg, gps.has_fix
-                    );
+                    // Parse NMEA sentence
+                    if let Some(gps) = state.nmea.parse_sentence(sentence) {
+                        debug!(
+                            "GPS: lat={}cdeg, lon={}cdeg, fix={}",
+                            gps.lat_cdeg, gps.lon_cdeg, gps.has_fix
+                        );
 
-                    // Process GPS through full pipeline
-                    if let Some(arrival) = state.process_gps(&gps) {
-                        // Emit arrival event via UART
-                        match uart::write_arrival_event(&mut uart, &arrival) {
-                            Ok(()) => {
-                                info!("Emitted arrival event for stop {}", arrival.stop_idx);
-                            }
-                            Err(e) => {
-                                defmt::warn!("Failed to write arrival event: {:?}", e);
+                        // Process GPS through full pipeline
+                        if let Some(arrival) = state.process_gps(&gps) {
+                            // Emit arrival event via UART
+                            match uart::write_arrival_event(&mut uart, &arrival) {
+                                Ok(()) => {
+                                    info!("Emitted arrival event for stop {}", arrival.stop_idx);
+                                }
+                                Err(e) => {
+                                    defmt::warn!("Failed to write arrival event: {:?}", e);
+                                }
                             }
                         }
                     }
-                }
 
-                // Reset buffer for next sentence
-                line_buf.reset();
-            }
-            Ok(None) => {
-                // No complete sentence yet, continue waiting
-            }
-            Err(e) => {
-                defmt::warn!("UART read error: {:?}", e);
-                line_buf.reset();
+                    // Reset buffer for next sentence
+                    line_buf.reset();
+                }
+                Ok(None) => {
+                    // FIFO empty, burst complete
+                    break;
+                }
+                Err(e) => {
+                    defmt::warn!("UART read error: {:?}", e);
+                    line_buf.reset();
+                    break;
+                }
             }
         }
 
@@ -355,7 +409,7 @@ File: ./crates/pico2-firmware/src/state.rs
 //! Manages the main state machine for processing GPS updates through
 //! the full arrival detection pipeline.
 
-use crate::detection::{compute_arrival_probability, find_active_stops};
+use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
 use gps_processor::kalman::{process_gps_update, ProcessResult};
 use shared::{binfile::RouteData, ArrivalEvent, DrState, GpsPoint, KalmanState};
 
@@ -379,7 +433,11 @@ impl<'a> State<'a> {
         let stop_count = route_data.stop_count;
         let mut stop_states = heapless::Vec::new();
         for i in 0..stop_count {
-            let _ = stop_states.push(StopState::new(i as u8));
+            if let Err(_) = stop_states.push(StopState::new(i as u8)) {
+                #[cfg(feature = "firmware")]
+                defmt::warn!("Route has {} stops but only 256 supported - stops beyond index 255 will be ignored", stop_count);
+                break;
+            }
         }
 
         Self {
@@ -416,14 +474,19 @@ impl<'a> State<'a> {
                 (s_cm, v_cms)
             }
             ProcessResult::Rejected(reason) => {
+                #[cfg(feature = "firmware")]
                 defmt::warn!("GPS update rejected: {}", reason);
+                #[cfg(not(feature = "firmware"))]
+                let _ = reason; // Suppress unused warning when firmware feature is disabled
                 return None;
             }
             ProcessResult::Outage => {
+                #[cfg(feature = "firmware")]
                 defmt::warn!("GPS outage exceeded 10 seconds");
                 return None;
             }
             ProcessResult::DrOutage { s_cm, v_cms } => {
+                #[cfg(feature = "firmware")]
                 defmt::debug!("DR mode: s={}cm, v={}cm/s", s_cm, v_cms);
                 (s_cm, v_cms)
             }
@@ -444,12 +507,18 @@ impl<'a> State<'a> {
             };
             let stop_state = &mut self.stop_states[stop_idx];
 
-            // Compute arrival probability
-            let probability = compute_arrival_probability(
+            // Get next sequential stop for adaptive weights
+            let next_stop_idx = stop_idx.checked_add(1);
+            let next_stop_value = next_stop_idx.and_then(|idx| self.route_data.get_stop(idx));
+            let next_stop = next_stop_value.as_ref();
+
+            // Compute arrival probability with adaptive weights
+            let probability = compute_arrival_probability_adaptive(
                 s_cm,
                 v_cms,
                 &stop,
                 stop_state.dwell_time_s,
+                next_stop,
             );
 
             // Update state machine
@@ -463,6 +532,7 @@ impl<'a> State<'a> {
 
             match event {
                 StopEvent::Arrived => {
+                    #[cfg(feature = "firmware")]
                     defmt::info!(
                         "Arrival at stop {}: s={}cm, v={}cm/s, p={}",
                         stop_idx,
@@ -479,6 +549,7 @@ impl<'a> State<'a> {
                     });
                 }
                 StopEvent::Departed => {
+                    #[cfg(feature = "firmware")]
                     defmt::info!(
                         "Departure from stop {}: s={}cm, v={}cm/s",
                         stop_idx,
@@ -500,6 +571,8 @@ File: ./crates/pico2-firmware/src/uart.rs
 //! UART I/O for GPS NMEA input and arrival event output
 //!
 //! Provides line-buffered NMEA sentence reading and formatted arrival event writing.
+
+#![cfg(feature = "firmware")]
 
 use embassy_rp::uart::Uart;
 
@@ -572,55 +645,55 @@ impl UartLineBuffer {
 /// - Ok(Some(sentence)) - Complete NMEA sentence received
 /// - Ok(None) - No data available yet
 /// - Err(...) - I/O error
-pub fn read_nmea_sentence<'a>(
-    uart: &mut Uart<'a, embassy_rp::uart::Blocking>,
-    line_buf: &mut UartLineBuffer,
-) -> Result<Option<&'a str>, ()> {
-    let mut byte = [0u8; 1];
+pub fn read_nmea_sentence<'buf>(
+    uart: &mut Uart<'_, embassy_rp::uart::Blocking>,
+    line_buf: &'buf mut UartLineBuffer,
+) -> Result<Option<&'buf str>, ()> {
+    // Loop until we have a complete line or error
+    // NMEA sentences are terminated by \r\n, so we must read all bytes
+    // before returning to avoid losing data between 1Hz main loop iterations
+    loop {
+        let mut byte = [0u8; 1];
 
-    // Try to read a single byte (blocking)
-    // embassy-rp blocking UART provides blocking_read() method
-    let result = uart.blocking_read(&mut byte);
+        // Try to read a single byte (blocking)
+        // embassy-rp blocking UART provides blocking_read() method
+        let result = uart.blocking_read(&mut byte);
 
-    match result {
-        Ok(_) => {
-            let b = byte[0];
+        match result {
+            Ok(_) => {
+                let b = byte[0];
 
-            // Skip leading NUL characters (common during startup)
-            if b == 0 && line_buf.len == 0 {
+                // Skip leading NUL characters (common during startup)
+                if b == 0 && line_buf.len == 0 {
+                    continue;
+                }
+
+                // Check for start of new sentence ($)
+                if b == b'$' && line_buf.len > 0 {
+                    defmt::warn!("Incomplete NMEA sentence before new $, resetting buffer");
+                    line_buf.reset();
+                }
+
+                // Add byte to buffer
+                if line_buf.push(b).is_err() {
+                    defmt::warn!("NMEA sentence too long, resetting buffer");
+                    line_buf.reset();
+                    return Ok(None);
+                }
+
+                // Check if we have a complete line
+                if line_buf.has_complete_line() {
+                    let sentence = core::str::from_utf8(&line_buf.buffer[..line_buf.len - 2])
+                        .map_err(|_| ())?;
+                    return Ok(Some(sentence));
+                }
+                // Continue loop to read next byte
+            }
+            Err(_) => {
+                // No data available (or error) - return None
+                // In a real system, we'd distinguish between no data and error
                 return Ok(None);
             }
-
-            // Check for start of new sentence ($)
-            if b == b'$' && line_buf.len > 0 {
-                defmt::warn!("Incomplete NMEA sentence before new $, resetting buffer");
-                line_buf.reset();
-            }
-
-            // Add byte to buffer
-            if line_buf.push(b).is_err() {
-                defmt::warn!("NMEA sentence too long, resetting buffer");
-                line_buf.reset();
-                return Ok(None);
-            }
-
-            // Check if we have a complete line
-            if line_buf.has_complete_line() {
-                // We need to return a slice with the same lifetime as the buffer
-                // This is safe because the buffer outlives this function call
-                let sentence = unsafe {
-                    let slice = core::slice::from_raw_parts(line_buf.buffer.as_ptr(), line_buf.len - 2);
-                    core::str::from_utf8_unchecked(slice)
-                };
-                return Ok(Some(sentence));
-            }
-
-            Ok(None)
-        }
-        Err(_) => {
-            // No data available (or error) - return None
-            // In a real system, we'd distinguish between no data and error
-            Ok(None)
         }
     }
 }
@@ -707,22 +780,15 @@ pub fn write_arrival_event(
 ================
 File: ./crates/pico2-firmware/build.rs
 ================
-use std::env;
-use std::fs;
 use std::path::PathBuf;
 
 fn main() {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let route_data_path = out_dir.join("route_data.bin");
-
-    // Copy route_data.bin from test_data if it exists
-    let source_path = PathBuf::from("test_data/route_data.bin");
-    if source_path.exists() {
-        fs::copy(&source_path, &route_data_path).unwrap();
-        println!("cargo:rerun-if-changed={}", source_path.display());
+    // Track the route data file dependency for rebuild triggers
+    // The data is embedded via include_bytes! in main.rs
+    let route_data_path = PathBuf::from("test_data/ty225_normal.bin");
+    if route_data_path.exists() {
+        println!("cargo:rerun-if-changed={}", route_data_path.display());
     }
-
-    println!("cargo:rustc-link-search={}", out_dir.display());
 }
 
 ================
@@ -1399,16 +1465,6 @@ impl StopState {
         }
     }
 
-    /// Reset state for re-entry into corridor (after departure)
-    ///
-    /// v8.6: This is NO-OP for one-time announcement rule.
-    /// Once a stop has been announced, it can never be announced again in the same trip.
-    /// The reset() function is kept for compatibility but does nothing.
-    pub fn reset(&mut self) {
-        // NO-OP: Do not reset state to prevent duplicate announcements
-        // Once announced, always announced for this trip
-    }
-
     /// Update state and return any event (arrival or departure)
     ///
     /// Arrival is triggered when:
@@ -1735,32 +1791,6 @@ mod tests {
     }
 
     #[test]
-    fn test_reset_is_noop() {
-        // v8.6: reset() is a no-op (one-time announcement rule)
-        // Once a stop has been announced, it can never be announced again
-        let mut state = StopState::new(0);
-        let stop_progress = 10000;
-        let corridor_start_cm = 2000;
-
-        // Progress through the state machine
-        state.update(5000, 100, stop_progress, corridor_start_cm, 0);
-        state.update(5000, 100, stop_progress, corridor_start_cm, 200);
-        state.fsm_state = FsmState::AtStop;
-        state.dwell_time_s = 10;
-
-        // Store original state values
-        let original_fsm_state = state.fsm_state;
-        let original_dwell_time = state.dwell_time_s;
-        let original_probability = state.last_probability;
-
-        // Reset should be a no-op - state should remain unchanged
-        state.reset();
-        assert_eq!(state.fsm_state, original_fsm_state);
-        assert_eq!(state.dwell_time_s, original_dwell_time);
-        assert_eq!(state.last_probability, original_probability);
-    }
-
-    #[test]
     fn test_one_time_announcement_rule() {
         // v8.6: A stop can only be announced once per trip
         let mut state = StopState::new(0);
@@ -1792,10 +1822,6 @@ mod tests {
 
         // Even if we re-enter the corridor, can_reactivate returns false
         assert!(!state.can_reactivate(stop_progress, stop_progress));
-
-        // reset() is a no-op, won't clear the announced flag
-        state.reset();
-        assert!(state.announced, "reset() should not clear announced flag");
     }
 }
 
@@ -2053,7 +2079,7 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
 
     ProcessResult::DrOutage {
         s_cm: state.s_cm,
-        v_cms: state.v_cms,
+        v_cms: dr.filtered_v,
     }
 }
 
@@ -2332,9 +2358,9 @@ impl NmeaState {
         let parts_slice: &[&str] = &parts;
 
         match parts_slice.first() {
-            Some(&"$GPRMC") => self.parse_rmc(parts_slice),
-            Some(&"$GNGSA") => self.parse_gsa(parts_slice),
-            Some(&"$GPGGA") => self.parse_gga(parts_slice),
+            Some(&"$GPRMC") | Some(&"$GNRMC") => self.parse_rmc(parts_slice),
+            Some(&"$GNGSA") | Some(&"$GPGSA") => self.parse_gsa(parts_slice),
+            Some(&"$GPGGA") | Some(&"$GNGGA") => self.parse_gga(parts_slice),
             _ => None,
         }
     }
@@ -2520,7 +2546,7 @@ mod tests {
         assert!(result.is_none()); // RMC alone doesn't complete the point
         assert!(state.point.has_fix);
         assert_eq!(state.point.lat_cdeg, 2500); // 25.00° * 100
-        assert_eq!(state.point.lon_cdeg, 12129); // 121.29° * 100 (rounded)
+        assert_eq!(state.point.lon_cdeg, 12128); // 121.28649...° * 100 (truncated)
         assert_eq!(state.point.speed_cms, 432); // 8.4 knots * 51.44
         assert_eq!(state.point.heading_cdeg, 8050); // 80.5° * 100
         assert_eq!(state.point.timestamp, 22 * 3600 + 13 * 60 + 20); // 221320 -> 22:13:20
@@ -2542,7 +2568,7 @@ mod tests {
         let point = result.unwrap();
         assert!(point.has_fix);
         assert_eq!(point.lat_cdeg, 2500); // 25.00° * 100
-        assert_eq!(point.lon_cdeg, 12129); // 121.29° * 100 (rounded)
+        assert_eq!(point.lon_cdeg, 12128); // 121.28649...° * 100 (truncated)
         assert_eq!(point.timestamp, 22 * 3600 + 13 * 60 + 20); // 221320 -> 22:13:20
     }
 
@@ -2567,7 +2593,7 @@ mod tests {
         let point = result.unwrap();
         assert!(point.has_fix);
         assert_eq!(point.lat_cdeg, 2500); // 25.00° * 100
-        assert_eq!(point.lon_cdeg, 12129); // 121.29° * 100 (rounded)
+        assert_eq!(point.lon_cdeg, 12128); // 121.28649...° * 100 (truncated)
         assert_eq!(point.hdop_x10, 12); // 1.2 * 10
         assert_eq!(point.timestamp, 22 * 3600 + 13 * 60 + 20); // Timestamp from RMC
     }
@@ -2584,6 +2610,27 @@ mod tests {
         let mut state = NmeaState::new();
         let result = state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,350.5,141123,,*00");
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_gnrmc_valid() {
+        let mut state = NmeaState::new();
+        let result = state.parse_sentence("$GNRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*30");
+        assert!(result.is_none()); // RMC alone doesn't complete the point
+        assert!(state.point.has_fix);
+        assert_eq!(state.point.lat_cdeg, 2500);
+        assert_eq!(state.point.lon_cdeg, 12128); // 121.286496...° * 100 (truncated)
+    }
+
+    #[test]
+    fn parse_gngga_valid() {
+        let mut state = NmeaState::new();
+        let result = state.parse_sentence("$GNGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*55");
+        assert!(result.is_some()); // GNGGA completes the point
+        let point = result.unwrap();
+        assert!(point.has_fix);
+        assert_eq!(point.lat_cdeg, 2500);
+        assert_eq!(point.lon_cdeg, 12128); // 121.286496...° * 100 (truncated)
     }
 }
 
@@ -2621,16 +2668,8 @@ struct StopTraceState {
     distance_cm: i32,
 }
 
-/// Find stops whose corridor contains the current route progress
-fn find_active_stops(s_cm: DistCm, stops: &[Stop]) -> Vec<usize> {
-    stops.iter()
-        .enumerate()
-        .filter(|(_, stop)| {
-            s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm
-        })
-        .map(|(i, _)| i)
-        .collect()
-}
+// Re-export find_active_stops from detection::corridor
+use detection::corridor::find_active_stops;
 
 /// Create stop_states for active stops (simplified, no arrival detection)
 fn create_stop_states(s_cm: DistCm, active_stops: &[usize], stops: &[Stop]) -> Vec<StopTraceState> {

@@ -1,0 +1,401 @@
+warning: unused import: `Some`
+  --> crates/shared/src/lib.rs:13:40
+   |
+13 | use core::option::Option::{self, None, Some};
+   |                                        ^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::io::Write`
+  --> crates/shared/src/binfile.rs:73:5
+   |
+73 | use std::io::Write;
+   |     ^^^^^^^^^^^^^^
+
+warning: `shared` (lib) generated 2 warnings (run `cargo fix --lib -p shared` to apply 1 suggestion)
+warning: constant `MAX_NMEA_FIELDS` is never used
+  --> crates/pipeline/gps_processor/src/nmea.rs:16:7
+   |
+16 | const MAX_NMEA_FIELDS: usize = 20;
+   |       ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `gps_processor` (lib) generated 1 warning
+warning: unused import: `TestResult`
+ --> crates/pipeline/tests/scenarios/normal.rs:3:67
+  |
+3 | use super::common::{load_ty225_route, load_nmea, ExpectedResults, TestResult};
+  |                                                                   ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/normal.rs:23:9
+   |
+23 |     let mut kalman = KalmanState::new();
+   |         ----^^^^^^
+   |         |
+   |         help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/normal.rs:24:9
+   |
+24 |     let mut dr = DrState::new();
+   |         ----^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/normal.rs:26:9
+   |
+26 |     let mut stop_states: Vec<StopState> = route_data.stops()
+   |         ----^^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/normal.rs:32:9
+   |
+32 |     let mut detected_arrivals: Vec<usize> = Vec::new();
+   |         ----^^^^^^^^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: unused variable: `kalman`
+  --> crates/pipeline/tests/scenarios/normal.rs:23:9
+   |
+23 |     let mut kalman = KalmanState::new();
+   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_kalman`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dr`
+  --> crates/pipeline/tests/scenarios/normal.rs:24:9
+   |
+24 |     let mut dr = DrState::new();
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_dr`
+
+warning: unused variable: `stop_states`
+  --> crates/pipeline/tests/scenarios/normal.rs:26:9
+   |
+26 |     let mut stop_states: Vec<StopState> = route_data.stops()
+   |         ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_stop_states`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:23:9
+   |
+23 |     let mut kalman = KalmanState::new();
+   |         ----^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:24:9
+   |
+24 |     let mut dr = DrState::new();
+   |         ----^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:26:9
+   |
+26 |     let mut stop_states: Vec<StopState> = route_data.stops()
+   |         ----^^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:32:9
+   |
+32 |     let mut detected_arrivals: Vec<usize> = Vec::new();
+   |         ----^^^^^^^^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: unused variable: `kalman`
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:23:9
+   |
+23 |     let mut kalman = KalmanState::new();
+   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_kalman`
+
+warning: unused variable: `dr`
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:24:9
+   |
+24 |     let mut dr = DrState::new();
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_dr`
+
+warning: unused variable: `stop_states`
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:26:9
+   |
+26 |     let mut stop_states: Vec<StopState> = route_data.stops()
+   |         ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_stop_states`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:64:9
+   |
+64 |     let mut kalman = KalmanState::new();
+   |         ----^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:65:9
+   |
+65 |     let mut dr = DrState::new();
+   |         ----^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:67:9
+   |
+67 |     let mut stop_states: Vec<StopState> = route_data.stops()
+   |         ----^^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:73:9
+   |
+73 |     let mut detected_arrivals: Vec<usize> = Vec::new();
+   |         ----^^^^^^^^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: unused variable: `kalman`
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:64:9
+   |
+64 |     let mut kalman = KalmanState::new();
+   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_kalman`
+
+warning: unused variable: `dr`
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:65:9
+   |
+65 |     let mut dr = DrState::new();
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_dr`
+
+warning: unused variable: `stop_states`
+  --> crates/pipeline/tests/scenarios/gps_anomalies.rs:67:9
+   |
+67 |     let mut stop_states: Vec<StopState> = route_data.stops()
+   |         ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_stop_states`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/signal_loss.rs:23:9
+   |
+23 |     let mut kalman = KalmanState::new();
+   |         ----^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/signal_loss.rs:24:9
+   |
+24 |     let mut dr = DrState::new();
+   |         ----^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/signal_loss.rs:26:9
+   |
+26 |     let mut stop_states: Vec<StopState> = route_data.stops()
+   |         ----^^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/scenarios/signal_loss.rs:32:9
+   |
+32 |     let mut detected_arrivals: Vec<usize> = Vec::new();
+   |         ----^^^^^^^^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: unused variable: `kalman`
+  --> crates/pipeline/tests/scenarios/signal_loss.rs:23:9
+   |
+23 |     let mut kalman = KalmanState::new();
+   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_kalman`
+
+warning: unused variable: `dr`
+  --> crates/pipeline/tests/scenarios/signal_loss.rs:24:9
+   |
+24 |     let mut dr = DrState::new();
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_dr`
+
+warning: unused variable: `stop_states`
+  --> crates/pipeline/tests/scenarios/signal_loss.rs:26:9
+   |
+26 |     let mut stop_states: Vec<StopState> = route_data.stops()
+   |         ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_stop_states`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/integration_test.rs:32:9
+   |
+32 |     let mut kalman = KalmanState::new();
+   |         ----^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/integration_test.rs:33:9
+   |
+33 |     let mut dr = DrState::new();
+   |         ----^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/integration_test.rs:35:9
+   |
+35 |     let mut stop_states: Vec<StopState> = route_data.stops()
+   |         ----^^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/integration_test.rs:41:9
+   |
+41 |     let mut arrivals: Vec<u8> = Vec::new();
+   |         ----^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/pipeline/tests/integration_test.rs:42:9
+   |
+42 |     let mut departures: Vec<u8> = Vec::new();
+   |         ----^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: unused variable: `kalman`
+  --> crates/pipeline/tests/integration_test.rs:32:9
+   |
+32 |     let mut kalman = KalmanState::new();
+   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_kalman`
+
+warning: unused variable: `dr`
+  --> crates/pipeline/tests/integration_test.rs:33:9
+   |
+33 |     let mut dr = DrState::new();
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_dr`
+
+warning: unused variable: `stop_states`
+  --> crates/pipeline/tests/integration_test.rs:35:9
+   |
+35 |     let mut stop_states: Vec<StopState> = route_data.stops()
+   |         ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_stop_states`
+
+warning: unused variable: `arrivals`
+  --> crates/pipeline/tests/integration_test.rs:41:9
+   |
+41 |     let mut arrivals: Vec<u8> = Vec::new();
+   |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_arrivals`
+
+warning: unused variable: `departures`
+  --> crates/pipeline/tests/integration_test.rs:42:9
+   |
+42 |     let mut departures: Vec<u8> = Vec::new();
+   |         ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_departures`
+
+warning: field `arrivals` is never read
+  --> crates/pipeline/tests/scenarios/common/mod.rs:59:9
+   |
+58 | pub struct ExpectedResults {
+   |            --------------- field in this struct
+59 |     pub arrivals: Vec<usize>,
+   |         ^^^^^^^^
+   |
+   = note: `ExpectedResults` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: associated function `with_bounds` is never used
+  --> crates/pipeline/tests/scenarios/common/mod.rs:77:12
+   |
+64 | impl ExpectedResults {
+   | -------------------- associated function in this implementation
+...
+77 |     pub fn with_bounds(min: usize, max: usize) -> Self {
+   |            ^^^^^^^^^^^
+
+warning: type alias `TestResult` is never used
+  --> crates/pipeline/tests/scenarios/common/mod.rs:87:10
+   |
+87 | pub type TestResult = Result<(), String>;
+   |          ^^^^^^^^^^
+
+warning: `pipeline` (test "integration_test") generated 42 warnings (run `cargo fix --test "integration_test" -p pipeline` to apply 39 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running tests/integration_test.rs (target/x86_64-apple-darwin/debug/deps/integration_test-61d021e2359dd1f1)
+
+running 12 tests
+test scenarios::route_edge_cases::test_close_stop_discrimination ... ok
+test scenarios::route_edge_cases::test_loop_closure_detection ... ok
+test scenarios::route_edge_cases::test_large_projection_error_stops_exist ... ok
+test scenarios::normal::test_normal_state_transitions ... ok
+test scenarios::route_edge_cases::test_route_data_integrity ... ok
+test scenarios::signal_loss::test_outage_dead_reckoning ... FAILED
+test scenarios::gps_anomalies::test_drift_recovery ... FAILED
+test scenarios::gps_anomalies::test_anomaly_route_data_loads ... FAILED
+test scenarios::signal_loss::test_outage_route_data ... FAILED
+test scenarios::gps_anomalies::test_jump_skip_stop_prevention ... FAILED
+test scenarios::signal_loss::test_outage_nmea_has_invalid_gps ... FAILED
+test scenarios::normal::test_normal_complete_route ... FAILED
+
+failures:
+
+---- scenarios::signal_loss::test_outage_dead_reckoning stdout ----
+
+thread 'scenarios::signal_loss::test_outage_dead_reckoning' (37059132) panicked at crates/pipeline/tests/scenarios/signal_loss.rs:16:10:
+Failed to load route data: InvalidVersion
+
+---- scenarios::gps_anomalies::test_drift_recovery stdout ----
+
+thread 'scenarios::gps_anomalies::test_drift_recovery' (37059124) panicked at crates/pipeline/tests/scenarios/gps_anomalies.rs:16:10:
+Failed to load route data: InvalidVersion
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- scenarios::gps_anomalies::test_anomaly_route_data_loads stdout ----
+
+thread 'scenarios::gps_anomalies::test_anomaly_route_data_loads' (37059123) panicked at crates/pipeline/tests/scenarios/gps_anomalies.rs:97:5:
+Drift route should load
+
+---- scenarios::signal_loss::test_outage_route_data stdout ----
+
+thread 'scenarios::signal_loss::test_outage_route_data' (37059134) panicked at crates/pipeline/tests/scenarios/signal_loss.rs:74:10:
+Failed to load route data: InvalidVersion
+
+---- scenarios::gps_anomalies::test_jump_skip_stop_prevention stdout ----
+
+thread 'scenarios::gps_anomalies::test_jump_skip_stop_prevention' (37059125) panicked at crates/pipeline/tests/scenarios/gps_anomalies.rs:57:10:
+Failed to load route data: InvalidVersion
+
+---- scenarios::signal_loss::test_outage_nmea_has_invalid_gps stdout ----
+
+thread 'scenarios::signal_loss::test_outage_nmea_has_invalid_gps' (37059133) panicked at crates/pipeline/tests/scenarios/signal_loss.rs:100:5:
+Outage NMEA should contain GPS invalid messages
+
+---- scenarios::normal::test_normal_complete_route stdout ----
+
+thread 'scenarios::normal::test_normal_complete_route' (37059126) panicked at crates/pipeline/tests/scenarios/normal.rs:43:5:
+Expected at least 55 arrivals, got 0
+
+
+failures:
+    scenarios::gps_anomalies::test_anomaly_route_data_loads
+    scenarios::gps_anomalies::test_drift_recovery
+    scenarios::gps_anomalies::test_jump_skip_stop_prevention
+    scenarios::normal::test_normal_complete_route
+    scenarios::signal_loss::test_outage_dead_reckoning
+    scenarios::signal_loss::test_outage_nmea_has_invalid_gps
+    scenarios::signal_loss::test_outage_route_data
+
+test result: FAILED. 5 passed; 7 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p pipeline --test integration_test`
