@@ -3,6 +3,10 @@
 
 mod scenarios;
 
+// Scenario tests are in scenarios/ module
+// Use: cargo test -p pipeline --test integration_test -- scenarios
+// or: cargo test -p pipeline --test integration_test (runs all tests including scenarios)
+
 use std::fs;
 use std::io::BufRead;
 
