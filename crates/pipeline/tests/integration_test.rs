@@ -1,6 +1,8 @@
 //! Integration test to verify pipeline produces consistent output
 //! between std and no_std builds
 
+mod scenarios;
+
 use std::fs;
 use std::io::BufRead;
 
