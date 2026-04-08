@@ -41,14 +41,15 @@ pub fn load_expected_arrivals(scenario: &str) -> Vec<usize> {
     let content = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("Failed to load {}: {:?}", filename, e));
 
-    // Parse arrivals JSON - each arrival has "stop_idx"
-    let value: serde_json::Value = serde_json::from_str(&content)
-        .unwrap_or_else(|e| panic!("Failed to parse {}: {:?}", filename, e));
-
-    value.as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v["stop_idx"].as_u64().unwrap() as usize)
+    // Parse arrivals JSONL - each line is a separate JSON object with "stop_idx"
+    content
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let value: serde_json::Value = serde_json::from_str(line)
+                .unwrap_or_else(|e| panic!("Failed to parse line in {}: {:?}", filename, e));
+            value["stop_idx"].as_u64().unwrap() as usize
+        })
         .collect()
 }
 
