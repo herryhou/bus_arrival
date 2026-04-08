@@ -973,6 +973,27 @@ print(f"Precision={precision:.3f}  Recall={recall:.3f}  F1={f1:.3f}")
 - [ ] 城市峽谷（HDOP > 4）場景：自適應 Kalman gain 啟用，正確率 ≥ 90%
 - [ ] 附錄 B 調校：收集 ≥ 200 筆事件，Grid Search 優化融合權重
 
+## Running Scenario Tests
+
+Scenario-based integration tests validate the full pipeline:
+
+```bash
+# All scenario tests
+cargo test -p pipeline --test integration_test -- scenarios
+
+# Specific scenario category
+cargo test -p pipeline --test integration_test -- scenarios -- normal
+cargo test -p pipeline --test integration_test -- scenarios -- gps_anomalies
+cargo test -p pipeline --test integration_test -- scenarios -- signal_loss
+cargo test -p pipeline --test integration_test -- scenarios -- route_edge_cases
+```
+
+Scenario tests use real ty225 route data and cover:
+- Normal operation
+- GPS drift and jump anomalies
+- Signal loss (outage)
+- Route geometry edge cases (loop closure, close stops)
+
 ---
 
 *依據 GPS-Based Bus Arrival Detection System 技術設計報告 v2.1*
