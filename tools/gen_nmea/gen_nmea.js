@@ -380,24 +380,49 @@ class AR1Noise {
 // ─── 路線前處理 ──────────────────────────────────────────────────────────────
 
 /**
- * Find the closest route point index for each stop
+ * Find the closest route point index for each stop, respecting traveling order
  * @param {Array} stops - Array of {lat, lon} stop objects
  * @param {Array} routePoints - Array of [lat, lon] route points
- * @returns {Array} - Array of route point indices closest to each stop
+ * @returns {Array} - Array of route point indices closest to each stop in traveling order
  */
 function findStopIndices(stops, routePoints) {
-  return stops.map(stop => {
+  const indices = [];
+  let searchStartIdx = 0;
+
+  for (const stop of stops) {
     let minDist = Infinity;
-    let minIdx = 0;
-    for (let i = 0; i < routePoints.length; i++) {
+    let minIdx = searchStartIdx;
+
+    // Search from searchStartIdx onwards to preserve traveling order
+    for (let i = searchStartIdx; i < routePoints.length; i++) {
       const dist = haversine([stop.lat, stop.lon], routePoints[i]);
       if (dist < minDist) {
         minDist = dist;
         minIdx = i;
       }
     }
-    return minIdx;
-  });
+
+    // For loop routes, also check from start if we're near the end
+    if (searchStartIdx > routePoints.length * 0.8) {
+      for (let i = 0; i < searchStartIdx; i++) {
+        const dist = haversine([stop.lat, stop.lon], routePoints[i]);
+        if (dist < minDist) {
+          minDist = dist;
+          minIdx = i;
+        }
+      }
+    }
+
+    indices.push(minIdx);
+    searchStartIdx = minIdx + 1;
+
+    // If we've reached the end, allow wrapping to start for loop routes
+    if (searchStartIdx >= routePoints.length) {
+      searchStartIdx = 0;
+    }
+  }
+
+  return indices;
 }
 
 function buildSegments(routePoints, stops, lights) {
@@ -459,10 +484,26 @@ function simulate(route, cfg) {
     ts++;
   };
 
+  // ── Special handling: stop at route point index 0 ─────────────────────────────
+  // Stops at index 0 cannot be processed by the stopBefore model since there's
+  // no "previous segment" to trigger the dwell time. Handle them explicitly here.
+  if (stops.includes(0) && segs.length > 0) {
+    const firstSeg = segs[0];
+    const isOutage = cfg.outage && 0 >= outageStartSeg && 0 <= outageEndSeg;
+    const dwell = dwellSeconds();
+    groundTruth.push({ stop_idx: stopSeqIdx++, seg_idx: 0, timestamp: ts, dwell_s: dwell });
+    for (let t = 0; t < dwell; t++) emitStatic(firstSeg.from, firstSeg.bearing, isOutage);
+  }
+
   for (let si = 0; si < segs.length; si++) {
     const seg = segs[si];
     const isOutage = cfg.outage && si >= outageStartSeg && si <= outageEndSeg;
     const prevSeg = si > 0 ? segs[si - 1] : null;
+
+    // DEBUG: Log every 20th segment
+    if (si % 20 === 0) {
+      console.log('Processing segment', si, 'dist', seg.dist.toFixed(2) + 'm');
+    }
 
     // ── 在本段起點處理停靠 / 紅燈 ───────────────────────────────────────────
     if (prevSeg && (prevSeg.stopBefore || prevSeg.lightBefore)) {
@@ -520,6 +561,7 @@ function simulate(route, cfg) {
         const noisyBearing = (seg.bearing + noiseHeading.next() + 360) % 360;
         nmeaLines.push(makeGPRMC(ts, nl, no, speedMs * 1.94384, noisyBearing));
         nmeaLines.push(makeGPGGA(ts, nl, no, hdop, sats));
+
       }
       ts++;
     }

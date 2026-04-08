@@ -1,6 +1,6 @@
 //! NMEA sentence parser
 
-use shared::{GpsPoint, SpeedCms, HeadCdeg, GeoCdeg};
+use shared::{GpsPoint, SpeedCms, HeadCdeg};
 
 // Import libm functions for no_std
 #[cfg(not(feature = "std"))]
@@ -93,9 +93,9 @@ impl NmeaState {
             heading_cdeg
         };
 
-        // Convert to integer centidegrees (0.01° units) for no-FPU runtime
-        self.point.lat_cdeg = (lat * 100.0) as GeoCdeg;
-        self.point.lon_cdeg = (lon * 100.0) as GeoCdeg;
+        // Store lat/lon directly as f64 for full precision
+        self.point.lat = lat;
+        self.point.lon = lon;
         self.point.speed_cms = knots_to_cms(speed_knots);
         self.point.heading_cdeg = heading_cdeg as HeadCdeg;
         self.point.has_fix = true;
@@ -143,9 +143,9 @@ impl NmeaState {
         let lon = parse_lon(parts[4], parts[5])?;
         let hdop: f64 = parts[8].parse().unwrap_or(99.0);
 
-        // Convert to integer centidegrees (0.01° units) for no-FPU runtime
-        self.point.lat_cdeg = (lat * 100.0) as GeoCdeg;
-        self.point.lon_cdeg = (lon * 100.0) as GeoCdeg;
+        // Store lat/lon directly as f64 for full precision
+        self.point.lat = lat;
+        self.point.lon = lon;
         self.point.hdop_x10 = f64_round(hdop * 10.0) as u16;
         self.point.has_fix = true;
 
@@ -236,8 +236,8 @@ mod tests {
         let result = state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*2E");
         assert!(result.is_none()); // RMC alone doesn't complete the point
         assert!(state.point.has_fix);
-        assert_eq!(state.point.lat_cdeg, 2500); // 25.00° * 100
-        assert_eq!(state.point.lon_cdeg, 12128); // 121.28649...° * 100 (truncated)
+        assert!((state.point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
+        assert!((state.point.lon - 121.286496).abs() < 0.000001); // 121°17.1898'E
         assert_eq!(state.point.speed_cms, 432); // 8.4 knots * 51.44
         assert_eq!(state.point.heading_cdeg, 8050); // 80.5° * 100
         assert_eq!(state.point.timestamp, 22 * 3600 + 13 * 60 + 20); // 221320 -> 22:13:20
@@ -258,8 +258,8 @@ mod tests {
         assert!(result.is_some()); // GGA alone completes the point
         let point = result.unwrap();
         assert!(point.has_fix);
-        assert_eq!(point.lat_cdeg, 2500); // 25.00° * 100
-        assert_eq!(point.lon_cdeg, 12128); // 121.28649...° * 100 (truncated)
+        assert!((point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
+        assert!((point.lon - 121.286496).abs() < 0.000001); // 121°17.1898'E
         assert_eq!(point.timestamp, 22 * 3600 + 13 * 60 + 20); // 221320 -> 22:13:20
     }
 
@@ -283,8 +283,8 @@ mod tests {
         assert!(result.is_some());
         let point = result.unwrap();
         assert!(point.has_fix);
-        assert_eq!(point.lat_cdeg, 2500); // 25.00° * 100
-        assert_eq!(point.lon_cdeg, 12128); // 121.28649...° * 100 (truncated)
+        assert!((point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
+        assert!((point.lon - 121.286496).abs() < 0.000001); // 121°17.1898'E
         assert_eq!(point.hdop_x10, 12); // 1.2 * 10
         assert_eq!(point.timestamp, 22 * 3600 + 13 * 60 + 20); // Timestamp from RMC
     }
@@ -309,8 +309,8 @@ mod tests {
         let result = state.parse_sentence("$GNRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*30");
         assert!(result.is_none()); // RMC alone doesn't complete the point
         assert!(state.point.has_fix);
-        assert_eq!(state.point.lat_cdeg, 2500);
-        assert_eq!(state.point.lon_cdeg, 12128); // 121.286496...° * 100 (truncated)
+        assert!((state.point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
+        assert!((state.point.lon - 121.286496).abs() < 0.000001); // 121°17.1898'E
     }
 
     #[test]
@@ -320,7 +320,7 @@ mod tests {
         assert!(result.is_some()); // GNGGA completes the point
         let point = result.unwrap();
         assert!(point.has_fix);
-        assert_eq!(point.lat_cdeg, 2500);
-        assert_eq!(point.lon_cdeg, 12128); // 121.286496...° * 100 (truncated)
+        assert!((point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
+        assert!((point.lon - 121.286496).abs() < 0.000001); // 121°17.1898'E
     }
 }

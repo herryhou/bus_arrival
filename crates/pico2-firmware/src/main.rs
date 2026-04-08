@@ -81,8 +81,8 @@ async fn main(_spawner: Spawner) {
                     // Parse NMEA sentence
                     if let Some(gps) = state.nmea.parse_sentence(sentence) {
                         debug!(
-                            "GPS: lat={}cdeg, lon={}cdeg, fix={}",
-                            gps.lat_cdeg, gps.lon_cdeg, gps.has_fix
+                            "GPS: lat={:.6}°, lon={:.6}°, fix={}",
+                            gps.lat, gps.lon, gps.has_fix
                         );
 
                         // Process GPS through full pipeline
