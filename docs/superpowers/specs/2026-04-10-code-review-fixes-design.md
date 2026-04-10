@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-10
 **Status:** Design
-**Author:** Claude Opus 4.6
+**Author:** GLM 5.1
 
 ## Overview
 
@@ -123,8 +123,6 @@ let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
 // AFTER:
 // Guard against GPS outside bounding box (cold start, GPS jump)
 if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
-    #[cfg(feature = "firmware")]
-    defmt::warn!("GPS outside route bounds: x={}, y={}", gps_x, gps_y);
     #[cfg(not(feature = "std"))]
     defmt::warn!("GPS outside route bounds: x={}, y={}", gps_x, gps_y);
     return last_idx;  // Conservative fallback
@@ -241,7 +239,22 @@ impl<'a> State<'a> {
                 }
                 (s_cm, v_cms)
             }
-            // ... other cases ...
+            ProcessResult::Outage => {
+                // Reset warmup on GPS loss (conservative - requires fresh warmup after outage)
+                if !self.first_fix {
+                    self.warmup_counter = 0;
+                    defmt::debug!("GPS outage reset warmup counter");
+                }
+                return None;
+            }
+            ProcessResult::Rejected(_) => {
+                // Don't reset warmup on rejected GPS updates (e.g., speed constraint violation)
+                return None;
+            }
+            ProcessResult::DrOutage { s_cm, v_cms } => {
+                // DR mode - continue detection (no warmup reset during DR)
+                (s_cm, v_cms)
+            }
         };
         // ... rest of processing ...
     }
@@ -305,7 +318,7 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
 
 **Problem:** Spec Section 15.2 specifies velocity penalty: *"若到達候選站點所需速度超過物理上限，懲罰為 `i32::MAX`（直接排除）"* (If required speed to reach candidate exceeds physical limit, penalty is `i32::MAX` - hard exclusion). Current code only uses `dist + index_penalty`.
 
-**Solution:** Add velocity-based hard exclusion for physically impossible candidates.
+**Solution:** Add velocity-based hard exclusion for physically impossible candidates using pure integer arithmetic.
 
 ```rust
 const V_MAX_CMS: SpeedCms = 3000;  // 108 km/h = 3000 cm/s - from kalman.rs
@@ -326,19 +339,12 @@ pub fn find_stop_index(
             let dist = (s_cm - stop.progress_cm).abs();
             let index_penalty = 5000 * (last_index as i32 - i as i32).max(0);
 
-            // Velocity penalty: hard exclusion if reaching this stop would require
-            // exceeding V_MAX_CMS (physically impossible recovery)
+            // Velocity penalty: hard exclusion if reaching this stop in 1 GPS tick
+            // would require exceeding V_MAX_CMS (physically impossible)
+            // Required speed = dist_to_stop cm/s (since dt=1s per GPS tick)
             let dist_to_stop = (stop.progress_cm - s_cm).unsigned_abs();
-            let time_to_stop = if v_filtered > 0 {
-                (dist_to_stop as f64 / v_filtered as f64) as u32
-            } else {
-                u32::MAX  // Can't reach any stop if v=0
-            };
-
-            // If we're more than 200m away and v_filtered would require V_MAX to reach
-            // within 1 second, exclude this candidate
-            let vel_penalty = if dist_to_stop > 20000 && time_to_stop < 1 {
-                i32::MAX  // Hard exclusion
+            let vel_penalty = if dist_to_stop > V_MAX_CMS as u32 {
+                i32::MAX  // Physically impossible in 1 second at max bus speed
             } else {
                 0
             };
@@ -354,7 +360,7 @@ pub fn find_stop_index(
 }
 ```
 
-**Note:** The spec's "速度懲罰" is specifically about physically impossible recovery scenarios, not a soft preference for slow-moving buses. The implementation above excludes candidates that would require exceeding `V_MAX_CMS` to reach.
+**Note:** Pure integer implementation - no floating point. The spec's "速度懲罰" is specifically about physically impossible recovery scenarios, not a soft preference for slow-moving buses.
 
 **Required:** Update call site to pass `state.v_cms`.
 
@@ -523,7 +529,8 @@ fn main() {
 
 ```rust
 fn main() {
-    let out_dir = PathBuf::from(env!("CARGO_TARGET_DIR").unwrap_or("./target".into()));
+    // OUT_DIR is set by Cargo during build.rs execution
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
 
     // Run gen_luts binary, capture output
     let output = std::process::Command::new("cargo")
@@ -579,7 +586,7 @@ Each fix includes unit tests:
 | should_announce | state_machine.rs tests | corridor entry triggers after FSM update |
 | warmup | state.rs tests | first 3 updates return None, resets on outage |
 | DR decay | kalman.rs tests | 1×10s ≈ 10×1s decay |
-| recovery score | recovery.rs tests | hard exclusion when v_req > V_MAX |
+| recovery score | recovery.rs tests | hard exclusion when dist > V_MAX (pure integer) |
 | duplication | detection.rs tests | both functions identical output |
 | GGA heading | nmea.rs tests | heading_cdeg = i16::MIN, segment_score skips penalty |
 | LUT sync | lut.rs tests | spot-check values |
@@ -648,8 +655,11 @@ def generate_recovery_trace():
 ### For Existing Code
 
 1. **ArrivalEvent**: Add `event_type: ArrivalEventType` field
-   - **Breaking change**: Affects `output.rs` serialization and JSON consumers
-   - Update `crates/pipeline/gps_processor/src/output.rs` to serialize new field
+   - **Breaking change**: Affects both firmware and pipeline
+   - **Firmware (`uart.rs`)**: Update `write_arrival_event()` to:
+     - Emit `"ANNOUNCE: ..."` prefix for announcement events
+     - Or suppress announcements if firmware output format shouldn't change
+   - **Pipeline (`output.rs`)**: Update JSON serialization to include new field
    - Default existing events to `ArrivalEventType::Arrival` for backward compatibility
    - Update any JSON consumers to handle new `Announce` event type
 
