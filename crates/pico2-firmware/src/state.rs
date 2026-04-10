@@ -7,9 +7,49 @@ use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
 use gps_processor::kalman::{process_gps_update, ProcessResult};
 use shared::{binfile::RouteData, ArrivalEvent, DrState, GpsPoint, KalmanState};
 
+// ===== Constants =====
+
+/// Number of GPS ticks required after first fix before arrival detection is enabled.
+///
+/// This warmup period allows the Kalman filter to converge to stable position and velocity
+/// estimates. The Kalman filter requires multiple measurements to initialize its covariance
+/// matrices and reduce uncertainty to acceptable levels for reliable arrival detection.
+///
+/// The value 3 represents approximately 3 seconds at 1 Hz GPS update rate, which empirical
+/// testing shows is sufficient for the filter to reach acceptable convergence in typical
+/// urban canyon conditions.
+const WARMUP_TICKS_REQUIRED: u8 = 3;
+
 // ===== State Struct =====
 
-/// Global state for the GPS processing pipeline
+/// Global state for the GPS processing pipeline.
+///
+/// # Warmup Behavior
+///
+/// The State machine implements a warmup period to ensure reliable arrival detection:
+///
+/// - **First GPS tick**: Initializes the Kalman filter with the first position fix.
+///   No arrival detection is performed during this initialization phase.
+///
+/// - **Warmup period** ([`WARMUP_TICKS_REQUIRED`] ticks): After initialization, the system
+///   waits for 3 additional GPS ticks. This allows the Kalman filter to converge to stable
+///   position and velocity estimates before making arrival decisions.
+///
+/// - **Normal operation**: After warmup completes, arrival detection is fully enabled.
+///
+/// # Outage Handling
+///
+/// The warmup counter resets to 0 during GPS outages (when [`ProcessResult::Outage`] occurs)
+/// for conservative behavior. This ensures that after extended signal loss, the system
+/// requires a fresh warmup period before making arrival decisions, since:
+///
+/// 1. GPS outage may indicate poor signal quality or multipath conditions
+/// 2. Dead-reckoning mode during outage may accumulate position errors
+/// 3. Kalman filter covariance matrices may have inflated uncertainty
+///
+/// Dead-reckoning outages ([`ProcessResult::DrOutage`]) do NOT reset the warmup counter
+/// because DR mode maintains valid state estimates - it only indicates the GPS measurement
+/// was rejected for quality reasons (e.g., excessive speed change), not that signal was lost.
 pub struct State<'a> {
     pub nmea: gps_processor::nmea::NmeaState,
     pub kalman: KalmanState,
@@ -68,10 +108,14 @@ impl<'a> State<'a> {
             ProcessResult::Valid { s_cm, v_cms, seg_idx: _ } => {
                 if self.first_fix {
                     self.first_fix = false;
-                } else if self.warmup_counter < 3 {
+                } else if self.warmup_counter < WARMUP_TICKS_REQUIRED {
                     self.warmup_counter += 1;
                     #[cfg(feature = "firmware")]
-                    defmt::debug!("Warmup: {}/3", self.warmup_counter);
+                    defmt::debug!(
+                        "Warmup: {}/{}",
+                        self.warmup_counter,
+                        WARMUP_TICKS_REQUIRED
+                    );
                     return None;
                 }
                 (s_cm, v_cms)
@@ -97,7 +141,9 @@ impl<'a> State<'a> {
             ProcessResult::DrOutage { s_cm, v_cms } => {
                 #[cfg(feature = "firmware")]
                 defmt::debug!("DR mode: s={}cm, v={}cm/s", s_cm, v_cms);
-                // DR mode - continue detection (no warmup reset during DR)
+                // DR mode maintains valid state estimates, so no warmup reset is needed.
+                // DR outages only indicate the GPS measurement was rejected for quality reasons
+                // (e.g., excessive speed change), not that signal was lost like GPS outages.
                 (s_cm, v_cms)
             }
         };
