@@ -292,6 +292,7 @@ pub enum FsmState {
 
 /// Event type for arrival/departure/announcement
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ArrivalEventType {
     /// Bus has arrived at stop
     Arrival,

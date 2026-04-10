@@ -57,7 +57,7 @@ fn setup_test_route_with_stop() -> (Vec<u8>, i32, i32) {
     };
 
     let mut buffer = Vec::new();
-    shared::binfile::pack_route_data(&nodes, &stops, &grid, 25.0, &[0u8; 256], &[0u8; 128], &mut buffer)
+    shared::binfile::pack_route_data(&nodes, &stops, &grid, 25.0, &mut buffer)
         .expect("Failed to pack test route data");
 
     (buffer, start_x, start_y)
@@ -216,7 +216,7 @@ fn test_active_stops_with_multiple_stops() {
     };
 
     let mut buffer = Vec::new();
-    shared::binfile::pack_route_data(&nodes, &stops, &grid, 25.0, &[0u8; 256], &[0u8; 128], &mut buffer)
+    shared::binfile::pack_route_data(&nodes, &stops, &grid, 25.0, &mut buffer)
         .expect("Failed to pack test route data");
 
     let route_data = RouteData::load(&buffer).expect("Failed to load test route data");

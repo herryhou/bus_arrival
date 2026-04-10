@@ -64,6 +64,13 @@ pub fn find_best_segment_restricted(
     }
 
     // 3. Fallback: Full grid query
+    // Guard against GPS outside bounding box (cold start, GPS jump)
+    if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
+        #[cfg(not(feature = "std"))]
+        defmt::warn!("GPS outside route bounds: x={}, y={}", gps_x, gps_y);
+        return last_idx;  // Conservative fallback
+    }
+
     let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
     let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
 

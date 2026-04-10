@@ -60,7 +60,7 @@ fn setup_test_route_data() -> (Vec<u8>, i32, i32) {
     };
 
     let mut buffer = Vec::new();
-    shared::binfile::pack_route_data(&nodes, &[], &grid, 25.0, &[0u8; 256], &[0u8; 128], &mut buffer)
+    shared::binfile::pack_route_data(&nodes, &[], &grid, 25.0, &mut buffer)
         .expect("Failed to pack test route data");
 
     (buffer, start_x, start_y)
@@ -135,7 +135,7 @@ fn setup_l_shaped_route() -> (Vec<u8>, i32, i32) {
     };
 
     let mut buffer = Vec::new();
-    shared::binfile::pack_route_data(&nodes, &[], &grid, 25.0, &[0u8; 256], &[0u8; 128], &mut buffer)
+    shared::binfile::pack_route_data(&nodes, &[], &grid, 25.0, &mut buffer)
         .expect("Failed to pack L-shaped route");
 
     (buffer, start_x, start_y)
@@ -233,7 +233,7 @@ fn setup_circular_route() -> (Vec<u8>, i32, i32) {
     };
 
     let mut buffer = Vec::new();
-    shared::binfile::pack_route_data(&nodes, &[], &grid, 25.0, &[0u8; 256], &[0u8; 128], &mut buffer)
+    shared::binfile::pack_route_data(&nodes, &[], &grid, 25.0, &mut buffer)
         .expect("Failed to pack circular route");
 
     (buffer, start_x, start_y)
