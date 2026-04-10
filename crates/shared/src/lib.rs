@@ -25,6 +25,7 @@ pub const FIXED_ORIGIN_LAT_DEG: f64 = 20.0;
 pub const FIXED_ORIGIN_Y_CM: i64 = 222389853; // R_CM * (20.0 * PI / 180.0)
 
 pub mod binfile;
+pub mod probability_constants;
 
 /// Distance in centimeters.
 /// Range: ±21,474,836 cm ≈ ±214 km — sufficient for bus routes.
