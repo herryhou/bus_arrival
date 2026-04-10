@@ -3,7 +3,10 @@
 //! Provides stop corridor filtering and arrival probability computation.
 
 use crate::lut::{GAUSSIAN_LUT, LOGISTIC_LUT};
-use shared::{binfile::RouteData, DistCm, Prob8, SpeedCms, Stop};
+use shared::{
+    binfile::RouteData, probability_constants::*,
+    DistCm, Prob8, SpeedCms, Stop,
+};
 
 // ===== Stop Corridor Filter =====
 
@@ -27,6 +30,27 @@ pub fn find_active_stops(s_cm: DistCm, route_data: &RouteData) -> heapless::Vec<
 
 // ===== Arrival Probability Computation =====
 
+/// Shared feature computation for arrival probability
+fn compute_features(s_cm: DistCm, v_cms: SpeedCms, stop: &Stop, dwell_time_s: u16) -> (u32, u32, u32, u32) {
+    // Feature 1: Distance likelihood (sigma_d = 2750 cm)
+    let d_cm = (s_cm - stop.progress_cm).abs();
+    let idx1 = ((d_cm as i64 * 64) / SIGMA_D_CM as i64).min(255) as usize;
+    let p1 = GAUSSIAN_LUT[idx1] as u32;
+
+    // Feature 2: Speed likelihood (near 0 -> higher, v_stop = 200 cm/s)
+    let idx2 = (v_cms / 10).max(0).min(SPEED_LUT_MAX_IDX as SpeedCms) as usize;
+    let p2 = LOGISTIC_LUT[idx2] as u32;
+
+    // Feature 3: Progress difference likelihood (sigma_p = 2000 cm)
+    let idx3 = ((d_cm as i64 * 64) / SIGMA_P_CM as i64).min(255) as usize;
+    let p3 = GAUSSIAN_LUT[idx3] as u32;
+
+    // Feature 4: Dwell time likelihood (T_ref = 10s)
+    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
+
+    (p1, p2, p3, p4)
+}
+
 /// Compute arrival probability using LUTs (no_std compatible)
 pub fn compute_arrival_probability(
     s_cm: DistCm,
@@ -34,23 +58,7 @@ pub fn compute_arrival_probability(
     stop: &Stop,
     dwell_time_s: u16,
 ) -> Prob8 {
-    // Feature 1: Distance likelihood (sigma_d = 2750 cm)
-    let d_cm = (s_cm - stop.progress_cm).abs();
-    let idx1 = ((d_cm as i64 * 64) / 2750).min(255) as usize;
-    let p1 = GAUSSIAN_LUT[idx1] as u32;
-
-    // Feature 2: Speed likelihood (near 0 → higher, v_stop = 200 cm/s)
-    let idx2 = (v_cms / 10).max(0).min(127) as usize;
-    let p2 = LOGISTIC_LUT[idx2] as u32;
-
-    // Feature 3: Progress difference likelihood (sigma_p = 2000 cm)
-    let idx3 = ((d_cm as i64 * 64) / 2000).min(255) as usize;
-    let p3 = GAUSSIAN_LUT[idx3] as u32;
-
-    // Feature 4: Dwell time likelihood (T_ref = 10s)
-    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
-
-    // Weighted sum: (13p₁ + 6p₂ + 10p₃ + 3p₄) / 32
+    let (p1, p2, p3, p4) = compute_features(s_cm, v_cms, stop, dwell_time_s);
     ((13 * p1 + 6 * p2 + 10 * p3 + 3 * p4) / 32) as u8
 }
 
@@ -65,21 +73,7 @@ pub fn compute_arrival_probability_adaptive(
     dwell_time_s: u16,
     next_stop: Option<&Stop>,
 ) -> Prob8 {
-    // Feature 1: Distance likelihood (sigma_d = 2750 cm)
-    let d_cm = (s_cm - stop.progress_cm).abs();
-    let idx1 = ((d_cm as i64 * 64) / 2750).min(255) as usize;
-    let p1 = GAUSSIAN_LUT[idx1] as u32;
-
-    // Feature 2: Speed likelihood (near 0 -> higher, v_stop = 200 cm/s)
-    let idx2 = (v_cms / 10).max(0).min(127) as usize;
-    let p2 = LOGISTIC_LUT[idx2] as u32;
-
-    // Feature 3: Progress difference likelihood (sigma_p = 2000 cm)
-    let idx3 = ((d_cm as i64 * 64) / 2000).min(255) as usize;
-    let p3 = GAUSSIAN_LUT[idx3] as u32;
-
-    // Feature 4: Dwell time likelihood (T_ref = 10s)
-    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
+    let (p1, p2, p3, p4) = compute_features(s_cm, v_cms, stop, dwell_time_s);
 
     // Adaptive weights based on next stop distance
     let (w1, w2, w3, w4) = if let Some(next) = next_stop {
