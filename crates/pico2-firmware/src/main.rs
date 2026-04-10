@@ -44,7 +44,7 @@ async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
     // Initialize UART for GPS NMEA input and arrival event output
-    // Using blocking UART with embedded-io traits for compatibility
+    // Using blocking UART with async wrappers for timeout support
     let mut uart = Uart::new_blocking(
         p.UART0,
         p.PIN_0, // TX
@@ -74,21 +74,21 @@ async fn main(_spawner: Spawner) {
         // Drain all sentences from current GPS burst before sleeping
         // GPS modules typically send RMC+GSA+GGA in a burst (~200ms)
         loop {
-            match uart::read_nmea_sentence(&mut uart, &mut line_buf) {
+            match uart::read_nmea_sentence_async(&mut uart, &mut line_buf).await {
                 Ok(Some(sentence)) => {
                     debug!("NMEA: {}", sentence);
 
                     // Parse NMEA sentence
                     if let Some(gps) = state.nmea.parse_sentence(sentence) {
                         debug!(
-                            "GPS: lat={:.6}°, lon={:.6}°, fix={}",
+                            "GPS: lat={}, lon={}, fix={}",
                             gps.lat, gps.lon, gps.has_fix
                         );
 
                         // Process GPS through full pipeline
                         if let Some(arrival) = state.process_gps(&gps) {
                             // Emit arrival event via UART
-                            match uart::write_arrival_event(&mut uart, &arrival) {
+                            match uart::write_arrival_event_async(&mut uart, &arrival).await {
                                 Ok(()) => {
                                     info!("Emitted arrival event for stop {}", arrival.stop_idx);
                                 }
@@ -104,6 +104,10 @@ async fn main(_spawner: Spawner) {
                 }
                 Ok(None) => {
                     // FIFO empty, burst complete
+                    break;
+                }
+                Err(uart::UartError::Timeout) => {
+                    defmt::warn!("UART timeout, GPS may be disconnected");
                     break;
                 }
                 Err(e) => {

@@ -5,6 +5,7 @@
 #![cfg(feature = "firmware")]
 
 use embassy_rp::uart::Uart;
+use embassy_time::{with_timeout, Duration};
 
 use shared::ArrivalEvent;
 
@@ -12,6 +13,15 @@ use shared::ArrivalEvent;
 
 /// Maximum NMEA sentence length (standard max is 82 chars)
 pub const MAX_NMEA_LENGTH: usize = 128;
+
+// ===== Error Types =====
+
+/// UART error types
+#[derive(Debug, Clone, Copy, defmt::Format)]
+pub enum UartError {
+    Timeout,
+    Io,
+}
 
 // ===== Line Buffer for NMEA Data =====
 
@@ -128,12 +138,90 @@ pub fn read_nmea_sentence<'buf>(
     }
 }
 
+// ===== Async NMEA Reading with Timeout =====
+
+/// Read a single byte with timeout using blocking UART in async context
+async fn read_byte_with_timeout(
+    uart: &mut Uart<'_, embassy_rp::uart::Blocking>,
+    timeout: Duration,
+) -> Result<u8, UartError> {
+    with_timeout(timeout, async {
+        // Small yield to allow other tasks to run
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
+
+        let mut byte = [0u8; 1];
+        match uart.blocking_read(&mut byte) {
+            Ok(_) => Ok(byte[0]),
+            Err(_) => Err(UartError::Io),
+        }
+    })
+    .await
+    .map_err(|_| UartError::Timeout)?
+}
+
+/// Read NMEA sentence with timeout (async version)
+///
+/// This function reads bytes from UART until a complete NMEA sentence
+/// is received (terminated by \r\n) or a 5-second timeout occurs.
+///
+/// Returns:
+/// - Ok(Some(sentence)) - Complete NMEA sentence received
+/// - Ok(None) - No data available yet
+/// - Err(UartError::Timeout) - Timeout occurred
+/// - Err(UartError::Io) - I/O error
+pub async fn read_nmea_sentence_async<'buf>(
+    uart: &mut Uart<'_, embassy_rp::uart::Blocking>,
+    line_buf: &'buf mut UartLineBuffer,
+) -> Result<Option<&'buf str>, UartError> {
+    let timeout = Duration::from_secs(5);
+
+    loop {
+        match read_byte_with_timeout(uart, timeout).await {
+            Ok(b) => {
+                // Skip leading NUL characters (common during startup)
+                if b == 0 && line_buf.len == 0 {
+                    continue;
+                }
+
+                // Check for start of new sentence ($)
+                if b == b'$' && line_buf.len > 0 {
+                    defmt::warn!("Incomplete NMEA sentence before new $, resetting buffer");
+                    line_buf.reset();
+                }
+
+                // Add byte to buffer
+                if line_buf.push(b).is_err() {
+                    defmt::warn!("NMEA sentence too long, resetting buffer");
+                    line_buf.reset();
+                    return Ok(None);
+                }
+
+                // Check if we have a complete line
+                if line_buf.has_complete_line() {
+                    let sentence = core::str::from_utf8(&line_buf.buffer[..line_buf.len - 2])
+                        .map_err(|_| UartError::Io)?;
+                    return Ok(Some(sentence));
+                }
+                // Continue loop to read next byte
+            }
+            Err(UartError::Timeout) => {
+                defmt::warn!("UART read timeout");
+                line_buf.reset();
+                return Err(UartError::Timeout);
+            }
+            Err(UartError::Io) => {
+                return Ok(None);
+            }
+        }
+    }
+}
+
 // ===== Arrival Event Writing =====
 
-/// Write arrival event to UART.
+/// Write arrival event to UART (async wrapper around blocking).
 ///
 /// Format: "ARRIVAL: t=TIME, stop=IDX, s=CMS, v=CMS/S, p=PROB\n"
-pub fn write_arrival_event(
+pub async fn write_arrival_event_async(
     uart: &mut Uart<'_, embassy_rp::uart::Blocking>,
     event: &ArrivalEvent,
 ) -> Result<(), ()> {
@@ -198,7 +286,10 @@ pub fn write_arrival_event(
     append_u64(&mut msg_buf, &mut pos, event.probability as u64)?;
     append!(b"\n");
 
-    // Write to UART using blocking_write
+    // Small yield to allow other tasks to run
+    embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
+
+    // Write to UART using blocking write
     uart.blocking_write(&msg_buf[..pos]).map_err(|_| ())?;
 
     // Flush to ensure data is sent
