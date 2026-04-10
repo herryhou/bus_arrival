@@ -10,6 +10,21 @@ pub const V_MAX_CMS: SpeedCms = 3000;
 /// GPS noise margin: 50m
 pub const SIGMA_GPS_CM: DistCm = 5000;
 
+/// DR decay factors: (9/10)^dt * 10000 for integer arithmetic
+const DR_DECAY_NUMERATOR: [u32; 11] = [
+    10000,  // dt=0: 1.0
+    9000,   // dt=1: 0.9
+    8100,   // dt=2: 0.81
+    7290,   // dt=3: 0.729
+    6561,   // dt=4: 0.6561
+    5905,   // dt=5: 0.5905
+    5314,   // dt=6: 0.5314
+    4783,   // dt=7: 0.4783
+    4305,   // dt=8: 0.4305
+    3874,   // dt=9: 0.3874
+    3487,   // dt=10: 0.3487
+];
+
 /// ProcessResult from GPS update
 pub enum ProcessResult {
     Valid {
@@ -133,10 +148,13 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
         return ProcessResult::Outage;
     }
 
-    // Dead-reckoning: ŝ(t) = ŝ(t-1) + v_filtered × dt
+    // Dead-reckoning: s(t) = s(t-1) + v_filtered * dt
     state.s_cm = dr.last_valid_s + dr.filtered_v * (dt as DistCm);
-    // Speed decays during outage
-    dr.filtered_v = dr.filtered_v * 9 / 10;
+
+    // Speed decay normalized by dt: (9/10)^dt
+    let dt_idx = dt.min(10) as usize;
+    let decay_factor = DR_DECAY_NUMERATOR[dt_idx];
+    dr.filtered_v = (dr.filtered_v as u32 * decay_factor / 10000) as SpeedCms;
 
     ProcessResult::DrOutage {
         s_cm: state.s_cm,
