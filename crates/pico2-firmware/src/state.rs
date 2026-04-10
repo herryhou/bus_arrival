@@ -17,6 +17,7 @@ pub struct State<'a> {
     pub stop_states: heapless::Vec<detection::state_machine::StopState, 256>,
     pub route_data: &'a RouteData<'a>,
     first_fix: bool,
+    warmup_counter: u8,
 }
 
 impl<'a> State<'a> {
@@ -41,6 +42,7 @@ impl<'a> State<'a> {
             stop_states,
             route_data,
             first_fix: true,
+            warmup_counter: 0,
         }
     }
 
@@ -64,7 +66,14 @@ impl<'a> State<'a> {
 
         let (s_cm, v_cms) = match result {
             ProcessResult::Valid { s_cm, v_cms, seg_idx: _ } => {
-                self.first_fix = false;
+                if self.first_fix {
+                    self.first_fix = false;
+                } else if self.warmup_counter < 3 {
+                    self.warmup_counter += 1;
+                    #[cfg(feature = "firmware")]
+                    defmt::debug!("Warmup: {}/3", self.warmup_counter);
+                    return None;
+                }
                 (s_cm, v_cms)
             }
             ProcessResult::Rejected(reason) => {
@@ -77,11 +86,18 @@ impl<'a> State<'a> {
             ProcessResult::Outage => {
                 #[cfg(feature = "firmware")]
                 defmt::warn!("GPS outage exceeded 10 seconds");
+                // Reset warmup on GPS loss (conservative - requires fresh warmup after outage)
+                if !self.first_fix {
+                    self.warmup_counter = 0;
+                    #[cfg(feature = "firmware")]
+                    defmt::debug!("GPS outage reset warmup counter");
+                }
                 return None;
             }
             ProcessResult::DrOutage { s_cm, v_cms } => {
                 #[cfg(feature = "firmware")]
                 defmt::debug!("DR mode: s={}cm, v={}cm/s", s_cm, v_cms);
+                // DR mode - continue detection (no warmup reset during DR)
                 (s_cm, v_cms)
             }
         };
