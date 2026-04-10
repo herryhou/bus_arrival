@@ -11,7 +11,8 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 
 // HAL imports
-use embassy_rp::uart::{Config as UartConfig, Uart};
+use embassy_rp::uart::{BufferedInterruptHandler, BufferedUart, Config as UartConfig};
+use embassy_rp::bind_interrupts;
 use embassy_rp::block::ImageDef;
 
 // Module declarations
@@ -29,6 +30,11 @@ mod state;
 #[link_section = ".bi_entries"]
 static IMAGE_DEF: ImageDef = ImageDef::secure_exe();
 
+// Interrupt bindings for buffered UART
+bind_interrupts!(struct Irqs {
+    UART0_IRQ => BufferedInterruptHandler<embassy_rp::peripherals::UART0>;
+});
+
 /// Route data embedded in flash
 /// Embedded at compile time from the preprocessor-generated binary file.
 /// Format: RouteData binary format (see shared::binfile)
@@ -44,13 +50,22 @@ async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
     // Initialize UART for GPS NMEA input and arrival event output
-    // Using blocking UART with async wrappers for timeout support
-    let mut uart = Uart::new_blocking(
-        p.UART0,
-        p.PIN_0, // TX
-        p.PIN_1, // RX
-        UartConfig::default(),
-    );
+    // Using buffered UART (interrupt-based) for true async I/O without DMA requirement
+    // TX/RX buffers must live for the entire program duration
+    static mut TX_BUFFER: [u8; 256] = [0u8; 256];
+    static mut RX_BUFFER: [u8; 256] = [0u8; 256];
+
+    let mut uart = unsafe {
+        BufferedUart::new(
+            p.UART0,
+            p.PIN_0, // TX
+            p.PIN_1, // RX
+            Irqs,
+            &mut TX_BUFFER,
+            &mut RX_BUFFER,
+            UartConfig::default(),
+        )
+    };
 
     // Initialize route data from flash
     let route_data = shared::binfile::RouteData::load(ROUTE_DATA)

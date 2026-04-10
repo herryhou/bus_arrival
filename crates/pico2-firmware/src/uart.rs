@@ -4,8 +4,9 @@
 
 #![cfg(feature = "firmware")]
 
-use embassy_rp::uart::Uart;
+use embassy_rp::uart::BufferedUart;
 use embassy_time::{with_timeout, Duration};
+use embedded_io_async::{Read as AsyncRead, Write as AsyncWrite};
 
 use shared::ArrivalEvent;
 
@@ -76,83 +77,18 @@ impl UartLineBuffer {
 
 // ===== NMEA Reading =====
 
-/// Read NMEA sentences from UART using blocking I/O.
-///
-/// This function reads bytes from UART until a complete NMEA sentence
-/// is received (terminated by \r\n). Returns the sentence as a string slice.
-///
-/// Returns:
-/// - Ok(Some(sentence)) - Complete NMEA sentence received
-/// - Ok(None) - No data available yet
-/// - Err(...) - I/O error
-pub fn read_nmea_sentence<'buf>(
-    uart: &mut Uart<'_, embassy_rp::uart::Blocking>,
-    line_buf: &'buf mut UartLineBuffer,
-) -> Result<Option<&'buf str>, ()> {
-    // Loop until we have a complete line or error
-    // NMEA sentences are terminated by \r\n, so we must read all bytes
-    // before returning to avoid losing data between 1Hz main loop iterations
-    loop {
-        let mut byte = [0u8; 1];
-
-        // Try to read a single byte (blocking)
-        // embassy-rp blocking UART provides blocking_read() method
-        let result = uart.blocking_read(&mut byte);
-
-        match result {
-            Ok(_) => {
-                let b = byte[0];
-
-                // Skip leading NUL characters (common during startup)
-                if b == 0 && line_buf.len == 0 {
-                    continue;
-                }
-
-                // Check for start of new sentence ($)
-                if b == b'$' && line_buf.len > 0 {
-                    defmt::warn!("Incomplete NMEA sentence before new $, resetting buffer");
-                    line_buf.reset();
-                }
-
-                // Add byte to buffer
-                if line_buf.push(b).is_err() {
-                    defmt::warn!("NMEA sentence too long, resetting buffer");
-                    line_buf.reset();
-                    return Ok(None);
-                }
-
-                // Check if we have a complete line
-                if line_buf.has_complete_line() {
-                    let sentence = core::str::from_utf8(&line_buf.buffer[..line_buf.len - 2])
-                        .map_err(|_| ())?;
-                    return Ok(Some(sentence));
-                }
-                // Continue loop to read next byte
-            }
-            Err(_) => {
-                // No data available (or error) - return None
-                // In a real system, we'd distinguish between no data and error
-                return Ok(None);
-            }
-        }
-    }
-}
-
 // ===== Async NMEA Reading with Timeout =====
 
-/// Read a single byte with timeout using blocking UART in async context
+/// Read a single byte with timeout using buffered async UART
 async fn read_byte_with_timeout(
-    uart: &mut Uart<'_, embassy_rp::uart::Blocking>,
+    uart: &mut BufferedUart,
     timeout: Duration,
 ) -> Result<u8, UartError> {
     with_timeout(timeout, async {
-        // Small yield to allow other tasks to run
-        embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
-
         let mut byte = [0u8; 1];
-        match uart.blocking_read(&mut byte) {
-            Ok(_) => Ok(byte[0]),
-            Err(_) => Err(UartError::Io),
+        match uart.read(&mut byte).await {
+            Ok(n) if n == 1 => Ok(byte[0]),
+            _ => Err(UartError::Io),
         }
     })
     .await
@@ -170,7 +106,7 @@ async fn read_byte_with_timeout(
 /// - Err(UartError::Timeout) - Timeout occurred
 /// - Err(UartError::Io) - I/O error
 pub async fn read_nmea_sentence_async<'buf>(
-    uart: &mut Uart<'_, embassy_rp::uart::Blocking>,
+    uart: &mut BufferedUart,
     line_buf: &'buf mut UartLineBuffer,
 ) -> Result<Option<&'buf str>, UartError> {
     let timeout = Duration::from_secs(5);
@@ -218,11 +154,11 @@ pub async fn read_nmea_sentence_async<'buf>(
 
 // ===== Arrival Event Writing =====
 
-/// Write arrival event to UART (async wrapper around blocking).
+/// Write arrival event to UART (async).
 ///
 /// Format: "ARRIVAL: t=TIME, stop=IDX, s=CMS, v=CMS/S, p=PROB\n"
 pub async fn write_arrival_event_async(
-    uart: &mut Uart<'_, embassy_rp::uart::Blocking>,
+    uart: &mut BufferedUart,
     event: &ArrivalEvent,
 ) -> Result<(), ()> {
     // Build a static byte buffer for the message
@@ -286,14 +222,11 @@ pub async fn write_arrival_event_async(
     append_u64(&mut msg_buf, &mut pos, event.probability as u64)?;
     append!(b"\n");
 
-    // Small yield to allow other tasks to run
-    embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
-
-    // Write to UART using blocking write
-    uart.blocking_write(&msg_buf[..pos]).map_err(|_| ())?;
+    // Write to UART using async write
+    uart.write(&msg_buf[..pos]).await.map_err(|_| ())?;
 
     // Flush to ensure data is sent
-    uart.blocking_flush().map_err(|_| ())?;
+    uart.flush().await.map_err(|_| ())?;
 
     Ok(())
 }
