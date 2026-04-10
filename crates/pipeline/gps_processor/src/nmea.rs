@@ -149,6 +149,8 @@ impl NmeaState {
         self.point.lon = lon;
         self.point.hdop_x10 = f64_round(hdop * 10.0) as u16;
         self.point.has_fix = true;
+        self.point.speed_cms = 0;  // GGA doesn't provide speed
+        self.point.heading_cdeg = i16::MIN;  // NEW: sentinel for unavailable
 
         // GGA alone is enough to complete the point
         Some(core::mem::replace(&mut self.point, GpsPoint::new()))
@@ -262,6 +264,8 @@ mod tests {
         assert!((point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
         assert!((point.lon - 121.286496).abs() < 0.000001); // 121°17.1898'E
         assert_eq!(point.timestamp, 22 * 3600 + 13 * 60 + 20); // 221320 -> 22:13:20
+        assert_eq!(point.heading_cdeg, i16::MIN); // GGA doesn't provide heading
+        assert_eq!(point.speed_cms, 0); // GGA doesn't provide speed
     }
 
     #[test]
@@ -323,5 +327,7 @@ mod tests {
         assert!(point.has_fix);
         assert!((point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
         assert!((point.lon - 121.286496).abs() < 0.000001); // 121°17.1898'E
+        assert_eq!(point.heading_cdeg, i16::MIN); // GNGGA doesn't provide heading
+        assert_eq!(point.speed_cms, 0); // GNGGA doesn't provide speed
     }
 }

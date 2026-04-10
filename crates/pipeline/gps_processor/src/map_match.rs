@@ -109,12 +109,16 @@ fn segment_score(
     // Distance squared to segment
     let dist2 = distance_to_segment_squared(gps_x, gps_y, seg);
 
-    // Heading penalty with speed ramp
-    let heading_diff = heading_diff_cdeg(gps_heading, seg.heading_cdeg);
-    let w = heading_weight(gps_speed);
-    let penalty = ((heading_diff as i64).pow(2) * w as i64) >> 8;
+    // Heading penalty - skip when heading unavailable (GGA-only mode)
+    let heading_penalty = if gps_heading != i16::MIN {
+        let heading_diff = heading_diff_cdeg(gps_heading, seg.heading_cdeg);
+        let w = heading_weight(gps_speed);
+        ((heading_diff as i64).pow(2) * w as i64) >> 8
+    } else {
+        0  // No heading penalty when unavailable
+    };
 
-    dist2 + penalty
+    dist2 + heading_penalty
 }
 
 /// Heading weight: 0 at v=0, 256 at v≥83 cm/s (3 km/h)
