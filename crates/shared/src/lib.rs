@@ -290,6 +290,17 @@ pub enum FsmState {
     TripComplete,
 }
 
+/// Event type for arrival/departure/announcement
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArrivalEventType {
+    /// Bus has arrived at stop
+    Arrival,
+    /// Bus has departed from stop
+    Departure,
+    /// Pre-arrival voice announcement trigger (v8.4)
+    Announce,
+}
+
 /// Arrival event emitted when bus reaches a stop
 #[cfg_attr(feature = "serde", derive(Debug, Clone, serde::Serialize))]
 pub struct ArrivalEvent {
@@ -303,6 +314,22 @@ pub struct ArrivalEvent {
     pub v_cms: SpeedCms,
     /// Arrival probability that triggered
     pub probability: Prob8,
+    /// Event type (arrival/departure/announcement)
+    pub event_type: ArrivalEventType,
+}
+
+impl ArrivalEvent {
+    /// Create arrival event (backward compatible)
+    pub fn arrival(time: u64, stop_idx: u8, s_cm: DistCm, v_cms: SpeedCms, probability: Prob8) -> Self {
+        Self {
+            time,
+            stop_idx,
+            s_cm,
+            v_cms,
+            probability,
+            event_type: ArrivalEventType::Arrival,
+        }
+    }
 }
 
 /// Departure event emitted when bus leaves a stop
