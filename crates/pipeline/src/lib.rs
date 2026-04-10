@@ -295,6 +295,7 @@ impl DetectionState {
                         s_cm: record.s_cm as i32,
                         v_cms: record.v_cms,
                         probability,
+                        event_type: shared::ArrivalEventType::Arrival,
                     });
                 }
                 StopEvent::Departed => {

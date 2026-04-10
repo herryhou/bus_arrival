@@ -140,6 +140,7 @@ impl<'a> State<'a> {
                         s_cm,
                         v_cms,
                         probability,
+                        event_type: shared::ArrivalEventType::Arrival,
                     });
                 }
                 StopEvent::Departed => {
