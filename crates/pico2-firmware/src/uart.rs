@@ -157,6 +157,8 @@ pub async fn read_nmea_sentence_async<'buf>(
 /// Write arrival event to UART (async).
 ///
 /// Format: "ARRIVAL: t=TIME, stop=IDX, s=CMS, v=CMS/S, p=PROB\n"
+///         "DEPARTURE: t=TIME, stop=IDX, s=CMS, v=CMS/S, p=PROB\n"
+///         "ANNOUNCE: t=TIME, stop=IDX, s=CMS, v=CMS/S\n"
 pub async fn write_arrival_event_async(
     uart: &mut BufferedUart,
     event: &ArrivalEvent,
@@ -209,8 +211,15 @@ pub async fn write_arrival_event_async(
         Ok(())
     }
 
-    // Build message
-    append!(b"ARRIVAL: t=");
+    // Build message prefix based on event type
+    if matches!(event.event_type, shared::ArrivalEventType::Arrival) {
+        append!(b"ARRIVAL");
+    } else if matches!(event.event_type, shared::ArrivalEventType::Departure) {
+        append!(b"DEPARTURE");
+    } else {
+        append!(b"ANNOUNCE");
+    }
+    append!(b": t=");
     append_u64(&mut msg_buf, &mut pos, event.time)?;
     append!(b", stop=");
     append_u64(&mut msg_buf, &mut pos, event.stop_idx as u64)?;
@@ -218,8 +227,14 @@ pub async fn write_arrival_event_async(
     append_u64(&mut msg_buf, &mut pos, event.s_cm as u64)?;
     append!(b"cm, v=");
     append_u64(&mut msg_buf, &mut pos, event.v_cms as u64)?;
-    append!(b"cm/s, p=");
-    append_u64(&mut msg_buf, &mut pos, event.probability as u64)?;
+    append!(b"cm/s");
+
+    // Only append probability for Arrival and Departure events
+    if matches!(event.event_type, shared::ArrivalEventType::Arrival | shared::ArrivalEventType::Departure) {
+        append!(b", p=");
+        append_u64(&mut msg_buf, &mut pos, event.probability as u64)?;
+    }
+
     append!(b"\n");
 
     // Write to UART using async write

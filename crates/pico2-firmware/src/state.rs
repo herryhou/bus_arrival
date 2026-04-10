@@ -115,7 +115,7 @@ impl<'a> State<'a> {
                 next_stop,
             );
 
-            // Update state machine
+            // Update state machine FIRST (v8.4: FSM transition before announce check)
             let event = stop_state.update(
                 s_cm,
                 v_cms,
@@ -123,6 +123,25 @@ impl<'a> State<'a> {
                 stop.corridor_start_cm,
                 probability,
             );
+
+            // THEN check for announcement trigger
+            if stop_state.should_announce(s_cm, stop.corridor_start_cm) {
+                #[cfg(feature = "firmware")]
+                defmt::info!(
+                    "Announcement for stop {}: s={}cm, v={}cm/s",
+                    stop_idx,
+                    s_cm,
+                    v_cms
+                );
+                return Some(ArrivalEvent {
+                    time: gps.timestamp,
+                    stop_idx: stop_idx as u8,
+                    s_cm,
+                    v_cms,
+                    probability: 0,
+                    event_type: shared::ArrivalEventType::Announce,
+                });
+            }
 
             match event {
                 StopEvent::Arrived => {
