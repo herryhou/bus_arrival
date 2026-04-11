@@ -60,6 +60,9 @@ pub struct State<'a> {
     pub first_fix: bool,
     /// Warmup counter - increments after first fix until WARMUP_TICKS_REQUIRED is reached
     pub warmup_counter: u8,
+    /// Flag indicating warmup was just reset (e.g., after GPS outage)
+    /// The next valid GPS tick will not increment the counter
+    warmup_just_reset: bool,
 }
 
 impl<'a> State<'a> {
@@ -85,6 +88,7 @@ impl<'a> State<'a> {
             route_data,
             first_fix: true,
             warmup_counter: 0,
+            warmup_just_reset: false,
         }
     }
 
@@ -110,6 +114,10 @@ impl<'a> State<'a> {
             ProcessResult::Valid { s_cm, v_cms, seg_idx: _ } => {
                 if self.first_fix {
                     self.first_fix = false;
+                } else if self.warmup_just_reset {
+                    // After warmup reset (e.g., GPS outage), first tick doesn't increment counter
+                    self.warmup_just_reset = false;
+                    return None;
                 } else if self.warmup_counter < WARMUP_TICKS_REQUIRED {
                     self.warmup_counter += 1;
                     #[cfg(feature = "firmware")]
@@ -135,6 +143,7 @@ impl<'a> State<'a> {
                 // Reset warmup on GPS loss (conservative - requires fresh warmup after outage)
                 if !self.first_fix {
                     self.warmup_counter = 0;
+                    self.warmup_just_reset = true;
                     #[cfg(feature = "firmware")]
                     defmt::debug!("GPS outage reset warmup counter");
                 }

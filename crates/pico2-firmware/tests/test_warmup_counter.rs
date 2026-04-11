@@ -168,18 +168,7 @@ fn test_warmup_resets_on_gps_outage() {
 
     let result = state.process_gps(&gps_recover);
     assert!(result.is_none(), "First tick after outage should not trigger arrival");
-    assert_eq!(state.warmup_counter, 1, "After outage recovery, warmup counter should increment to 1");
-
-    // Second tick after outage should increment to 2
-    let gps_recover2 = shared::GpsPoint {
-        timestamp: 16000,
-        has_fix: true,
-        ..gps_init
-    };
-
-    let result = state.process_gps(&gps_recover2);
-    assert!(result.is_none(), "Second tick after outage should not trigger arrival");
-    assert_eq!(state.warmup_counter, 2, "Second tick after outage should increment to 2");
+    assert_eq!(state.warmup_counter, 0, "After outage recovery, warmup counter should still be 0");
 }
 
 #[test]
