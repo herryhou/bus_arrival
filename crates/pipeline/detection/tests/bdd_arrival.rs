@@ -20,8 +20,8 @@ fn test_math_level_lut_verification() {
 
     // Verify Logistic LUT at key points
     // i = v/10. v_stop = 200 -> i=20.
-    // v=200 -> i=20. 1/(1+exp(0))=0.5 -> 127.
-    assert_eq!(l_lut[20], 127);
+    // v=200 -> i=20. 1/(1+exp(0))=0.5 -> 127.5 -> 128 (rounded).
+    assert_eq!(l_lut[20], 128);
     // v=0 -> i=0. 1/(1+exp(-2))=0.88 -> 224. (using k=0.01, v_stop=200 -> exp(0.01*-200)=exp(-2))
     assert!(l_lut[0] >= 224 && l_lut[0] <= 225);
 }
