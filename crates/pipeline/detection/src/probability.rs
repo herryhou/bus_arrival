@@ -210,7 +210,6 @@ pub fn compute_probability_with_luts(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use shared::Stop;
 
     #[test]
@@ -237,8 +236,13 @@ mod tests {
         let l_lut = super::build_logistic_lut();
         let stop = Stop { progress_cm: 10000, corridor_start_cm: 2000, corridor_end_cm: 14000 };
 
-        let p = super::arrival_probability(10000, 100, &stop, 5, &g_lut, &l_lut);
-        assert!(p <= 255);
+        // At stop with zero speed and 10s dwell should be high probability
+        let p_high = super::arrival_probability(10000, 0, &stop, 10, &g_lut, &l_lut);
+        assert!(p_high > 200, "At stop with 0 speed and 10s dwell should be high probability");
+
+        // Far from stop with high speed should be low probability
+        let p_low = super::arrival_probability(50000, 1000, &stop, 0, &g_lut, &l_lut);
+        assert!(p_low < 100, "Far from stop with high speed should be low probability");
     }
 
     #[test]
