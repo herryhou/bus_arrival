@@ -291,12 +291,18 @@ mod tests {
             corridor_end_cm: 135_000,
         };
 
-        let prob_close = super::arrival_probability_adaptive(
+        let prob_adaptive = super::arrival_probability_adaptive(
             100_000, 600, &stop_current, 5, &g_lut, &l_lut, Some(&stop_next)
         );
 
-        // Normal stop uses standard weights
-        assert!(prob_close <= 255);
+        let prob_standard = super::arrival_probability(
+            100_000, 600, &stop_current, 5, &g_lut, &l_lut
+        );
+
+        // Normal stop (>12m to next) should use standard weights
+        // Therefore adaptive should equal standard
+        assert_eq!(prob_adaptive, prob_standard,
+            "Normal stop should use standard weights (13, 6, 10, 3)");
     }
 
     #[test]
