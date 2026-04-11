@@ -401,4 +401,41 @@ mod tests {
         // Even if we re-enter the corridor, can_reactivate returns false
         assert!(!state.can_reactivate(stop_progress, stop_progress));
     }
+
+    #[test]
+    fn test_should_announce_corridor_entry() {
+        let mut state = StopState::new(0);
+        let _stop_progress = 10000;
+        let corridor_start_cm = 2000;
+
+        // Initially outside corridor - should not announce
+        assert!(!state.should_announce(1000, corridor_start_cm));
+        assert_eq!(state.last_announced_stop, u8::MAX);
+
+        // Enter corridor - first time should announce
+        state.fsm_state = FsmState::Approaching;
+        assert!(state.should_announce(2000, corridor_start_cm),
+            "Should announce on first corridor entry");
+        assert_eq!(state.last_announced_stop, 0);
+
+        // Subsequent calls should not announce (already announced)
+        assert!(!state.should_announce(2000, corridor_start_cm),
+            "Should not announce again for same stop");
+    }
+
+    #[test]
+    fn test_should_announce_requires_active_state() {
+        let mut state = StopState::new(0);
+        let corridor_start_cm = 2000;
+
+        // Even in corridor, Idle state should not announce
+        state.fsm_state = FsmState::Idle;
+        assert!(!state.should_announce(2000, corridor_start_cm),
+            "Idle state should not trigger announcement");
+
+        // Approaching state should announce
+        state.fsm_state = FsmState::Approaching;
+        assert!(state.should_announce(2000, corridor_start_cm),
+            "Approaching state should trigger announcement");
+    }
 }
