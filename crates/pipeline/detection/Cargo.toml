@@ -13,3 +13,8 @@ serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 # For floating-point operations in no_std
 libm = "0.2"
+
+[[bin]]
+name = "gen_luts"
+path = "src/bin/gen_luts.rs"
+required-features = ["std"]
