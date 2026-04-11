@@ -149,9 +149,11 @@ impl NmeaState {
         self.point.lon = lon;
         self.point.hdop_x10 = f64_round(hdop * 10.0) as u16;
         self.point.has_fix = true;
-        // GGA doesn't provide speed/heading - set sentinel values
-        self.point.speed_cms = 0;
-        self.point.heading_cdeg = i16::MIN;
+        // GGA doesn't provide speed/heading
+        // In RMC+GGA mode: RMC sets heading to valid value, GGA preserves it
+        // In GGA-only mode: heading remains i16::MIN (sentinel from GpsPoint::new())
+        // Speed: GGA doesn't provide speed, so it remains at 0 (either from RMC or initialization)
+        // No action needed - heading/speed are already at the correct values
 
         // GGA alone is enough to complete the point
         Some(core::mem::replace(&mut self.point, GpsPoint::new()))

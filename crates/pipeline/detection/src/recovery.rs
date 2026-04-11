@@ -142,12 +142,73 @@ mod tests {
             Stop { progress_cm: 1000, corridor_start_cm: 0, corridor_end_cm: 2000 },
             Stop { progress_cm: 9000, corridor_start_cm: 8000, corridor_end_cm: 10000 },
         ];
-        
+
         // At s=1000, last_index=1.
         // Stop 0 (1000): dist 0, penalty 5000 -> score 5000
         // Stop 1 (9000): dist 8000, penalty 0 -> score 8000
         // Stop 0 wins!
         assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1), Some(0));
+    }
+
+    #[test]
+    fn test_gps_recovery_with_realistic_elapsed_time() {
+        let stops = vec![
+            Stop { progress_cm: 1000, corridor_start_cm: 0, corridor_end_cm: 2000 },
+            Stop { progress_cm: 5000, corridor_start_cm: 4000, corridor_end_cm: 6000 },
+            Stop { progress_cm: 9000, corridor_start_cm: 8000, corridor_end_cm: 10000 },
+        ];
+
+        // GPS recovery scenario: 5 seconds elapsed since last valid fix
+        // Bus is now at s=2000, last known index was 1 (bus was near stop 1)
+        //
+        // Before fix: vel_penalty compared dist directly against V_MAX_CMS (3000 cm)
+        //   Stop 1 (5000): dist 3000 <= 3000 -> vel_penalty 0 -> score = 3000 + 0 = 3000
+        //   Stop 2 (9000): dist 7000 > 3000 -> vel_penalty i32::MAX -> excluded
+        //   Result: Some(1) (stop 2 incorrectly excluded)
+        //
+        // After fix: vel_penalty uses max_reachable = V_MAX_CMS * dt
+        //   max_reachable = 3000 * 5 = 15000 cm
+        //   Stop 1 (5000): dist 3000, vel_penalty 0 -> score = 3000
+        //   Stop 2 (9000): dist 7000 < 15000 -> vel_penalty 0 -> score = 7000
+        //   Result: Some(1) (stop 1 still wins due to lower score, but stop 2 is now correctly NOT excluded)
+        assert_eq!(find_stop_index(2000, 1000, 5, &stops, 1), Some(1));
+
+        // GPS recovery: 10 seconds elapsed, bus has jumped forward
+        // Bus at s=3000, last_index=0 (was at stop 0)
+        // max_reachable = 3000 * 10 = 30000 cm (300m - bus can travel far in 10s)
+        // Stop 0 (1000): dist 2000, vel_penalty 0 (behind) -> score = 2000
+        // Stop 1 (5000): dist 2000 < 30000 -> vel_penalty 0 -> score = 2000
+        // Stop 2 (9000): dist 6000 < 30000 -> vel_penalty 0 -> score = 6000
+        // Result: Some(0) or Some(1) - both have same score, first wins
+        assert_eq!(find_stop_index(3000, 1000, 10, &stops, 0), Some(0));
+
+        // GPS recovery: 10 seconds elapsed, bus has jumped further forward
+        // Bus at s=6000, last_index=0
+        // max_reachable = 3000 * 10 = 30000 cm
+        // Stop 0 (1000): dist 5000, vel_penalty 0 (behind) -> score = 5000
+        // Stop 1 (5000): dist 1000 < 30000 -> vel_penalty 0 -> score = 1000
+        // Stop 2 (9000): dist 3000 < 30000 -> vel_penalty 0 -> score = 3000
+        // Result: Some(1) (closest stop ahead wins)
+        assert_eq!(find_stop_index(6000, 1000, 10, &stops, 0), Some(1));
+
+        // Edge case: dt=0 (GPS fix received within same second)
+        // max_reachable = 0, so any forward distance should be excluded
+        // Bus at s=2000, last_index=0
+        // Stop 0 (1000): dist 1000, vel_penalty 0 (behind) -> score = 1000
+        // Stop 1 (5000): dist 3000 > 0 -> vel_penalty i32::MAX -> excluded
+        // Stop 2 (9000): dist 7000 > 0 -> vel_penalty i32::MAX -> excluded
+        // Result: Some(0) (only stop 0 is viable - stops ahead are excluded)
+        assert_eq!(find_stop_index(2000, 1000, 0, &stops, 0), Some(0));
+
+        // The key demonstration: with realistic dt (5s), stops > 30m away are NOT excluded
+        // Bus at s=1100, last_index=2 (was at stop 2), dt=5
+        // Before fix: both stop 1 (3900cm > 3000) and stop 2 (7900cm > 3000) would be excluded
+        // After fix:
+        //   max_reachable = 3000 * 5 = 15000 cm
+        //   Stop 1: dist 3900 < 15000 -> NOT excluded, score = 3900 + 5000 = 8900
+        //   Stop 2: dist 7900 < 15000 -> NOT excluded, score = 7900
+        // Result: Some(2) (stop 2 wins with lower score)
+        assert_eq!(find_stop_index(1100, 1000, 5, &stops, 2), Some(2));
     }
 }
 

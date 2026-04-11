@@ -143,7 +143,7 @@ impl GpsPoint {
             timestamp: 0,
             lat: 0.0,
             lon: 0.0,
-            heading_cdeg: 0,
+            heading_cdeg: i16::MIN, // Sentinel value for "heading not available"
             speed_cms: 0,
             hdop_x10: 0,
             has_fix: false,
