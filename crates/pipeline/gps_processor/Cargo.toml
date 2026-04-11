@@ -16,3 +16,8 @@ serde_json = { workspace = true, optional = true }
 libm = "0.2"
 # For fixed-size Vec in no_std (NMEA parsing)
 heapless = { version = "0.9.2", default-features = false }
+
+[dev-dependencies]
+shared = { path = "../../shared", features = ["std"] }
+serde_json = { workspace = true }
+gps_processor = { path = ".", features = ["std"] }

@@ -1,0 +1,38 @@
+vendor/
+dist/
+*.generated.py
+
+# Rust
+/target
+Cargo.lock
+.cargo/
+!.cargo/config.toml
+cargo-cache
+claude-npm-cache
+
+# IDEs and OS
+/.worktrees
+.DS_Store
+.vscode/
+.idea/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Project specific artifacts
+*.bin
+test_size
+verify_v8_binary.py
+tools/data/stops.json
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+.playwright-cli/
+.playwright-test/
+settings.local.json
+test_data/

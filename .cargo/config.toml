@@ -1,5 +1,10 @@
-[build]
-target = "thumbv8m.main-none-eabi"
+# Note: We don't set a global target here because the workspace contains both
+# embedded (firmware) and host code. Setting target globally would cause host-only
+# crates like preprocessor, trace_validator, and pipeline to fail compilation.
+#
+# For firmware builds, use:
+#   cargo build --package pico2-firmware --features firmware --target thumbv8m.main-none-eabi
+# Or set an alias/command in your shell
 
 [target.thumbv8m.main-none-eabi]
 runner = "probe-rs run --chip RP2350"

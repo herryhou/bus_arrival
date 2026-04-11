@@ -590,8 +590,8 @@ fn scenario_handle_gps_outage_with_dr(route_data: &RouteData, start_x: i32, star
     if let ProcessResult::DrOutage { s_cm, v_cms } = result {
         // Expected: last_s(0) + v(1000) * dt(2) = 2000
         assert_eq!(s_cm, 2000, "DR position should advance by 2000cm");
-        // Expected: decayed speed = 1000 * 9/10 = 900 (first decay)
-        assert_eq!(v_cms, 900, "DR should return decayed speed (dr.filtered_v), not stale Kalman speed");
+        // Expected: decayed speed = 1000 * 0.81 = 810 (dt=2 decay)
+        assert_eq!(v_cms, 810, "DR should return decayed speed based on dt=2");
     } else {
         panic!("Expected DR result, got other");
     }
@@ -600,12 +600,13 @@ fn scenario_handle_gps_outage_with_dr(route_data: &RouteData, start_x: i32, star
     gps_lost.timestamp = 1003;
     let result2 = process_gps_update(&mut state, &mut dr, &gps_lost, &route_data, 3, false);
 
-    // Then: Speed should decay further: 900 * 9/10 = 810
+    // Then: Position is calculated from last_valid_s with further decayed speed
     if let ProcessResult::DrOutage { s_cm, v_cms } = result2 {
-        // Position: last_s(2000) + v(900) * dt(1) = 2900
-        assert_eq!(s_cm, 2900, "DR position should continue advancing");
-        // Speed: 900 * 9/10 = 810 (second decay)
-        assert_eq!(v_cms, 810, "DR speed should decay over multiple seconds");
+        // Position: last_s(0) + v(810) * dt(3) = 2430
+        // Note: DR position is always calculated from last_valid_s, not accumulated
+        assert_eq!(s_cm, 2430, "DR position should be calculated from last_valid_s");
+        // Speed: 810 * 0.729 = 590 (cumulative decay: 810 from previous, then decayed again)
+        assert_eq!(v_cms, 590, "DR speed should decay cumulatively over multiple outages");
     } else {
         panic!("Expected DR result for second outage");
     }

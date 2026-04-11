@@ -303,7 +303,8 @@ pub enum ArrivalEventType {
 }
 
 /// Arrival event emitted when bus reaches a stop
-#[cfg_attr(feature = "serde", derive(Debug, Clone, serde::Serialize))]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ArrivalEvent {
     /// GPS update timestamp (seconds since epoch)
     pub time: u64,

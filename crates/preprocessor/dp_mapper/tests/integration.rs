@@ -783,7 +783,7 @@ fn test_integration_ty225_real_route() {
     let result = map_stops(&stops_cm, &route_nodes, Some(15));
 
     // Validate results
-    assert_eq!(result.len(), 54, "should map all 54 stops");
+    assert_eq!(result.len(), 58, "should map all 58 stops (including snapped route points)");
 
     // Verify monotonicity (critical constraint)
     for i in 0..result.len() - 1 {

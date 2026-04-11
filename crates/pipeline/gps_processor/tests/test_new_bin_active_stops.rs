@@ -27,14 +27,17 @@ fn test_new_ty225_bin_active_stops() {
     ];
 
     for (time, s_cm) in gps_positions {
-        let stops = route_data.stops();
-        let active_stops: Vec<usize> = stops.iter()
-            .enumerate()
-            .filter(|(_, stop)| {
-                let s = s_cm as i32;
-                s >= stop.corridor_start_cm && s <= stop.corridor_end_cm
+        let active_stops: Vec<usize> = (0..route_data.stop_count)
+            .filter_map(|i| {
+                route_data.get_stop(i).map(|stop| {
+                    let s = s_cm as i32;
+                    if s >= stop.corridor_start_cm && s <= stop.corridor_end_cm {
+                        Some(i)
+                    } else {
+                        None
+                    }
+                }).flatten()
             })
-            .map(|(i, _)| i)
             .collect();
 
         println!("time={}, s_cm={}, active_stops={:?}", time, s_cm, active_stops);

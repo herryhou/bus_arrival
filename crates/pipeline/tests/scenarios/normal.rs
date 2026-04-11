@@ -1,10 +1,10 @@
 //! Normal operation scenario tests
 
-use super::common::{load_ty225_route, load_nmea, ExpectedResults, TestResult};
+use super::common::{load_ty225_route, load_nmea_reader, ExpectedResults};
 use shared::binfile::RouteData;
-use shared::{KalmanState, DrState, FsmState};
-use gps_processor::nmea::NmeaState;
+use shared::FsmState;
 use detection::state_machine::StopState;
+use pipeline::Pipeline;
 
 /// Test: Bus drives entire ty225 route normally
 /// Validates: All stops detected, correct arrival order
@@ -15,29 +15,19 @@ fn test_normal_complete_route() {
     let route_data = RouteData::load(&route_bytes)
         .expect("Failed to load route data");
 
-    let nmea_lines = load_nmea("normal");
     let expected = ExpectedResults::from_ground_truth("normal");
 
-    // Initialize pipeline state
-    let mut nmea = NmeaState::new();
-    let mut kalman = KalmanState::new();
-    let mut dr = DrState::new();
+    // Use the full pipeline to process NMEA
+    let result = Pipeline::process_nmea_reader(
+        load_nmea_reader("normal"),
+        &route_data,
+        &pipeline::PipelineConfig::default(),
+    ).expect("Pipeline processing failed");
 
-    let mut stop_states: Vec<StopState> = route_data.stops()
+    let detected_arrivals: Vec<usize> = result.arrivals
         .iter()
-        .enumerate()
-        .map(|(i, _)| StopState::new(i as u8))
+        .map(|a| a.stop_idx as usize)
         .collect();
-
-    let mut detected_arrivals: Vec<usize> = Vec::new();
-
-    // Process NMEA sentences
-    for line in nmea_lines {
-        if let Some(_gps) = nmea.parse_sentence(&line) {
-            // TODO: Full pipeline processing
-            // For now, just verify NMEA parsing works
-        }
-    }
 
     // Validate: should detect expected number of arrivals
     assert!(

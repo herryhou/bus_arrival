@@ -11,7 +11,7 @@ fn test_format_arrival_event_arrival() {
         stop_idx: 42,
         s_cm: 123456,
         v_cms: 50,
-        probability: Prob8::new(200).unwrap(),
+        probability: 200,
     };
 
     let result = format_arrival_event(&event);
@@ -49,11 +49,11 @@ fn test_format_arrival_event_arrival() {
 fn test_format_arrival_event_departure() {
     let event = ArrivalEvent {
         event_type: ArrivalEventType::Departure,
-        time: 9876543210,
+        time: 1876543210,
         stop_idx: 10,
         s_cm: 654321,
         v_cms: 100,
-        probability: Prob8::new(255).unwrap(),
+        probability: 255,
     };
 
     let result = format_arrival_event(&event);
@@ -64,7 +64,7 @@ fn test_format_arrival_event_departure() {
         .expect("Output should be valid JSON");
 
     assert_eq!(parsed["type"], "departure");
-    assert_eq!(parsed["time"], 9876543210);
+    assert_eq!(parsed["time"], 1876543210);
     assert_eq!(parsed["stop"], 10);
 }
 
@@ -76,7 +76,7 @@ fn test_format_arrival_event_announce() {
         stop_idx: 5,
         s_cm: 500000,
         v_cms: 75,
-        probability: Prob8::new(128).unwrap(),
+        probability: 128,
     };
 
     let result = format_arrival_event(&event);
@@ -97,7 +97,7 @@ fn test_format_arrival_event_all_fields_present() {
         stop_idx: 0,
         s_cm: 0,
         v_cms: 0,
-        probability: Prob8::new(1).unwrap(),
+        probability: 1,
     };
 
     let result = format_arrival_event(&event);

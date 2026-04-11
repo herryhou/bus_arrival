@@ -1,7 +1,7 @@
 //! Common utilities for scenario integration tests
 
 use std::fs;
-use std::io::BufRead;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 /// Test data directory path
@@ -20,17 +20,20 @@ pub fn load_ty225_route(scenario: &str) -> Vec<u8> {
         .unwrap_or_else(|e| panic!("Failed to load {}: {:?}", filename, e))
 }
 
-/// Load NMEA test data
-pub fn load_nmea(scenario: &str) -> Vec<String> {
+/// Load NMEA test data as a buffered reader
+pub fn load_nmea_reader(scenario: &str) -> BufReader<fs::File> {
     let filename = format!("ty225_{}_nmea.txt", scenario);
     let mut path = test_data_dir();
     path.push(&filename);
     let file = fs::File::open(&path)
         .unwrap_or_else(|e| panic!("Failed to open {}: {:?}", filename, e));
-    std::io::BufReader::new(file)
-        .lines()
-        .map(|l| l.unwrap())
-        .collect()
+    BufReader::new(file)
+}
+
+/// Load NMEA test data as lines
+pub fn load_nmea(scenario: &str) -> Vec<String> {
+    let reader = load_nmea_reader(scenario);
+    reader.lines().map(|l| l.unwrap()).collect()
 }
 
 /// Load expected arrivals from ground truth JSON

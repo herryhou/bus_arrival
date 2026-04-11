@@ -1,10 +1,8 @@
 //! GPS anomaly scenario tests (drift, jump)
 
-use super::common::{load_ty225_route, load_nmea, ExpectedResults};
+use super::common::{load_ty225_route, load_nmea_reader, ExpectedResults};
 use shared::binfile::RouteData;
-use shared::{KalmanState, DrState};
-use gps_processor::nmea::NmeaState;
-use detection::state_machine::StopState;
+use pipeline::Pipeline;
 
 /// Test: GPS drift scenario
 /// Validates: Recovery algorithm corrects position after drift
@@ -15,28 +13,19 @@ fn test_drift_recovery() {
     let route_data = RouteData::load(&route_bytes)
         .expect("Failed to load route data");
 
-    let nmea_lines = load_nmea("drift");
     let expected = ExpectedResults::from_ground_truth("drift");
 
-    // Initialize pipeline
-    let mut nmea = NmeaState::new();
-    let mut kalman = KalmanState::new();
-    let mut dr = DrState::new();
+    // Use the full pipeline to process NMEA
+    let result = Pipeline::process_nmea_reader(
+        load_nmea_reader("drift"),
+        &route_data,
+        &pipeline::PipelineConfig::default(),
+    ).expect("Pipeline processing failed");
 
-    let mut stop_states: Vec<StopState> = route_data.stops()
+    let detected_arrivals: Vec<usize> = result.arrivals
         .iter()
-        .enumerate()
-        .map(|(i, _)| StopState::new(i as u8))
+        .map(|a| a.stop_idx as usize)
         .collect();
-
-    let mut detected_arrivals: Vec<usize> = Vec::new();
-
-    // Process NMEA with drift
-    for line in nmea_lines {
-        if let Some(_gps) = nmea.parse_sentence(&line) {
-            // Pipeline processing
-        }
-    }
 
     // Validate: should still detect arrivals despite drift
     assert!(
@@ -56,28 +45,19 @@ fn test_jump_skip_stop_prevention() {
     let route_data = RouteData::load(&route_bytes)
         .expect("Failed to load route data");
 
-    let nmea_lines = load_nmea("jump");
     let expected = ExpectedResults::from_ground_truth("jump");
 
-    // Initialize pipeline
-    let mut nmea = NmeaState::new();
-    let mut kalman = KalmanState::new();
-    let mut dr = DrState::new();
+    // Use the full pipeline to process NMEA
+    let result = Pipeline::process_nmea_reader(
+        load_nmea_reader("jump"),
+        &route_data,
+        &pipeline::PipelineConfig::default(),
+    ).expect("Pipeline processing failed");
 
-    let mut stop_states: Vec<StopState> = route_data.stops()
+    let detected_arrivals: Vec<usize> = result.arrivals
         .iter()
-        .enumerate()
-        .map(|(i, _)| StopState::new(i as u8))
+        .map(|a| a.stop_idx as usize)
         .collect();
-
-    let mut detected_arrivals: Vec<usize> = Vec::new();
-
-    // Process NMEA with jump
-    for line in nmea_lines {
-        if let Some(_gps) = nmea.parse_sentence(&line) {
-            // Pipeline processing
-        }
-    }
 
     // Validate: jump should not cause false arrivals
     assert!(
