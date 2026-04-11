@@ -136,6 +136,11 @@ pub fn write_output<W: Write>(
 }
 
 /// Format arrival event as JSON for output
+///
+/// Uses manual `format!` instead of `serde_json` for embedded/no-std compatibility.
+/// This function may be called in contexts where serde_json is not available
+/// (when the `std` feature is not enabled). The manual format is simple and
+/// well-tested, avoiding the serde_json dependency for this specific use case.
 pub fn format_arrival_event(event: &shared::ArrivalEvent) -> String {
     use shared::ArrivalEventType;
 
