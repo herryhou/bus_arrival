@@ -1,6 +1,7 @@
 //! Signal loss scenario tests (GPS outage, tunnel)
 
 use super::common::{load_ty225_route, load_nmea, load_nmea_reader, ExpectedResults};
+use super::common::{validate_arrivals_exact, load_expected_arrivals, validate_arrival_order};
 use shared::binfile::RouteData;
 use pipeline::Pipeline;
 
@@ -83,4 +84,37 @@ fn test_outage_nmea_has_valid_gps() {
         has_gpgga,
         "Outage NMEA should contain GPGGA sentences"
     );
+}
+
+/// Test: Exact stop matching for outage scenario
+/// Validates: Dead reckoning maintains correct detection during 10s outage
+#[test]
+fn test_outage_exact_stop_matching() {
+    let route_bytes = load_ty225_route("outage");
+    let route_data = RouteData::load(&route_bytes)
+        .expect("Failed to load route data");
+
+    let expected_arrivals = load_expected_arrivals("outage");
+
+    let result = Pipeline::process_nmea_reader(
+        load_nmea_reader("outage"),
+        &route_data,
+        &pipeline::PipelineConfig::default(),
+    ).expect("Pipeline processing failed");
+
+    let detected_arrivals: Vec<usize> = result.arrivals
+        .iter()
+        .map(|a| a.stop_idx as usize)
+        .collect();
+
+    let validation = validate_arrivals_exact(&detected_arrivals, &expected_arrivals);
+    validation.print_report();
+
+    // Allow moderate tolerance for outage (93%)
+    validation.assert_quality(0.93, 0.93)
+        .unwrap();
+
+    // Order must be maintained
+    validate_arrival_order(&detected_arrivals)
+        .unwrap();
 }

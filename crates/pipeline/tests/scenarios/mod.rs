@@ -9,3 +9,4 @@ mod normal;
 mod gps_anomalies;
 mod signal_loss;
 mod route_edge_cases;
+mod edge_cases;

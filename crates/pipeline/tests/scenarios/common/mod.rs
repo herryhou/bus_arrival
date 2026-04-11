@@ -88,3 +88,11 @@ impl ExpectedResults {
 
 /// Scenario test result
 pub type TestResult = Result<(), String>;
+
+pub mod exact_validation;
+pub mod order_validation;
+pub mod position_accuracy;
+
+pub use exact_validation::{validate_arrivals_exact, ValidationResult};
+pub use order_validation::{validate_arrival_order, validate_arrival_order_strict};
+pub use position_accuracy::{analyze_position_accuracy, PositionAccuracyReport, ACCEPTABLE_ARRIVAL_DISTANCE_CM};
