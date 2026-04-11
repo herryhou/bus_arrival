@@ -1,5 +1,5 @@
 //! LUTs for arrival probability computation
-//! Auto-generated from pipeline source
+//! Generated at build time from pipeline probability module
 
 include!(concat!(env!("OUT_DIR"), "/lut_generated.rs"));
 
@@ -14,7 +14,21 @@ mod tests {
 
     #[test]
     fn lut_spot_check() {
-        assert_eq!(GAUSSIAN_LUT[0], 255);
-        assert!((GAUSSIAN_LUT[64] as i32 - 170).abs() < 5);
+        // Check boundary values
+        assert_eq!(GAUSSIAN_LUT[0], 255, "LUT[0] should be 255 (max probability)");
+
+        // Check middle values with tolerance
+        assert!((GAUSSIAN_LUT[64] as i32 - 170).abs() < 5, "LUT[64] should be ~170");
+        assert!((GAUSSIAN_LUT[128] as i32 - 91).abs() < 5, "LUT[128] should be ~91");
+
+        // Check near-zero value
+        assert!(GAUSSIAN_LUT[255] < 10, "LUT[255] should be near 0");
+
+        // Verify monotonic decreasing property
+        for i in 1..GAUSSIAN_LUT.len() {
+            assert!(GAUSSIAN_LUT[i] <= GAUSSIAN_LUT[i - 1],
+                "LUT should be monotonically decreasing: LUT[{}] = {} > LUT[{}] = {}",
+                i, GAUSSIAN_LUT[i], i - 1, GAUSSIAN_LUT[i - 1]);
+        }
     }
 }

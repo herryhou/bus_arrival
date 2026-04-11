@@ -4,8 +4,9 @@ fn main() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
 
     // Generate LUTs from pipeline probability module
+    // We don't specify --target, letting cargo choose the host target
     let output = std::process::Command::new("cargo")
-        .args(["run", "--bin", "gen_luts", "--features", "std", "--target", x86_64_apple_darwin()])
+        .args(["run", "--bin", "gen_luts", "--features", "std"])
         .current_dir("../pipeline/detection")
         .output()
         .expect("Failed to run LUT generator");
@@ -15,7 +16,20 @@ fn main() {
         panic!("LUT generator failed: {}", stderr);
     }
 
-    let lut_content = String::from_utf8(output.stdout).unwrap();
+    let lut_content = String::from_utf8_lossy(&output.stdout).into_owned();
+
+    // Validate LUT values are in valid u8 range
+    for line in lut_content.lines() {
+        if line.trim().starts_with(|c: char| c.is_ascii_digit()) {
+            if let Some(value_str) = line.split_whitespace().last() {
+                if let Ok(value) = value_str.trim_end_matches(',').parse::<i32>() {
+                    if value < 0 || value > 255 {
+                        panic!("LUT value out of range [0, 255]: {}", value);
+                    }
+                }
+            }
+        }
+    }
 
     let out_path = out_dir.join("lut_generated.rs");
     std::fs::write(&out_path, lut_content).expect("Failed to write LUT file");
@@ -29,19 +43,4 @@ fn main() {
     if route_data_path.exists() {
         println!("cargo:rerun-if-changed={}", route_data_path.display());
     }
-}
-
-#[cfg(target_os = "macos")]
-fn x86_64_apple_darwin() -> &'static str {
-    "x86_64-apple-darwin"
-}
-
-#[cfg(target_os = "linux")]
-fn x86_64_apple_darwin() -> &'static str {
-    "x86_64-unknown-linux-gnu"
-}
-
-#[cfg(target_os = "windows")]
-fn x86_64_apple_darwin() -> &'static str {
-    "x86_64-pc-windows-msvc"
 }
