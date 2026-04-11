@@ -6,6 +6,7 @@
 
 pub mod detection;
 pub mod lut;
+pub mod recovery_trigger;
 pub mod state;
 
 // uart module depends on Embassy and is only available for firmware builds

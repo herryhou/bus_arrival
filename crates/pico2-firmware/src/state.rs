@@ -4,6 +4,7 @@
 //! the full arrival detection pipeline.
 
 use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
+use crate::recovery_trigger::should_trigger_recovery;
 use gps_processor::kalman::{process_gps_update, ProcessResult};
 use shared::{binfile::RouteData, ArrivalEvent, DistCm, DrState, GpsPoint, KalmanState};
 
