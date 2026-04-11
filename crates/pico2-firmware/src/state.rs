@@ -56,8 +56,10 @@ pub struct State<'a> {
     pub dr: DrState,
     pub stop_states: heapless::Vec<detection::state_machine::StopState, 256>,
     pub route_data: &'a RouteData<'a>,
-    first_fix: bool,
-    warmup_counter: u8,
+    /// First fix flag - true until first GPS fix is received
+    pub first_fix: bool,
+    /// Warmup counter - increments after first fix until WARMUP_TICKS_REQUIRED is reached
+    pub warmup_counter: u8,
 }
 
 impl<'a> State<'a> {
