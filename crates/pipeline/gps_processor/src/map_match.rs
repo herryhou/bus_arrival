@@ -99,7 +99,7 @@ pub fn find_best_segment_restricted(
 }
 
 /// Heading-weighted segment score
-fn segment_score(
+pub fn segment_score(
     gps_x: DistCm,
     gps_y: DistCm,
     gps_heading: HeadCdeg,
@@ -231,4 +231,63 @@ pub fn latlon_to_cm_absolute_with_lat_avg(
     let dy_cm = f64_round(y_abs - y0_abs) as i64;
 
     (dx_cm as DistCm, dy_cm as DistCm)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_segment_score_heading_sentinel() {
+        // When heading is i16::MIN (GGA-only mode), heading penalty should be 0
+        let seg = RouteNode {
+            x_cm: 100000,
+            y_cm: 100000,
+            cum_dist_cm: 0,
+            heading_cdeg: 9000, // 90 degrees
+            seg_len_mm: 10000,
+            dx_cm: 100,
+            dy_cm: 0,
+            _pad: 0,
+        };
+
+        // With valid heading
+        let score_with_heading = segment_score(
+            100000, 100000,  // GPS position at segment
+            9000,             // Same heading
+            100,              // Low speed
+            &seg,
+        );
+
+        // With sentinel heading (i16::MIN) - should have no heading penalty
+        let score_sentinel = segment_score(
+            100000, 100000,
+            i16::MIN,         // Sentinel value
+            100,
+            &seg,
+        );
+
+        // With sentinel, heading penalty is 0, so score should be <= score with heading
+        assert!(score_sentinel <= score_with_heading,
+            "Sentinel heading should not add penalty");
+
+        // At high speed, valid heading should have significant penalty if mismatched
+        let score_mismatch = segment_score(
+            100000, 100000,
+            0,                // Opposite heading
+            500,              // High speed
+            &seg,
+        );
+
+        let score_sentinel_high_speed = segment_score(
+            100000, 100000,
+            i16::MIN,
+            500,
+            &seg,
+        );
+
+        // Sentinel should have lower score than mismatched heading at high speed
+        assert!(score_sentinel_high_speed < score_mismatch,
+            "Sentinel should avoid heading penalty entirely");
+    }
 }
