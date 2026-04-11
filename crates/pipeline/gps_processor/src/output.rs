@@ -134,3 +134,19 @@ pub fn write_output<W: Write>(
 
     writeln!(output, "{}", serde_json::to_string(&record).unwrap())
 }
+
+/// Format arrival event as JSON for output
+pub fn format_arrival_event(event: &shared::ArrivalEvent) -> String {
+    use shared::ArrivalEventType;
+
+    let event_type_str = match event.event_type {
+        ArrivalEventType::Arrival => "arrival",
+        ArrivalEventType::Departure => "departure",
+        ArrivalEventType::Announce => "announce",
+    };
+
+    format!(
+        r#"{{"type":"{}","time":{},"stop":{},"s":{},"v":{},"p":{}}}"#,
+        event_type_str, event.time, event.stop_idx, event.s_cm, event.v_cms, event.probability
+    )
+}
