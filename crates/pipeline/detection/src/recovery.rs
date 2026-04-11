@@ -17,11 +17,20 @@ const V_MAX_CMS: u32 = 3000;
 /// Implements scoring formula from Tech Report Section 15.2:
 /// score(i) = |s_i - s| + 5000 * max(0, last_index - i) + vel_penalty(i)
 ///
-/// Velocity penalty: hard exclusion if distance to stop > V_MAX_CMS (3000 cm/s * 1s)
+/// Velocity penalty: hard exclusion if distance to stop exceeds V_MAX_CMS * dt_since_last_fix
+/// (i.e., if reaching the stop would require exceeding max physical speed)
+///
+/// # Parameters
+/// - `s_cm`: Current GPS position (cm)
+/// - `v_filtered`: Filtered speed estimate (cm/s) - reserved for future use
+/// - `dt_since_last_fix`: Seconds elapsed since last valid GPS fix
+/// - `stops`: Array of all stops on route
+/// - `last_index`: Last known stop index before GPS anomaly
 #[cfg(feature = "std")]
 pub fn find_stop_index(
     s_cm: DistCm,
     _v_filtered: SpeedCms,  // Reserved for future use
+    dt_since_last_fix: u64,  // Seconds since last valid fix
     stops: &[Stop],
     last_index: u8,
 ) -> Option<usize> {
@@ -37,14 +46,16 @@ pub fn find_stop_index(
             let index_penalty = 5000 * (last_index as i32 - i as i32).max(0);
 
             // Velocity penalty: hard exclusion if reaching this stop requires
-            // exceeding V_MAX_CMS (physically impossible in 1 GPS tick)
+            // exceeding V_MAX_CMS given the elapsed time since last valid fix
             // Only applies to stops ahead of the bus
             let dist_to_stop = if stop.progress_cm > s_cm {
-                (stop.progress_cm - s_cm) as u32
+                (stop.progress_cm - s_cm) as u64
             } else {
                 0
             };
-            let vel_penalty = if dist_to_stop > V_MAX_CMS {
+            // Maximum physically reachable distance = V_MAX_CMS * dt
+            let max_reachable = V_MAX_CMS as u64 * dt_since_last_fix;
+            let vel_penalty = if dist_to_stop > max_reachable {
                 i32::MAX
             } else {
                 0
@@ -78,29 +89,29 @@ mod tests {
         // Stop 1: dist 100, penalty 0 -> score 100
         // Stop 0: dist 4100, penalty 0 -> score 4100 (wait, i >= 0-1=0, so stop 0 is candidate)
         // Stop 2: dist 3900, penalty 0 -> score 3900
-        assert_eq!(find_stop_index(5100, 1000, &stops, 0), Some(1));
+        assert_eq!(find_stop_index(5100, 1000, 1, &stops, 0), Some(1));
 
         // Jump back from idx 2 to near stop 1
         // Point s = 1100. last_index = 2.
         // Candidates: idx 1, idx 2 (idx 0 is excluded by i >= 2-1 = 1)
-        // Stop 1 (5000): dist 3900, penalty 5000, vel_penalty i32::MAX (dist 3900 > 3000) -> excluded
-        // Stop 2 (9000): dist 7900, penalty 0, vel_penalty i32::MAX (dist 7900 > 3000) -> excluded
+        // Stop 1 (5000): dist 3900, penalty 5000, vel_penalty i32::MAX (dist 3900 > 3000*1) -> excluded
+        // Stop 2 (9000): dist 7900, penalty 0, vel_penalty i32::MAX (dist 7900 > 3000*1) -> excluded
         // Both stops excluded by velocity constraint (physically impossible to reach in 1s)
-        assert_eq!(find_stop_index(1100, 1000, &stops, 2), None);
+        assert_eq!(find_stop_index(1100, 1000, 1, &stops, 2), None);
 
         // Jump back from idx 2 to stop 1, but much closer to 1
         // Point s = 4500.
         // Stop 1 (5000): dist 500, penalty 5000, vel_penalty 0 (dist 500 < 3000) -> score 5500
         // Stop 2 (9000): dist 4500, penalty 0, vel_penalty i32::MAX (dist 4500 > 3000) -> excluded
         // Stop 1 wins because stop 2 is excluded by velocity constraint.
-        assert_eq!(find_stop_index(4500, 1000, &stops, 2), Some(1));
+        assert_eq!(find_stop_index(4500, 1000, 1, &stops, 2), Some(1));
 
         // Jump back from idx 1 to stop 0
         // Point s = 1000. last_index = 1.
         // Stop 0 (1000): dist 0, penalty 5000, vel_penalty 0 (stop is behind) -> score 5000
         // Stop 1 (5000): dist 4000, penalty 0, vel_penalty i32::MAX (dist 4000 > 3000) -> excluded
         // Stop 0 wins because stop 1 is excluded by velocity constraint.
-        assert_eq!(find_stop_index(1000, 1000, &stops, 1), Some(0));
+        assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1), Some(0));
         
         // Point s = -2000. last_index = 1.
         // Stop 0 (1000): dist 3000, penalty 5000 -> score 8000
@@ -136,7 +147,7 @@ mod tests {
         // Stop 0 (1000): dist 0, penalty 5000 -> score 5000
         // Stop 1 (9000): dist 8000, penalty 0 -> score 8000
         // Stop 0 wins!
-        assert_eq!(find_stop_index(1000, 1000, &stops, 1), Some(0));
+        assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1), Some(0));
     }
 }
 
