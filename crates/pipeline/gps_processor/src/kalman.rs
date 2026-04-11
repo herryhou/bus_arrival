@@ -124,7 +124,7 @@ pub fn process_gps_update(
 }
 
 /// Reject GPS updates that exceed physical limits
-fn check_speed_constraint(z_new: DistCm, z_prev: DistCm, dt: i32) -> bool {
+pub fn check_speed_constraint(z_new: DistCm, z_prev: DistCm, dt: i32) -> bool {
     let dist_abs = (z_new - z_prev).unsigned_abs() as i32;
     let max_dist = V_MAX_CMS * dt.max(1) + SIGMA_GPS_CM;
     dist_abs <= max_dist
