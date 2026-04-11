@@ -14,7 +14,7 @@ pub fn build_gaussian_lut() -> [u8; 256] {
     for i in 0..256 {
         let x = (i as f64) / 64.0;  // 0 to 4.0
         let g = (-0.5 * x * x).exp();
-        lut[i] = (g * 255.0).min(255.0) as u8;
+        lut[i] = (g * 255.0).min(255.0).round() as u8;  // Use .round() for proper rounding
     }
     lut
 }
@@ -215,11 +215,17 @@ mod tests {
 
     #[test]
     fn test_lut_generation() {
-        let g_lut = build_gaussian_lut();
+        let g_lut = super::build_gaussian_lut();
         assert_eq!(g_lut[0], 255);  // x=0 → max probability
         assert!(g_lut[255] < 10);   // x=4.0 → near zero
 
-        let l_lut = build_logistic_lut();
+        // Verify Gaussian LUT is monotonically decreasing
+        for i in 1..g_lut.len() {
+            assert!(g_lut[i] <= g_lut[i - 1],
+                "Gaussian LUT should be monotonically decreasing at index {}", i);
+        }
+
+        let l_lut = super::build_logistic_lut();
         assert!(l_lut[0] > 200);    // v=0 cm/s → high probability (approx 0.88 → 224)
         assert_eq!(l_lut[20], 128); // v=200 cm/s → exactly at v_stop (0.5 → 127.5 → 128)
         assert!(l_lut[100] < 20);   // v=1000 cm/s → low probability
@@ -227,18 +233,18 @@ mod tests {
 
     #[test]
     fn test_probability_range() {
-        let g_lut = build_gaussian_lut();
-        let l_lut = build_logistic_lut();
+        let g_lut = super::build_gaussian_lut();
+        let l_lut = super::build_logistic_lut();
         let stop = Stop { progress_cm: 10000, corridor_start_cm: 2000, corridor_end_cm: 14000 };
 
-        let p = arrival_probability(10000, 100, &stop, 5, &g_lut, &l_lut);
+        let p = super::arrival_probability(10000, 100, &stop, 5, &g_lut, &l_lut);
         assert!(p <= 255);
     }
 
     #[test]
     fn test_adaptive_probability_close_stop() {
-        let g_lut = build_gaussian_lut();
-        let l_lut = build_logistic_lut();
+        let g_lut = super::build_gaussian_lut();
+        let l_lut = super::build_logistic_lut();
 
         let stop_current = Stop {
             progress_cm: 100_000,
@@ -253,7 +259,7 @@ mod tests {
         };
 
         // At stop, moderate speed, some dwell
-        let prob = arrival_probability_adaptive(
+        let prob = super::arrival_probability_adaptive(
             100_000,  // s_cm (at stop)
             600,      // v_cms (approaching)
             &stop_current,
@@ -270,8 +276,8 @@ mod tests {
 
     #[test]
     fn test_adaptive_probability_normal_stop() {
-        let g_lut = build_gaussian_lut();
-        let l_lut = build_logistic_lut();
+        let g_lut = super::build_gaussian_lut();
+        let l_lut = super::build_logistic_lut();
 
         let stop_current = Stop {
             progress_cm: 100_000,
@@ -285,7 +291,7 @@ mod tests {
             corridor_end_cm: 135_000,
         };
 
-        let prob_close = arrival_probability_adaptive(
+        let prob_close = super::arrival_probability_adaptive(
             100_000, 600, &stop_current, 5, &g_lut, &l_lut, Some(&stop_next)
         );
 
@@ -295,8 +301,8 @@ mod tests {
 
     #[test]
     fn test_adaptive_probability_last_stop() {
-        let g_lut = build_gaussian_lut();
-        let l_lut = build_logistic_lut();
+        let g_lut = super::build_gaussian_lut();
+        let l_lut = super::build_logistic_lut();
 
         let stop = Stop {
             progress_cm: 100_000,
@@ -305,7 +311,7 @@ mod tests {
         };
 
         // Last stop (next_stop = None)
-        let prob = arrival_probability_adaptive(
+        let prob = super::arrival_probability_adaptive(
             100_000, 0, &stop, 10, &g_lut, &l_lut, None
         );
 
