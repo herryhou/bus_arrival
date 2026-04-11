@@ -5,7 +5,7 @@
 
 use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
 use gps_processor::kalman::{process_gps_update, ProcessResult};
-use shared::{binfile::RouteData, ArrivalEvent, DrState, GpsPoint, KalmanState};
+use shared::{binfile::RouteData, ArrivalEvent, DistCm, DrState, GpsPoint, KalmanState};
 
 // ===== Constants =====
 
@@ -63,6 +63,10 @@ pub struct State<'a> {
     /// Flag indicating warmup was just reset (e.g., after GPS outage)
     /// The next valid GPS tick will not increment the counter
     warmup_just_reset: bool,
+    /// Last confirmed stop index for GPS jump recovery
+    last_known_stop_index: u8,
+    /// Last valid position for jump detection (cm)
+    last_valid_s_cm: DistCm,
 }
 
 impl<'a> State<'a> {
@@ -89,6 +93,8 @@ impl<'a> State<'a> {
             first_fix: true,
             warmup_counter: 0,
             warmup_just_reset: false,
+            last_known_stop_index: 0,
+            last_valid_s_cm: 0,
         }
     }
 
