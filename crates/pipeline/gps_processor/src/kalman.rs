@@ -161,3 +161,51 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
         v_cms: dr.filtered_v,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dr_decay_normalization() {
+        // DR decay factors: (9/10)^dt * 10000 for integer arithmetic
+        let expected_factors = [
+            10000,  // dt=0: 1.0
+            9000,   // dt=1: 0.9
+            8100,   // dt=2: 0.81
+            7290,   // dt=3: 0.729
+            6561,   // dt=4: 0.6561
+            5905,   // dt=5: 0.5905
+            5314,   // dt=6: 0.5314
+            4783,   // dt=7: 0.4783
+            4305,   // dt=8: 0.4305
+            3874,   // dt=9: 0.3874
+            3487,   // dt=10: 0.3487
+        ];
+
+        // Verify LUT values match expected decay factors
+        for (i, &expected) in expected_factors.iter().enumerate() {
+            assert_eq!(DR_DECAY_NUMERATOR[i], expected,
+                "DR decay factor for dt={} should be {}", i, expected);
+        }
+
+        // Verify decay is normalized by dt (not constant)
+        let v_initial = 1000; // 10 m/s
+
+        // dt=1: v = 1000 * 0.9 = 900
+        let v_dt1 = (v_initial as u32 * DR_DECAY_NUMERATOR[1] / 10000) as SpeedCms;
+        assert_eq!(v_dt1, 900);
+
+        // dt=2: v = 1000 * 0.81 = 810
+        let v_dt2 = (v_initial as u32 * DR_DECAY_NUMERATOR[2] / 10000) as SpeedCms;
+        assert_eq!(v_dt2, 810);
+
+        // dt=5: v = 1000 * 0.5905 = 590 (rounded)
+        let v_dt5 = (v_initial as u32 * DR_DECAY_NUMERATOR[5] / 10000) as SpeedCms;
+        assert_eq!(v_dt5, 590);
+
+        // Decay should be monotonic decreasing with dt
+        assert!(v_dt1 > v_dt2 && v_dt2 > v_dt5,
+            "DR decay should decrease monotonically with dt");
+    }
+}
