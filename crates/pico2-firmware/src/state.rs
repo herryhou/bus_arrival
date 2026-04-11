@@ -6,7 +6,8 @@
 use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
 use crate::recovery_trigger::should_trigger_recovery;
 use gps_processor::kalman::{process_gps_update, ProcessResult};
-use shared::{binfile::RouteData, ArrivalEvent, DistCm, DrState, GpsPoint, KalmanState};
+use shared::{binfile::RouteData, ArrivalEvent, DistCm, DrState, GpsPoint, KalmanState, Stop};
+use shared::FsmState;
 
 // ===== Constants =====
 
@@ -68,6 +69,8 @@ pub struct State<'a> {
     last_known_stop_index: u8,
     /// Last valid position for jump detection (cm)
     last_valid_s_cm: DistCm,
+    /// Timestamp of last GPS fix for recovery time delta calculation
+    last_gps_timestamp: u64,
 }
 
 impl<'a> State<'a> {
@@ -96,6 +99,7 @@ impl<'a> State<'a> {
             warmup_just_reset: false,
             last_known_stop_index: 0,
             last_valid_s_cm: 0,
+            last_gps_timestamp: 0,
         }
     }
 
@@ -119,6 +123,51 @@ impl<'a> State<'a> {
 
         let (s_cm, v_cms) = match result {
             ProcessResult::Valid { s_cm, v_cms, seg_idx: _ } => {
+                // Check for GPS jump requiring recovery (H1)
+                let prev_s_cm = self.last_valid_s_cm;
+                // Skip recovery on first fix - last_valid_s_cm is still 0 (initial value)
+                if !self.first_fix && should_trigger_recovery(s_cm, prev_s_cm) {
+                    #[cfg(feature = "firmware")]
+                    defmt::warn!("GPS jump detected: s={}→{}, triggering recovery",
+                        prev_s_cm, s_cm);
+
+                    // Call recovery module
+                    // Calculate time delta since last GPS fix (in seconds)
+                    let dt_since_last_fix = if self.last_gps_timestamp > 0 {
+                        gps.timestamp.saturating_sub(self.last_gps_timestamp)
+                    } else {
+                        1 // Default to 1 second on first fix or after outage
+                    };
+
+                    // Collect stops into a heapless::Vec for recovery module
+                    let mut stops_vec = heapless::Vec::<Stop, 256>::new();
+                    for i in 0..self.route_data.stop_count {
+                        if let Some(stop) = self.route_data.get_stop(i) {
+                            if let Err(_) = stops_vec.push(stop) {
+                                #[cfg(feature = "firmware")]
+                                defmt::warn!("Too many stops for recovery buffer");
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Some(recovered_idx) = detection::recovery::find_stop_index(
+                        s_cm,
+                        v_cms,
+                        dt_since_last_fix,
+                        &stops_vec,
+                        self.last_known_stop_index,
+                    ) {
+                        #[cfg(feature = "firmware")]
+                        defmt::info!("Recovery found stop index: {}", recovered_idx);
+                        self.last_known_stop_index = recovered_idx as u8;
+                        self.reset_stop_states_after_recovery(recovered_idx);
+                    } else {
+                        #[cfg(feature = "firmware")]
+                        defmt::warn!("Recovery failed: no valid stop found");
+                    }
+                }
+
                 if self.first_fix {
                     self.first_fix = false;
                 } else if self.warmup_just_reset {
@@ -135,6 +184,13 @@ impl<'a> State<'a> {
                     );
                     return None;
                 }
+
+                // Update recovery tracking
+                self.last_known_stop_index = self.find_closest_stop_index(s_cm);
+                self.last_valid_s_cm = s_cm;
+                // Update timestamp for next iteration
+                self.last_gps_timestamp = gps.timestamp;
+
                 (s_cm, v_cms)
             }
             ProcessResult::Rejected(reason) => {
@@ -256,5 +312,44 @@ impl<'a> State<'a> {
         }
 
         None
+    }
+
+    /// Find closest stop index to current position
+    fn find_closest_stop_index(&self, s_cm: DistCm) -> u8 {
+        let mut closest_idx = 0;
+        let mut closest_dist = i32::MAX;
+
+        for i in 0..self.route_data.stop_count {
+            if let Some(stop) = self.route_data.get_stop(i) {
+                let dist = (s_cm - stop.progress_cm).abs();
+                if dist < closest_dist {
+                    closest_dist = dist;
+                    closest_idx = i as u8;
+                }
+            }
+        }
+
+        closest_idx
+    }
+
+    /// Reset all stop states to Idle after recovery
+    fn reset_stop_states_after_recovery(&mut self, recovered_idx: usize) {
+        use detection::state_machine::StopState;
+
+        // Reset all stop states by recreating them
+        for i in 0..self.stop_states.len() {
+            self.stop_states[i] = StopState::new(i as u8);
+        }
+
+        // Mark recovered stop as Approaching if within corridor
+        if let Some(stop) = self.route_data.get_stop(recovered_idx) {
+            if self.last_valid_s_cm >= stop.corridor_start_cm
+                && self.last_valid_s_cm <= stop.corridor_end_cm
+            {
+                if let Some(state) = self.stop_states.get_mut(recovered_idx) {
+                    state.fsm_state = FsmState::Approaching;
+                }
+            }
+        }
     }
 }

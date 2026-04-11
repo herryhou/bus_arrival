@@ -1,12 +1,8 @@
 //! Stop index recovery for GPS jump handling
 
-use shared::{DistCm, SpeedCms};
-
-#[cfg(feature = "std")]
-use shared::Stop;
+use shared::{DistCm, SpeedCms, Stop};
 
 /// Trigger conditions
-#[cfg_attr(not(feature = "std"), allow(dead_code))]
 const GPS_JUMP_THRESHOLD: DistCm = 20000;  // 200 m
 
 /// Maximum bus speed for city bus operations: 60 km/h = 1667 cm/s
@@ -27,7 +23,6 @@ const V_MAX_CMS: u32 = 1667;
 /// - `dt_since_last_fix`: Seconds elapsed since last valid GPS fix
 /// - `stops`: Array of all stops on route
 /// - `last_index`: Last known stop index before GPS anomaly
-#[cfg(feature = "std")]
 pub fn find_stop_index(
     s_cm: DistCm,
     _v_filtered: SpeedCms,  // Reserved for future use
@@ -35,43 +30,43 @@ pub fn find_stop_index(
     stops: &[Stop],
     last_index: u8,
 ) -> Option<usize> {
-    // Candidates within ±200m and >= last_index - 1
-    let mut candidates: Vec<(usize, i32)> = stops.iter()
-        .enumerate()
-        .filter(|&(i, stop)| {
-            let d = (s_cm - stop.progress_cm).abs();
-            d < GPS_JUMP_THRESHOLD && (i as u8) >= last_index.saturating_sub(1)
-        })
-        .map(|(i, stop)| {
-            let dist = (s_cm - stop.progress_cm).abs();
-            let index_penalty = 5000 * (last_index as i32 - i as i32).max(0);
+    let mut best_idx: Option<usize> = None;
+    let mut best_score = i32::MAX;
 
-            // Velocity penalty: hard exclusion if reaching this stop requires
-            // exceeding V_MAX_CMS given the elapsed time since last valid fix
-            // Only applies to stops ahead of the bus
-            let dist_to_stop = if stop.progress_cm > s_cm {
-                (stop.progress_cm - s_cm) as u64
-            } else {
-                0
-            };
-            // Maximum physically reachable distance = V_MAX_CMS * dt
-            let max_reachable = V_MAX_CMS as u64 * dt_since_last_fix;
-            let vel_penalty = if dist_to_stop > max_reachable {
-                i32::MAX
-            } else {
-                0
-            };
+    for (i, stop) in stops.iter().enumerate() {
+        let d = (s_cm - stop.progress_cm).abs();
 
-            let score = dist.saturating_add(index_penalty).saturating_add(vel_penalty);
-            (i, score)
-        })
-        .filter(|(_, score)| *score < i32::MAX)
-        .collect();
+        // Filter: within ±200m and >= last_index - 1
+        if d >= GPS_JUMP_THRESHOLD || (i as u8) < last_index.saturating_sub(1) {
+            continue;
+        }
 
-    // Sort by score (ascending)
-    candidates.sort_by_key(|&(_, score)| score);
+        let dist = (s_cm - stop.progress_cm).abs();
+        let index_penalty = 5000 * (last_index as i32 - i as i32).max(0);
 
-    candidates.first().map(|(i, _)| *i)
+        // Velocity penalty: hard exclusion if reaching this stop requires
+        // exceeding V_MAX_CMS given the elapsed time since last valid fix
+        // Only applies to stops ahead of the bus
+        let dist_to_stop = if stop.progress_cm > s_cm {
+            (stop.progress_cm - s_cm) as u64
+        } else {
+            0
+        };
+        // Maximum physically reachable distance = V_MAX_CMS * dt
+        let max_reachable = V_MAX_CMS as u64 * dt_since_last_fix;
+        if dist_to_stop > max_reachable {
+            continue;  // Hard exclusion
+        }
+
+        let score = dist.saturating_add(index_penalty);
+
+        if score < best_score {
+            best_score = score;
+            best_idx = Some(i);
+        }
+    }
+
+    best_idx
 }
 
 #[cfg(test)]
@@ -95,34 +90,34 @@ mod tests {
         // Jump back from idx 2 to near stop 1
         // Point s = 1100. last_index = 2.
         // Candidates: idx 1, idx 2 (idx 0 is excluded by i >= 2-1 = 1)
-        // Stop 1 (5000): dist 3900, penalty 5000, vel_penalty i32::MAX (dist 3900 > 3000*1) -> excluded
-        // Stop 2 (9000): dist 7900, penalty 0, vel_penalty i32::MAX (dist 7900 > 3000*1) -> excluded
+        // Stop 1 (5000): dist 3900, penalty 5000, vel_penalty (dist 3900 > 3000*1) -> excluded
+        // Stop 2 (9000): dist 7900, penalty 0, vel_penalty (dist 7900 > 3000*1) -> excluded
         // Both stops excluded by velocity constraint (physically impossible to reach in 1s)
         assert_eq!(find_stop_index(1100, 1000, 1, &stops, 2), None);
 
         // Jump back from idx 2 to stop 1, but much closer to 1
         // Point s = 4500.
         // Stop 1 (5000): dist 500, penalty 5000, vel_penalty 0 (dist 500 < 3000) -> score 5500
-        // Stop 2 (9000): dist 4500, penalty 0, vel_penalty i32::MAX (dist 4500 > 3000) -> excluded
+        // Stop 2 (9000): dist 4500, penalty 0, vel_penalty (dist 4500 > 3000) -> excluded
         // Stop 1 wins because stop 2 is excluded by velocity constraint.
         assert_eq!(find_stop_index(4500, 1000, 1, &stops, 2), Some(1));
 
         // Jump back from idx 1 to stop 0
         // Point s = 1000. last_index = 1.
         // Stop 0 (1000): dist 0, penalty 5000, vel_penalty 0 (stop is behind) -> score 5000
-        // Stop 1 (5000): dist 4000, penalty 0, vel_penalty i32::MAX (dist 4000 > 3000) -> excluded
+        // Stop 1 (5000): dist 4000, penalty 0, vel_penalty (dist 4000 > 3000) -> excluded
         // Stop 0 wins because stop 1 is excluded by velocity constraint.
         assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1), Some(0));
-        
+
         // Point s = -2000. last_index = 1.
         // Stop 0 (1000): dist 3000, penalty 5000 -> score 8000
         // Stop 1 (5000): dist 7000, penalty 0 -> score 7000
-        // Still stop 1. 
+        // Still stop 1.
 
         // Point s = 0. last_index = 1. Stop 0 is at 1000. Stop 1 at 5000.
         // Stop 0: dist 1000, penalty 5000 -> score 6000
         // Stop 1: dist 5000, penalty 0 -> score 5000.
-        
+
         // To make stop 0 win from last_index 1:
         // dist(s, stop 1) - dist(s, stop 0) > 5000.
         // |5000 - s| - |1000 - s| > 5000.
@@ -212,4 +207,3 @@ mod tests {
         assert_eq!(find_stop_index(1100, 1000, 5, &stops, 2), Some(2));
     }
 }
-
