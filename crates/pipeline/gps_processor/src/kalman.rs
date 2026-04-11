@@ -5,10 +5,13 @@ use core::cmp::Ord;
 use crate::route_data::RouteData;
 use shared::{DistCm, DrState, GpsPoint, KalmanState, SpeedCms};
 
-/// Maximum bus speed: 108 km/h = 3000 cm/s
-pub const V_MAX_CMS: SpeedCms = 3000;
-/// GPS noise margin: 50m
-pub const SIGMA_GPS_CM: DistCm = 5000;
+/// Maximum bus speed for city bus operations: 60 km/h = 1667 cm/s
+/// Per spec Section 9.1: urban transit routes, not highway speeds
+pub const V_MAX_CMS: SpeedCms = 1667;
+
+/// GPS noise margin for urban canyon conditions: 20 m
+/// Per spec Section 9.1: accommodates multipath errors
+pub const SIGMA_GPS_CM: DistCm = 2000;
 
 /// DR decay factors: (9/10)^dt * 10000 for integer arithmetic
 const DR_DECAY_NUMERATOR: [u32; 11] = [
