@@ -30,7 +30,7 @@ pub fn build_logistic_lut() -> [u8; 128] {
     for i in 0..128 {
         let v = (i as f64) * 10.0;  // 0 to 1270 cm/s
         let l = 1.0 / (1.0 + (k * (v - v_stop)).exp());
-        lut[i] = (l * 255.0).min(255.0) as u8;
+        lut[i] = (l * 255.0).min(255.0).round() as u8;  // Use .round() for proper rounding
     }
     lut
 }
@@ -221,7 +221,7 @@ mod tests {
 
         let l_lut = build_logistic_lut();
         assert!(l_lut[0] > 200);    // v=0 cm/s → high probability (approx 0.88 → 224)
-        assert_eq!(l_lut[20], 127); // v=200 cm/s → exactly at v_stop (0.5 → 127)
+        assert_eq!(l_lut[20], 128); // v=200 cm/s → exactly at v_stop (0.5 → 127.5 → 128)
         assert!(l_lut[100] < 20);   // v=1000 cm/s → low probability
     }
 
