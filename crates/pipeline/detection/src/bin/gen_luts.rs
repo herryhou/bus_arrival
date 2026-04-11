@@ -1,16 +1,12 @@
 //! Generate LUT constants for firmware embedding
 //! Run with: cargo run --bin gen_luts
 
-use shared::probability_constants::*;
-use shared::SpeedCms;
-
 fn build_gaussian_lut() -> [u8; 256] {
     let mut lut = [0u8; 256];
     for i in 0..256 {
-        let d_cm = (i as i32 * SIGMA_D_CM) / 64;
-        let z = (d_cm as f64) / (SIGMA_D_CM as f64);
-        let p: f64 = 255.0 * (-0.5 * z * z).exp();
-        lut[i] = p.round() as u8;
+        let x = (i as f64) / 64.0;  // Match runtime formula - no integer division!
+        let g = (-0.5 * x * x).exp();
+        lut[i] = (g * 255.0).min(255.0).round() as u8;
     }
     lut
 }
@@ -18,11 +14,11 @@ fn build_gaussian_lut() -> [u8; 256] {
 fn build_logistic_lut() -> [u8; 128] {
     let mut lut = [0u8; 128];
     let k = 0.01;
+    let v_stop = 200.0;
     for i in 0..128 {
-        let v_cms: SpeedCms = (i as SpeedCms) * 10;
-        let v_stop = V_STOP_CMS as f64;
-        let p: f64 = 255.0 * (1.0 / (1.0 + (k * (v_cms as f64 - v_stop)).exp()));
-        lut[i] = p.round() as u8;
+        let v = (i as f64) * 10.0;  // 0 to 1270 cm/s
+        let l = 1.0 / (1.0 + (k * (v - v_stop)).exp());
+        lut[i] = (l * 255.0).min(255.0).round() as u8;
     }
     lut
 }
