@@ -9,8 +9,9 @@ use shared::Stop;
 #[cfg_attr(not(feature = "std"), allow(dead_code))]
 const GPS_JUMP_THRESHOLD: DistCm = 20000;  // 200 m
 
-/// Maximum bus speed: 108 km/h = 3000 cm/s
-const V_MAX_CMS: u32 = 3000;
+/// Maximum bus speed for city bus operations: 60 km/h = 1667 cm/s
+/// Per spec Section 9.1: urban transit routes, not highway speeds
+const V_MAX_CMS: u32 = 1667;
 
 /// Find correct stop after GPS jump
 ///
