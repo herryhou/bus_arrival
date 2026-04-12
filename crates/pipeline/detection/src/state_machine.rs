@@ -102,6 +102,13 @@ impl StopState {
                     self.last_probability = probability;
                     return StopEvent::Departed; // Departed from Arriving state
                 }
+                // D4 fix: Corridor exit check (same logic as Approaching state)
+                if s_cm < corridor_start_cm {
+                    self.fsm_state = FsmState::Idle;
+                    self.dwell_time_s = 0;
+                    // Note: announced flag is NOT reset (preserves one-time announcement rule)
+                    return StopEvent::None;
+                }
                 self.dwell_time_s += 1;
             }
             FsmState::AtStop => {
