@@ -63,5 +63,3 @@ ground_truth_*.json
 
 # Generated test binaries (regenerated from test_data/*.json)
 simulator/test_assets/*.bin
-
-.serena/
