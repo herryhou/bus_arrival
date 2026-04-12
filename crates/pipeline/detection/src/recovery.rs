@@ -69,7 +69,7 @@ pub fn find_stop_index(
     best_idx
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
 
@@ -90,22 +90,22 @@ mod tests {
         // Jump back from idx 2 to near stop 1
         // Point s = 1100. last_index = 2.
         // Candidates: idx 1, idx 2 (idx 0 is excluded by i >= 2-1 = 1)
-        // Stop 1 (5000): dist 3900, penalty 5000, vel_penalty (dist 3900 > 3000*1) -> excluded
-        // Stop 2 (9000): dist 7900, penalty 0, vel_penalty (dist 7900 > 3000*1) -> excluded
+        // Stop 1 (5000): dist 3900, penalty 5000, vel_penalty (dist 3900 > 1667*1) -> excluded
+        // Stop 2 (9000): dist 7900, penalty 0, vel_penalty (dist 7900 > 1667*1) -> excluded
         // Both stops excluded by velocity constraint (physically impossible to reach in 1s)
         assert_eq!(find_stop_index(1100, 1000, 1, &stops, 2), None);
 
         // Jump back from idx 2 to stop 1, but much closer to 1
         // Point s = 4500.
-        // Stop 1 (5000): dist 500, penalty 5000, vel_penalty 0 (dist 500 < 3000) -> score 5500
-        // Stop 2 (9000): dist 4500, penalty 0, vel_penalty (dist 4500 > 3000) -> excluded
+        // Stop 1 (5000): dist 500, penalty 5000, vel_penalty 0 (dist 500 < 1667) -> score 5500
+        // Stop 2 (9000): dist 4500, penalty 0, vel_penalty (dist 4500 > 1667) -> excluded
         // Stop 1 wins because stop 2 is excluded by velocity constraint.
         assert_eq!(find_stop_index(4500, 1000, 1, &stops, 2), Some(1));
 
         // Jump back from idx 1 to stop 0
         // Point s = 1000. last_index = 1.
         // Stop 0 (1000): dist 0, penalty 5000, vel_penalty 0 (stop is behind) -> score 5000
-        // Stop 1 (5000): dist 4000, penalty 0, vel_penalty (dist 4000 > 3000) -> excluded
+        // Stop 1 (5000): dist 4000, penalty 0, vel_penalty (dist 4000 > 1667) -> excluded
         // Stop 0 wins because stop 1 is excluded by velocity constraint.
         assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1), Some(0));
 
