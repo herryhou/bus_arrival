@@ -22,6 +22,10 @@ use shared::FsmState;
 /// urban canyon conditions.
 const WARMUP_TICKS_REQUIRED: u8 = 3;
 
+/// Maximum warmup duration before timeout safety valve (10 seconds)
+/// Matches DR outage tolerance - both counters reset on Outage
+const WARMUP_TIMEOUT_TICKS: u8 = 10;
+
 // ===== State Struct =====
 
 /// Global state for the GPS processing pipeline.
@@ -60,8 +64,10 @@ pub struct State<'a> {
     pub route_data: &'a RouteData<'a>,
     /// First fix flag - true until first GPS fix is received
     pub first_fix: bool,
-    /// Warmup counter - increments after first fix until WARMUP_TICKS_REQUIRED is reached
-    pub warmup_counter: u8,
+    /// Number of valid GPS ticks with Kalman updates (convergence counter)
+    warmup_valid_ticks: u8,
+    /// Total ticks since first fix (timeout safety valve)
+    warmup_total_ticks: u8,
     /// Flag indicating warmup was just reset (e.g., after GPS outage)
     /// The next valid GPS tick will not increment the counter
     warmup_just_reset: bool,
@@ -95,7 +101,8 @@ impl<'a> State<'a> {
             stop_states,
             route_data,
             first_fix: true,
-            warmup_counter: 0,
+            warmup_valid_ticks: 0,
+            warmup_total_ticks: 0,
             warmup_just_reset: false,
             last_known_stop_index: 0,
             last_valid_s_cm: 0,
