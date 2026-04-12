@@ -52,6 +52,52 @@ pub type Prob8 = u8;
 /// Prevents overflow in dot products: (2×10⁶)² ≈ 4×10¹² < i64::MAX.
 pub type Dist2 = i64;
 
+/// Position signals for arrival detection
+///
+/// Per spec Section 13.2: F1 uses raw GPS projection, F3 uses Kalman-filtered position.
+/// These represent two independent signal sources with different noise characteristics.
+///
+/// # Fields
+///
+/// - `z_gps_cm`: Raw GPS projection onto route (for F1, sigma_d = 2750 cm)
+/// - `s_cm`: Kalman-filtered route position (for F3, sigma_p = 2000 cm)
+///
+/// # Independence
+///
+/// The two signals are independent by design:
+/// - `z_gps_cm` reflects current sensor observation (noisy, ±30m)
+/// - `s_cm` reflects system-integrated estimate (smoothed, ±10-20m)
+///
+/// In steady-state conditions with good GPS, `z_gps_cm ≈ s_cm`.
+/// During GPS noise events, they diverge: F1 drops while F3 remains stable.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct PositionSignals {
+    /// Raw GPS projection onto route (for F1, sigma_d = 2750 cm)
+    pub z_gps_cm: DistCm,
+    /// Kalman-filtered route position (for F3, sigma_p = 2000 cm)
+    pub s_cm: DistCm,
+}
+
+impl PositionSignals {
+    /// Create new position signals from raw GPS and filtered position
+    #[inline]
+    pub const fn new(z_gps_cm: DistCm, s_cm: DistCm) -> Self {
+        Self { z_gps_cm, s_cm }
+    }
+
+    /// Both signals equal (cold start or perfect GPS)
+    #[inline]
+    pub const fn is_converged(&self) -> bool {
+        self.z_gps_cm == self.s_cm
+    }
+
+    /// Divergence between raw and filtered signals
+    #[inline]
+    pub const fn divergence_cm(&self) -> i32 {
+        (self.z_gps_cm - self.s_cm).abs()
+    }
+}
+
 /// Route node with precomputed segment coefficients for runtime GPS matching.
 ///
 /// Field ordering: i32 fields grouped first to satisfy 4-byte alignment
@@ -376,7 +422,6 @@ mod tests {
 
         // Test with various HDOP levels, all should respect non-negative constraint
         for hdop in [10, 25, 40, 100] {
-            let v_before = state.v_cms;
             state.update_adaptive(10100, -1000, hdop);
             assert!(state.v_cms >= 0, "v_cms should be non-negative for HDOP {}", hdop);
         }
@@ -412,5 +457,63 @@ mod tests {
 
         // v_cms should be clamped to 0
         assert_eq!(state.v_cms, 0, "v_cms should be clamped to 0 with extreme noise");
+    }
+
+    #[test]
+    fn test_position_signals_new() {
+        // Test creating position signals
+        let signals = PositionSignals::new(10000, 10050);
+
+        assert_eq!(signals.z_gps_cm, 10000, "z_gps_cm should be initialized");
+        assert_eq!(signals.s_cm, 10050, "s_cm should be initialized");
+    }
+
+    #[test]
+    fn test_position_signals_default() {
+        // Test default initialization
+        let signals = PositionSignals::default();
+
+        assert_eq!(signals.z_gps_cm, 0, "z_gps_cm should default to 0");
+        assert_eq!(signals.s_cm, 0, "s_cm should default to 0");
+    }
+
+    #[test]
+    fn test_position_signals_is_converged() {
+        // Test converged signals (cold start or perfect GPS)
+        let converged = PositionSignals::new(10000, 10000);
+        assert!(converged.is_converged(), "Signals should be converged when equal");
+
+        // Test diverged signals
+        let diverged = PositionSignals::new(10000, 10050);
+        assert!(!diverged.is_converged(), "Signals should not be converged when different");
+    }
+
+    #[test]
+    fn test_position_signals_divergence_cm() {
+        // Test divergence calculation
+        let signals = PositionSignals::new(10000, 10050);
+        assert_eq!(signals.divergence_cm(), 50, "Divergence should be 50 cm");
+
+        // Test divergence when s_cm > z_gps_cm
+        let signals_reverse = PositionSignals::new(10050, 10000);
+        assert_eq!(signals_reverse.divergence_cm(), 50, "Divergence should be absolute value");
+
+        // Test zero divergence
+        let converged = PositionSignals::new(10000, 10000);
+        assert_eq!(converged.divergence_cm(), 0, "Divergence should be 0 when converged");
+    }
+
+    #[test]
+    fn test_position_signals_copy() {
+        // Test that PositionSignals implements Copy trait
+        let signals1 = PositionSignals::new(10000, 10050);
+        let signals2 = signals1; // Should copy, not move
+
+        assert_eq!(signals2.z_gps_cm, 10000);
+        assert_eq!(signals2.s_cm, 10050);
+
+        // signals1 should still be valid (was copied, not moved)
+        assert_eq!(signals1.z_gps_cm, 10000);
+        assert_eq!(signals1.s_cm, 10050);
     }
 }
