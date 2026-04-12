@@ -2,7 +2,7 @@
 // Run with: cargo test --package pico2-firmware --features dev
 
 use pico2_firmware::detection::compute_arrival_probability_adaptive;
-use shared::Stop;
+use shared::{PositionSignals, Stop};
 
 #[test]
 fn test_adaptive_weights_close_stop() {
@@ -18,8 +18,12 @@ fn test_adaptive_weights_close_stop() {
         corridor_end_cm: 118_000,
     };
 
+    let signals = PositionSignals {
+        z_gps_cm: 100_000,
+        s_cm: 100_000,
+    };
     let prob = compute_arrival_probability_adaptive(
-        100_000,  // s_cm (at stop)
+        signals,  // PositionSignals
         600,      // v_cms (approaching)
         &stop_current,
         5,        // dwell_time_s
@@ -43,8 +47,12 @@ fn test_adaptive_weights_normal_stop() {
         corridor_end_cm: 135_000,
     };
 
+    let signals = PositionSignals {
+        z_gps_cm: 100_000,
+        s_cm: 100_000,
+    };
     let prob = compute_arrival_probability_adaptive(
-        100_000, 600, &stop_current, 5, Some(&stop_next)
+        signals, 600, &stop_current, 5, Some(&stop_next)
     );
 
     // Normal stop: verify computation succeeds
@@ -59,8 +67,12 @@ fn test_adaptive_weights_last_stop() {
         corridor_end_cm: 110_000,
     };
 
+    let signals = PositionSignals {
+        z_gps_cm: 100_000,
+        s_cm: 100_000,
+    };
     let prob = compute_arrival_probability_adaptive(
-        100_000, 0, &stop, 10, None
+        signals, 0, &stop, 10, None
     );
 
     // Last stop: at stop with zero speed and 10s dwell should have high probability

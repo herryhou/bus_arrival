@@ -6,7 +6,7 @@
 use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
 use crate::recovery_trigger::should_trigger_recovery;
 use gps_processor::kalman::{process_gps_update, ProcessResult};
-use shared::{binfile::RouteData, ArrivalEvent, DistCm, DrState, GpsPoint, KalmanState, Stop};
+use shared::{binfile::RouteData, ArrivalEvent, DistCm, DrState, GpsPoint, KalmanState, PositionSignals, Stop};
 use shared::FsmState;
 
 // ===== Constants =====
@@ -121,8 +121,10 @@ impl<'a> State<'a> {
             self.first_fix,
         );
 
-        let (s_cm, v_cms) = match result {
-            ProcessResult::Valid { s_cm, v_cms, seg_idx: _ } => {
+        let (s_cm, v_cms, signals) = match result {
+            ProcessResult::Valid { signals, v_cms, seg_idx: _ } => {
+                let PositionSignals { z_gps_cm: _, s_cm } = signals;
+
                 // Check for GPS jump requiring recovery (H1)
                 let prev_s_cm = self.last_valid_s_cm;
                 // Skip recovery on first fix - last_valid_s_cm is still 0 (initial value)
@@ -191,7 +193,8 @@ impl<'a> State<'a> {
                 // Update timestamp for next iteration
                 self.last_gps_timestamp = gps.timestamp;
 
-                (s_cm, v_cms)
+                // Return s_cm, v_cms, and signals for detection
+                (s_cm, v_cms, signals)
             }
             ProcessResult::Rejected(reason) => {
                 #[cfg(feature = "firmware")]
@@ -218,12 +221,14 @@ impl<'a> State<'a> {
                 // DR mode maintains valid state estimates, so no warmup reset is needed.
                 // DR outages only indicate the GPS measurement was rejected for quality reasons
                 // (e.g., excessive speed change), not that signal was lost like GPS outages.
-                (s_cm, v_cms)
+                // Construct signals for DR mode (both values same)
+                let signals = PositionSignals { z_gps_cm: s_cm, s_cm };
+                (s_cm, v_cms, signals)
             }
         };
 
         // Module ⑨: Stop corridor filtering
-        let active_indices = find_active_stops(s_cm, self.route_data);
+        let active_indices = find_active_stops(signals, self.route_data);
 
         // Module ⑩+⑪: Arrival probability and state machine for each active stop
         for stop_idx in active_indices {
@@ -244,7 +249,7 @@ impl<'a> State<'a> {
 
             // Compute arrival probability with adaptive weights
             let probability = compute_arrival_probability_adaptive(
-                s_cm,
+                signals,
                 v_cms,
                 &stop,
                 stop_state.dwell_time_s,
