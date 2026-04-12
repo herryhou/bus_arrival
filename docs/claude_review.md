@@ -113,7 +113,7 @@ A typical NMEA burst (`$GPRMC` + `$GPGGA` + `$GNGSA`) is ~220–260 bytes. The R
 | **D2** | ✅ Complete | 1ca6da2, 0871ec7 | Monotonicity threshold changed from -50000 cm to -5000 cm (-50 m). |
 | **D3** | ✅ Complete | f89645f, eef532d | Speed constraint: V_MAX_CMS=1667 (60 km/h), SIGMA_GPS_CM=2000 (20 m). |
 | **D4** | ✅ Complete | a272125, d1c8fe4 | Arriving → Idle transition on corridor exit. Resets `dwell_time_s`, preserves `announced` flag. |
-| **D5** | ⏸️ Pending | — | Dwell-time counter off-by-one on corridor entry. |
+| **D5** | ✅ Complete | 672d7cf, 02beea2, 0041613, a0f4624, 5dd4bfe | Dwell-time counter now starts counting from corridor entry. Removed else wrapper in Approaching branch, added increment in Idle branch. After 10s: p4=255 (not 229). |
 | **H1** | ✅ Complete | 8873959, 0dd557c, 9aa62cd | Recovery module wired into firmware with GPS jump detection. |
 | **H2** | ⏸️ Pending | — | Flash state persistence not implemented. |
 | **H3** | ⏸️ Pending | — | DR soft-resync (2/10) not implemented. |
@@ -127,7 +127,7 @@ A typical NMEA burst (`$GPRMC` + `$GPGGA` + `$GNGSA`) is ~220–260 bytes. The R
 
 ### Summary
 
-- **9 of 15 issues resolved** (D1, D2, D3, D4, H1, I1, I5)
-- **2 High-severity remaining** (H3)
-- **5 Medium-severity remaining** (H2, H4, I6, D5)
+- **10 of 15 issues resolved** (D1, D2, D3, D4, D5, H1, I1, I5)
+- **1 High-severity remaining** (H3)
+- **4 Medium-severity remaining** (H2, H4, I6)
 - **4 Low-severity remaining** (I2, I3, I4)
