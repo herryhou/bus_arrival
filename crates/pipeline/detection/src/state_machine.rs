@@ -73,6 +73,7 @@ impl StopState {
                 // Transition to Approaching when entering corridor
                 if s_cm >= corridor_start_cm {
                     self.fsm_state = FsmState::Approaching;
+                    self.dwell_time_s += 1; // D5 fix: Start counting from corridor entry
                 }
                 // Don't increment dwell_time when idle
             }
@@ -80,12 +81,15 @@ impl StopState {
                 if d_to_stop < 5000 {
                     self.fsm_state = FsmState::Arriving;
                 }
+
                 // Can exit corridor back to Idle if we leave the corridor
                 if s_cm < corridor_start_cm {
                     self.fsm_state = FsmState::Idle;
-                    self.dwell_time_s = 0; // Reset dwell time when leaving corridor
-                } else {
-                    // Update dwell time when in corridor
+                    self.dwell_time_s = 0;
+                }
+
+                // Update dwell time when in corridor (including first tick after transition)
+                if s_cm >= corridor_start_cm {
                     self.dwell_time_s += 1;
                 }
             }
