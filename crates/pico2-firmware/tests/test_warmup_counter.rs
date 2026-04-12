@@ -302,3 +302,50 @@ fn test_warmup_normal_three_valid_gps() {
     let result = state.process_gps(&gps5);
     assert!(result.is_some(), "Detection should be enabled, arrival should trigger");
 }
+
+#[test]
+fn test_warmup_timeout_after_repeated_rejections() {
+    // I5 fix: After 10 total ticks, detection enables even if < 3 were valid
+    // This prevents permanent stuck state when GPS is repeatedly rejected
+    let route_bytes = fs::read("../../test_data/ty225_normal.bin")
+        .expect("Failed to load ty225_normal.bin");
+    let route_data = shared::binfile::RouteData::load(&route_bytes)
+        .expect("Failed to parse ty225_normal.bin");
+    let mut state = State::new(&route_data);
+    let mut tick = 0;
+
+    // First fix: total=1, valid=0
+    let gps1 = make_gps(tick, 120.0, 25.0, 10000, 0, 100, true);
+    state.process_gps(&gps1);
+    assert_eq!(state.warmup_valid_ticks, 0);
+    assert_eq!(state.warmup_total_ticks, 1);
+
+    // Simulate 8 consecutive rejections (GPS fails speed constraint)
+    // This could happen if first fix was at a bad position
+    for i in 2..=9 {
+        tick += 1;
+        // Create GPS that will be rejected (excessive speed change)
+        let gps_bad = make_gps(tick, 120.0 + (i as f64) * 0.1, 25.0, 10000 + (i * 50000), 0, 100, true);
+        state.process_gps(&gps_bad);
+        assert_eq!(state.warmup_valid_ticks, 0, "Valid ticks should remain 0");
+        assert_eq!(state.warmup_total_ticks, i as u8, "Total ticks should increment");
+    }
+
+    // Now: total=9, valid=0 - still blocked
+    assert_eq!(state.warmup_total_ticks, 9);
+
+    // One more rejection: total=10 -> TIMEOUT, detection enabled
+    tick += 1;
+    let gps_bad = make_gps(tick, 121.0, 25.0, 10000 + 450000, 0, 100, true);
+    let result = state.process_gps(&gps_bad);
+    assert!(result.is_none(), "Rejection still blocks detection");
+    assert_eq!(state.warmup_total_ticks, 10, "Should reach timeout threshold");
+    assert_eq!(state.warmup_valid_ticks, 0, "Still 0 valid ticks");
+
+    // Detection should now be enabled via timeout
+    // Next valid GPS should proceed to detection
+    tick += 1;
+    let gps_good = make_gps(tick, 120.1, 25.01, 10000, 0, 0, true); // At stop
+    let result = state.process_gps(&gps_good);
+    assert!(result.is_some(), "Detection should be enabled via timeout, arrival should trigger");
+}
