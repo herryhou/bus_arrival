@@ -132,13 +132,17 @@ pub fn process_gps_update(
 
     // 7. Kalman update (HDOP-adaptive) with soft-resync for GPS recovery
     // H3: Apply soft-resync if in recovery mode (2/10 gain instead of full Kalman)
+    // Per spec Section 11.3: conservative gain for BOTH position and velocity
+    // to handle potentially noisy first post-outage GPS data
     if dr.in_recovery {
-        // Soft resync: ŝ_resync = ŝ_DR + (2/10)*(z_gps - ŝ_DR)
-        // Per spec Section 11.3: conservative gain to handle potentially noisy first post-outage GPS
+        // Soft resync for position: ŝ_resync = ŝ_DR + (2/10)*(z_gps - ŝ_DR)
         state.s_cm = state.s_cm + 2 * (z_raw - state.s_cm) / 10;
-        // Still update velocity normally
-        state.v_cms = state.v_cms + 77 * (gps.speed_cms - state.v_cms) / 256;
+        
+        // Soft resync for velocity: v_resync = v_DR + (2/10)*(v_gps - v_DR)
+        // Using same conservative 2/10 gain for velocity during recovery
+        state.v_cms = state.v_cms + 2 * (gps.speed_cms - state.v_cms) / 10;
         state.v_cms = state.v_cms.max(0);
+        
         // Clear recovery flag after applying soft-resync
         dr.in_recovery = false;
     } else {
