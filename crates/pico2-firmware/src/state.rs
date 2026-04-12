@@ -226,7 +226,14 @@ impl<'a> State<'a> {
                 defmt::warn!("GPS update rejected: {}", reason);
                 #[cfg(not(feature = "firmware"))]
                 let _ = reason; // Suppress unused warning when firmware feature is disabled
-                return None;
+
+                // Increment timeout counter even on rejection (I5 fix)
+                // This prevents permanent stuck state when GPS is repeatedly rejected
+                if !self.first_fix {
+                    self.warmup_total_ticks = self.warmup_total_ticks.saturating_add(1);
+                }
+
+                return None;  // Still block detection
             }
             ProcessResult::Outage => {
                 #[cfg(feature = "firmware")]
