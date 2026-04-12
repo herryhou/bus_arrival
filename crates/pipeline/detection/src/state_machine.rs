@@ -317,7 +317,7 @@ mod tests {
         // Enter corridor: should transition to Approaching
         state.update(2000, 100, stop_progress, corridor_start_cm, 0);
         assert_eq!(state.fsm_state, FsmState::Approaching);
-        assert_eq!(state.dwell_time_s, 0); // No increment on transition tick
+        assert_eq!(state.dwell_time_s, 1, "dwell_time_s should be 1 on corridor entry (D5 fix)");
     }
 
     #[test]
