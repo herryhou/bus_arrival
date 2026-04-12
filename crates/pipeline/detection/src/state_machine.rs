@@ -337,10 +337,10 @@ mod tests {
 
         state.update(5000, 100, stop_progress, corridor_start_cm, 0);
         assert_eq!(state.fsm_state, FsmState::Approaching);
-        assert_eq!(state.dwell_time_s, 1);
+        assert_eq!(state.dwell_time_s, 2, "After 2 ticks in corridor");
 
         state.update(5000, 100, stop_progress, corridor_start_cm, 0);
-        assert_eq!(state.dwell_time_s, 2);
+        assert_eq!(state.dwell_time_s, 3, "After 3 ticks in corridor");
 
         // Exit corridor: should transition to Idle and reset dwell_time
         state.update(1000, 100, stop_progress, corridor_start_cm, 0);
@@ -465,7 +465,7 @@ mod tests {
         // Move to Arriving state (Approaching -> Arriving)
         state.update(6000, 100, stop_progress, corridor_start_cm, 100);
         assert_eq!(state.fsm_state, FsmState::Arriving);
-        assert_eq!(state.dwell_time_s, 1, "dwell_time should be 1 after first Arriving tick");
+        assert_eq!(state.dwell_time_s, 2, "After corridor entry + Arriving transition");
 
         // GPS drifts backward past corridor start
         state.update(1000, 100, stop_progress, corridor_start_cm, 50);
