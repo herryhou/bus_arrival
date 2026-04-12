@@ -3,7 +3,7 @@
 use core::cmp::Ord;
 
 use crate::route_data::RouteData;
-use shared::{DistCm, DrState, GpsPoint, KalmanState, SpeedCms};
+use shared::{DistCm, DrState, GpsPoint, KalmanState, PositionSignals, SpeedCms};
 
 /// Maximum bus speed for city bus operations: 60 km/h = 1667 cm/s
 /// Per spec Section 9.1: urban transit routes, not highway speeds
@@ -31,7 +31,7 @@ const DR_DECAY_NUMERATOR: [u32; 11] = [
 /// ProcessResult from GPS update
 pub enum ProcessResult {
     Valid {
-        s_cm: DistCm,
+        signals: PositionSignals,
         v_cms: SpeedCms,
         seg_idx: usize,
     },
@@ -93,8 +93,15 @@ pub fn process_gps_update(
         dr.last_gps_time = Some(gps.timestamp);
         dr.last_valid_s = state.s_cm;
         dr.filtered_v = state.v_cms;
-        return ProcessResult::Valid {
+
+        // Construct position signals for first fix
+        let signals = PositionSignals {
+            z_gps_cm: z_raw,
             s_cm: state.s_cm,
+        };
+
+        return ProcessResult::Valid {
+            signals,
             v_cms: state.v_cms,
             seg_idx,
         };
@@ -127,13 +134,19 @@ pub fn process_gps_update(
     state.update_adaptive(z_raw, gps.speed_cms, gps.hdop_x10);
     state.last_seg_idx = seg_idx;
 
+    // Construct position signals with raw GPS and Kalman output
+    let signals = PositionSignals {
+        z_gps_cm: z_raw,   // Raw projection before Kalman
+        s_cm: state.s_cm,  // Kalman-filtered output
+    };
+
     // 8. Update DR state
     dr.last_gps_time = Some(gps.timestamp);
     dr.last_valid_s = state.s_cm;
     dr.filtered_v = state.v_cms;
 
     ProcessResult::Valid {
-        s_cm: state.s_cm,
+        signals,
         v_cms: state.v_cms,
         seg_idx,
     }

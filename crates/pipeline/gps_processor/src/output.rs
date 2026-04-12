@@ -59,7 +59,7 @@ pub fn write_output<W: Write>(
 ) -> io::Result<()> {
     // Compute active stops for all result types (even invalid ones we have s_cm)
     let s_cm_for_active = match result {
-        super::kalman::ProcessResult::Valid { s_cm, .. } => Some(*s_cm),
+        super::kalman::ProcessResult::Valid { signals, .. } => Some(signals.s_cm),
         super::kalman::ProcessResult::DrOutage { s_cm, .. } => Some(*s_cm),
         _ => None,
     };
@@ -74,11 +74,11 @@ pub fn write_output<W: Write>(
         .unwrap_or_default();
 
     let record = match result {
-        super::kalman::ProcessResult::Valid { s_cm, v_cms, seg_idx } => OutputRecord {
+        super::kalman::ProcessResult::Valid { signals, v_cms, seg_idx } => OutputRecord {
             time,
             lat,
             lon,
-            s_cm: *s_cm as i64,
+            s_cm: signals.s_cm as i64,
             v_cms: *v_cms as i32,
             heading_cdeg: Some(heading_cdeg),
             status: "valid".to_string(),
