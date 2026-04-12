@@ -24,3 +24,7 @@ pub use probability::{compute_probability_with_luts, THETA_ARRIVAL};
 
 #[cfg(feature = "std")]
 pub use probability::compute_probability;
+
+// Re-export new PositionSignals-based probability API
+pub use probability::{compute_arrival_probability, compute_arrival_probability_adaptive};
+pub use shared::PositionSignals;
