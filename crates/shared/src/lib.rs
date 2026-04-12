@@ -306,6 +306,9 @@ pub struct DrState {
     pub last_gps_time: Option<u64>,
     pub last_valid_s: DistCm,
     pub filtered_v: SpeedCms,
+    /// H3: Flag indicating we're in GPS recovery mode
+    /// Set to true when returning from outage, cleared after first valid GPS
+    pub in_recovery: bool,
 }
 
 impl DrState {
@@ -314,6 +317,7 @@ impl DrState {
             last_gps_time: None,
             last_valid_s: 0,
             filtered_v: 0,
+            in_recovery: false,
         }
     }
 }

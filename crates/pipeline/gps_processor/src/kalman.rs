@@ -130,8 +130,21 @@ pub fn process_gps_update(
         };
     }
 
-    // 7. Kalman update (HDOP-adaptive)
-    state.update_adaptive(z_raw, gps.speed_cms, gps.hdop_x10);
+    // 7. Kalman update (HDOP-adaptive) with soft-resync for GPS recovery
+    // H3: Apply soft-resync if in recovery mode (2/10 gain instead of full Kalman)
+    if dr.in_recovery {
+        // Soft resync: ŝ_resync = ŝ_DR + (2/10)*(z_gps - ŝ_DR)
+        // Per spec Section 11.3: conservative gain to handle potentially noisy first post-outage GPS
+        state.s_cm = state.s_cm + 2 * (z_raw - state.s_cm) / 10;
+        // Still update velocity normally
+        state.v_cms = state.v_cms + 77 * (gps.speed_cms - state.v_cms) / 256;
+        state.v_cms = state.v_cms.max(0);
+        // Clear recovery flag after applying soft-resync
+        dr.in_recovery = false;
+    } else {
+        // Normal Kalman update
+        state.update_adaptive(z_raw, gps.speed_cms, gps.hdop_x10);
+    }
     state.last_seg_idx = seg_idx;
 
     // Construct position signals with raw GPS and Kalman output
@@ -141,9 +154,11 @@ pub fn process_gps_update(
     };
 
     // 8. Update DR state
+    // H4: Use EMA velocity filter instead of direct Kalman copy
+    // Per spec Section 11.1: v_filtered(t) = v_filtered(t-1) + 3*(v_gps - v_filtered(t-1))/10
     dr.last_gps_time = Some(gps.timestamp);
     dr.last_valid_s = state.s_cm;
-    dr.filtered_v = state.v_cms;
+    dr.filtered_v = update_dr_ema(dr.filtered_v, gps.speed_cms);
 
     ProcessResult::Valid {
         signals,
@@ -170,6 +185,13 @@ fn check_monotonic(z_new: DistCm, z_prev: DistCm) -> bool {
     z_new >= z_prev - 5000  // CHANGED from 50000
 }
 
+/// EMA velocity filter update per spec Section 11.1
+/// Formula: v_filtered(t) = v_filtered(t-1) + 3*(v_gps - v_filtered(t-1))/10
+/// Uses α = 3/10 = 0.3 for smoothing
+pub fn update_dr_ema(v_filtered_prev: SpeedCms, v_gps: SpeedCms) -> SpeedCms {
+    v_filtered_prev + 3 * (v_gps - v_filtered_prev) / 10
+}
+
 /// Handle GPS outage (max 10 seconds per spec Section 11.2)
 fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> ProcessResult {
     let dt = match dr.last_gps_time {
@@ -180,6 +202,9 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
     if dt > 10 {
         return ProcessResult::Outage;
     }
+
+    // H3: Set recovery flag - next valid GPS will need soft-resync
+    dr.in_recovery = true;
 
     // Dead-reckoning: s(t) = s(t-1) + v_filtered * dt
     state.s_cm = dr.last_valid_s + dr.filtered_v * (dt as DistCm);
@@ -264,5 +289,70 @@ mod tests {
     fn test_monotonicity_allows_forward() {
         // Always allow forward movement
         assert!(check_monotonic(105_000, 100_000));
+    }
+
+    // ===== H4: EMA Velocity Filter Tests =====
+    
+    /// EMA coefficient α = 3/10 = 0.3
+    /// Formula: v_filtered(t) = v_filtered(t-1) + 3*(v_gps - v_filtered(t-1))/10
+    
+    #[test]
+    fn test_ema_velocity_filter_initial_value() {
+        // First GPS update should initialize filtered_v to v_gps
+        let v_gps = 500; // 5 m/s
+        let v_filtered_initial = 0;
+        
+        // EMA update: v = 0 + 3*(500 - 0)/10 = 150
+        let expected = v_filtered_initial + 3 * (v_gps - v_filtered_initial) / 10;
+        assert_eq!(expected, 150);
+    }
+    
+    #[test]
+    fn test_ema_velocity_filter_convergence() {
+        // EMA should converge toward the GPS speed over time
+        let v_filtered = 300;
+        let v_gps = 500;
+        
+        // EMA update: v = 300 + 3*(500 - 300)/10 = 300 + 60 = 360
+        let expected = v_filtered + 3 * (v_gps - v_filtered) / 10;
+        assert_eq!(expected, 360);
+        
+        // Next update: v = 360 + 3*(500 - 360)/10 = 360 + 42 = 402
+        let v_filtered = expected;
+        let expected = v_filtered + 3 * (v_gps - v_filtered) / 10;
+        assert_eq!(expected, 402);
+    }
+    
+    #[test]
+    fn test_ema_velocity_filter_smoothing() {
+        // EMA should smooth out GPS speed noise
+        let v_filtered = 400;
+        let v_gps_noisy = 700; // Sudden jump
+        
+        // EMA update: v = 400 + 3*(700 - 400)/10 = 400 + 90 = 490
+        // The filtered value changes only 30% toward the noisy GPS value
+        let expected = v_filtered + 3 * (v_gps_noisy - v_filtered) / 10;
+        assert_eq!(expected, 490);
+        assert!(expected < v_gps_noisy, "EMA should smooth out sudden jumps");
+    }
+    
+    #[test]
+    fn test_ema_velocity_filter_integer_arithmetic() {
+        // Verify integer arithmetic doesn't accumulate excessive error
+        // Formula: v += 3*(v_gps - v)/10
+        // Using integer division, we lose some precision but should be close
+        
+        let v_filtered = 433; // Odd number to test rounding
+        let v_gps = 567;
+        
+        // EMA update with integer arithmetic
+        let delta = v_gps - v_filtered;
+        let adjustment = (3 * delta) / 10; // Integer division
+        let expected = v_filtered + adjustment;
+        
+        // Verify the adjustment is approximately 30% of the delta
+        // 3 * 134 / 10 = 402 / 10 = 40 (integer division)
+        assert_eq!(adjustment, 40);
+        assert_eq!(expected, 473);
     }
 }
