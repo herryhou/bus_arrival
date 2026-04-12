@@ -122,13 +122,12 @@ A typical NMEA burst (`$GPRMC` + `$GPGGA` + `$GNGSA`) is ~220–260 bytes. The R
 | **I2** | ⏸️ Pending | — | UART i32→u64 cast issue still present. |
 | **I3** | ⏸️ Pending | — | RouteNode version comment still says "32 bytes" but actual is 24. |
 | **I4** | ⏸️ Pending | — | Memory leak in XIP misaligned path still present. |
-| **I5** | 🟡 Partial | 32e63b5, 0e73a6e | Post-outage warmup fixed; repeated rejection case still broken. |
+| **I5** | ✅ Complete | c1f1010, 007cc3d, 470bf75, fec1b13, 34d0dc1, 66198ec | Two-counter warmup system: valid_ticks (convergence) + total_ticks (timeout). DrOutage also updated. |
 | **I6** | ⏸️ Pending | — | UART RX buffer still 256 bytes (should be 512+). |
 
 ### Summary
 
-- **8 of 15 issues resolved** (D1, D2, D3, D4, H1, I1)
-- **1 partially resolved** (I5)
+- **9 of 15 issues resolved** (D1, D2, D3, D4, H1, I1, I5)
 - **2 High-severity remaining** (H3)
-- **6 Medium-severity remaining** (H2, H4, I5-part, I6, D5)
+- **5 Medium-severity remaining** (H2, H4, I6, D5)
 - **4 Low-severity remaining** (I2, I3, I4)
