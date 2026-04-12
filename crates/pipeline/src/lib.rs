@@ -182,7 +182,8 @@ impl<'a> LocalizationState<'a> {
         self.is_first_fix = false;
 
         match result {
-            gps_processor::kalman::ProcessResult::Valid { s_cm, v_cms, seg_idx: _ } => {
+            gps_processor::kalman::ProcessResult::Valid { signals, v_cms, seg_idx: _ } => {
+                let shared::PositionSignals { z_gps_cm: _, s_cm } = signals;
                 Some(gps::GpsRecord {
                     time: gps.timestamp,
                     lat: gps.lat,
