@@ -65,12 +65,12 @@ pub struct State<'a> {
     /// First fix flag - true until first GPS fix is received
     pub first_fix: bool,
     /// Number of valid GPS ticks with Kalman updates (convergence counter)
-    warmup_valid_ticks: u8,
+    pub warmup_valid_ticks: u8,
     /// Total ticks since first fix (timeout safety valve)
-    warmup_total_ticks: u8,
+    pub warmup_total_ticks: u8,
     /// Flag indicating warmup was just reset (e.g., after GPS outage)
     /// The next valid GPS tick will not increment the counter
-    warmup_just_reset: bool,
+    pub warmup_just_reset: bool,
     /// Last confirmed stop index for GPS jump recovery
     last_known_stop_index: u8,
     /// Last valid position for jump detection (cm)
@@ -186,8 +186,9 @@ impl<'a> State<'a> {
                 }
 
                 if self.warmup_just_reset {
-                    // After warmup reset (e.g., GPS outage), first tick doesn't increment counter
+                    // After warmup reset (e.g., GPS outage), first tick counts as first fix
                     self.warmup_just_reset = false;
+                    self.warmup_total_ticks = 1;
                     return None;
                 }
 
