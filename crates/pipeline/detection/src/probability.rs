@@ -161,6 +161,7 @@ pub fn arrival_probability_adaptive(
 }
 
 /// Compute individual feature scores for trace output
+/// Enables verification that F1 and F3 use independent signals
 #[cfg(feature = "std")]
 pub fn compute_feature_scores(
     signals: PositionSignals,

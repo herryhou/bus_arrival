@@ -62,12 +62,13 @@ pub struct StopTraceState {
     pub just_arrived: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+/// Individual feature scores for trace output (std/testing only)
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureScores {
-    pub p1: u8,  // Distance likelihood (Gaussian)
-    pub p2: u8,  // Speed likelihood (Logistic)
-    pub p3: u8,  // Progress likelihood (Gaussian)
-    pub p4: u8,  // Dwell time likelihood (Linear)
+    pub p1: u8,  // Raw GPS distance likelihood (F1)
+    pub p2: u8,  // Speed likelihood (F2)
+    pub p3: u8,  // Kalman distance likelihood (F3)
+    pub p4: u8,  // Dwell time likelihood (F4)
 }
 
 /// v8.4: Voice announcement event
