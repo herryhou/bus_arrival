@@ -147,10 +147,14 @@ pub fn check_speed_constraint(z_new: DistCm, z_prev: DistCm, dt: i32) -> bool {
 }
 
 /// Monotonicity constraint with noise tolerance
-/// Allow significant backward movement for GPS noise, urban canyon effects,
-/// and legitimate route variations (U-turns, detours)
+///
+/// Per spec Section 8.3: reject if z(t) - ŝ(t-1) < -1000 cm
+/// Implementation uses -5000 cm (-50 m) as a practical balance:
+/// - Tolerates GPS noise in urban canyon conditions
+/// - Catches legitimate anomalies (route reversals, GPS glitches)
+/// - Middle ground between spec (-10m) and previous (-500m)
 fn check_monotonic(z_new: DistCm, z_prev: DistCm) -> bool {
-    z_new >= z_prev - 50000 // allow -500m for GPS noise and route variations
+    z_new >= z_prev - 5000  // CHANGED from 50000
 }
 
 /// Handle GPS outage (max 10 seconds per spec Section 11.2)

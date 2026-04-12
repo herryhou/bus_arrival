@@ -395,7 +395,7 @@ fn scenario_monotonicity_tolerance(route_data: &RouteData, start_x: i32, start_y
     gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
     process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
 
-    // When: GPS jumps BACKWARDS by 5m (500cm) - within 500m tolerance
+    // When: GPS jumps BACKWARDS by 5m (500cm) - within 50m tolerance
     gps.timestamp += 1;
     gps.lat = lat_from_y(start_y + 8500);
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false);
@@ -407,25 +407,22 @@ fn scenario_monotonicity_tolerance(route_data: &RouteData, start_x: i32, start_y
         panic!("Backward noise should be accepted");
     }
 
-    // When: GPS jumps BACKWARDS by 60m (6000cm) - still within 500m tolerance
-    // to position 20m (2000cm).
-    // The monotonicity check allows z_new >= z_prev - 50000
-    // 2000 >= 9000 - 50000 = -41000, so this is ACCEPTED.
-    // To trigger rejection, we need to jump more than 500m backward.
-    // But on a 100m route, we can't test this.
-    // Let's verify it's accepted.
+    // When: GPS jumps BACKWARDS by 60m (6000cm) - exceeds 50m tolerance
+    // to position 30m (3000cm).
+    // The monotonicity check allows z_new >= z_prev - 5000
+    // 3000 >= 9000 - 5000 = 4000, so this is REJECTED.
     gps.timestamp += 60;
-    gps.lat = lat_from_y(start_y + 2000);
+    gps.lat = lat_from_y(start_y + 3000);
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 2, false);
 
-    // Then: It should be accepted (within 500m tolerance)
+    // Then: It should trigger DR outage (exceeds 50m tolerance)
     match result {
-        ProcessResult::Valid { s_cm, .. } => {
-            assert!(s_cm < 9000, "Progress should be less than previous position");
+        ProcessResult::DrOutage { .. } => {
+            // Expected - backward jump exceeds threshold
         },
-        ProcessResult::Rejected(_) => panic!("Should not reject - within 500m tolerance"),
+        ProcessResult::Valid { .. } => panic!("Should reject - exceeds 50m tolerance"),
+        ProcessResult::Rejected(_) => panic!("Should return DR outage, not Rejected"),
         ProcessResult::Outage => panic!("Should not return outage"),
-        ProcessResult::DrOutage { .. } => panic!("Should not return DR outage"),
     }
 }
 
@@ -744,19 +741,22 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
     gps.heading_cdeg = 9000; // East again
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 4, false);
 
-    // Then: Progress should indicate loop completion
-    // And should NOT jump back to 0
-    if let ProcessResult::Valid { s_cm, .. } = result {
-        // KNOWN LIMITATION: The system does not currently clamp progress to route length
-        // when GPS returns to start coordinates on a loop route. The map matcher snaps GPS
-        // to the nearest point (progress 0), and Kalman smoothing produces an intermediate value.
-        // Expected per spec: s_cm should be 20000 (route length)
-        // Actual: ~6024 (Kalman-smoothed between prediction ~20000 and raw GPS 0)
-        assert!(s_cm > 5000, "Progress should be > 5000 (not jumping back to start), got {}", s_cm);
-        // TODO: This should be: assert_eq!(s_cm, 20000, "Progress should be at route end (20000)");
-        // Tracking: https://github.com/anthropics/claude-code/issues/XXX
-    } else {
-        panic!("Loop completion update failed");
+    // Then: With the new 50m monotonicity threshold, the large backward jump
+    // from ~15000 to ~0 triggers DR outage (correct behavior until loop closure is handled)
+    match result {
+        ProcessResult::DrOutage { s_cm, .. } => {
+            // Expected - loop closure causes large backward jump that exceeds 50m threshold
+            // The DR prediction should continue moving forward
+            assert!(s_cm > 10000, "DR prediction should continue forward, got {}", s_cm);
+        }
+        ProcessResult::Valid { .. } => {
+            // This would be the behavior with the old 500m threshold
+            panic!("Should trigger DR outage - loop closure exceeds 50m monotonicity threshold");
+        }
+        ProcessResult::Rejected(_) => {
+            panic!("Should return DR outage, not Rejected");
+        }
+        ProcessResult::Outage => panic!("Should not return outage"),
     }
 }
 
@@ -782,27 +782,27 @@ fn scenario_large_backward_jump_rejection(route_data: &RouteData, start_x: i32, 
 
     // When: GPS shows a backward jump (80m -> 10m)
     // This is a 70m backward movement (7000cm).
-    // The monotonicity check allows z_new >= z_prev - 50000
-    // 1000 >= 8000 - 50000 = -42000, so this is WITHIN tolerance.
-    // To trigger rejection, we need to jump more than 500m backward.
-    // But on a 100m route, we can't test this.
-    // Let's verify it's accepted (within 500m tolerance).
+    // The monotonicity check allows z_new >= z_prev - 5000
+    // 1000 >= 8000 - 5000 = 3000, so this EXCEEDS tolerance.
+    // Should trigger DR outage.
     gps.timestamp += 70; // 70 seconds gives enough time for the speed constraint
     gps.lat = lat_from_y(start_y + 1000); // Jumped back to 10m
     gps.heading_cdeg = 18000; // South (opposite direction)
     gps.speed_cms = 1000;
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false);
 
-    // Then: Should be accepted (within 500m monotonicity tolerance)
+    // Then: Should trigger DR outage (exceeds 50m monotonicity tolerance)
     match result {
-        ProcessResult::Valid { s_cm, .. } => {
-            assert!(s_cm < 8000, "Progress should be less than previous position");
+        ProcessResult::DrOutage { .. } => {
+            // Expected - 70m backward jump exceeds 50m threshold
+        }
+        ProcessResult::Valid { .. } => {
+            panic!("Should reject - 70m backward jump exceeds 50m tolerance");
         }
         ProcessResult::Rejected(_) => {
-            panic!("Should not reject - 70m backward jump is within 500m tolerance");
+            panic!("Should return DR outage, not Rejected");
         }
         ProcessResult::Outage => panic!("Should not return outage"),
-        ProcessResult::DrOutage { .. } => panic!("Should not return DR outage"),
     }
 }
 
