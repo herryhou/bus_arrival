@@ -179,19 +179,37 @@ impl<'a> State<'a> {
 
                 if self.first_fix {
                     self.first_fix = false;
-                } else if self.warmup_just_reset {
+                    // First fix initializes Kalman but doesn't run update_adaptive
+                    // Counts toward timeout but NOT convergence
+                    self.warmup_total_ticks = 1;
+                    return None;
+                }
+
+                if self.warmup_just_reset {
                     // After warmup reset (e.g., GPS outage), first tick doesn't increment counter
                     self.warmup_just_reset = false;
                     return None;
-                } else if self.warmup_counter < WARMUP_TICKS_REQUIRED {
-                    self.warmup_counter += 1;
-                    #[cfg(feature = "firmware")]
-                    defmt::debug!(
-                        "Warmup: {}/{}",
-                        self.warmup_counter,
-                        WARMUP_TICKS_REQUIRED
-                    );
-                    return None;
+                }
+
+                // Increment total time counter
+                self.warmup_total_ticks = self.warmup_total_ticks.saturating_add(1);
+
+                // Check convergence requirement
+                if self.warmup_valid_ticks < WARMUP_TICKS_REQUIRED {
+                    self.warmup_valid_ticks += 1;
+
+                    // Block detection unless timeout expired
+                    if self.warmup_total_ticks < WARMUP_TIMEOUT_TICKS {
+                        #[cfg(feature = "firmware")]
+                        defmt::debug!(
+                            "Warmup: {}/{} valid, {}/{} total",
+                            self.warmup_valid_ticks,
+                            WARMUP_TICKS_REQUIRED,
+                            self.warmup_total_ticks,
+                            WARMUP_TIMEOUT_TICKS
+                        );
+                        return None;
+                    }
                 }
 
                 // Update recovery tracking
@@ -215,10 +233,11 @@ impl<'a> State<'a> {
                 defmt::warn!("GPS outage exceeded 10 seconds");
                 // Reset warmup on GPS loss (conservative - requires fresh warmup after outage)
                 if !self.first_fix {
-                    self.warmup_counter = 0;
+                    self.warmup_valid_ticks = 0;
+                    self.warmup_total_ticks = 0;
                     self.warmup_just_reset = true;
                     #[cfg(feature = "firmware")]
-                    defmt::debug!("GPS outage reset warmup counter");
+                    defmt::debug!("GPS outage reset warmup counters");
                 }
                 return None;
             }
