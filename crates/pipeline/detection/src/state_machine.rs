@@ -362,16 +362,16 @@ mod tests {
         assert_eq!(state.fsm_state, FsmState::Idle);
         assert_eq!(state.dwell_time_s, 0);
 
-        // Enter corridor: first tick transitions, no increment
+        // Enter corridor: first tick transitions AND increments dwell_time
         state.update(5000, 100, stop_progress, corridor_start_cm, 0);
         assert_eq!(state.fsm_state, FsmState::Approaching);
-        assert_eq!(state.dwell_time_s, 0);
+        assert_eq!(state.dwell_time_s, 1, "First tick in corridor should count toward dwell");
 
         // Subsequent ticks in corridor: dwell_time increments
         for _ in 0..5 {
             state.update(5000, 100, stop_progress, corridor_start_cm, 0);
         }
-        assert_eq!(state.dwell_time_s, 5);
+        assert_eq!(state.dwell_time_s, 6, "First tick (1) + 5 subsequent ticks = 6 total");
 
         // Exit corridor: resets to Idle
         state.update(1000, 100, stop_progress, corridor_start_cm, 0);
