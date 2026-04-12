@@ -352,4 +352,14 @@ impl<'a> State<'a> {
             }
         }
     }
+
+    /// Get the last known stop index (for testing recovery behavior)
+    pub fn last_known_stop_index(&self) -> u8 {
+        self.last_known_stop_index
+    }
+
+    /// Get the last valid position in cm (for testing recovery behavior)
+    pub fn last_valid_s_cm(&self) -> DistCm {
+        self.last_valid_s_cm
+    }
 }
