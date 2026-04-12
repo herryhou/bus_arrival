@@ -252,10 +252,37 @@ impl<'a> State<'a> {
             ProcessResult::DrOutage { s_cm, v_cms } => {
                 #[cfg(feature = "firmware")]
                 defmt::debug!("DR mode: s={}cm, v={}cm/s", s_cm, v_cms);
-                // DR mode maintains valid state estimates, so no warmup reset is needed.
-                // DR outages only indicate the GPS measurement was rejected for quality reasons
-                // (e.g., excessive speed change), not that signal was lost like GPS outages.
-                // Construct signals for DR mode (both values same)
+                // DR mode occurs when GPS measurement is rejected for quality reasons
+                // (e.g., excessive speed change, monotonicity violation).
+                // I5 fix: Count toward timeout but NOT convergence, preventing permanent stuck state.
+
+                if self.warmup_just_reset {
+                    // After warmup reset (e.g., GPS outage), first tick counts as first fix
+                    self.warmup_just_reset = false;
+                    self.warmup_total_ticks = 1;
+                    return None;
+                }
+
+                // Increment timeout counter but NOT valid counter (I5 fix)
+                // Note: first_fix is already false after first GPS, so we don't need to check it
+                if !self.first_fix {
+                    self.warmup_total_ticks = self.warmup_total_ticks.saturating_add(1);
+                }
+
+                // Block detection unless timeout expired
+                if self.warmup_total_ticks < WARMUP_TIMEOUT_TICKS {
+                    #[cfg(feature = "firmware")]
+                    defmt::debug!(
+                        "Warmup (DR): {}/{} valid, {}/{} total",
+                        self.warmup_valid_ticks,
+                        WARMUP_TICKS_REQUIRED,
+                        self.warmup_total_ticks,
+                        WARMUP_TIMEOUT_TICKS
+                    );
+                    return None;
+                }
+
+                // Timeout expired: detection enabled, proceed with DR estimates
                 let signals = PositionSignals { z_gps_cm: s_cm, s_cm };
                 (s_cm, v_cms, signals)
             }
