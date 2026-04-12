@@ -153,41 +153,25 @@ fn check_monotonic(z_new: DistCm, z_prev: DistCm) -> bool {
     z_new >= z_prev - 50000 // allow -500m for GPS noise and route variations
 }
 
-/// Handle GPS outage (extended DR support)
-/// Per spec Section 11.2: DR max duration is 10s with ~150m error.
-/// For test scenarios with longer outages (41s gaps), we continue DR
-/// with more aggressive decay beyond 10s to maintain arrival detection.
+/// Handle GPS outage (max 10 seconds per spec Section 11.2)
 fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> ProcessResult {
     let dt = match dr.last_gps_time {
         Some(t) => timestamp.saturating_sub(t),
         None => return ProcessResult::Rejected("no previous fix"),
     };
 
+    if dt > 10 {
+        return ProcessResult::Outage;
+    }
+
     // Dead-reckoning: s(t) = s(t-1) + v_filtered * dt
     state.s_cm = dr.last_valid_s + dr.filtered_v * (dt as DistCm);
 
-    // Speed decay: (9/10)^dt for dt <= 10, (9/10)^10 * (1/2)^(dt-10) for dt > 10
-    // Extended decay continues DR but with reduced confidence
-    let decay_factor = if dt <= 10 {
-        let dt_idx = dt as usize;
-        DR_DECAY_NUMERATOR[dt_idx]
-    } else {
-        // For extended outages, continue with (0.9)^10 * (0.5)^(dt-10)
-        // This provides ~35% velocity retention at 10s, decaying further
-        let base_decay = DR_DECAY_NUMERATOR[10];  // (0.9)^10 ≈ 0.3487 * 10000
-        // Calculate extended decay: (0.5)^(dt-10) * 10000
-        // For dt=41: (0.5)^31 * 10000 ≈ very small, but not zero
-        let extra_dt = (dt - 10).min(30) as u32;  // Cap to avoid underflow
-        // Extended decay as (5000/10000)^extra_dt = (1/2)^extra_dt
-        // Use bit shift for power of 2: 2^extra_dt
-        let extended_denom = if extra_dt < 31 { 1u32 << extra_dt } else { 1u32 << 30 };
-        let extended_decay = 10000u32 / extended_denom.max(1);
-        (base_decay * extended_decay / 10000).max(1)  // Ensure at least 1
-    };
+    // Speed decay normalized by dt: (9/10)^dt
+    let dt_idx = dt.min(10) as usize;
+    let decay_factor = DR_DECAY_NUMERATOR[dt_idx];
+    dr.filtered_v = (dr.filtered_v as u32 * decay_factor / 10000) as SpeedCms;
 
-    dr.filtered_v = (dr.filtered_v as u32 * decay_factor / 10000).max(0) as SpeedCms;
-
-    // Continue DR even for long outages to maintain arrival detection
     ProcessResult::DrOutage {
         s_cm: state.s_cm,
         v_cms: dr.filtered_v,
