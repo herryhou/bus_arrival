@@ -224,4 +224,28 @@ mod tests {
         assert!(v_dt1 > v_dt2 && v_dt2 > v_dt5,
             "DR decay should decrease monotonically with dt");
     }
+
+    #[test]
+    fn test_monotonicity_accepts_small_backward() {
+        // Accept -10m backward jump (GPS noise)
+        assert!(check_monotonic(100_000, 101_000));
+    }
+
+    #[test]
+    fn test_monotonicity_accepts_threshold() {
+        // Accept exactly -50m (at threshold)
+        assert!(check_monotonic(100_000, 105_000));
+    }
+
+    #[test]
+    fn test_monotonicity_rejects_large_backward() {
+        // Reject -51m (exceeds threshold)
+        assert!(!check_monotonic(100_000, 105_100));
+    }
+
+    #[test]
+    fn test_monotonicity_allows_forward() {
+        // Always allow forward movement
+        assert!(check_monotonic(105_000, 100_000));
+    }
 }
