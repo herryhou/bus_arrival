@@ -149,60 +149,45 @@ fn test_warmup_prevents_arrival_detection() {
 
 #[test]
 fn test_warmup_resets_on_gps_outage() {
-    // Load route data
+    // I5 fix: Both warmup_valid_ticks and warmup_total_ticks reset on outage
     let route_bytes = fs::read("../../test_data/ty225_normal.bin")
         .expect("Failed to load ty225_normal.bin");
     let route_data = shared::binfile::RouteData::load(&route_bytes)
         .expect("Failed to parse ty225_normal.bin");
-
     let mut state = State::new(&route_data);
+    let mut tick = 0;
 
-    // First fix to initialize
-    let gps_init = shared::GpsPoint {
-        lat: 0.0,
-        lon: 0.0,
-        heading_cdeg: i16::MIN,
-        speed_cms: 500,
-        timestamp: 1000,
-        has_fix: true,
-        hdop_x10: 10,
-    };
-    state.process_gps(&gps_init);
-
-    // Add 2 warmup ticks
-    let gps2 = shared::GpsPoint { timestamp: 2000, ..gps_init };
+    // First fix + 2 valid GPS: total=3, valid=2
+    let gps1 = make_gps(tick, 120.0, 25.0, 10000, 0, 100, true);
+    state.process_gps(&gps1);
+    tick += 1;
+    let gps2 = make_gps(tick, 120.01, 25.01, 10100, 0, 100, true);
     state.process_gps(&gps2);
-    assert_eq!(state.warmup_valid_ticks, 1);
-    assert_eq!(state.warmup_total_ticks, 2);
-
-    let gps3 = shared::GpsPoint { timestamp: 3000, ..gps_init };
+    tick += 1;
+    let gps3 = make_gps(tick, 120.02, 25.02, 10200, 0, 100, true);
     state.process_gps(&gps3);
-    assert_eq!(state.warmup_valid_ticks, 2);
-    assert_eq!(state.warmup_total_ticks, 3);
 
-    // GPS outage (>10 seconds) - should reset warmup counter to 0
-    let gps_outage = shared::GpsPoint {
-        timestamp: 14000,  // 11 seconds after last GPS (1000ms gap)
-        has_fix: false,    // No fix
-        ..gps_init
-    };
+    assert_eq!(state.warmup_valid_ticks, 2, "Should have 2 valid ticks");
+    assert_eq!(state.warmup_total_ticks, 3, "Should have 3 total ticks");
 
-    let result = state.process_gps(&gps_outage);
-    assert!(result.is_none(), "GPS outage should not trigger arrival");
-    assert_eq!(state.warmup_valid_ticks, 0, "GPS outage should reset warmup_valid_ticks to 0");
-    assert_eq!(state.warmup_total_ticks, 0, "GPS outage should reset warmup_total_ticks to 0");
+    // Simulate GPS outage (> 10 seconds without fix)
+    tick += 11;
+    let gps_outage = make_gps(tick, 120.0, 25.0, 10000, 0, 100, false); // no fix
+    state.process_gps(&gps_outage);
 
-    // After outage recovery, warmup should restart from 0, then increment on first valid GPS
-    let gps_recover = shared::GpsPoint {
-        timestamp: 15000,
-        has_fix: true,
-        ..gps_init
-    };
+    // Both counters should be reset
+    assert_eq!(state.warmup_valid_ticks, 0, "Valid ticks should reset to 0");
+    assert_eq!(state.warmup_total_ticks, 0, "Total ticks should reset to 0");
+    assert!(state.warmup_just_reset, "warmup_just_reset flag should be set");
 
-    let result = state.process_gps(&gps_recover);
-    assert!(result.is_none(), "First tick after outage should not trigger arrival");
-    assert_eq!(state.warmup_valid_ticks, 0, "After outage recovery, warmup_valid_ticks should still be 0");
-    assert_eq!(state.warmup_total_ticks, 1, "After outage recovery, warmup_total_ticks should be 1 (first fix)");
+    // Next tick should count as first fix (warmup_just_reset behavior)
+    tick += 1;
+    let gps_after = make_gps(tick, 120.1, 25.01, 10300, 0, 100, true);
+    state.process_gps(&gps_after);
+
+    assert_eq!(state.warmup_valid_ticks, 0, "Valid ticks still 0 after reset");
+    assert_eq!(state.warmup_total_ticks, 1, "Total ticks should be 1 (counts as first fix)");
+    assert!(!state.warmup_just_reset, "warmup_just_reset flag should be cleared");
 }
 
 #[test]
