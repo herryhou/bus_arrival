@@ -504,4 +504,70 @@ mod tests {
         assert_eq!(prob_old_adaptive, prob_new_adaptive,
             "Old and new adaptive API should produce identical results when signals are aligned");
     }
+
+    #[test]
+    fn test_f1_uses_raw_gps() {
+        let g_lut = super::build_gaussian_lut();
+        let l_lut = super::build_logistic_lut();
+        let stop = Stop { progress_cm: 10_000, corridor_start_cm: 0, corridor_end_cm: 20_000 };
+
+        // Raw GPS is 5m from stop, Kalman shows 0m (perfect arrival)
+        let signals = PositionSignals { z_gps_cm: 10_500, s_cm: 10_000 };
+
+        let scores = super::compute_feature_scores(signals, 0, &stop, 10, &g_lut, &l_lut);
+
+        // F1 (raw GPS) should be lower than F3 (Kalman)
+        assert!(scores.p1 < scores.p3, "F1 should reflect raw GPS distance");
+    }
+
+    #[test]
+    fn test_f3_uses_kalman() {
+        let g_lut = super::build_gaussian_lut();
+        let l_lut = super::build_logistic_lut();
+        let stop = Stop { progress_cm: 10_000, corridor_start_cm: 0, corridor_end_cm: 20_000 };
+
+        // Raw GPS shows 20m error, Kalman shows 2m (filtered)
+        let signals = PositionSignals { z_gps_cm: 12_000, s_cm: 10_200 };
+
+        let scores = super::compute_feature_scores(signals, 0, &stop, 10, &g_lut, &l_lut);
+
+        // F3 should be higher (closer) than F1
+        assert!(scores.p3 > scores.p1, "F3 should reflect Kalman smoothing");
+    }
+
+    #[test]
+    fn test_signals_independent() {
+        let signals = PositionSignals { z_gps_cm: 10_000, s_cm: 10_200 };
+        assert_eq!(signals.divergence_cm(), 200);
+        assert!(!signals.is_converged());
+    }
+
+    #[test]
+    fn test_signals_converged() {
+        let signals = PositionSignals { z_gps_cm: 10_000, s_cm: 10_000 };
+        assert_eq!(signals.divergence_cm(), 0);
+        assert!(signals.is_converged());
+    }
+
+    #[test]
+    fn test_gps_noise_f1_drops_f3_stable() {
+        // Setup: bus at stop 10_000 cm, steady state
+        let g_lut = super::build_gaussian_lut();
+        let l_lut = super::build_logistic_lut();
+        let stop = Stop { progress_cm: 10_000, corridor_start_cm: 0, corridor_end_cm: 20_000 };
+
+        // Normal conditions: both signals agree
+        let signals_normal = PositionSignals { z_gps_cm: 10_100, s_cm: 10_050 };
+        let scores_normal = super::compute_feature_scores(signals_normal, 0, &stop, 5, &g_lut, &l_lut);
+
+        // GPS noise event: raw GPS jumps 30m, Kalman filters to 5m
+        let signals_noise = PositionSignals { z_gps_cm: 13_000, s_cm: 10_500 };
+        let scores_noise = super::compute_feature_scores(signals_noise, 0, &stop, 6, &g_lut, &l_lut);
+
+        // F1 should drop significantly (raw GPS noise)
+        assert!(scores_noise.p1 < scores_normal.p1 - 50, "F1 should drop on GPS noise");
+
+        // F3 should remain stable (Kalman smoothing)
+        assert!(scores_noise.p3 > scores_normal.p3 - 30, "F3 should remain stable");
+    }
 }
