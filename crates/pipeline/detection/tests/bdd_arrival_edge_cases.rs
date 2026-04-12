@@ -69,18 +69,18 @@ fn scenario_dwell_time_progression() {
     // Given: a bus is stationary at a stop (speed = 0 cm/s)
     let corridor_start_cm = stop_progress - 8000; // 2000
 
-    // First update transitions from Idle to Approaching (no dwell_time increment)
+    // First update transitions from Idle to Approaching (dwell_time counts from entry)
     state.update(10000, 0, stop_progress, corridor_start_cm, 0);
     assert_eq!(state.fsm_state, FsmState::Approaching);
-    assert_eq!(state.dwell_time_s, 0);
+    assert_eq!(state.dwell_time_s, 1, "dwell_time_s should be 1 on corridor entry");
 
     // When: 5 more updates occur (simulating 5 seconds/updates in corridor)
     for _ in 0..5 {
         state.update(10000, 0, stop_progress, corridor_start_cm, 0);
     }
 
-    // Then: the dwell_time_s should be 5 (one for each update while in Approaching)
-    assert_eq!(state.dwell_time_s, 5);
+    // Then: the dwell_time_s should be 6 (1 for entry + 5 more updates)
+    assert_eq!(state.dwell_time_s, 6);
 }
 
 #[test]
