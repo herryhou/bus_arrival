@@ -114,20 +114,21 @@ A typical NMEA burst (`$GPRMC` + `$GPGGA` + `$GNGSA`) is ~220–260 bytes. The R
 | **D3** | ✅ Complete | f89645f, eef532d | Speed constraint: V_MAX_CMS=1667 (60 km/h), SIGMA_GPS_CM=2000 (20 m). |
 | **D4** | ✅ Complete | a272125, d1c8fe4 | Arriving → Idle transition on corridor exit. Resets `dwell_time_s`, preserves `announced` flag. |
 | **D5** | ⏸️ Pending | — | Dwell-time counter off-by-one on corridor entry. |
-| **H1** | ⏸️ Pending | — | Module ⑫ Recovery not wired into firmware. |
+| **H1** | ✅ Complete | 8873959, 0dd557c, 9aa62cd | Recovery module wired into firmware with GPS jump detection. |
 | **H2** | ⏸️ Pending | — | Flash state persistence not implemented. |
 | **H3** | ⏸️ Pending | — | DR soft-resync (2/10) not implemented. |
-| **H4** | ⏸️ Pending | — | EMA velocity filter not implemented. |
-| **I1** | ⏸️ Pending | — | build.rs macOS-only. |
-| **I2** | ⏸️ Pending | — | UART i32→u64 cast issue. |
-| **I3** | ⏸️ Pending | — | RouteNode version comment mismatch. |
-| **I4** | ⏸️ Pending | — | Memory leak in XIP misaligned path. |
-| **I5** | ⏸️ Pending | — | Warmup counter stuck on Rejected. |
-| **I6** | ⏸️ Pending | — | UART RX buffer undersized. |
+| **H4** | ⏸️ Pending | — | EMA velocity filter not implemented (still uses direct `state.v_cms`). |
+| **I1** | ✅ Complete | — | build.rs removed; build system now uses standard cargo cross-compilation. |
+| **I2** | ⏸️ Pending | — | UART i32→u64 cast issue still present. |
+| **I3** | ⏸️ Pending | — | RouteNode version comment still says "32 bytes" but actual is 24. |
+| **I4** | ⏸️ Pending | — | Memory leak in XIP misaligned path still present. |
+| **I5** | 🟡 Partial | 32e63b5, 0e73a6e | Post-outage warmup fixed; repeated rejection case still broken. |
+| **I6** | ⏸️ Pending | — | UART RX buffer still 256 bytes (should be 512+). |
 
 ### Summary
 
-- **4 of 15 issues resolved** (D1, D2, D3, D4)
-- **3 High-severity remaining** (H1, H3)
-- **7 Medium-severity remaining** (H2, H4, I5, I6, D5)
-- **5 Low-severity remaining** (I1, I2, I3, I4)
+- **8 of 15 issues resolved** (D1, D2, D3, D4, H1, I1)
+- **1 partially resolved** (I5)
+- **2 High-severity remaining** (H3)
+- **6 Medium-severity remaining** (H2, H4, I5-part, I6, D5)
+- **4 Low-severity remaining** (I2, I3, I4)
