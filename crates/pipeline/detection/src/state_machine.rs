@@ -438,4 +438,31 @@ mod tests {
         assert!(state.should_announce(2000, corridor_start_cm),
             "Approaching state should trigger announcement");
     }
+
+    #[test]
+    fn test_arriving_to_idle_on_corridor_exit() {
+        // D4 fix: Arriving state should transition to Idle when exiting corridor
+        // This prevents FSM from getting stuck with dwell_time_s incrementing forever
+        let mut state = StopState::new(0);
+        let stop_progress = 10000;
+        let corridor_start_cm = 2000;
+
+        // Start: Enter corridor (Idle -> Approaching)
+        state.update(5000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(state.fsm_state, FsmState::Approaching);
+
+        // Move to Arriving state (Approaching -> Arriving)
+        state.update(6000, 100, stop_progress, corridor_start_cm, 100);
+        assert_eq!(state.fsm_state, FsmState::Arriving);
+        assert_eq!(state.dwell_time_s, 1, "dwell_time should be 1 after first Arriving tick");
+
+        // GPS drifts backward past corridor start
+        state.update(1000, 100, stop_progress, corridor_start_cm, 50);
+
+        // Should transition to Idle and reset dwell_time
+        assert_eq!(state.fsm_state, FsmState::Idle,
+            "Arriving should transition to Idle when s_cm < corridor_start_cm");
+        assert_eq!(state.dwell_time_s, 0,
+            "dwell_time_s should be reset to 0 on corridor exit");
+    }
 }
