@@ -123,69 +123,32 @@ pub fn find_best_segment_restricted(
     route_data: &RouteData,
     last_idx: usize,
 ) -> usize {
-    // 1. First, search in a small window ahead of last_idx
-    // Window: [last_idx - 2, last_idx + 10]
-    const WINDOW_BACK: usize = 2; // GPS 雜訊造成的最大表觀後退路段數
-    const WINDOW_FWD: usize = 10; // V_MAX(3000 cm/s) × 最大路段長(~30m) 的 10× 緩衝
+    // Early-exit threshold: if the best eligible segment in the window is
+    // within SIGMA_GPS_CM (20 m), skip the expensive grid search.
+    // Now that scores are pure dist2, this comparison is physically meaningful.
+    const MAX_DIST2_EARLY_EXIT: Dist2 =
+        SIGMA_GPS_CM as i64 * SIGMA_GPS_CM as i64; // 4 000 000 cm²
+
+    const WINDOW_BACK: usize = 2;
+    const WINDOW_FWD: usize = 10;
 
     let start = last_idx.saturating_sub(WINDOW_BACK);
     let end = (last_idx + WINDOW_FWD).min(route_data.node_count.saturating_sub(1));
 
-    let mut best_idx = last_idx;
-    let mut best_score = i64::MAX;
-    let mut found_in_window = false;
+    // PHASE 1: Window search
+    let (window_best_eligible, window_eligible_dist2, window_eligible_found,
+         window_best_any, _window_any_dist2) =
+        best_eligible(gps_x, gps_y, gps_heading, gps_speed, route_data,
+                      start..=end);
 
-    for idx in start..=end {
-        if let Some(seg) = route_data.get_node(idx) {
-            let score = segment_score(gps_x, gps_y, gps_heading, gps_speed, &seg);
-            if score < best_score {
-                best_score = score;
-                best_idx = idx;
-                found_in_window = true;
-            }
-        }
+    // Early exit if eligible segment found within threshold
+    if window_eligible_found && window_eligible_dist2 < MAX_DIST2_EARLY_EXIT {
+        return window_best_eligible;
     }
 
-    // 2. If window score is acceptable, use it (e.g. distance < 50m)
-    // 50m squared = 5000^2 = 25,000,000
-    const MAX_DIST_SQRT: i64 = SIGMA_GPS_CM as i64 * SIGMA_GPS_CM as i64;
-    if found_in_window && best_score < MAX_DIST_SQRT {
-        return best_idx;
-    }
-
-    // 3. Fallback: Full grid query
-    // Guard against GPS outside bounding box (cold start, GPS jump)
-    if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
-        return last_idx;  // Conservative fallback
-    }
-
-    let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
-    let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
-
-    // Search 3x3 grid neighborhood
-    for dy in 0..=2 {
-        for dx in 0..=2 {
-            let ny = gy as i32 + dy as i32 - 1;
-            let nx = gx as i32 + dx as i32 - 1;
-            if ny < 0 || nx < 0 {
-                continue;
-            }
-
-            // Visit cell indices using visitor pattern (no allocation)
-            let cell_handler = |idx: u16| {
-                if let Some(seg) = route_data.get_node(idx as usize) {
-                    let score = segment_score(gps_x, gps_y, gps_heading, gps_speed, &seg);
-                    if score < best_score {
-                        best_score = score;
-                        best_idx = idx as usize;
-                    }
-                }
-            };
-            let _ = route_data.grid.visit_cell(nx as u32, ny as u32, cell_handler);
-        }
-    }
-
-    best_idx
+    // TODO: Grid search will be added in next task
+    // For now, return window_best_any as fallback
+    window_best_any
 }
 
 /// Heading-weighted segment score (DEPRECATED: now pure distance)
