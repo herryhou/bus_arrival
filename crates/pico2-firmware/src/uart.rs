@@ -212,6 +212,24 @@ pub async fn write_arrival_event_async(
         Ok(())
     }
 
+    // Helper to append signed integer as decimal string
+    fn append_i64(buf: &mut [u8], p: &mut usize, n: i64) -> Result<(), ()> {
+        if n < 0 {
+            // Format negative numbers with leading minus sign
+            if *p + 1 > buf.len() {
+                return Err(());
+            }
+            buf[*p] = b'-';
+            *p += 1;
+            // Format absolute value
+            let abs_n = n.wrapping_abs() as u64;
+            append_u64(buf, p, abs_n)
+        } else {
+            // Positive numbers use the unsigned formatter
+            append_u64(buf, p, n as u64)
+        }
+    }
+
     // Build message prefix based on event type
     if matches!(event.event_type, shared::ArrivalEventType::Arrival) {
         append!(b"ARRIVAL");
