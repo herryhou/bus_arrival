@@ -1,6 +1,8 @@
 
 ## E1. The Heading Penalty Has No Tunable λ — It Silently Overrides Distance
 
+**Status:** ✅ FIXED (v8.9 - Filter-then-Rank Architecture)
+
 The spec defines:
 
 $$\text{score}(i) = d^2 + \lambda \cdot \text{diff}^2 \cdot w_h$$
@@ -13,7 +15,15 @@ and recommends λ = 1 cm²/cdeg² as a starting value. In `segment_score`, the a
 
 λ is absent (effectively λ = 1, unitless). The problem is a unit mismatch: `heading_diff` is in centidegrees (0.01°), so a 90° difference = 9,000 cdeg, giving a heading term of 9000² × 256 >> 8 = **324,000,000**. A typical on-route `d²` for a bus 10–50 cm off the line is **100–25,000**. The heading term is 10,000× larger than the distance term, turning a soft penalty into a de facto hard exclusion. Near stops where GPS heading is unreliable (bus nearly stationary, heading jitter), this will frequently cause wrong segment selection because the low-speed weight ramp never fully zeroes the term — it approaches zero but the quadratic heading penalty is so large that even a 10% residual dominates.
 
-The λ parameter needs to have units of cm²/cdeg² with a value of ~0.000003 to produce a numerically balanced score, or the entire heading term needs to be rethought with proper unit reconciliation.
+**Solution Implemented (v8.9):**
+
+Replaced blended scoring with **Filter-then-Rank** architecture:
+- **Filter:** `heading_eligible()` - Boolean heading gate based on speed-adjusted threshold
+- **Rank:** `segment_score()` - Pure distance squared (no heading term)
+
+This eliminates the unit mismatch problem entirely. The heading threshold is now a single, physically interpretable parameter (90° at full speed) rather than an arbitrary λ scale factor.
+
+See `docs/bus_arrival_tech_report_v8.md` Section 7.2-7.3 for the updated architecture specification.
 
 ---
 
@@ -97,10 +107,10 @@ Additionally, the first stop on the route has `corridor_start = stop_progress - 
 
 ## Summary
 
-| Issue | Impact |
-|-------|--------|
-| Heading penalty lacks λ — dominates distance at 10,000× | Wrong segment selected near stops, especially during approach/low-speed |
-| Linear sum mislabeled as Bayesian — single feature can override others | False positives when one feature fires strongly and others contradict |
+| Issue | Status | Impact |
+|-------|--------|--------|
+| Heading penalty lacks λ — dominates distance at 10,000× | ✅ FIXED (v8.9) | Wrong segment selected near stops, especially during approach/low-speed |
+| Linear sum mislabeled as Bayesian — single feature can override others | OPEN | False positives when one feature fires strongly and others contradict |
 | F1 and F3 are structurally correlated | Wastes 10/32 weight on near-redundant signal |
 | HDOP one cycle stale | Adaptive Kalman responds too late on rapid quality degradation |
 | Midnight rollover — DR freezes for one tick | Silent position stall at 00:00:00 |

@@ -4,7 +4,39 @@
 
 **目標受眾：** Embedded Rust 開發團隊  
 **硬體平台：** Raspberry Pi Pico 2（RP2350）  
-**文件版本：** v8.8（Grid 優化：bitmask + u16 offsets）
+**文件版本：** v8.9（Filter-then-Rank：修正 E1 heading penalty 支配問題）
+
+### 版本更新記錄（Changelog）
+
+#### v8.9 → v8.8（2026-04-13）- E1 修正：Filter-then-Rank 架構
+
+**問題：** 原設計使用混合評分（$d^2 + \lambda \cdot \text{diff}^2 \cdot w_h$），但因 λ 缺失且單位不匹配（cm² + cdeg²），heading 項遠大於 distance 項（10,000×），實際上變成了硬排除。
+
+**解決方案：** Filter-then-Rank 架構
+- **Filter（過濾）**：布林 heading 閘（`heading_eligible`），基於速度調整的閾值（`heading_threshold_cdeg`）
+- **Rank（排名）**：純 distance 平方（`segment_score`），移除 heading 參數
+
+**主要變更：**
+- 新增 `MAX_HEADING_DIFF_CDEG = 9_000`（90° heading 閘常數）
+- 新增 `heading_threshold_cdeg(w)` 函數：速度依賴的 heading 閾值
+- 新增 `heading_eligible(gps_heading, gps_speed, seg_heading)` 函數：布林過濾器
+- 新增 `best_eligible()` 函數：雙追蹤器（eligible + any）
+- 重寫 `find_best_segment_restricted()`：window → grid 搜索，雙追蹤器 seeding
+- 簡化 `segment_score()`：移除 heading 參數，返回純 distance 平方
+
+**關鍵不變量（Invariants）：**
+- Early exit 需要 `eligible_found = true`
+- `best_eligible_dist2 = MAX` 當 `window_eligible = false`（防止掩蓋 bug）
+- 雙追蹤器從 window 傳承到 grid
+- Grid 設定 `eligible_found = true` 當找到 eligible 路段
+- Fallback 返回 `best_any_idx`（明確降級）
+
+**測試更新：**
+- 更新 `scenario_loop_closure` 測試以接受 filter-then-rank 行為（角落處多個 eligible 路段皆有效）
+
+**檔案變更：**
+- `crates/pipeline/gps_processor/src/map_match.rs`：核心實作
+- `crates/pipeline/gps_processor/tests/bdd_localization.rs`：測試更新
 
 ---
 
@@ -521,71 +553,179 @@ $$d^2(G,\; \text{seg}_i) = \|G - P_t\|^2$$
 
 其中 $\text{dx}_\text{cm}$、$\text{dy}_\text{cm}$、$\text{seg\_len\_mm}$ 已儲存於 `RouteNode`。**$\text{len2}_\text{cm2}$ 則由 runtime 計算：$(\text{seg\_len\_mm} / 10)^2$**。Runtime 僅需整數運算：點積（i64）、除法（i64）、距離平方（i64），完全避免 `sqrt`。
 
-### 7.2 方向篩選（純整數，漸進權重）
+### 7.2 方向篩選（Filter-then-Rank 架構）
 
-利用預算之 `heading_cdeg`，對方向差進行**漸進降權**而非二元排除，以解決低速時誤匹配對向路段的問題。
+**E1 修正：** 原設計使用混合評分（$d^2 + \lambda \cdot \text{diff}^2 \cdot w_h$），但因單位不匹配（cm² + cdeg²）且 λ 缺失，導致 heading 項遠大於 distance 項（10,000×），實際上變成了硬排除。
 
-**原設計（二元切換）的問題：** 低速（< 83 cm/s）時完全跳過 heading 篩選，公車停靠後若 GPS 漂移至對向道路附近，可能在 30–83 cm/s 模糊速度區間誤匹配對向路段，造成 progress 短暫跳反。
+**新設計：Filter-then-Rank**
 
-**改進設計：漸進速度加權（Heading Weight Ramp）**
+採用兩階段架構解決單位混合問題：
+1. **Filter（過濾）**：布林 heading 閘，基於速度調整的閾值
+2. **Rank（排名）**：純 distance 平方（$d^2$）
 
-定義方向懲罰係數 $w_h \in [0, 256]$（整數 1/256 scale）：
+這種架構的優點：
+- 物理可解釋：heading 閘值單位為度（°），任何開發者都能理解
+- 避免單位混合：不將 cm² 和 cdeg² 相加
+- 清晰的責任分離：heading 判斷可行性，distance 判斷優劣
+
+#### 7.2.1 Heading Weight Ramp（速度漸進權重）
+
+定義方向權重係數 $w_h \in [0, 256]$（整數 1/256 scale）：
 
 $$w_h = \min\!\left(\frac{v_\text{cms}}{v_\text{ramp}},\; 1\right) \times 256, \quad v_\text{ramp} = 83\ \text{cm/s（3 km/h）}$$
 
-整數實作（1 次乘法 + 1 次右移，無除法）：
+整數實作：
 
 ```rust
-/// Heading penalty weight, linearly ramped with speed.
-/// Returns 0..=256: 0 → no heading penalty (stationary), 256 → full penalty.
-///
-/// Ramp: w = 0 at v = 0 cm/s, w = 256 at v ≥ 83 cm/s (3 km/h).
-pub fn heading_weight(v_cms: i32) -> i32 {
-    // v_ramp = 83 cm/s; scale: multiply then saturate at 256
+/// Heading weight: 0 at v=0, 256 at v≥83 cm/s (3 km/h).
+fn heading_weight(v_cms: SpeedCms) -> i32 {
     ((v_cms * 256) / 83).min(256)
 }
-
-/// Heading-weighted score penalty term.
-/// At low speed the heading term approaches zero → distance dominates.
-/// At normal speed (≥ 3 km/h) full heading constraint applies.
-pub fn heading_penalty(
-    gps_heading: HeadCdeg,
-    seg_heading: HeadCdeg,
-    v_cms: i32,
-    lambda: i32,          // base penalty coefficient (cm²/cdeg²)
-) -> i64 {
-    let diff = heading_diff_cdeg(gps_heading, seg_heading) as i64;
-    let w    = heading_weight(v_cms) as i64;
-    // w=256 → full penalty; w=0 → no penalty
-    (lambda as i64 * diff * diff * w) >> 8
-}
 ```
 
-**漸進權重 vs 二元切換的對比：**
+| 速度 | 權重 | 含義 |
+|------|------|------|
+| 0 cm/s | 0 | 停車，heading 不可靠 |
+| 40 cm/s（~1.4 km/h） | ~123 | 部分約束 |
+| 83 cm/s（3 km/h） | 256 | 完全約束 |
+| > 83 cm/s | 256 | 完全約束 |
 
-| 速度 | 舊設計（二元） | 新設計（漸進） |
-|------|-------------|-------------|
-| 0 cm/s | heading 無效 | heading 權重 0（相同） |
-| 40 cm/s（~1.4 km/h） | heading 無效 | heading 權重 ≈ 49%（部分約束） |
-| 83 cm/s（3 km/h） | heading 突然全效 | heading 權重 100%（平滑過渡） |
-| > 83 cm/s | heading 全效 | heading 全效（相同） |
+#### 7.2.2 Heading Threshold（速度依賴閾值）
 
-此設計在低速模糊區間仍保留部分方向約束，防止停車時誤匹配對向路段，同時完全避免二元切換帶來的評分不連續。
-
-> **$\lambda$ 建議初始值：** $1\ \text{cm}^2 / \text{cdeg}^2$（路線密度高時可調大，使方向約束更強）。
-
-### 7.3 路段評分（純整數）
-
-$$\text{score}(i) = d^2(G, \text{seg}_i) + \text{heading\_penalty}(\theta_\text{gps},\, \theta_i,\, v,\, \lambda)$$
-
-其中 `heading_penalty` 已包含速度漸進權重（詳見 7.2），選擇 score 最小之路段。$\lambda$ 依路線密度調整（建議初始值 $1\ \text{cm}^2/\text{cdeg}^2$），原始 60° 硬截止條件保留作為**粗略預篩選**（可選，用於快速排除明顯背向路段節省後續乘法）：
+Heading 閘值隨速度線性插值，在停止時完全開放（因 heading 不可靠），在正常速度時收緊至 90°：
 
 ```rust
-// Optional pre-filter: discard segments with heading diff > 90° at any speed
-if v_cms > 83 && !heading_within(gps_heading_cdeg, seg.heading_cdeg, 9000) {
-    continue;  // 90° hard cutoff — only at normal speed
+/// Heading filter threshold for a given speed weight.
+/// Returns u32::MAX (gate disabled) when w = 0 — stopped, heading unreliable.
+/// Returns 90° (9000 cdeg) at w = 256 — full speed, meaningful gate.
+fn heading_threshold_cdeg(w: i32) -> u32 {
+    if w == 0 {
+        return u32::MAX;
+    }
+    // threshold = 36000 - (36000 - 9000) × w / 256
+    let range = 36_000u32 - 9_000; // 27 000
+    36_000 - range * w as u32 / 256
 }
 ```
+
+- **w = 0（停止）**：`u32::MAX` → 閘完全開放
+- **w = 128（~1.5 km/h）**：約 22,500 cdeg（225°，幾乎開放）
+- **w = 256（≥3 km/h）**：9,000 cdeg（90°，有意義的閘）
+
+#### 7.2.3 Heading Eligible（布林過濾器）
+
+```rust
+/// Returns true if segment is a plausible direction of travel.
+/// Three cases:
+///   - Sentinel heading (i16::MIN): GGA-only mode → always eligible
+///   - Stopped (w = 0): heading unreliable → always eligible  
+///   - Moving: eligible iff heading_diff ≤ threshold(speed)
+fn heading_eligible(gps_heading: HeadCdeg, gps_speed: SpeedCms, seg_heading: HeadCdeg) -> bool {
+    if gps_heading == i16::MIN {
+        return true; // GGA-only: preserve existing sentinel behaviour
+    }
+    let w = heading_weight(gps_speed);
+    let threshold = heading_threshold_cdeg(w);
+    let diff = heading_diff_cdeg(gps_heading, seg_heading) as u32;
+    diff <= threshold
+}
+```
+
+**關鍵設計決策：**
+- 這是**硬閘**（hard gate），不是混合懲罰。路段要麼物理上可行，要麼不可行
+- 避免了「部分信用」帶來的單位混合問題（cm² + cdeg²）
+- 停車時 heading 不可靠，所以不拒絕任何路段
+- GGA-only 模式（sentinel `i16::MIN`）保留原有行為
+
+### 7.3 路段評分與選擇（Filter-then-Rank）
+
+**路段評分：純 Distance 平方**
+
+$$\text{score}(i) = d^2(G, \text{seg}_i)$$
+
+其中 $d^2$ 為 GPS 點到路段的距離平方（詳見 7.1）。Heading **有意義地缺席**於評分函數 — heading 屬於過濾階段，不屬於排名階段。
+
+```rust
+/// Distance-squared from GPS point to segment (clamped projection).
+/// Heading is intentionally absent — belongs in heading_eligible filter.
+pub fn segment_score(
+    gps_x: DistCm,
+    gps_y: DistCm,
+    seg: &RouteNode,
+) -> Dist2 {
+    distance_to_segment_squared(gps_x, gps_y, seg)
+}
+```
+
+**路段選擇：Window Search → Grid Search**
+
+採用兩階段搜索，使用 **dual trackers**（雙追蹤器）防止 heading-ineligible 結果掩蓋 eligible-but-farther 結果：
+
+1. **Window Search（窗格搜索）**：
+   - 搜索範圍：`[last_idx - 2, last_idx + 10]`
+   - 使用 `best_eligible()` 同時追蹤：
+     - `best_eligible_*`：通過 heading 過濾的最佳路段
+     - `best_any_*`：純 distance 的最佳路段（不管 heading）
+   - Early exit：若 eligible 路段在 20m 內 → 直接返回
+
+2. **Grid Search（格網搜索）**（若 window 無 eligible 路段或超出 20m）：
+   - 搜索 GPS 位置周圍 3×3 格網
+   - **關鍵：Seeding（種子初始化）**
+     - 若 `window_eligible = true`：用 window 的 eligible 結果做種子
+     - 若 `window_eligible = false`：`best_eligible_dist2 = MAX`（讓第一個 eligible grid 路段勝出）
+   - 雙追蹤器持續更新
+   - Fallback：若無 eligible 路段 → 回退到 `best_any_idx` 並記錄警告
+
+```rust
+/// Scan segment indices, returning (best_eligible, best_any).
+fn best_eligible(
+    gps_x: DistCm, gps_y: DistCm,
+    gps_heading: HeadCdeg, gps_speed: SpeedCms,
+    route_data: &RouteData,
+    range: impl Iterator<Item = usize>,
+) -> (usize, Dist2, bool, usize, Dist2) {
+    let mut best_eligible_idx: Option<usize> = None;
+    let mut best_eligible_dist2 = Dist2::MAX;
+    let mut best_any_idx: Option<usize> = None;
+    let mut best_any_dist2 = Dist2::MAX;
+
+    for idx in range {
+        if let Some(seg) = route_data.get_node(idx) {
+            let d2 = segment_score(gps_x, gps_y, &seg);
+
+            // Update best_any tracker (pure distance)
+            if d2 < best_any_dist2 {
+                best_any_dist2 = d2;
+                best_any_idx = Some(idx);
+            }
+
+            // Update best_eligible tracker (heading must pass)
+            if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg)
+                && d2 < best_eligible_dist2
+            {
+                best_eligible_dist2 = d2;
+                best_eligible_idx = Some(idx);
+            }
+        }
+    }
+
+    let eligible_found = best_eligible_idx.is_some();
+    let eligible_idx = best_eligible_idx.unwrap_or(0);
+    let any_idx = best_any_idx.unwrap_or(0);
+
+    (eligible_idx, best_eligible_dist2, eligible_found, any_idx, best_any_dist2)
+}
+```
+
+**不變量（Invariants）：**
+
+| 不變量 | 為什麼重要 |
+|--------|------------|
+| Early exit 需要 `eligible_found = true` | 防止返回 heading-ineligible 的 window 路段（U-turn bug 修正） |
+| `best_eligible_dist2 = MAX` 當 `window_eligible = false` | 防止 heading-ineligible window 結果掩蓋 eligible-but-farther grid 路段 |
+| 雙追蹤器從 window 傳承到 grid | Grid 只能改進，不會變差 |
+| Grid 設定 `eligible_found = true` 當找到 eligible 路段 | 關鍵：當 `window_eligible = false` 時，grid 可能發現第一個 eligible 結果 |
+| Fallback 返回 `best_any_idx` | 當無 eligible 路段時，明確降級到純 distance，而不是靜默錯誤 |
 
 ---
 
