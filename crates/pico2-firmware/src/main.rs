@@ -14,6 +14,7 @@ use embassy_time::{Duration, Timer};
 use embassy_rp::uart::{BufferedInterruptHandler, BufferedUart, Config as UartConfig};
 use embassy_rp::bind_interrupts;
 use embassy_rp::block::ImageDef;
+use embassy_rp::flash::Flash;
 
 // Module declarations
 mod lut;
@@ -50,6 +51,9 @@ async fn main(_spawner: Spawner) {
     // Initialize peripherals
     let p = embassy_rp::init(Default::default());
 
+    // Initialize flash driver for state persistence
+    let mut flash = Flash::<_, _, _, { 2 * 1024 * 1024 }>::new(p.FLASH, p.DMA_CH0);
+
     // Initialize UART for GPS NMEA input and arrival event output
     // Using buffered UART (interrupt-based) for true async I/O without DMA requirement
     // TX/RX buffers must live for the entire program duration
@@ -82,8 +86,16 @@ async fn main(_spawner: Spawner) {
         route_data.node_count, route_data.stop_count
     );
 
-    // Initialize state with route data reference (no persisted state yet - will load in Task 9)
-    let mut state = state::State::new(&route_data, None);
+    // Load persisted state from flash (may be None on first boot)
+    let persisted = persist::load(&mut flash).await;
+    if persisted.is_some() {
+        info!("Loaded persisted state");
+    } else {
+        info!("No valid persisted state, cold start");
+    }
+
+    // Initialize state with route data reference
+    let mut state = state::State::new(&route_data, persisted);
 
     // Initialize line buffer for NMEA data
     let mut line_buf = uart::UartLineBuffer::new();
@@ -136,6 +148,25 @@ async fn main(_spawner: Spawner) {
                     line_buf.reset();
                     break;
                 }
+            }
+        }
+
+        // Persist state if stop index changed and rate limit allows
+        if let Some(current_stop) = state.current_stop_index() {
+            if state.should_persist(current_stop) {
+                let ps = shared::PersistedState::new(state.kalman.s_cm, current_stop);
+                match persist::save(&mut flash, &ps).await {
+                    Ok(()) => {
+                        info!("Persisted state: stop={}, progress={}cm", current_stop, state.kalman.s_cm);
+                        state.mark_persisted(current_stop);
+                    }
+                    Err(()) => {
+                        defmt::warn!("Failed to persist state to flash");
+                    }
+                }
+            } else {
+                // Increment tick counter for rate limiting
+                state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
             }
         }
 
