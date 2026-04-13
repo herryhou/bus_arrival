@@ -30,6 +30,27 @@ fn heading_threshold_cdeg(w: i32) -> u32 {
     36_000 - range * w as u32 / 256
 }
 
+/// Returns true if this segment is a plausible direction of travel given the
+/// current GPS heading.
+///
+/// Three cases handled explicitly:
+///   - Sentinel heading (i16::MIN): GGA-only mode, no heading data → always eligible
+///   - Stopped (w = 0): heading is unreliable → always eligible
+///   - Moving: eligible iff heading_diff ≤ threshold(speed)
+///
+/// Note: this is a hard gate, not a blended penalty.  A segment is either
+/// physically plausible or it isn't; partial credit produces commensuration
+/// problems (adding cm² to cdeg²).
+fn heading_eligible(gps_heading: HeadCdeg, gps_speed: SpeedCms, seg_heading: HeadCdeg) -> bool {
+    if gps_heading == i16::MIN {
+        return true; // GGA-only: preserve existing sentinel behaviour
+    }
+    let w = heading_weight(gps_speed);
+    let threshold = heading_threshold_cdeg(w);
+    let diff = heading_diff_cdeg(gps_heading, seg_heading) as u32;
+    diff <= threshold
+}
+
 // Import libm functions for no_std
 #[cfg(not(feature = "std"))]
 use libm::{cos as f64_cos, round as f64_round};
