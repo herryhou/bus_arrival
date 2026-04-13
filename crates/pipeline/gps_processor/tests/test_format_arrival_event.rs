@@ -34,8 +34,8 @@ fn test_format_arrival_event_arrival() {
     assert!(!result.contains(",]"));
 
     // Parse with serde_json to verify it's actually valid JSON
-    let parsed: serde_json::Value = serde_json::from_str(&result)
-        .expect("Output should be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&result).expect("Output should be valid JSON");
 
     assert_eq!(parsed["type"], "arrival");
     assert_eq!(parsed["time"], 1234567890);
@@ -60,8 +60,8 @@ fn test_format_arrival_event_departure() {
 
     assert!(result.contains("\"type\":\"departure\""));
 
-    let parsed: serde_json::Value = serde_json::from_str(&result)
-        .expect("Output should be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&result).expect("Output should be valid JSON");
 
     assert_eq!(parsed["type"], "departure");
     assert_eq!(parsed["time"], 1876543210);
@@ -83,8 +83,8 @@ fn test_format_arrival_event_announce() {
 
     assert!(result.contains("\"type\":\"announce\""));
 
-    let parsed: serde_json::Value = serde_json::from_str(&result)
-        .expect("Output should be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&result).expect("Output should be valid JSON");
 
     assert_eq!(parsed["type"], "announce");
 }
@@ -101,8 +101,8 @@ fn test_format_arrival_event_all_fields_present() {
     };
 
     let result = format_arrival_event(&event);
-    let parsed: serde_json::Value = serde_json::from_str(&result)
-        .expect("Output should be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&result).expect("Output should be valid JSON");
 
     // Verify all 6 fields are present
     assert_eq!(parsed.as_object().unwrap().len(), 6);

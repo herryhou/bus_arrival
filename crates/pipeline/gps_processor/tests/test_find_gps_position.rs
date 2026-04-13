@@ -2,7 +2,7 @@
 
 mod common;
 use common::load_test_asset_bytes;
-use shared::binfile::{RouteData, BusError};
+use shared::binfile::{BusError, RouteData};
 
 #[test]
 fn test_find_gps_route_position() {
@@ -36,15 +36,23 @@ fn test_find_gps_route_position() {
         let cum_dist = node.cum_dist_cm;
         let x = node.x_cm;
         let y = node.y_cm;
-        println!("Closest node {}: cum_dist_cm={}, x_cm={}, y_cm={}, diff={} cm ({} m)",
-            closest_idx, cum_dist, x, y, min_diff, min_diff / 100);
+        println!(
+            "Closest node {}: cum_dist_cm={}, x_cm={}, y_cm={}, diff={} cm ({} m)",
+            closest_idx,
+            cum_dist,
+            x,
+            y,
+            min_diff,
+            min_diff / 100
+        );
 
         // Convert back to lat/lon
         use shared::{EARTH_R_CM, FIXED_ORIGIN_LAT_DEG, FIXED_ORIGIN_LON_DEG};
         let lat_avg = route_data.lat_avg_deg;
 
         let lat = FIXED_ORIGIN_LAT_DEG + (y as f64 / EARTH_R_CM as f64).to_degrees();
-        let lon = FIXED_ORIGIN_LON_DEG + (x as f64 / (EARTH_R_CM as f64 * lat_avg.to_radians().cos())).to_degrees();
+        let lon = FIXED_ORIGIN_LON_DEG
+            + (x as f64 / (EARTH_R_CM as f64 * lat_avg.to_radians().cos())).to_degrees();
 
         println!("Corresponding lat/lon: lat={}, lon={}", lat, lon);
     }

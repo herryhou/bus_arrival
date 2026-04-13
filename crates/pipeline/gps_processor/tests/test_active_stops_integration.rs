@@ -5,7 +5,7 @@
 
 mod common;
 use common::load_test_asset_bytes;
-use shared::binfile::{RouteData, BusError};
+use shared::binfile::{BusError, RouteData};
 
 #[test]
 fn test_active_stops_functionality() {
@@ -34,39 +34,59 @@ fn test_active_stops_functionality() {
     let stop_last = route_data.get_stop(last_stop_idx).unwrap();
     let gps_s_cm = stop_last.progress_cm as i32;
     let stops = route_data.stops();
-    let active_stops: Vec<usize> = stops.iter()
+    let active_stops: Vec<usize> = stops
+        .iter()
         .enumerate()
         .filter(|(_, stop)| gps_s_cm >= stop.corridor_start_cm && gps_s_cm <= stop.corridor_end_cm)
         .map(|(i, _)| i)
         .collect();
 
-    assert!(!active_stops.is_empty(),
-        "GPS at s_cm={} should have at least one active stop (had none)", gps_s_cm);
+    assert!(
+        !active_stops.is_empty(),
+        "GPS at s_cm={} should have at least one active stop (had none)",
+        gps_s_cm
+    );
 
-    assert!(active_stops.contains(&last_stop_idx),
-        "GPS at s_cm={} should be in Stop {}'s corridor", gps_s_cm, last_stop_idx);
+    assert!(
+        active_stops.contains(&last_stop_idx),
+        "GPS at s_cm={} should be in Stop {}'s corridor",
+        gps_s_cm,
+        last_stop_idx
+    );
 
     // Test case 2: GPS at the beginning of the route (near first stop)
     let gps_s_cm_start = 30000i32;
-    let active_stops_start: Vec<usize> = stops.iter()
+    let active_stops_start: Vec<usize> = stops
+        .iter()
         .enumerate()
-        .filter(|(_, stop)| gps_s_cm_start >= stop.corridor_start_cm && gps_s_cm_start <= stop.corridor_end_cm)
+        .filter(|(_, stop)| {
+            gps_s_cm_start >= stop.corridor_start_cm && gps_s_cm_start <= stop.corridor_end_cm
+        })
         .map(|(i, _)| i)
         .collect();
 
-    assert!(!active_stops_start.is_empty(),
-        "GPS at s_cm={} should have at least one active stop", gps_s_cm_start);
+    assert!(
+        !active_stops_start.is_empty(),
+        "GPS at s_cm={} should have at least one active stop",
+        gps_s_cm_start
+    );
 
     // Test case 3: GPS before first stop's corridor (no active stops expected)
     let gps_s_cm_before = 10000i32;
-    let active_stops_before: Vec<usize> = stops.iter()
+    let active_stops_before: Vec<usize> = stops
+        .iter()
         .enumerate()
-        .filter(|(_, stop)| gps_s_cm_before >= stop.corridor_start_cm && gps_s_cm_before <= stop.corridor_end_cm)
+        .filter(|(_, stop)| {
+            gps_s_cm_before >= stop.corridor_start_cm && gps_s_cm_before <= stop.corridor_end_cm
+        })
         .map(|(i, _)| i)
         .collect();
 
-    assert!(active_stops_before.is_empty(),
-        "GPS at s_cm={} should have no active stops (before first corridor)", gps_s_cm_before);
+    assert!(
+        active_stops_before.is_empty(),
+        "GPS at s_cm={} should have no active stops (before first corridor)",
+        gps_s_cm_before
+    );
 
     println!("✓ All active_stops tests passed!");
 }
@@ -100,11 +120,20 @@ fn test_stop_states_content() {
 
             // Verify distance is reasonable (within corridor range)
             let corridor_range = stop.corridor_end_cm - stop.corridor_start_cm;
-            assert!(distance_cm.abs() <= corridor_range as i32,
-                "Distance {} should be within corridor range {}", distance_cm, corridor_range);
+            assert!(
+                distance_cm.abs() <= corridor_range as i32,
+                "Distance {} should be within corridor range {}",
+                distance_cm,
+                corridor_range
+            );
 
-            println!("Stop {}: progress={}, distance_from_gps={}cm ({}m)",
-                i, stop.progress_cm, distance_cm, distance_cm / 100);
+            println!(
+                "Stop {}: progress={}, distance_from_gps={}cm ({}m)",
+                i,
+                stop.progress_cm,
+                distance_cm,
+                distance_cm / 100
+            );
         }
     }
 }

@@ -2,7 +2,7 @@
 
 mod common;
 use common::load_test_asset_bytes;
-use shared::binfile::{RouteData, BusError};
+use shared::binfile::{BusError, RouteData};
 
 #[test]
 fn test_loop_closure_stop() {
@@ -16,20 +16,27 @@ fn test_loop_closure_stop() {
         Err(e) => panic!("Failed to load route data: {:?}", e),
     };
 
-    println!("Route data: {} nodes, {} stops", route_data.node_count, route_data.stop_count);
+    println!(
+        "Route data: {} nodes, {} stops",
+        route_data.node_count, route_data.stop_count
+    );
 
     // Check the last stop (the one we added)
     let last_idx = route_data.stop_count - 1;
     if let Some(stop) = route_data.get_stop(last_idx) {
-        println!("Stop {} (loop closure): progress_cm={}, corridor=[{}, {}]",
-            last_idx, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm);
+        println!(
+            "Stop {} (loop closure): progress_cm={}, corridor=[{}, {}]",
+            last_idx, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm
+        );
     }
 
     // Check second-to-last stop
     let second_last_idx = route_data.stop_count - 2;
     if let Some(stop) = route_data.get_stop(second_last_idx) {
-        println!("Stop {}: progress_cm={}, corridor=[{}, {}]",
-            second_last_idx, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm);
+        println!(
+            "Stop {}: progress_cm={}, corridor=[{}, {}]",
+            second_last_idx, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm
+        );
     }
 
     // Test if GPS at s_cm=1720784 is in any stop's corridor
@@ -40,9 +47,14 @@ fn test_loop_closure_stop() {
     for i in 0..route_data.stop_count {
         if let Some(stop) = route_data.get_stop(i) {
             if gps_s_cm >= stop.corridor_start_cm && gps_s_cm <= stop.corridor_end_cm {
-                println!("  Active Stop {}: progress={}, corridor=[{}, {}], distance={} cm",
-                    i, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm,
-                    stop.progress_cm as i32 - gps_s_cm);
+                println!(
+                    "  Active Stop {}: progress={}, corridor=[{}, {}], distance={} cm",
+                    i,
+                    stop.progress_cm,
+                    stop.corridor_start_cm,
+                    stop.corridor_end_cm,
+                    stop.progress_cm as i32 - gps_s_cm
+                );
                 found_active = true;
             }
         }

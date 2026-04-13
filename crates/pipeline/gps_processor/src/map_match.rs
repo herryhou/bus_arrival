@@ -81,7 +81,9 @@ fn best_eligible(
                 best_any_idx = Some(idx);
             }
 
-            if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg) && d2 < best_eligible_dist2 {
+            if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg)
+                && d2 < best_eligible_dist2
+            {
                 best_eligible_dist2 = d2;
                 best_eligible_idx = Some(idx);
             }
@@ -92,7 +94,13 @@ fn best_eligible(
     let eligible_idx = best_eligible_idx.unwrap_or(0);
     let any_idx = best_any_idx.unwrap_or(0);
 
-    (eligible_idx, best_eligible_dist2, eligible_found, any_idx, best_any_dist2)
+    (
+        eligible_idx,
+        best_eligible_dist2,
+        eligible_found,
+        any_idx,
+        best_any_dist2,
+    )
 }
 
 // Import libm functions for no_std
@@ -126,8 +134,7 @@ pub fn find_best_segment_restricted(
     // Early-exit threshold: if the best eligible segment in the window is
     // within SIGMA_GPS_CM (20 m), skip the expensive grid search.
     // Now that scores are pure dist2, this comparison is physically meaningful.
-    const MAX_DIST2_EARLY_EXIT: Dist2 =
-        SIGMA_GPS_CM as i64 * SIGMA_GPS_CM as i64; // 4 000 000 cm²
+    const MAX_DIST2_EARLY_EXIT: Dist2 = SIGMA_GPS_CM as i64 * SIGMA_GPS_CM as i64; // 4 000 000 cm²
 
     const WINDOW_BACK: usize = 2;
     const WINDOW_FWD: usize = 10;
@@ -136,10 +143,20 @@ pub fn find_best_segment_restricted(
     let end = (last_idx + WINDOW_FWD).min(route_data.node_count.saturating_sub(1));
 
     // PHASE 1: Window search
-    let (window_best_eligible, window_eligible_dist2, window_eligible_found,
-         window_best_any, window_any_dist2) =
-        best_eligible(gps_x, gps_y, gps_heading, gps_speed, route_data,
-                      start..=end);
+    let (
+        window_best_eligible,
+        window_eligible_dist2,
+        window_eligible_found,
+        window_best_any,
+        window_any_dist2,
+    ) = best_eligible(
+        gps_x,
+        gps_y,
+        gps_heading,
+        gps_speed,
+        route_data,
+        start..=end,
+    );
 
     // Early exit if eligible segment found within threshold
     if window_eligible_found && window_eligible_dist2 < MAX_DIST2_EARLY_EXIT {
@@ -178,26 +195,28 @@ pub fn find_best_segment_restricted(
             if ny < 0 || nx < 0 {
                 continue;
             }
-            let _ = route_data.grid.visit_cell(nx as u32, ny as u32, |idx: u16| {
-                if let Some(seg) = route_data.get_node(idx as usize) {
-                    let d2 = segment_score(gps_x, gps_y, &seg);
+            let _ = route_data
+                .grid
+                .visit_cell(nx as u32, ny as u32, |idx: u16| {
+                    if let Some(seg) = route_data.get_node(idx as usize) {
+                        let d2 = segment_score(gps_x, gps_y, &seg);
 
-                    // Update best_any tracker
-                    if d2 < best_any_dist2 {
-                        best_any_dist2 = d2;
-                        best_any_idx = idx as usize;
-                    }
+                        // Update best_any tracker
+                        if d2 < best_any_dist2 {
+                            best_any_dist2 = d2;
+                            best_any_idx = idx as usize;
+                        }
 
-                    // Update best_eligible tracker if heading matches
-                    if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg) {
-                        if d2 < best_eligible_dist2 {
-                            best_eligible_dist2 = d2;
-                            best_eligible_idx = idx as usize;
-                            eligible_found = true;
+                        // Update best_eligible tracker if heading matches
+                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg) {
+                            if d2 < best_eligible_dist2 {
+                                best_eligible_dist2 = d2;
+                                best_eligible_idx = idx as usize;
+                                eligible_found = true;
+                            }
                         }
                     }
-                }
-            });
+                });
         }
     }
 
@@ -209,7 +228,8 @@ pub fn find_best_segment_restricted(
         defmt::warn!(
             "heading filter: no eligible segments at speed={} cdeg heading={}, \
              falling back to pure-distance selection",
-            gps_speed, gps_heading
+            gps_speed,
+            gps_heading
         );
         return best_any_idx;
     }
@@ -225,11 +245,7 @@ pub fn find_best_segment_restricted(
 /// derived from first principles.
 ///
 /// The return type is `Dist2` (i64 cm²).
-pub fn segment_score(
-    gps_x: DistCm,
-    gps_y: DistCm,
-    seg: &RouteNode,
-) -> Dist2 {
+pub fn segment_score(gps_x: DistCm, gps_y: DistCm, seg: &RouteNode) -> Dist2 {
     distance_to_segment_squared(gps_x, gps_y, seg)
 }
 
@@ -383,8 +399,8 @@ mod tests {
     #[test]
     fn test_heading_eligible_stopped() {
         // Stopped (w=0): always eligible — heading is unreliable
-        assert!(heading_eligible(0, 0, 9000));      // facing opposite direction
-        assert!(heading_eligible(0, 0, 18000));     // 180° misaligned
+        assert!(heading_eligible(0, 0, 9000)); // facing opposite direction
+        assert!(heading_eligible(0, 0, 18000)); // 180° misaligned
     }
 
     #[test]

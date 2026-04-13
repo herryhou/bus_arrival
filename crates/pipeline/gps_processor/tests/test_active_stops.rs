@@ -3,9 +3,9 @@
 //! This test verifies that the simulator correctly identifies active stops
 //! based on route progress and stop corridor boundaries.
 
-use shared::{DrState, GpsPoint, KalmanState, RouteNode, Stop};
 use gps_processor::kalman::{process_gps_update, ProcessResult};
 use gps_processor::route_data::RouteData;
+use shared::{DrState, GpsPoint, KalmanState, RouteNode, Stop};
 
 fn setup_test_route_with_stop() -> (Vec<u8>, i32, i32) {
     let mut nodes = Vec::new();
@@ -39,13 +39,11 @@ fn setup_test_route_with_stop() -> (Vec<u8>, i32, i32) {
 
     // Create a stop at 100m (progress_cm = 10000)
     // Corridor: 10000 - 8000 = 2000 to 10000 + 4000 = 14000
-    let stops = vec![
-        Stop {
-            progress_cm: 10000,
-            corridor_start_cm: 2000,
-            corridor_end_cm: 14000,
-        }
-    ];
+    let stops = vec![Stop {
+        progress_cm: 10000,
+        corridor_start_cm: 2000,
+        corridor_end_cm: 14000,
+    }];
 
     let grid = shared::SpatialGrid {
         cells: vec![vec![0, 1]], // Both segments in first cell
@@ -82,8 +80,10 @@ fn test_active_stops_when_in_corridor() {
     // Verify stop is loaded correctly
     assert_eq!(route_data.stop_count, 1);
     let stop = route_data.get_stop(0).expect("Failed to get stop");
-    println!("Stop: progress_cm={}, corridor_start_cm={}, corridor_end_cm={}",
-        stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm);
+    println!(
+        "Stop: progress_cm={}, corridor_start_cm={}, corridor_end_cm={}",
+        stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm
+    );
     assert_eq!(stop.progress_cm, 10000);
     assert_eq!(stop.corridor_start_cm, 2000);
     assert_eq!(stop.corridor_end_cm, 14000);
@@ -106,12 +106,17 @@ fn test_active_stops_when_in_corridor() {
         let s_cm = signals.s_cm;
         println!("Test 1: s_cm={} (before corridor)", s_cm);
         let stops = route_data.stops();
-        let active_stops: Vec<usize> = stops.iter()
+        let active_stops: Vec<usize> = stops
+            .iter()
             .enumerate()
             .filter(|(_, stop)| s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm)
             .map(|(i, _)| i)
             .collect();
-        assert_eq!(active_stops.len(), 0, "Should have no active stops before corridor");
+        assert_eq!(
+            active_stops.len(),
+            0,
+            "Should have no active stops before corridor"
+        );
     }
 
     // Test Case 2: Inside corridor (s_cm = 5000)
@@ -123,12 +128,17 @@ fn test_active_stops_when_in_corridor() {
         let s_cm = signals.s_cm;
         println!("Test 2: s_cm={} (inside corridor)", s_cm);
         let stops = route_data.stops();
-        let active_stops: Vec<usize> = stops.iter()
+        let active_stops: Vec<usize> = stops
+            .iter()
             .enumerate()
             .filter(|(_, stop)| s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm)
             .map(|(i, _)| i)
             .collect();
-        assert_eq!(active_stops.len(), 1, "Should have 1 active stop inside corridor");
+        assert_eq!(
+            active_stops.len(),
+            1,
+            "Should have 1 active stop inside corridor"
+        );
         assert_eq!(active_stops[0], 0, "Active stop should be index 0");
     }
 
@@ -139,12 +149,17 @@ fn test_active_stops_when_in_corridor() {
         let s_cm = signals.s_cm;
         println!("Test 3: s_cm={} (at stop)", s_cm);
         let stops = route_data.stops();
-        let active_stops: Vec<usize> = stops.iter()
+        let active_stops: Vec<usize> = stops
+            .iter()
             .enumerate()
             .filter(|(_, stop)| s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm)
             .map(|(i, _)| i)
             .collect();
-        assert_eq!(active_stops.len(), 1, "Should have 1 active stop at stop location");
+        assert_eq!(
+            active_stops.len(),
+            1,
+            "Should have 1 active stop at stop location"
+        );
     }
 
     // Test Case 4: After corridor (s_cm = 15000)
@@ -154,12 +169,17 @@ fn test_active_stops_when_in_corridor() {
         let s_cm = signals.s_cm;
         println!("Test 4: s_cm={} (after corridor)", s_cm);
         let stops = route_data.stops();
-        let active_stops: Vec<usize> = stops.iter()
+        let active_stops: Vec<usize> = stops
+            .iter()
             .enumerate()
             .filter(|(_, stop)| s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm)
             .map(|(i, _)| i)
             .collect();
-        assert_eq!(active_stops.len(), 0, "Should have no active stops after corridor");
+        assert_eq!(
+            active_stops.len(),
+            0,
+            "Should have no active stops after corridor"
+        );
     }
 }
 
@@ -230,11 +250,16 @@ fn test_active_stops_with_multiple_stops() {
     // Should find BOTH active stops
     let stops = route_data.stops();
     let s_cm = 13000i32;
-    let active_stops: Vec<usize> = stops.iter()
+    let active_stops: Vec<usize> = stops
+        .iter()
         .enumerate()
         .filter(|(_, stop)| s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm)
         .map(|(i, _)| i)
         .collect();
 
-    assert_eq!(active_stops.len(), 2, "Should have 2 active stops in overlap region");
+    assert_eq!(
+        active_stops.len(),
+        2,
+        "Should have 2 active stops in overlap region"
+    );
 }

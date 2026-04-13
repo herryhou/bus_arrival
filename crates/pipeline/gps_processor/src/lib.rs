@@ -3,15 +3,14 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-
-pub mod route_data;
-pub mod nmea;
-pub mod map_match;
 pub mod kalman;
+pub mod map_match;
+pub mod nmea;
+pub mod route_data;
 
 #[cfg(feature = "std")]
 pub mod output;
 
 // Re-export commonly used types
+pub use kalman::{process_gps_update, ProcessResult, SIGMA_GPS_CM, V_MAX_CMS};
 pub use nmea::NmeaState;
-pub use kalman::{ProcessResult, process_gps_update, V_MAX_CMS, SIGMA_GPS_CM};

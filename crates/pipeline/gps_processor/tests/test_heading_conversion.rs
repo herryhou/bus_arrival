@@ -74,16 +74,24 @@ fn test_heading_conversion_boundary_180() {
 #[test]
 fn test_no_heading_overflow_for_common_values() {
     // Verify common NMEA headings don't overflow to 32767
-    let headings = [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0, 350.5, 359.9];
+    let headings = [
+        0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0, 350.5, 359.9,
+    ];
     for &heading_deg in &headings {
         let heading_cdeg = convert_nmea_heading(heading_deg);
         // Should never be 32767 (i16::MAX) which indicates overflow
-        assert_ne!(heading_cdeg, 32767,
-            "Heading {}° should not overflow to 32767 (i16::MAX)", heading_deg);
+        assert_ne!(
+            heading_cdeg, 32767,
+            "Heading {}° should not overflow to 32767 (i16::MAX)",
+            heading_deg
+        );
         // Result should be in valid range
-        assert!(heading_cdeg >= -18000 && heading_cdeg <= 18000,
+        assert!(
+            heading_cdeg >= -18000 && heading_cdeg <= 18000,
             "Heading {}° resulted in {} cdeg, which is outside valid range [-18000, 18000]",
-            heading_deg, heading_cdeg);
+            heading_deg,
+            heading_cdeg
+        );
     }
 }
 
@@ -91,21 +99,24 @@ fn test_no_heading_overflow_for_common_values() {
 fn test_heading_conversion_roundtrip() {
     // Test that common directions convert correctly
     let test_cases = [
-        (0.0, 0),      // North
-        (45.0, 4500),  // Northeast
-        (90.0, 9000),  // East
-        (135.0, 13500),// Southeast
-        (180.0, 18000),// South
-        (225.0, -13500),// Southwest (22500 - 36000)
-        (270.0, -9000),// West (27000 - 36000)
-        (315.0, -4500),// Northwest (31500 - 36000)
-        (350.5, -950), // North-northwest (35050 - 36000)
+        (0.0, 0),        // North
+        (45.0, 4500),    // Northeast
+        (90.0, 9000),    // East
+        (135.0, 13500),  // Southeast
+        (180.0, 18000),  // South
+        (225.0, -13500), // Southwest (22500 - 36000)
+        (270.0, -9000),  // West (27000 - 36000)
+        (315.0, -4500),  // Northwest (31500 - 36000)
+        (350.5, -950),   // North-northwest (35050 - 36000)
     ];
 
     for &(heading_deg, expected_cdeg) in &test_cases {
         let heading_cdeg = convert_nmea_heading(heading_deg);
-        assert_eq!(heading_cdeg, expected_cdeg,
-            "Heading {}° should convert to {} cdeg", heading_deg, expected_cdeg);
+        assert_eq!(
+            heading_cdeg, expected_cdeg,
+            "Heading {}° should convert to {} cdeg",
+            heading_deg, expected_cdeg
+        );
     }
 }
 
@@ -132,11 +143,17 @@ fn test_overflow_protection() {
 
         // Calculate expected value
         let expected = ((heading_deg * 100.0).round() as i32 - 36000) as i16;
-        assert_eq!(heading_cdeg, expected,
-            "Heading {}° should convert to {} cdeg", heading_deg, expected);
+        assert_eq!(
+            heading_cdeg, expected,
+            "Heading {}° should convert to {} cdeg",
+            heading_deg, expected
+        );
 
         // Verify it's not the overflow value
-        assert_ne!(heading_cdeg, 32767,
-            "Heading {}° should not overflow to 32767", heading_deg);
+        assert_ne!(
+            heading_cdeg, 32767,
+            "Heading {}° should not overflow to 32767",
+            heading_deg
+        );
     }
 }

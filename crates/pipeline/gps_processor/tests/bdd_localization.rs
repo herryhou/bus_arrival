@@ -1,6 +1,6 @@
-use shared::{DrState, GpsPoint, KalmanState, RouteNode};
 use gps_processor::kalman::{process_gps_update, ProcessResult};
 use gps_processor::route_data::RouteData;
+use shared::{DrState, GpsPoint, KalmanState, RouteNode};
 
 // A single straight segment of 100m north.
 // Uses ABSOLUTE coordinates from fixed origin (120°E, 20°N).
@@ -108,7 +108,7 @@ fn setup_l_shaped_route() -> (Vec<u8>, i32, i32) {
         cum_dist_cm: 5000,
         dx_cm: 0,
         dy_cm: 5000,
-        heading_cdeg: 0,  // North
+        heading_cdeg: 0, // North
         _pad: 0,
     });
 
@@ -225,7 +225,7 @@ fn setup_circular_route() -> (Vec<u8>, i32, i32) {
 
     let grid = shared::SpatialGrid {
         cells: vec![vec![0, 1, 2, 3, 4]], // Single cell containing all nodes
-        grid_size_cm: 10000, // Large enough to cover entire 50m x 50m square
+        grid_size_cm: 10000,              // Large enough to cover entire 50m x 50m square
         cols: 1,
         rows: 1,
         x0_cm: start_x,
@@ -345,8 +345,12 @@ fn scenario_route_end_clamping(route_data: &RouteData, start_x: i32, start_y: i3
         let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 10, false);
 
         if let ProcessResult::Valid { signals, .. } = result {
-        let s_cm = signals.s_cm;
-            assert!(s_cm <= 10000, "Progress should never exceed 10000, got {}", s_cm);
+            let s_cm = signals.s_cm;
+            assert!(
+                s_cm <= 10000,
+                "Progress should never exceed 10000, got {}",
+                s_cm
+            );
         } else {
             panic!("End clamping update failed");
         }
@@ -421,7 +425,7 @@ fn scenario_monotonicity_tolerance(route_data: &RouteData, start_x: i32, start_y
     match result {
         ProcessResult::DrOutage { .. } => {
             // Expected - backward jump exceeds threshold
-        },
+        }
         ProcessResult::Valid { .. } => panic!("Should reject - exceeds 50m tolerance"),
         ProcessResult::Rejected(_) => panic!("Should return DR outage, not Rejected"),
         ProcessResult::Outage => panic!("Should not return outage"),
@@ -555,8 +559,11 @@ fn scenario_handle_gps_jump(route_data: &RouteData, start_x: i32, start_y: i32) 
     // GPS should be accepted and clamped to route end (10000cm)
     match result {
         ProcessResult::Valid { signals, .. } => {
-            assert!(signals.s_cm <= 10000, "Progress should be clamped to route end");
-        },
+            assert!(
+                signals.s_cm <= 10000,
+                "Progress should be clamped to route end"
+            );
+        }
         ProcessResult::Rejected(_) => panic!("Should not reject - jump is within speed limit"),
         ProcessResult::Outage => panic!("Should not return outage"),
         ProcessResult::DrOutage { .. } => panic!("Should not return DR outage"),
@@ -606,9 +613,15 @@ fn scenario_handle_gps_outage_with_dr(route_data: &RouteData, start_x: i32, star
     if let ProcessResult::DrOutage { s_cm, v_cms } = result2 {
         // Position: last_s(0) + v(810) * dt(3) = 2430
         // Note: DR position is always calculated from last_valid_s, not accumulated
-        assert_eq!(s_cm, 2430, "DR position should be calculated from last_valid_s");
+        assert_eq!(
+            s_cm, 2430,
+            "DR position should be calculated from last_valid_s"
+        );
         // Speed: 810 * 0.729 = 590 (cumulative decay: 810 from previous, then decayed again)
-        assert_eq!(v_cms, 590, "DR speed should decay cumulatively over multiple outages");
+        assert_eq!(
+            v_cms, 590,
+            "DR speed should decay cumulatively over multiple outages"
+        );
     } else {
         panic!("Expected DR result for second outage");
     }
@@ -628,7 +641,10 @@ fn scenario_l_shaped_turn(route_data: &RouteData, start_x: i32, start_y: i32) {
     gps.speed_cms = 500; // 5 m/s
 
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
-    if let ProcessResult::Valid { signals, seg_idx, .. } = result {
+    if let ProcessResult::Valid {
+        signals, seg_idx, ..
+    } = result
+    {
         let s_cm = signals.s_cm;
         assert_eq!(seg_idx, 0, "Should start on segment 0 (East)");
         assert_eq!(s_cm, 0);
@@ -644,10 +660,16 @@ fn scenario_l_shaped_turn(route_data: &RouteData, start_x: i32, start_y: i32) {
     gps.lon = lon_from_x(start_x + 2500, route_data.lat_avg_deg);
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false);
 
-    if let ProcessResult::Valid { signals, seg_idx, .. } = result {
+    if let ProcessResult::Valid {
+        signals, seg_idx, ..
+    } = result
+    {
         let s_cm = signals.s_cm;
         assert_eq!(seg_idx, 0, "Should still be on segment 0");
-        assert_eq!(s_cm, 1101, "Progress should be Kalman-smoothed (1101, not 2500)");
+        assert_eq!(
+            s_cm, 1101,
+            "Progress should be Kalman-smoothed (1101, not 2500)"
+        );
     } else {
         panic!("Mid-segment update failed");
     }
@@ -662,10 +684,16 @@ fn scenario_l_shaped_turn(route_data: &RouteData, start_x: i32, start_y: i32) {
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 2, false);
 
     // Then: Map matcher should identify segment 1 (North)
-    if let ProcessResult::Valid { signals, seg_idx, .. } = result {
+    if let ProcessResult::Valid {
+        signals, seg_idx, ..
+    } = result
+    {
         let s_cm = signals.s_cm;
         assert_eq!(seg_idx, 1, "Should transition to segment 1 (North)");
-        assert_eq!(s_cm, 3375, "Progress should be Kalman-smoothed (3375, not 7500)");
+        assert_eq!(
+            s_cm, 3375,
+            "Progress should be Kalman-smoothed (3375, not 7500)"
+        );
     } else {
         panic!("Turn transition failed");
     }
@@ -699,7 +727,10 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
     gps.heading_cdeg = 0; // North
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false);
 
-    if let ProcessResult::Valid { signals, seg_idx, .. } = result {
+    if let ProcessResult::Valid {
+        signals, seg_idx, ..
+    } = result
+    {
         let s_cm = signals.s_cm;
         // The system returns Kalman-smoothed values
         // Actual: 1853 (Kalman-smoothed from prediction 5000 and raw GPS position)
@@ -717,7 +748,10 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
     gps.heading_cdeg = -9000; // West
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 2, false);
 
-    if let ProcessResult::Valid { signals, seg_idx, .. } = result {
+    if let ProcessResult::Valid {
+        signals, seg_idx, ..
+    } = result
+    {
         let s_cm = signals.s_cm;
         // Progress should continue to increase
         assert!(s_cm > 1000, "Progress should be > 1000, got {}", s_cm);
@@ -735,12 +769,19 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 3, false);
 
     // Then: Progress should indicate 3/4 around the loop, not jump back to 0
-    if let ProcessResult::Valid { signals, seg_idx, .. } = result {
+    if let ProcessResult::Valid {
+        signals, seg_idx, ..
+    } = result
+    {
         let s_cm = signals.s_cm;
         // The key assertion: progress should NOT jump back to 0 or small values
         // even though GPS coordinates are near the start
         // Actual behavior: progress continues to increase (Kalman-smoothed)
-        assert!(s_cm > 5000, "Progress should be > 5000 (3/4 around loop), got {}", s_cm);
+        assert!(
+            s_cm > 5000,
+            "Progress should be > 5000 (3/4 around loop), got {}",
+            s_cm
+        );
         assert_eq!(seg_idx, 3, "Should be on segment 3 (South)");
     } else {
         panic!("Corner 3 (near-start) update failed");
@@ -759,7 +800,11 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
         ProcessResult::DrOutage { s_cm, .. } => {
             // Expected - loop closure causes large backward jump that exceeds 50m threshold
             // The DR prediction should continue moving forward
-            assert!(s_cm > 10000, "DR prediction should continue forward, got {}", s_cm);
+            assert!(
+                s_cm > 10000,
+                "DR prediction should continue forward, got {}",
+                s_cm
+            );
         }
         ProcessResult::Valid { .. } => {
             // This would be the behavior with the old 500m threshold
@@ -858,7 +903,11 @@ fn scenario_loop_closure_full_route_completion() {
     // Actual (when bug exists): Progress is ~6000 (not clamped)
     if let ProcessResult::Valid { signals, .. } = result {
         let s_cm = signals.s_cm;
-        assert_eq!(s_cm, 20000, "Progress should be at route end (20000), not {}", s_cm);
+        assert_eq!(
+            s_cm, 20000,
+            "Progress should be at route end (20000), not {}",
+            s_cm
+        );
     } else {
         panic!("Loop completion update failed");
     }

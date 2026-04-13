@@ -15,17 +15,17 @@ pub const SIGMA_GPS_CM: DistCm = 2000;
 
 /// DR decay factors: (9/10)^dt * 10000 for integer arithmetic
 const DR_DECAY_NUMERATOR: [u32; 11] = [
-    10000,  // dt=0: 1.0
-    9000,   // dt=1: 0.9
-    8100,   // dt=2: 0.81
-    7290,   // dt=3: 0.729
-    6561,   // dt=4: 0.6561
-    5905,   // dt=5: 0.5905
-    5314,   // dt=6: 0.5314
-    4783,   // dt=7: 0.4783
-    4305,   // dt=8: 0.4305
-    3874,   // dt=9: 0.3874
-    3487,   // dt=10: 0.3487
+    10000, // dt=0: 1.0
+    9000,  // dt=1: 0.9
+    8100,  // dt=2: 0.81
+    7290,  // dt=3: 0.729
+    6561,  // dt=4: 0.6561
+    5905,  // dt=5: 0.5905
+    5314,  // dt=6: 0.5314
+    4783,  // dt=7: 0.4783
+    4305,  // dt=8: 0.4305
+    3874,  // dt=9: 0.3874
+    3487,  // dt=10: 0.3487
 ];
 
 /// ProcessResult from GPS update
@@ -85,7 +85,6 @@ pub fn process_gps_update(
     let z_raw = crate::map_match::project_to_route(gps_x, gps_y, seg_idx, route_data);
 
     if is_first_fix {
-
         state.s_cm = z_raw;
 
         state.v_cms = gps.speed_cms;
@@ -137,12 +136,12 @@ pub fn process_gps_update(
     if dr.in_recovery {
         // Soft resync for position: ŝ_resync = ŝ_DR + (2/10)*(z_gps - ŝ_DR)
         state.s_cm = state.s_cm + 2 * (z_raw - state.s_cm) / 10;
-        
+
         // Soft resync for velocity: v_resync = v_DR + (2/10)*(v_gps - v_DR)
         // Using same conservative 2/10 gain for velocity during recovery
         state.v_cms = state.v_cms + 2 * (gps.speed_cms - state.v_cms) / 10;
         state.v_cms = state.v_cms.max(0);
-        
+
         // Clear recovery flag after applying soft-resync
         dr.in_recovery = false;
     } else {
@@ -153,8 +152,8 @@ pub fn process_gps_update(
 
     // Construct position signals with raw GPS and Kalman output
     let signals = PositionSignals {
-        z_gps_cm: z_raw,   // Raw projection before Kalman
-        s_cm: state.s_cm,  // Kalman-filtered output
+        z_gps_cm: z_raw,  // Raw projection before Kalman
+        s_cm: state.s_cm, // Kalman-filtered output
     };
 
     // 8. Update DR state
@@ -186,7 +185,7 @@ pub fn check_speed_constraint(z_new: DistCm, z_prev: DistCm, dt: i32) -> bool {
 /// - Catches legitimate anomalies (route reversals, GPS glitches)
 /// - Middle ground between spec (-10m) and previous (-500m)
 fn check_monotonic(z_new: DistCm, z_prev: DistCm) -> bool {
-    z_new >= z_prev - 5000  // CHANGED from 50000
+    z_new >= z_prev - 5000 // CHANGED from 50000
 }
 
 /// EMA velocity filter update per spec Section 11.1
@@ -232,23 +231,26 @@ mod tests {
     fn test_dr_decay_normalization() {
         // DR decay factors: (9/10)^dt * 10000 for integer arithmetic
         let expected_factors = [
-            10000,  // dt=0: 1.0
-            9000,   // dt=1: 0.9
-            8100,   // dt=2: 0.81
-            7290,   // dt=3: 0.729
-            6561,   // dt=4: 0.6561
-            5905,   // dt=5: 0.5905
-            5314,   // dt=6: 0.5314
-            4783,   // dt=7: 0.4783
-            4305,   // dt=8: 0.4305
-            3874,   // dt=9: 0.3874
-            3487,   // dt=10: 0.3487
+            10000, // dt=0: 1.0
+            9000,  // dt=1: 0.9
+            8100,  // dt=2: 0.81
+            7290,  // dt=3: 0.729
+            6561,  // dt=4: 0.6561
+            5905,  // dt=5: 0.5905
+            5314,  // dt=6: 0.5314
+            4783,  // dt=7: 0.4783
+            4305,  // dt=8: 0.4305
+            3874,  // dt=9: 0.3874
+            3487,  // dt=10: 0.3487
         ];
 
         // Verify LUT values match expected decay factors
         for (i, &expected) in expected_factors.iter().enumerate() {
-            assert_eq!(DR_DECAY_NUMERATOR[i], expected,
-                "DR decay factor for dt={} should be {}", i, expected);
+            assert_eq!(
+                DR_DECAY_NUMERATOR[i], expected,
+                "DR decay factor for dt={} should be {}",
+                i, expected
+            );
         }
 
         // Verify decay is normalized by dt (not constant)
@@ -267,8 +269,10 @@ mod tests {
         assert_eq!(v_dt5, 590);
 
         // Decay should be monotonic decreasing with dt
-        assert!(v_dt1 > v_dt2 && v_dt2 > v_dt5,
-            "DR decay should decrease monotonically with dt");
+        assert!(
+            v_dt1 > v_dt2 && v_dt2 > v_dt5,
+            "DR decay should decrease monotonically with dt"
+        );
     }
 
     #[test]
@@ -296,64 +300,64 @@ mod tests {
     }
 
     // ===== H4: EMA Velocity Filter Tests =====
-    
+
     /// EMA coefficient α = 3/10 = 0.3
     /// Formula: v_filtered(t) = v_filtered(t-1) + 3*(v_gps - v_filtered(t-1))/10
-    
+
     #[test]
     fn test_ema_velocity_filter_initial_value() {
         // First GPS update should initialize filtered_v to v_gps
         let v_gps = 500; // 5 m/s
         let v_filtered_initial = 0;
-        
+
         // EMA update: v = 0 + 3*(500 - 0)/10 = 150
         let expected = v_filtered_initial + 3 * (v_gps - v_filtered_initial) / 10;
         assert_eq!(expected, 150);
     }
-    
+
     #[test]
     fn test_ema_velocity_filter_convergence() {
         // EMA should converge toward the GPS speed over time
         let v_filtered = 300;
         let v_gps = 500;
-        
+
         // EMA update: v = 300 + 3*(500 - 300)/10 = 300 + 60 = 360
         let expected = v_filtered + 3 * (v_gps - v_filtered) / 10;
         assert_eq!(expected, 360);
-        
+
         // Next update: v = 360 + 3*(500 - 360)/10 = 360 + 42 = 402
         let v_filtered = expected;
         let expected = v_filtered + 3 * (v_gps - v_filtered) / 10;
         assert_eq!(expected, 402);
     }
-    
+
     #[test]
     fn test_ema_velocity_filter_smoothing() {
         // EMA should smooth out GPS speed noise
         let v_filtered = 400;
         let v_gps_noisy = 700; // Sudden jump
-        
+
         // EMA update: v = 400 + 3*(700 - 400)/10 = 400 + 90 = 490
         // The filtered value changes only 30% toward the noisy GPS value
         let expected = v_filtered + 3 * (v_gps_noisy - v_filtered) / 10;
         assert_eq!(expected, 490);
         assert!(expected < v_gps_noisy, "EMA should smooth out sudden jumps");
     }
-    
+
     #[test]
     fn test_ema_velocity_filter_integer_arithmetic() {
         // Verify integer arithmetic doesn't accumulate excessive error
         // Formula: v += 3*(v_gps - v)/10
         // Using integer division, we lose some precision but should be close
-        
+
         let v_filtered = 433; // Odd number to test rounding
         let v_gps = 567;
-        
+
         // EMA update with integer arithmetic
         let delta = v_gps - v_filtered;
         let adjustment = (3 * delta) / 10; // Integer division
         let expected = v_filtered + adjustment;
-        
+
         // Verify the adjustment is approximately 30% of the delta
         // 3 * 134 / 10 = 402 / 10 = 40 (integer division)
         assert_eq!(adjustment, 40);

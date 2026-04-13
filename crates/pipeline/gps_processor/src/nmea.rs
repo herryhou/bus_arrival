@@ -1,6 +1,6 @@
 //! NMEA sentence parser
 
-use shared::{GpsPoint, SpeedCms, HeadCdeg};
+use shared::{GpsPoint, HeadCdeg, SpeedCms};
 
 // Import libm functions for no_std
 #[cfg(not(feature = "std"))]
@@ -8,9 +8,13 @@ use libm::{round as f64_round, trunc as f64_trunc};
 
 // Helper functions for floating-point operations
 #[cfg(feature = "std")]
-fn f64_round(x: f64) -> f64 { x.round() }
+fn f64_round(x: f64) -> f64 {
+    x.round()
+}
 #[cfg(feature = "std")]
-fn f64_trunc(x: f64) -> f64 { x.trunc() }
+fn f64_trunc(x: f64) -> f64 {
+    x.trunc()
+}
 
 // NMEA sentences typically have < 20 fields (only used in no_std builds)
 #[cfg_attr(feature = "std", allow(dead_code))]
@@ -201,12 +205,16 @@ mod tests {
 
     #[test]
     fn verify_checksum_valid() {
-        assert!(verify_checksum("$GPRMC,123519,V,0000.0000,N,00000.0000,E,000.0,000.0,030311,,,A*6A"));
+        assert!(verify_checksum(
+            "$GPRMC,123519,V,0000.0000,N,00000.0000,E,000.0,000.0,030311,,,A*6A"
+        ));
     }
 
     #[test]
     fn verify_checksum_invalid() {
-        assert!(!verify_checksum("$GPRMC,123519,V,0000.0000,N,00000.0000,E,000.0,000.0,030311,,,A*00"));
+        assert!(!verify_checksum(
+            "$GPRMC,123519,V,0000.0000,N,00000.0000,E,000.0,000.0,030311,,,A*00"
+        ));
     }
 
     #[test]
@@ -239,7 +247,8 @@ mod tests {
     #[test]
     fn parse_rmc_valid() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*2E");
+        let result =
+            state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*2E");
         assert!(result.is_none()); // RMC alone doesn't complete the point
         assert!(state.point.has_fix);
         assert!((state.point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
@@ -252,7 +261,8 @@ mod tests {
     #[test]
     fn parse_rmc_invalid_status() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GPRMC,221320,V,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*39");
+        let result =
+            state.parse_sentence("$GPRMC,221320,V,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*39");
         assert!(result.is_none());
         assert!(!state.point.has_fix);
     }
@@ -260,7 +270,8 @@ mod tests {
     #[test]
     fn parse_gga_valid() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GPGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*4B");
+        let result = state
+            .parse_sentence("$GPGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*4B");
         assert!(result.is_some()); // GGA alone completes the point
         let point = result.unwrap();
         assert!(point.has_fix);
@@ -274,7 +285,8 @@ mod tests {
     #[test]
     fn parse_gga_invalid_fix() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GPGGA,221320,2500.2582,N,12117.1898,E,0,08,3.5,10.0,M,0.0,M,,*4A");
+        let result = state
+            .parse_sentence("$GPGGA,221320,2500.2582,N,12117.1898,E,0,08,3.5,10.0,M,0.0,M,,*4A");
         assert!(result.is_none());
         assert!(!state.point.has_fix);
     }
@@ -287,7 +299,8 @@ mod tests {
         // Then GSA should complete the point
         // $GNGSA,A,3,04,05,09,12,14,15,16,21,22,24,25,26,1.5,1.2,3.0
         // HDOP is at index 15 (value 1.2)
-        let result = state.parse_sentence("$GNGSA,A,3,04,05,09,12,14,15,16,21,22,24,25,26,1.5,1.2,3.0*23");
+        let result =
+            state.parse_sentence("$GNGSA,A,3,04,05,09,12,14,15,16,21,22,24,25,26,1.5,1.2,3.0*23");
         assert!(result.is_some());
         let point = result.unwrap();
         assert!(point.has_fix);
@@ -307,14 +320,16 @@ mod tests {
     #[test]
     fn parse_sentence_invalid_checksum() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,350.5,141123,,*00");
+        let result =
+            state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,350.5,141123,,*00");
         assert!(result.is_none());
     }
 
     #[test]
     fn parse_gnrmc_valid() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GNRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*30");
+        let result =
+            state.parse_sentence("$GNRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*30");
         assert!(result.is_none()); // RMC alone doesn't complete the point
         assert!(state.point.has_fix);
         assert!((state.point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
@@ -324,7 +339,8 @@ mod tests {
     #[test]
     fn parse_gngga_valid() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GNGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*55");
+        let result = state
+            .parse_sentence("$GNGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*55");
         assert!(result.is_some()); // GNGGA completes the point
         let point = result.unwrap();
         assert!(point.has_fix);

@@ -4,7 +4,7 @@
 
 mod common;
 use common::load_test_asset_bytes;
-use shared::binfile::{RouteData, BusError};
+use shared::binfile::{BusError, RouteData};
 
 #[test]
 fn test_ty225_bin_stops() {
@@ -12,18 +12,25 @@ fn test_ty225_bin_stops() {
     let route_data = match RouteData::load(&data) {
         Ok(data) => data,
         Err(BusError::InvalidVersion) => {
-            eprintln!("Skipping test: ty225.bin is VERSION 2, needs to be regenerated to VERSION 3");
+            eprintln!(
+                "Skipping test: ty225.bin is VERSION 2, needs to be regenerated to VERSION 3"
+            );
             return;
         }
         Err(e) => panic!("Failed to load route data: {:?}", e),
     };
 
-    println!("Route data: {} nodes, {} stops", route_data.node_count, route_data.stop_count);
+    println!(
+        "Route data: {} nodes, {} stops",
+        route_data.node_count, route_data.stop_count
+    );
 
     for i in 0..route_data.stop_count {
         if let Some(stop) = route_data.get_stop(i) {
-            println!("Stop {}: progress_cm={}, corridor_start_cm={}, corridor_end_cm={}",
-                i, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm);
+            println!(
+                "Stop {}: progress_cm={}, corridor_start_cm={}, corridor_end_cm={}",
+                i, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm
+            );
         }
     }
 
@@ -37,8 +44,10 @@ fn test_ty225_bin_stops() {
     for i in 0..route_data.stop_count {
         if let Some(stop) = route_data.get_stop(i) {
             if test_s_cm >= stop.corridor_start_cm && test_s_cm <= stop.corridor_end_cm {
-                println!("  s_cm {} is in corridor of Stop {} [{}, {}]",
-                    test_s_cm, i, stop.corridor_start_cm, stop.corridor_end_cm);
+                println!(
+                    "  s_cm {} is in corridor of Stop {} [{}, {}]",
+                    test_s_cm, i, stop.corridor_start_cm, stop.corridor_end_cm
+                );
                 found_any = true;
             }
         }
@@ -53,8 +62,13 @@ fn test_ty225_bin_stops() {
     for i in 0..route_data.stop_count.min(5) {
         if let Some(stop) = route_data.get_stop(i) {
             let diff = stop.progress_cm as i64 - test_s_cm as i64;
-            println!("  Stop {}: progress_cm={}, diff_from_s_cm={} cm ({} m)",
-                i, stop.progress_cm, diff, diff / 100);
+            println!(
+                "  Stop {}: progress_cm={}, diff_from_s_cm={} cm ({} m)",
+                i,
+                stop.progress_cm,
+                diff,
+                diff / 100
+            );
         }
     }
 }

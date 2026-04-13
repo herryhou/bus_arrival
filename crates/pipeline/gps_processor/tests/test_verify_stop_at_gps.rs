@@ -2,7 +2,7 @@
 
 mod common;
 use common::load_test_asset_bytes;
-use shared::binfile::{RouteData, BusError};
+use shared::binfile::{BusError, RouteData};
 
 #[test]
 fn test_verify_stop_at_gps_position() {
@@ -16,13 +16,18 @@ fn test_verify_stop_at_gps_position() {
         Err(e) => panic!("Failed to load route data: {:?}", e),
     };
 
-    println!("Route data: {} nodes, {} stops", route_data.node_count, route_data.stop_count);
+    println!(
+        "Route data: {} nodes, {} stops",
+        route_data.node_count, route_data.stop_count
+    );
 
     // Check the last stop (the one we added at GPS position)
     let last_idx = route_data.stop_count - 1;
     if let Some(stop) = route_data.get_stop(last_idx) {
-        println!("Stop {} (at GPS position): progress_cm={}, corridor=[{}, {}]",
-            last_idx, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm);
+        println!(
+            "Stop {} (at GPS position): progress_cm={}, corridor=[{}, {}]",
+            last_idx, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm
+        );
     }
 
     // Test if GPS at s_cm=1717259 is in this stop's corridor
@@ -47,8 +52,10 @@ fn test_verify_stop_at_gps_position() {
         for i in 0..route_data.stop_count {
             if let Some(stop) = route_data.get_stop(i) {
                 if *test_s_cm >= stop.corridor_start_cm && *test_s_cm <= stop.corridor_end_cm {
-                    println!("  ACTIVE Stop {}: progress={}, corridor=[{}, {}]",
-                        i, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm);
+                    println!(
+                        "  ACTIVE Stop {}: progress={}, corridor=[{}, {}]",
+                        i, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm
+                    );
                     found_any = true;
                 }
             }

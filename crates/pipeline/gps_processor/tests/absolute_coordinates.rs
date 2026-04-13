@@ -35,10 +35,14 @@ fn test_gps_to_absolute_coordinates_uses_correct_lat_avg() {
     let expected_y = (y_abs - y0_abs).round() as i32;
 
     // Assert: Function returns absolute coordinates
-    assert_eq!(x_cm, expected_x,
-        "GPS should be converted to absolute coordinates (from fixed origin)");
-    assert_eq!(y_cm, expected_y,
-        "GPS should be converted to absolute coordinates (from fixed origin)");
+    assert_eq!(
+        x_cm, expected_x,
+        "GPS should be converted to absolute coordinates (from fixed origin)"
+    );
+    assert_eq!(
+        y_cm, expected_y,
+        "GPS should be converted to absolute coordinates (from fixed origin)"
+    );
 }
 
 #[test]
@@ -70,10 +74,14 @@ fn test_latlon_to_cm_absolute_with_lat_avg_matches_preprocessor_formula() {
     let expected_y = (y_abs - y0_abs).round() as i32;
 
     // Assert: Simulator uses correct formula matching preprocessor
-    assert_eq!(sim_x, expected_x,
-        "Simulator must use same coordinate conversion as preprocessor (x)");
-    assert_eq!(sim_y, expected_y,
-        "Simulator must use same coordinate conversion as preprocessor (y)");
+    assert_eq!(
+        sim_x, expected_x,
+        "Simulator must use same coordinate conversion as preprocessor (x)"
+    );
+    assert_eq!(
+        sim_y, expected_y,
+        "Simulator must use same coordinate conversion as preprocessor (y)"
+    );
 }
 
 #[test]
@@ -89,8 +97,14 @@ fn test_absolute_coordinates_not_relative_to_grid_origin() {
     let (abs_x, abs_y) = map_match::latlon_to_cm_absolute_with_lat_avg(lat, lon, lat_avg_deg);
 
     // Verify absolute coordinates are large positive values (offset from fixed origin)
-    assert!(abs_x > 10000000, "Absolute x coordinate should be large positive value");
-    assert!(abs_y > 50000000, "Absolute y coordinate should be large positive value");
+    assert!(
+        abs_x > 10000000,
+        "Absolute x coordinate should be large positive value"
+    );
+    assert!(
+        abs_y > 50000000,
+        "Absolute y coordinate should be large positive value"
+    );
 
     // Demonstrate the bug: if we subtract grid origin from GPS coordinates,
     // the result would be much smaller and in the wrong location
@@ -101,14 +115,20 @@ fn test_absolute_coordinates_not_relative_to_grid_origin() {
     let relative_x = abs_x as i64 - hypothetical_grid_x0;
     let relative_y = abs_y as i64 - hypothetical_grid_y0;
     // This puts the bus in the wrong location!
-    assert_ne!(relative_x, abs_x as i64,
-        "Using relative coordinates would give wrong x position");
-    assert_ne!(relative_y, abs_y as i64,
-        "Using relative coordinates would give wrong y position");
+    assert_ne!(
+        relative_x, abs_x as i64,
+        "Using relative coordinates would give wrong x position"
+    );
+    assert_ne!(
+        relative_y, abs_y as i64,
+        "Using relative coordinates would give wrong y position"
+    );
 
     // The difference should be significant (> 10 km in one dimension)
     let diff_x = (relative_x - abs_x as i64).abs();
     let diff_y = (relative_y - abs_y as i64).abs();
-    assert!(diff_x > 1000000 || diff_y > 1000000,
-        "Coordinate system error should cause >10km position error");
+    assert!(
+        diff_x > 1000000 || diff_y > 1000000,
+        "Coordinate system error should cause >10km position error"
+    );
 }

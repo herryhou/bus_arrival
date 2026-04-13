@@ -1,9 +1,9 @@
 //! JSON output for localization results
 
 use serde::Serialize;
-use std::io::{self, Write};
-use shared::{Stop, DistCm, HeadCdeg};
 use shared::binfile::RouteData;
+use shared::{DistCm, HeadCdeg, Stop};
+use std::io::{self, Write};
 
 #[derive(Serialize)]
 struct OutputRecord {
@@ -74,7 +74,11 @@ pub fn write_output<W: Write>(
         .unwrap_or_default();
 
     let record = match result {
-        super::kalman::ProcessResult::Valid { signals, v_cms, seg_idx } => OutputRecord {
+        super::kalman::ProcessResult::Valid {
+            signals,
+            v_cms,
+            seg_idx,
+        } => OutputRecord {
             time,
             lat,
             lon,

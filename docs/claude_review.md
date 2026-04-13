@@ -1,5 +1,5 @@
 
-## 1. The Heading Penalty Has No Tunable λ — It Silently Overrides Distance
+## E1. The Heading Penalty Has No Tunable λ — It Silently Overrides Distance
 
 The spec defines:
 
@@ -17,7 +17,7 @@ The λ parameter needs to have units of cm²/cdeg² with a value of ~0.000003 to
 
 ---
 
-## 2. The Probability Model Is a Linear Discriminant, Not Bayesian Fusion
+## E2. The Probability Model Is a Linear Discriminant, Not Bayesian Fusion
 
 The spec describes the probability model as "Bayesian fusion" but the formula is:
 
@@ -27,7 +27,7 @@ This is a weighted linear sum — a linear discriminant. Bayesian fusion would m
 
 ---
 
-## 3. F1 and F3 Are Structurally Correlated — Two Features for the Price of None
+## E3. F1 and F3 Are Structurally Correlated — Two Features for the Price of None
 
 The spec's rationale: F1 = raw GPS projection (noisy, independent), F3 = Kalman-smoothed position (stable, correlated across time). The intent is two independent views of the same physical fact.
 
@@ -35,7 +35,7 @@ The flaw: both F1 and F3 are computed from `|s_cm - stop.progress_cm|` using the
 
 ---
 
-## 4. HDOP Is Always One Message Cycle Stale
+## E4. HDOP Is Always One Message Cycle Stale
 
 The NMEA parsing sequence in practice: RMC → GGA → GSA (or RMC → GSA, or GGA alone).
 
@@ -45,7 +45,7 @@ The fix is to hold the point in a staging buffer until both a position source an
 
 ---
 
-## 5. Midnight Rollover Causes DR to Stall
+## E5. Midnight Rollover Causes DR to Stall
 
 GPS timestamps are derived from HHMMSS as `hh * 3600 + mm * 60 + ss` — a value in `[0, 86399]`. Dead-reckoning computes:
 
@@ -57,13 +57,13 @@ At midnight, `last_gps_time = 86399` and `timestamp = 0`. `(0u64).saturating_sub
 
 ---
 
-## 6. Only One Event Returns Per Tick — Silent Drop When Corridors Overlap
+## E6. Only One Event Returns Per Tick — Silent Drop When Corridors Overlap
 
 `process_gps` in `state.rs` iterates over active stops and returns `Some(...)` immediately on the first `StopEvent::Arrived` or announcement. If two corridors overlap (which the close-stop logic explicitly creates), and both trigger an event in the same tick, only the lower-indexed stop's event is returned. The higher-indexed stop's FSM is updated (state transitions correctly), but its arrival event is dropped. The caller never knows it happened. This is a structural limitation of returning `Option<ArrivalEvent>` rather than a `Vec<ArrivalEvent>` or a callback.
 
 ---
 
-## 7. Recovery Triggers Cannot Fire Even If Wired Up
+## E7. Recovery Triggers Cannot Fire Even If Wired Up
 
 The spec lists three Recovery triggers (Section 15.1): GPS jump > 200 m, restart mismatch > 500 m, and sustained position/stop divergence > 5 s. None of the state needed to detect these is tracked in `State`:
 
@@ -75,19 +75,19 @@ Before Module ⑫ can be wired up, three new fields must be added to `State` and
 
 ---
 
-## 8. The One-Time Announcement Rule Breaks Circular Routes
+## E8. The One-Time Announcement Rule Breaks Circular Routes
 
 Section 14.4 makes `announced = true` permanent for the lifetime of a `StopState`. For a circular route (bus loops back past stop #5 twice per trip), the second pass is silent. The spec acknowledges this as "expected behavior." But many real transit routes are circular, and this architectural decision makes the system unsuitable for them without a trip-reset mechanism. The spec doesn't define what constitutes a "trip boundary" or how to detect one, leaving this as an unresolved operational gap.
 
 ---
 
-## 9. The Close-Stop Corridor Adjustment and Adaptive Weights Aren't Jointly Calibrated
+## E9. The Close-Stop Corridor Adjustment and Adaptive Weights Aren't Jointly Calibrated
 
 The close-stop fix (v8.6) applies two independent interventions simultaneously: corridor resizing (Section 12.5) and weight redistribution from (13,6,10,3) to (14,7,11,0). These two changes interact: the resized corridor means dwell time accumulates differently, but the adaptive weights remove dwell time entirely for those stops. The system was validated on a single real-world case (tpF805 Stop #2→#3 at 79 m), and probability went from 185 → 222. However, the threshold θ=191 was set under the standard weights. With adaptive weights that remove p4 entirely, the score distribution shifts. Whether θ=191 remains the right threshold for the (14,7,11,0) regime was never independently evaluated — the validation just confirms "> 191," not that the threshold is still optimal.
 
 ---
 
-## 10. The 80 m Pre-Corridor Is Both a Feature and a Constraint — and Creates an Edge Case at Route Start
+## E10. The 80 m Pre-Corridor Is Both a Feature and a Constraint — and Creates an Edge Case at Route Start
 
 The corridor's pre-corridor width (80 m) serves two roles: it's the announcement trigger, and it's the window for dwell-time accumulation. These two purposes impose conflicting constraints. For announcement you want the corridor to start early (before the bus decelerates). For dwell-time you want it to start late (to avoid counting slow-approach time as dwell time). The system resolves this by making the corridor serve both, but the result is that `τ_dwell` and `T_ref = 10 s` must be tuned relative to corridor width and bus approach speed simultaneously — they aren't independent parameters.
 

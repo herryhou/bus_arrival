@@ -26,7 +26,7 @@ fn test_speed_constraint_allows_36m_jump() {
 #[test]
 fn test_speed_constraint_dt_scaling() {
     // With dt=2, D_max = 1667*2 + 2000 = 5334 cm
-    let z_new = 10000 + 5300;  // 53 m
+    let z_new = 10000 + 5300; // 53 m
     let z_prev = 10000;
     let dt = 2;
 
@@ -42,6 +42,8 @@ fn test_speed_constraint_current_value_too_permissive() {
     let dt = 1;
 
     // This will PASS with current code (wrong), FAIL after fix (correct)
-    assert!(!check_speed_constraint(z_new, z_prev, dt),
-        "80 m jump should be rejected but currently passes");
+    assert!(
+        !check_speed_constraint(z_new, z_prev, dt),
+        "80 m jump should be rejected but currently passes"
+    );
 }

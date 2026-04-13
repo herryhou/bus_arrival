@@ -47,10 +47,14 @@ fn test_gps_position_matches_route_position() {
     // Assert: GPS position should match route position exactly
     // If this fails, there's a coordinate system mismatch between
     // preprocessor and simulator
-    assert_eq!(gps_x_cm, route_x_cm,
-        "GPS x_cm should match route x_cm (coordinate system aligned)");
-    assert_eq!(gps_y_cm, route_y_cm,
-        "GPS y_cm should match route y_cm (coordinate system aligned)");
+    assert_eq!(
+        gps_x_cm, route_x_cm,
+        "GPS x_cm should match route x_cm (coordinate system aligned)"
+    );
+    assert_eq!(
+        gps_y_cm, route_y_cm,
+        "GPS y_cm should match route y_cm (coordinate system aligned)"
+    );
 }
 
 #[test]
@@ -81,6 +85,8 @@ fn test_gps_offset_from_route_measures_distance() {
     let expected_distance_m = 150.0;
 
     // Assert: Distance is approximately correct (±5% tolerance)
-    assert!((distance_m - expected_distance_m).abs() < expected_distance_m * 0.05,
-        "GPS offset distance should be approximately correct (±5%)");
+    assert!(
+        (distance_m - expected_distance_m).abs() < expected_distance_m * 0.05,
+        "GPS offset distance should be approximately correct (±5%)"
+    );
 }

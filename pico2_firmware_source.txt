@@ -55,6 +55,7 @@ Directory Structure
         lib.rs
         lut.rs
         main.rs
+        persist.rs
         recovery_trigger.rs
         state.rs
         uart.rs
@@ -122,6 +123,7 @@ File: ./crates/pico2-firmware/src/detection.rs
 //! Arrival detection logic
 //!
 //! Provides stop corridor filtering and arrival probability computation.
+#![allow(dead_code)]
 
 use crate::lut::{GAUSSIAN_LUT, LOGISTIC_LUT};
 use shared::{
@@ -239,6 +241,7 @@ File: ./crates/pico2-firmware/src/lut.rs
 ================
 //! LUTs for arrival probability computation
 //! Generated at build time from pipeline probability module
+#![allow(dead_code)]
 
 include!(concat!(env!("OUT_DIR"), "/lut_generated.rs"));
 
@@ -278,6 +281,7 @@ File: ./crates/pico2-firmware/src/main.rs
 #![no_std]
 #![no_main]
 #![cfg(feature = "firmware")]
+#![allow(static_mut_refs)]
 
 use defmt::*;
 use defmt_rtt as _;
@@ -291,12 +295,15 @@ use embassy_time::{Duration, Timer};
 use embassy_rp::uart::{BufferedInterruptHandler, BufferedUart, Config as UartConfig};
 use embassy_rp::bind_interrupts;
 use embassy_rp::block::ImageDef;
+use embassy_rp::flash::Flash;
 
 // Module declarations
 mod lut;
 mod uart;
 mod detection;
+mod recovery_trigger;
 mod state;
+mod persist;
 
 
 // Note: embassy-rp doesn't require external bootloader
@@ -307,9 +314,10 @@ mod state;
 #[link_section = ".bi_entries"]
 static IMAGE_DEF: ImageDef = ImageDef::secure_exe();
 
-// Interrupt bindings for buffered UART
+// Interrupt bindings for buffered UART and DMA flash
 bind_interrupts!(struct Irqs {
     UART0_IRQ => BufferedInterruptHandler<embassy_rp::peripherals::UART0>;
+    DMA_IRQ_0 => embassy_rp::dma::InterruptHandler<embassy_rp::peripherals::DMA_CH0>;
 });
 
 /// Route data embedded in flash
@@ -325,6 +333,9 @@ async fn main(_spawner: Spawner) {
 
     // Initialize peripherals
     let p = embassy_rp::init(Default::default());
+
+    // Initialize flash driver for state persistence
+    let mut flash = Flash::<_, embassy_rp::flash::Async, { 2 * 1024 * 1024 }>::new(p.FLASH, p.DMA_CH0, Irqs);
 
     // Initialize UART for GPS NMEA input and arrival event output
     // Using buffered UART (interrupt-based) for true async I/O without DMA requirement
@@ -358,8 +369,16 @@ async fn main(_spawner: Spawner) {
         route_data.node_count, route_data.stop_count
     );
 
+    // Load persisted state from flash (may be None on first boot)
+    let persisted = persist::load(&mut flash).await;
+    if persisted.is_some() {
+        info!("Loaded persisted state");
+    } else {
+        info!("No valid persisted state, cold start");
+    }
+
     // Initialize state with route data reference
-    let mut state = state::State::new(&route_data);
+    let mut state = state::State::new(&route_data, persisted);
 
     // Initialize line buffer for NMEA data
     let mut line_buf = uart::UartLineBuffer::new();
@@ -415,9 +434,135 @@ async fn main(_spawner: Spawner) {
             }
         }
 
+        // Persist state if stop index changed and rate limit allows
+        if let Some(current_stop) = state.current_stop_index() {
+            if state.should_persist(current_stop) {
+                let ps = shared::PersistedState::new(state.kalman.s_cm, current_stop);
+                match persist::save(&mut flash, &ps).await {
+                    Ok(()) => {
+                        info!("Persisted state: stop={}, progress={}cm", current_stop, state.kalman.s_cm);
+                        state.mark_persisted(current_stop);
+                    }
+                    Err(()) => {
+                        defmt::warn!("Failed to persist state to flash");
+                    }
+                }
+            } else {
+                // Increment tick counter for rate limiting
+                state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
+            }
+        }
+
         // Rate limiting: 1 Hz processing
         Timer::after(Duration::from_secs(1)).await;
     }
+}
+
+================
+File: ./crates/pico2-firmware/src/persist.rs
+================
+//! Flash persistence for bus arrival state across reboots.
+//!
+//! This module provides functions to load and save `PersistedState` to/from
+//! a dedicated 4KB flash sector at the end of flash memory.
+//!
+//! # Flash Endurance
+//!
+//! NOR flash typically supports ~100,000 erase cycles. To avoid wearing out
+//! the flash, writes are rate-limited to at most once per 60 seconds in the
+//! main loop. This gives ~350,000 writes per year, well within endurance.
+//!
+//! # Flash Layout
+//!
+//! - **Offset:** 0x1FF000 from flash base (absolute: 0x101FF000)
+//! - **Size:** 4KB (one sector, minimum erase unit)
+//! - **Content:** One `PersistedState` (12 bytes), rest is 0xFF padding
+
+#![cfg(feature = "firmware")]
+
+use embassy_rp::flash::{Flash, ERASE_SIZE};
+use embassy_rp::peripherals::FLASH;
+use embedded_storage_async::nor_flash::NorFlash;
+use shared::PersistedState;
+
+/// Offset from flash base for persisted state sector.
+/// Must match the PERSIST region in memory.x.
+/// Pico 2 flash base is 0x10000000, PERSIST region is at 0x101FF000.
+/// Offset = 0x101FF000 - 0x10000000 = 0x1FF000.
+///
+/// Note: This offset is at the end of flash, within the ROUTE_DATA region.
+/// The actual route data binary is only ~22KB, so the last 4KB is unused.
+const PERSIST_FLASH_OFFSET: u32 = 0x1FF000;
+
+/// Flash size in bytes (2 MB for RP2350).
+/// Embassy-rp requires this as a const generic parameter.
+const FLASH_SIZE: usize = 2 * 1024 * 1024;
+
+/// Load persisted state from flash.
+///
+/// Returns `None` if:
+/// - Flash is entirely erased (all 0xFF bytes)
+/// - CRC32 checksum does not match
+/// - Read operation fails
+pub async fn load(flash: &mut Flash<'_, FLASH, embassy_rp::flash::Async, FLASH_SIZE>) -> Option<PersistedState> {
+    let mut buf = [0u8; core::mem::size_of::<PersistedState>()];
+
+    // Read the persisted state from flash
+    flash.read(PERSIST_FLASH_OFFSET, &mut buf).await.ok()?;
+
+    // Check if flash is blank (erased state is all 0xFF)
+    if buf.iter().all(|&b| b == 0xFF) {
+        return None;
+    }
+
+    // Deserialize from unaligned bytes (flash may not be 4-byte aligned)
+    let state: PersistedState = unsafe { core::ptr::read_unaligned(buf.as_ptr() as *const _) };
+
+    // Verify CRC32 checksum
+    if state.is_valid() {
+        Some(state)
+    } else {
+        None
+    }
+}
+
+/// Save persisted state to flash.
+///
+/// This operation takes ~10ms (4KB erase + write). The erase is required
+/// before any write on NOR flash.
+///
+/// # Errors
+///
+/// Returns `Err(())` if:
+/// - Erase operation fails
+/// - Write operation fails
+pub async fn save(
+    flash: &mut Flash<'_, FLASH, embassy_rp::flash::Async, FLASH_SIZE>,
+    state: &PersistedState,
+) -> Result<(), ()> {
+    // Erase the sector first (required before write on NOR flash)
+    flash
+        .erase(PERSIST_FLASH_OFFSET, PERSIST_FLASH_OFFSET + ERASE_SIZE as u32)
+        .await
+        .map_err(|_| ())?;
+
+    // Write must be in multiples of WRITE_SIZE (1 byte for RP2350).
+    // Pad with 0xFF (erased state value) to fill the sector.
+    let mut write_buf = [0xFFu8; ERASE_SIZE];
+
+    let state_bytes = unsafe {
+        core::slice::from_raw_parts(
+            state as *const PersistedState as *const u8,
+            core::mem::size_of::<PersistedState>(),
+        )
+    };
+
+    write_buf[..state_bytes.len()].copy_from_slice(state_bytes);
+
+    flash
+        .write(PERSIST_FLASH_OFFSET, &write_buf)
+        .await
+        .map_err(|_| ())
 }
 
 ================
@@ -488,6 +633,7 @@ File: ./crates/pico2-firmware/src/state.rs
 //!
 //! Manages the main state machine for processing GPS updates through
 //! the full arrival detection pipeline.
+#![allow(dead_code)]
 
 use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
 use crate::recovery_trigger::should_trigger_recovery;
@@ -563,10 +709,16 @@ pub struct State<'a> {
     last_valid_s_cm: DistCm,
     /// Timestamp of last GPS fix for recovery time delta calculation
     last_gps_timestamp: u64,
+    /// Pending persisted state to apply after first GPS fix
+    pending_persisted: Option<shared::PersistedState>,
+    /// Last stop index that was persisted to flash
+    last_persisted_stop: u8,
+    /// Ticks since last persist operation (for rate limiting)
+    pub ticks_since_persist: u16,
 }
 
 impl<'a> State<'a> {
-    pub fn new(route_data: &'a RouteData<'a>) -> Self {
+    pub fn new(route_data: &'a RouteData<'a>, persisted: Option<shared::PersistedState>) -> Self {
         use detection::state_machine::StopState;
         use gps_processor::nmea::NmeaState;
 
@@ -593,6 +745,9 @@ impl<'a> State<'a> {
             last_known_stop_index: 0,
             last_valid_s_cm: 0,
             last_gps_timestamp: 0,
+            pending_persisted: persisted,
+            last_persisted_stop: if let Some(ps) = persisted { ps.last_stop_index } else { 0 },
+            ticks_since_persist: 0,
         }
     }
 
@@ -668,6 +823,35 @@ impl<'a> State<'a> {
                     // First fix initializes Kalman but doesn't run update_adaptive
                     // Counts toward timeout but NOT convergence
                     self.warmup_total_ticks = 1;
+
+                    // Apply persisted state if valid and within 500m threshold
+                    if let Some(ps) = self.pending_persisted.take() {
+                        // Check 500m threshold from spec (Section 11.4)
+                        // Only trust persisted state if current GPS is close enough
+                        let delta_cm = if s_cm >= ps.last_progress_cm {
+                            s_cm - ps.last_progress_cm
+                        } else {
+                            ps.last_progress_cm - s_cm
+                        };
+
+                        if delta_cm <= 50_000 {
+                            // Within 500m: trust persisted stop index
+                            self.apply_persisted_stop_index(ps.last_stop_index);
+                            #[cfg(feature = "firmware")]
+                            defmt::info!(
+                                "Applied persisted state: stop={}, delta={}cm",
+                                ps.last_stop_index,
+                                delta_cm
+                            );
+                        } else {
+                            #[cfg(feature = "firmware")]
+                            defmt::warn!(
+                                "Persisted state too stale: delta={}cm > 500m, ignoring",
+                                delta_cm
+                            );
+                        }
+                    }
+
                     return None;
                 }
 
@@ -914,6 +1098,53 @@ impl<'a> State<'a> {
     pub fn last_valid_s_cm(&self) -> DistCm {
         self.last_valid_s_cm
     }
+
+    /// Returns true if state should be persisted this tick.
+    /// Writes when stop index changes, but no more than once per 60 seconds.
+    /// This rate limiting prevents excessive flash wear (~100k erase cycles).
+    pub fn should_persist(&self, current_stop: u8) -> bool {
+        // Only persist when stop index actually changes
+        if current_stop == self.last_persisted_stop {
+            return false;
+        }
+
+        // Rate limit: no more than once per 60 seconds (60 ticks at 1Hz)
+        if self.ticks_since_persist < 60 {
+            return false;
+        }
+
+        true
+    }
+
+    /// Mark state as persisted, resetting the rate-limit counter.
+    pub fn mark_persisted(&mut self, stop_index: u8) {
+        self.last_persisted_stop = stop_index;
+        self.ticks_since_persist = 0;
+    }
+
+    /// Get the current stop index from last_known_stop_index.
+    /// Returns None if not yet initialized.
+    pub fn current_stop_index(&self) -> Option<u8> {
+        if self.first_fix {
+            None
+        } else {
+            Some(self.last_known_stop_index)
+        }
+    }
+
+    /// Apply persisted stop index by marking all prior stops as Departed.
+    ///
+    /// This prevents the corridor filter from re-triggering stops that
+    /// were already passed before the reboot. Without this, the bus would
+    /// re-announce all stops from the beginning of the route.
+    fn apply_persisted_stop_index(&mut self, stop_index: u8) {
+        use shared::FsmState;
+
+        for i in 0..stop_index.min(self.stop_states.len() as u8) as usize {
+            self.stop_states[i].fsm_state = FsmState::Departed;
+            self.stop_states[i].announced = true;
+        }
+    }
 }
 
 ================
@@ -924,6 +1155,7 @@ File: ./crates/pico2-firmware/src/uart.rs
 //! Provides line-buffered NMEA sentence reading and formatted arrival event writing.
 
 #![cfg(feature = "firmware")]
+#![allow(dead_code)]
 
 use embassy_rp::uart::BufferedUart;
 use embassy_time::{with_timeout, Duration};
@@ -1829,7 +2061,6 @@ mod tests {
 
         // With close stop, p4 weight is removed, should be higher
         assert!(prob > 190, "Expected probability > 190 for close stop, got {}", prob);
-        assert!(prob <= 255);
     }
 
     #[test]
@@ -1880,7 +2111,6 @@ mod tests {
         );
 
         // Should use standard weights
-        assert!(prob <= 255);
         assert!(prob > 150); // At stop with 10s dwell should be high
     }
 
@@ -7200,6 +7430,62 @@ impl ArrivalEvent {
     }
 }
 
+/// State persisted across reboots to reduce cold-start latency.
+/// Stored in a dedicated flash sector; verified with CRC32 on load.
+///
+/// On reboot, if CRC matches and progress is within 500m of current estimate,
+/// last_stop_index is trusted directly (no full Recovery scan needed).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PersistedState {
+    /// Route progress at last save (cm)
+    pub last_progress_cm: i32,
+    /// Stop index at last save
+    pub last_stop_index: u8,
+    /// Padding to align checksum to 4-byte boundary
+    _pad: [u8; 3],
+    /// CRC32 over all preceding fields
+    pub checksum: u32,
+}
+
+impl PersistedState {
+    /// Invalid state sentinel for uninitialized flash
+    pub const INVALID: Self = Self {
+        last_progress_cm: 0,
+        last_stop_index: 0,
+        _pad: [0; 3],
+        checksum: 0,
+    };
+
+    /// Compute CRC over everything except the checksum field itself.
+    pub fn compute_crc(&self) -> u32 {
+        let bytes = unsafe {
+            core::slice::from_raw_parts(
+                self as *const Self as *const u8,
+                core::mem::size_of::<Self>() - 4, // exclude checksum field
+            )
+        };
+        crate::binfile::crc32(bytes)
+    }
+
+    /// Returns true if the checksum is valid.
+    pub fn is_valid(&self) -> bool {
+        self.checksum == self.compute_crc()
+    }
+
+    /// Create a new persisted state with computed checksum.
+    pub fn new(last_progress_cm: i32, last_stop_index: u8) -> Self {
+        let mut s = Self {
+            last_progress_cm,
+            last_stop_index,
+            _pad: [0; 3],
+            checksum: 0,
+        };
+        s.checksum = s.compute_crc();
+        s
+    }
+}
+
 /// Departure event emitted when bus leaves a stop
 #[cfg_attr(feature = "serde", derive(Debug, Clone, serde::Serialize))]
 pub struct DepartureEvent {
@@ -7218,6 +7504,8 @@ pub struct DepartureEvent {
 // and regenerate all route_data.bin files with the preprocessor.
 const _: () = assert!(core::mem::size_of::<RouteNode>() == 24);
 const _: () = assert!(core::mem::size_of::<Stop>() == 12);
+// Compile-time size check — flash read/write uses raw bytes
+const _: () = assert!(core::mem::size_of::<PersistedState>() == 12);
 
 #[cfg(test)]
 mod tests {

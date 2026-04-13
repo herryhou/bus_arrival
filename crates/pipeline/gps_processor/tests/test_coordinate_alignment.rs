@@ -2,7 +2,7 @@
 
 mod common;
 use common::load_test_asset_bytes;
-use shared::binfile::{RouteData, BusError};
+use shared::binfile::{BusError, RouteData};
 
 #[test]
 fn test_coordinate_alignment() {
@@ -16,7 +16,10 @@ fn test_coordinate_alignment() {
         Err(e) => panic!("Failed to load route data: {:?}", e),
     };
 
-    println!("Route data: {} nodes, {} stops", route_data.node_count, route_data.stop_count);
+    println!(
+        "Route data: {} nodes, {} stops",
+        route_data.node_count, route_data.stop_count
+    );
 
     // Check first few nodes
     println!("\nFirst 5 nodes:");
@@ -25,7 +28,10 @@ fn test_coordinate_alignment() {
             let cum_dist = node.cum_dist_cm;
             let x = node.x_cm;
             let y = node.y_cm;
-            println!("Node {}: x_cm={}, y_cm={}, cum_dist_cm={}", i, x, y, cum_dist);
+            println!(
+                "Node {}: x_cm={}, y_cm={}, cum_dist_cm={}",
+                i, x, y, cum_dist
+            );
         }
     }
 
@@ -33,15 +39,20 @@ fn test_coordinate_alignment() {
     println!("\nFirst 5 stops:");
     for i in 0..5.min(route_data.stop_count) {
         if let Some(stop) = route_data.get_stop(i) {
-            println!("Stop {}: progress_cm={}, corridor=[{}, {}]",
-                i, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm);
+            println!(
+                "Stop {}: progress_cm={}, corridor=[{}, {}]",
+                i, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm
+            );
         }
     }
 
     // First NMEA position from jsonl: lat=25.004345, lon=121.286612, s_cm=1717259
     let nmea_lat: f64 = 25.004345;
     let nmea_lon: f64 = 121.286612;
-    println!("\nFirst NMEA position: lat={}, lon={}, s_cm=1717259", nmea_lat, nmea_lon);
+    println!(
+        "\nFirst NMEA position: lat={}, lon={}, s_cm=1717259",
+        nmea_lat, nmea_lon
+    );
 
     // Convert NMEA position to cm coordinates using the same projection as preprocessor
     use shared::{EARTH_R_CM, FIXED_ORIGIN_LAT_DEG, FIXED_ORIGIN_LON_DEG};
@@ -55,7 +66,8 @@ fn test_coordinate_alignment() {
     let lat0_rad = FIXED_ORIGIN_LAT_DEG.to_radians();
     let lon0_rad = FIXED_ORIGIN_LON_DEG.to_radians();
 
-    let x_cm = ((lon_rad - lon0_rad) * (EARTH_R_CM as f64) * lat_avg.to_radians().cos()).round() as i32;
+    let x_cm =
+        ((lon_rad - lon0_rad) * (EARTH_R_CM as f64) * lat_avg.to_radians().cos()).round() as i32;
     let y_cm = ((lat_rad - lat0_rad) * (EARTH_R_CM as f64)).round() as i32;
 
     println!("NMEA in cm coordinates: x_cm={}, y_cm={}", x_cm, y_cm);
@@ -81,7 +93,9 @@ fn test_coordinate_alignment() {
         let x = node.x_cm;
         let y = node.y_cm;
         let dist_m = (min_dist2 as f64).sqrt() / 100.0;
-        println!("Closest node {}: x_cm={}, y_cm={}, cum_dist_cm={}, distance={}m",
-            closest_idx, x, y, cum_dist, dist_m);
+        println!(
+            "Closest node {}: x_cm={}, y_cm={}, cum_dist_cm={}, distance={}m",
+            closest_idx, x, y, cum_dist, dist_m
+        );
     }
 }
