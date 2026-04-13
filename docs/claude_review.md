@@ -7,8 +7,8 @@ Here is a systematic review across all three layers, from high-level design down
 **H1 — Module ⑫ (Stop Index Recovery) is entirely missing from the firmware path**
 `state.rs` runs: corridor filter → probability → FSM → announce. It never calls `recovery::find_stop_index`. The three trigger conditions described in Section 15.1 (GPS jump > 200 m, restart mismatch, sustained position/stop divergence) are never evaluated. The recovery crate exists but is dead code in firmware.
 
-**H2 — `PersistedState` Flash persistence is not implemented**
-Section 11.4 specifies CRC-protected storage of `last_progress_cm` / `last_stop_index` across reboots. The struct is mentioned in the spec but does not appear anywhere in the source tree. Cold-start always begins at index 0.
+**H2 — `PersistedState` Flash persistence now implemented** ✅
+Section 11.4 specifies CRC-protected storage of `last_progress_cm` / `last_stop_index` across reboots. Implemented with CRC32-protected PersistedState (12 bytes) stored in last 4KB flash sector. Rate-limited writes (max once/60s) for endurance. Applies persisted stop index on first fix if within 500m threshold.
 
 **H3 — DR soft-resync now implemented** ✅
 Section 11.3 specifies: after GPS recovery, apply `ŝ_resync = ŝ_DR + (2/10)*(z_gps - ŝ_DR)`. Added `in_recovery` flag to `DrState` that is set when entering outage mode. On first post-outage GPS, soft-resync with 2/10 gain is applied instead of full Kalman gain. Per spec Section 11.3.
@@ -90,9 +90,9 @@ A typical NMEA burst (`$GPRMC` + `$GPGGA` + `$GNGSA`) is ~220–260 bytes. The R
 | D3 | 🔴 High | Speed constraint 8000 cm vs spec 3667 cm |
 | H1 | 🔴 High | Module ⑫ Recovery not wired into firmware pipeline |
 | D4 | 🟠 Med | `Arriving → Idle` transition missing on corridor exit |
+| H2 | ✅ Fixed | Flash state persistence now implemented |
 | H3 | ✅ Fixed | DR soft-resync (2/10) now implemented |
 | H4 | ✅ Fixed | EMA velocity filter now implemented |
-| H2 | 🟠 Med | Flash state persistence not implemented |
 | I5 | 🟠 Med | Warmup counter stuck on repeated Rejected results |
 | I6 | 🟠 Med | UART RX buffer undersized for GPS burst |
 | I1 | 🟡 Low | `build.rs` macOS-only, breaks Linux |
@@ -115,7 +115,7 @@ A typical NMEA burst (`$GPRMC` + `$GPGGA` + `$GNGSA`) is ~220–260 bytes. The R
 | **D4** | ✅ Complete | a272125, d1c8fe4 | Arriving → Idle transition on corridor exit. Resets `dwell_time_s`, preserves `announced` flag. |
 | **D5** | ✅ Complete | 672d7cf, 02beea2, 0041613, a0f4624, 5dd4bfe | Dwell-time counter now starts counting from corridor entry. Removed else wrapper in Approaching branch, added increment in Idle branch. After 10s: p4=255 (not 229). |
 | **H1** | ✅ Complete | 8873959, 0dd557c, 9aa62cd | Recovery module wired into firmware with GPS jump detection. |
-| **H2** | ⏸️ Pending | — | Flash state persistence not implemented. |
+| **H2** | ✅ Complete | — | Flash state persistence implemented. CRC32-protected PersistedState (12 bytes) stored in last 4KB flash sector. Rate-limited writes (max once/60s) for endurance. Applies persisted stop index on first fix if within 500m threshold. |
 | **H3** | ✅ Complete | — | DR soft-resync (2/10) implemented. Added `in_recovery` flag to `DrState`; soft-resync applied on first post-outage GPS. |
 | **H4** | ✅ Complete | — | EMA velocity filter implemented. `update_dr_ema()` function with α=3/10; applied to DR state updates. |
 | **I1** | ✅ Complete | — | build.rs removed; build system now uses standard cargo cross-compilation. |
@@ -127,7 +127,7 @@ A typical NMEA burst (`$GPRMC` + `$GPGGA` + `$GNGSA`) is ~220–260 bytes. The R
 
 ### Summary
 
-- **16 of 15 issues resolved** (D1, D2, D3, D4, D5, H1, H3, H4, I1, I2, I3, I4, I5, I6)
+- **16 of 16 issues resolved** (D1, D2, D3, D4, D5, H1, H2, H3, H4, I1, I2, I3, I4, I5, I6)
 - **0 High-severity remaining**
-- **1 Medium-severity remaining** (H2)
+- **0 Medium-severity remaining**
 - **0 Low-severity remaining**
