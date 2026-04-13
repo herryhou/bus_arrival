@@ -14,6 +14,7 @@ use shared::ArrivalEvent;
 
 /// Maximum NMEA sentence length (standard max is 82 chars)
 pub const MAX_NMEA_LENGTH: usize = 128;
+// Note: RX_BUFFER in main.rs is sized for 1-second accumulation, not per-sentence.
 
 // ===== Error Types =====
 

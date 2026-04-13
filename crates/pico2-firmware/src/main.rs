@@ -52,8 +52,13 @@ async fn main(_spawner: Spawner) {
     // Initialize UART for GPS NMEA input and arrival event output
     // Using buffered UART (interrupt-based) for true async I/O without DMA requirement
     // TX/RX buffers must live for the entire program duration
+    // TX_BUFFER: 256 bytes sufficient for arrival event messages (~128 bytes each)
+    // RX_BUFFER: 512 bytes covers full 1-second sleep window at 9600 baud.
+    //   Main loop sleeps for 1 second between GPS reads; buffer must absorb
+    //   all NMEA sentences transmitted during that window (~480 bytes/sec typical,
+    //   960 bytes/sec theoretical max at 9600 baud).
     static mut TX_BUFFER: [u8; 256] = [0u8; 256];
-    static mut RX_BUFFER: [u8; 256] = [0u8; 256];
+    static mut RX_BUFFER: [u8; 512] = [0u8; 512];
 
     let mut uart = unsafe {
         BufferedUart::new(
