@@ -243,9 +243,9 @@ pub async fn write_arrival_event_async(
     append!(b", stop=");
     append_u64(&mut msg_buf, &mut pos, event.stop_idx as u64)?;
     append!(b", s=");
-    append_u64(&mut msg_buf, &mut pos, event.s_cm as u64)?;
+    append_i64(&mut msg_buf, &mut pos, event.s_cm as i64)?;
     append!(b"cm, v=");
-    append_u64(&mut msg_buf, &mut pos, event.v_cms as u64)?;
+    append_i64(&mut msg_buf, &mut pos, event.v_cms as i64)?;
     append!(b"cm/s");
 
     // Only append probability for Arrival and Departure events
