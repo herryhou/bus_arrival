@@ -20,6 +20,7 @@ mod lut;
 mod uart;
 mod detection;
 mod state;
+mod persist;
 
 
 // Note: embassy-rp doesn't require external bootloader
