@@ -409,15 +409,15 @@ mod tests {
         let seg_heading: HeadCdeg = 9000; // 90°
 
         // Sentinel: always eligible regardless of segment heading or speed
-        assert!(heading_eligible(i16::MIN, 500, seg_heading));
-        assert!(heading_eligible(i16::MIN, 0, seg_heading));
+        assert!(heading_eligible(i16::MIN, 500, seg_heading, false));
+        assert!(heading_eligible(i16::MIN, 0, seg_heading, false));
     }
 
     #[test]
     fn test_heading_eligible_stopped() {
         // Stopped (w=0): always eligible — heading is unreliable
-        assert!(heading_eligible(0, 0, 9000)); // facing opposite direction
-        assert!(heading_eligible(0, 0, 18000)); // 180° misaligned
+        assert!(heading_eligible(0, 0, 9000, false)); // facing opposite direction
+        assert!(heading_eligible(0, 0, 18000, false)); // 180° misaligned
     }
 
     #[test]
@@ -425,15 +425,15 @@ mod tests {
         let speed: SpeedCms = 500; // well above 83 cm/s → w=256 → threshold=9000
 
         // Same heading: eligible
-        assert!(heading_eligible(9000, speed, 9000));
+        assert!(heading_eligible(9000, speed, 9000, false));
 
         // 89° off: eligible (just under 90° gate)
-        assert!(heading_eligible(0, speed, 8999));
+        assert!(heading_eligible(0, speed, 8999, false));
 
         // 91° off: not eligible
-        assert!(!heading_eligible(0, speed, 9001));
+        assert!(!heading_eligible(0, speed, 9001, false));
 
         // 180° (opposite direction): not eligible at speed
-        assert!(!heading_eligible(0, speed, 18000));
+        assert!(!heading_eligible(0, speed, 18000, false));
     }
 }
