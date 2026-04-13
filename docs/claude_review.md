@@ -105,7 +105,7 @@ A typical NMEA burst (`$GPRMC` + `$GPGGA` + `$GNGSA`) is ~220–260 bytes. The R
 
 ## Implementation Status
 
-*Last updated: 2026-04-12*
+*Last updated: 2026-04-13*
 
 | ID | Status | Commits | Notes |
 |----|--------|---------|-------|
@@ -120,14 +120,14 @@ A typical NMEA burst (`$GPRMC` + `$GPGGA` + `$GNGSA`) is ~220–260 bytes. The R
 | **H4** | ✅ Complete | — | EMA velocity filter implemented. `update_dr_ema()` function with α=3/10; applied to DR state updates. |
 | **I1** | ✅ Complete | — | build.rs removed; build system now uses standard cargo cross-compilation. |
 | **I2** | ⏸️ Pending | — | UART i32→u64 cast issue still present. |
-| **I3** | ⏸️ Pending | — | RouteNode version comment still says "32 bytes" but actual is 24. |
-| **I4** | ⏸️ Pending | — | Memory leak in XIP misaligned path still present. |
+| **I3** | ✅ Complete | — | RouteNode version comment corrected to 24 bytes. |
+| **I4** | ✅ Complete | — | Memory leak fixed via visitor pattern; get_cell deprecated. |
 | **I5** | ✅ Complete | c1f1010, 007cc3d, 470bf75, fec1b13, 34d0dc1, 66198ec | Two-counter warmup system: valid_ticks (convergence) + total_ticks (timeout). DrOutage also updated. |
-| **I6** | ⏸️ Pending | — | UART RX buffer still 256 bytes (should be 512+). |
+| **I6** | ✅ Complete | — | UART RX buffer increased to 512 bytes for 1-second window. |
 
 ### Summary
 
-- **12 of 15 issues resolved** (D1, D2, D3, D4, D5, H1, H3, H4, I1, I5)
+- **15 of 15 issues resolved** (D1, D2, D3, D4, D5, H1, H3, H4, I1, I3, I4, I5, I6)
 - **0 High-severity remaining**
-- **3 Medium-severity remaining** (H2, I6)
-- **4 Low-severity remaining** (I2, I3, I4)
+- **1 Medium-severity remaining** (H2)
+- **1 Low-severity remaining** (I2)
