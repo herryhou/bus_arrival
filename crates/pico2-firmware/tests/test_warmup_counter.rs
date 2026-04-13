@@ -251,15 +251,18 @@ fn test_warmup_normal_three_valid_gps() {
     let mut tick = 0;
 
     // First fix: initializes Kalman, total=1, valid=0
-    let gps1 = make_gps(tick, 120.0, 25.0, 10000, 0, 100, true);
+    // Use coordinates near the start of ty225 route (25.00425, 121.28645)
+    // Use slow speed (100 cm/s = 3.6 km/h) to stay within speed constraints
+    let gps1 = make_gps(tick, 25.00425, 121.28645, 100, 0, 100, true);
     let result = state.process_gps(&gps1);
     assert!(result.is_none(), "First fix should not trigger detection");
     assert_eq!(state.warmup_valid_ticks, 0, "First fix should not count as valid");
     assert_eq!(state.warmup_total_ticks, 1, "First fix should count toward total");
 
     // Valid GPS #1: total=2, valid=1
+    // Move slightly along route (~10m between ticks = 10 m/s = 36 km/h, well under 60 km/h limit)
     tick += 1;
-    let gps2 = make_gps(tick, 120.01, 25.01, 10100, 0, 100, true);
+    let gps2 = make_gps(tick, 25.00430, 121.28650, 1000, 0, 100, true);
     let result = state.process_gps(&gps2);
     assert!(result.is_none(), "Should not trigger detection yet");
     assert_eq!(state.warmup_valid_ticks, 1, "Should have 1 valid tick");
@@ -267,7 +270,7 @@ fn test_warmup_normal_three_valid_gps() {
 
     // Valid GPS #2: total=3, valid=2
     tick += 1;
-    let gps3 = make_gps(tick, 120.02, 25.02, 10200, 0, 100, true);
+    let gps3 = make_gps(tick, 25.00435, 121.28655, 2000, 0, 100, true);
     let result = state.process_gps(&gps3);
     assert!(result.is_none(), "Should not trigger detection yet");
     assert_eq!(state.warmup_valid_ticks, 2, "Should have 2 valid ticks");
@@ -275,15 +278,17 @@ fn test_warmup_normal_three_valid_gps() {
 
     // Valid GPS #3: total=4, valid=3 -> DETECTION ENABLED
     tick += 1;
-    let gps4 = make_gps(tick, 120.03, 25.03, 10300, 0, 100, true);
+    let gps4 = make_gps(tick, 25.00440, 121.28660, 3000, 0, 100, true);
     let result = state.process_gps(&gps4);
     assert!(result.is_none(), "No arrival at this position");
     assert_eq!(state.warmup_valid_ticks, 3, "Should have 3 valid ticks");
     assert_eq!(state.warmup_total_ticks, 4, "Should have 4 total ticks");
 
     // Now detection should be enabled - try to trigger arrival
+    // Use coordinates at the first stop (25.004283, 121.286559) with speed=0
+    // This is near the start of the route, so the bus should be within the corridor
     tick += 1;
-    let gps5 = make_gps(tick, 120.04, 25.04, 10000, 0, 0, true); // At stop
+    let gps5 = make_gps(tick, 25.004283, 121.286559, 0, 0, 0, true); // At stop, stopped
     let result = state.process_gps(&gps5);
     assert!(result.is_some(), "Detection should be enabled, arrival should trigger");
 }
