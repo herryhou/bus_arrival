@@ -32,7 +32,7 @@ fn test_warmup_counter_increments_after_first_fix() {
     let route_data = shared::binfile::RouteData::load(&route_bytes)
         .expect("Failed to parse ty225_normal.bin");
 
-    let mut state = State::new(&route_data);
+    let mut state = State::new(&route_data, None);
 
     // Initial state: first_fix is true, warmup counters are 0
     assert!(state.first_fix, "Initially first_fix should be true");
@@ -101,7 +101,7 @@ fn test_warmup_prevents_arrival_detection() {
     let route_data = shared::binfile::RouteData::load(&route_bytes)
         .expect("Failed to parse ty225_normal.bin");
 
-    let mut state = State::new(&route_data);
+    let mut state = State::new(&route_data, None);
 
     // First fix to initialize
     let gps_init = shared::GpsPoint {
@@ -154,7 +154,7 @@ fn test_warmup_resets_on_gps_outage() {
         .expect("Failed to load ty225_normal.bin");
     let route_data = shared::binfile::RouteData::load(&route_bytes)
         .expect("Failed to parse ty225_normal.bin");
-    let mut state = State::new(&route_data);
+    let mut state = State::new(&route_data, None);
     let mut tick = 0;
 
     // First fix + 2 valid GPS: total=3, valid=2
@@ -198,7 +198,7 @@ fn test_warmup_not_reset_on_dr_outage() {
     let route_data = shared::binfile::RouteData::load(&route_bytes)
         .expect("Failed to parse ty225_normal.bin");
 
-    let mut state = State::new(&route_data);
+    let mut state = State::new(&route_data, None);
 
     // Initialize and add warmup ticks
     let gps_init = shared::GpsPoint {
@@ -247,7 +247,7 @@ fn test_warmup_normal_three_valid_gps() {
         .expect("Failed to load ty225_normal.bin");
     let route_data = shared::binfile::RouteData::load(&route_bytes)
         .expect("Failed to parse ty225_normal.bin");
-    let mut state = State::new(&route_data);
+    let mut state = State::new(&route_data, None);
     let mut tick = 0;
 
     // First fix: initializes Kalman, total=1, valid=0
@@ -296,7 +296,7 @@ fn test_warmup_timeout_after_repeated_rejections() {
         .expect("Failed to load ty225_normal.bin");
     let route_data = shared::binfile::RouteData::load(&route_bytes)
         .expect("Failed to parse ty225_normal.bin");
-    let mut state = State::new(&route_data);
+    let mut state = State::new(&route_data, None);
 
     // First fix: total=1, valid=0
     let gps1 = make_gps(0, 120.0, 25.0, 10000, 0, 100, true);

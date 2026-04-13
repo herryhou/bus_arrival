@@ -82,8 +82,8 @@ async fn main(_spawner: Spawner) {
         route_data.node_count, route_data.stop_count
     );
 
-    // Initialize state with route data reference
-    let mut state = state::State::new(&route_data);
+    // Initialize state with route data reference (no persisted state yet - will load in Task 9)
+    let mut state = state::State::new(&route_data, None);
 
     // Initialize line buffer for NMEA data
     let mut line_buf = uart::UartLineBuffer::new();

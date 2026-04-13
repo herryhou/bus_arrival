@@ -23,7 +23,7 @@ fn test_full_recovery_flow() {
         }
     };
 
-    let mut state = State::new(&route_data);
+    let mut state = State::new(&route_data, None);
     let base_timestamp = 1_000_000_000;
 
     // 1. Initialize with first GPS point
@@ -89,7 +89,7 @@ fn test_no_recovery_for_small_movement() {
         Err(_) => return,
     };
 
-    let mut state = State::new(&route_data);
+    let mut state = State::new(&route_data, None);
     let base_timestamp = 1_000_000_000;
 
     // Initialize

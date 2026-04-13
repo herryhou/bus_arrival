@@ -77,10 +77,16 @@ pub struct State<'a> {
     last_valid_s_cm: DistCm,
     /// Timestamp of last GPS fix for recovery time delta calculation
     last_gps_timestamp: u64,
+    /// Pending persisted state to apply after first GPS fix
+    pending_persisted: Option<shared::PersistedState>,
+    /// Last stop index that was persisted to flash
+    last_persisted_stop: u8,
+    /// Ticks since last persist operation (for rate limiting)
+    ticks_since_persist: u16,
 }
 
 impl<'a> State<'a> {
-    pub fn new(route_data: &'a RouteData<'a>) -> Self {
+    pub fn new(route_data: &'a RouteData<'a>, persisted: Option<shared::PersistedState>) -> Self {
         use detection::state_machine::StopState;
         use gps_processor::nmea::NmeaState;
 
@@ -107,6 +113,9 @@ impl<'a> State<'a> {
             last_known_stop_index: 0,
             last_valid_s_cm: 0,
             last_gps_timestamp: 0,
+            pending_persisted: persisted,
+            last_persisted_stop: if let Some(ps) = persisted { ps.last_stop_index } else { 0 },
+            ticks_since_persist: 0,
         }
     }
 
@@ -427,5 +436,38 @@ impl<'a> State<'a> {
     /// Get the last valid position in cm (for testing recovery behavior)
     pub fn last_valid_s_cm(&self) -> DistCm {
         self.last_valid_s_cm
+    }
+
+    /// Returns true if state should be persisted this tick.
+    /// Writes when stop index changes, but no more than once per 60 seconds.
+    /// This rate limiting prevents excessive flash wear (~100k erase cycles).
+    pub fn should_persist(&self, current_stop: u8) -> bool {
+        // Only persist when stop index actually changes
+        if current_stop == self.last_persisted_stop {
+            return false;
+        }
+
+        // Rate limit: no more than once per 60 seconds (60 ticks at 1Hz)
+        if self.ticks_since_persist < 60 {
+            return false;
+        }
+
+        true
+    }
+
+    /// Mark state as persisted, resetting the rate-limit counter.
+    pub fn mark_persisted(&mut self, stop_index: u8) {
+        self.last_persisted_stop = stop_index;
+        self.ticks_since_persist = 0;
+    }
+
+    /// Get the current stop index from last_known_stop_index.
+    /// Returns None if not yet initialized.
+    pub fn current_stop_index(&self) -> Option<u8> {
+        if self.first_fix {
+            None
+        } else {
+            Some(self.last_known_stop_index)
+        }
     }
 }

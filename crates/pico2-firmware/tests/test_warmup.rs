@@ -135,8 +135,8 @@ fn test_warmup_with_state_instance() {
         }
     };
 
-    // Create State instance
-    let mut state = pico2_firmware::state::State::new(&route_data);
+    // Create State instance (no persisted state for warmup tests)
+    let mut state = pico2_firmware::state::State::new(&route_data, None);
 
     // Verify initial state
     assert_eq!(
