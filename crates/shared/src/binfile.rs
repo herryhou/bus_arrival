@@ -81,8 +81,9 @@ pub const MAGIC: u32 = 0x42555341;
 /// v2: Removed line_a, line_b, line_c from RouteNode (52 → 36 bytes)
 /// v3 (v8.5): Changed repr(C, packed) to repr(C) to fix UB with field references
 ///             Size now 40 bytes on platforms with 8-byte i64 alignment
-/// v4 (v8.7): RouteNode optimization - remove len2_cm2, seg_len_cm→seg_len_mm (i64),
-///             dx_cm/dy_cm i32→i16. Size now 32 bytes (28 data + 4 padding).
+/// v4 (v8.7): RouteNode optimization - removed len2_cm2 (runtime compute),
+///             seg_len_cm→seg_len_mm for 10× precision, dx/dy narrowed to i16.
+///             See CHANGELOG for migration notes.
 /// v5 (v8.8): Grid optimization - bitmask for sparse cells + u16 offsets.
 ///             Grid space reduced from ~16KB to ~5KB (60-70% savings).
 pub const VERSION: u16 = 5;

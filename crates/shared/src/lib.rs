@@ -397,7 +397,9 @@ pub struct DepartureEvent {
     pub v_cms: SpeedCms,
 }
 
-// Compile-time assertion — v8.7: 24 bytes (no padding)
+// Size is load-bearing: binfile.rs packs/unpacks RouteNode as raw bytes.
+// If this assert fails, increment VERSION in binfile.rs (breaking change)
+// and regenerate all route_data.bin files with the preprocessor.
 const _: () = assert!(core::mem::size_of::<RouteNode>() == 24);
 const _: () = assert!(core::mem::size_of::<Stop>() == 12);
 
