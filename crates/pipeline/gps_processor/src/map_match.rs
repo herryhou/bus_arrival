@@ -144,7 +144,13 @@ pub fn find_best_segment_restricted(
     best_idx
 }
 
-/// Heading-weighted segment score
+/// Heading-weighted segment score (DEPRECATED: now pure distance)
+///
+/// This function is kept for API compatibility during transition.
+/// Heading filtering is now handled by `heading_eligible()`.
+///
+/// The return type is `Dist2` (i64 cm²).
+#[deprecated(note = "Use heading_eligible() for filtering, then segment_score() for distance")]
 pub fn segment_score(
     gps_x: DistCm,
     gps_y: DistCm,
@@ -153,18 +159,7 @@ pub fn segment_score(
     seg: &RouteNode,
 ) -> i64 {
     // Distance squared to segment
-    let dist2 = distance_to_segment_squared(gps_x, gps_y, seg);
-
-    // Heading penalty - skip when heading unavailable (GGA-only mode)
-    let heading_penalty = if gps_heading != i16::MIN {
-        let heading_diff = heading_diff_cdeg(gps_heading, seg.heading_cdeg);
-        let w = heading_weight(gps_speed);
-        ((heading_diff as i64).pow(2) * w as i64) >> 8
-    } else {
-        0  // No heading penalty when unavailable
-    };
-
-    dist2 + heading_penalty
+    distance_to_segment_squared(gps_x, gps_y, seg)
 }
 
 /// Heading weight: 0 at v=0, 256 at v≥83 cm/s (3 km/h)
@@ -284,57 +279,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_segment_score_heading_sentinel() {
-        // When heading is i16::MIN (GGA-only mode), heading penalty should be 0
+    fn test_segment_score_is_pure_distance() {
         let seg = RouteNode {
             x_cm: 100000,
             y_cm: 100000,
             cum_dist_cm: 0,
-            heading_cdeg: 9000, // 90 degrees
-            seg_len_mm: 10000,
-            dx_cm: 100,
+            heading_cdeg: 9000,
+            seg_len_mm: 20000, // 200cm long, enough for our test
+            dx_cm: 200,
             dy_cm: 0,
             _pad: 0,
         };
 
-        // With valid heading
-        let score_with_heading = segment_score(
-            100000, 100000,  // GPS position at segment
-            9000,             // Same heading
-            100,              // Low speed
-            &seg,
-        );
+        // Same position: score should be 0 regardless of any external heading
+        let score = segment_score(100000, 100000, 0, 0, &seg);
+        assert_eq!(score, 0);
 
-        // With sentinel heading (i16::MIN) - should have no heading penalty
-        let score_sentinel = segment_score(
-            100000, 100000,
-            i16::MIN,         // Sentinel value
-            100,
-            &seg,
-        );
-
-        // With sentinel, heading penalty is 0, so score should be <= score with heading
-        assert!(score_sentinel <= score_with_heading,
-            "Sentinel heading should not add penalty");
-
-        // At high speed, valid heading should have significant penalty if mismatched
-        let score_mismatch = segment_score(
-            100000, 100000,
-            0,                // Opposite heading
-            500,              // High speed
-            &seg,
-        );
-
-        let score_sentinel_high_speed = segment_score(
-            100000, 100000,
-            i16::MIN,
-            500,
-            &seg,
-        );
-
-        // Sentinel should have lower score than mismatched heading at high speed
-        assert!(score_sentinel_high_speed < score_mismatch,
-            "Sentinel should avoid heading penalty entirely");
+        // Different position: score is pure distance squared
+        let score_far = segment_score(100500, 100000, 0, 0, &seg); // 500 cm away from segment start
+        assert_eq!(score_far, 245_025); // Actual distance squared to segment
     }
 
     #[test]
