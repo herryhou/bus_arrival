@@ -11,6 +11,25 @@ use crate::SIGMA_GPS_CM;
 /// directly interpretable — no hidden scale factors.
 const MAX_HEADING_DIFF_CDEG: u32 = 9_000; // 90°
 
+/// Heading filter threshold for a given speed weight.
+///
+/// Returns `u32::MAX` (gate disabled) when w = 0 — at a standstill GPS heading
+/// is unreliable; don't reject any segment.
+/// Returns `MAX_HEADING_DIFF_CDEG` (90°) at w = 256.
+/// Linearly interpolates between the two, giving a progressively tighter gate
+/// as the bus picks up speed.
+///
+/// At w = 128 (≈1.5 km/h):  threshold ≈ 22 500 cdeg (225°, nearly open)
+/// At w = 256 (≥3 km/h):    threshold =  9 000 cdeg (90°, meaningful gate)
+fn heading_threshold_cdeg(w: i32) -> u32 {
+    if w == 0 {
+        return u32::MAX;
+    }
+    // threshold = 36000 - (36000 - MAX_HEADING_DIFF_CDEG) × w / 256
+    let range = 36_000u32 - MAX_HEADING_DIFF_CDEG; // 27 000
+    36_000 - range * w as u32 / 256
+}
+
 // Import libm functions for no_std
 #[cfg(not(feature = "std"))]
 use libm::{cos as f64_cos, round as f64_round};
