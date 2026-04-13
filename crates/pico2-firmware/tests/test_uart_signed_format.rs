@@ -63,27 +63,29 @@ fn test_speedcms_type_exists() {
 
 #[test]
 fn test_cold_start_scenario() {
-    // Simulate a cold-start scenario where Kalman filter hasn't converged
-    // This is the scenario where negative values are most likely to occur
-
-    // Before convergence, position might be negative (before route start)
-    let cold_start_event = ArrivalEvent {
+    // Edge-case test: defensive test - verify formatting works even if impossible
+    // values are passed. While Kalman filter enforces v_cms >= 0 and
+    // s_cm should be non-negative in normal operation, the types are i32
+    // and could theoretically hold negative values. This test verifies
+    // the fix handles such edge cases gracefully rather than producing
+    // corrupted unsigned wraparound values.
+    let edge_case_event = ArrivalEvent {
         time: 12345,
         stop_idx: 0,
-        s_cm: -500,  // -5 meters (before route origin)
-        v_cms: -100, // Negative velocity (GPS noise or backward movement)
+        s_cm: -500,  // Edge case: before route origin
+        v_cms: -100, // Edge case: defensive test (code enforces >= 0)
         probability: Prob8::from(0),
         event_type: ArrivalEventType::Announce,
     };
 
     // Verify values are what we expect
-    assert_eq!(cold_start_event.s_cm, -500);
-    assert_eq!(cold_start_event.v_cms, -100);
+    assert_eq!(edge_case_event.s_cm, -500);
+    assert_eq!(edge_case_event.v_cms, -100);
 
     // When formatted, these should produce "-500cm" and "-100cm/s"
     // NOT "4294966796cm" and "4294967196cm/s"
-    let s_str = format!("{}", cold_start_event.s_cm);
-    let v_str = format!("{}", cold_start_event.v_cms);
+    let s_str = format!("{}", edge_case_event.s_cm);
+    let v_str = format!("{}", edge_case_event.v_cms);
 
     assert!(s_str.starts_with('-'), "s_cm should format as negative");
     assert!(v_str.starts_with('-'), "v_cms should format as negative");
