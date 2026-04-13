@@ -137,7 +137,7 @@ pub fn find_best_segment_restricted(
 
     // PHASE 1: Window search
     let (window_best_eligible, window_eligible_dist2, window_eligible_found,
-         window_best_any, _window_any_dist2) =
+         window_best_any, window_any_dist2) =
         best_eligible(gps_x, gps_y, gps_heading, gps_speed, route_data,
                       start..=end);
 
@@ -146,9 +146,75 @@ pub fn find_best_segment_restricted(
         return window_best_eligible;
     }
 
-    // TODO: Grid search will be added in next task
-    // For now, return window_best_any as fallback
-    window_best_any
+    // Fallback: full grid search.
+    if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
+        return window_best_any; // Outside bounding box — keep window result
+    }
+
+    let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
+    let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
+
+    // PHASE 2: Grid search
+    // Carry over the window winner as the seed — grid search only improves on it.
+    let mut best_eligible_idx = if window_eligible_found {
+        window_best_eligible
+    } else {
+        // Safe default; will be overwritten by first eligible grid segment
+        last_idx
+    };
+    let mut best_eligible_dist2 = if window_eligible_found {
+        window_eligible_dist2
+    } else {
+        Dist2::MAX
+    };
+    let mut best_any_idx = window_best_any;
+    let mut best_any_dist2 = window_any_dist2;
+    let mut eligible_found = window_eligible_found;
+
+    for dy in 0..=2i32 {
+        for dx in 0..=2i32 {
+            let ny = gy as i32 + dy - 1;
+            let nx = gx as i32 + dx - 1;
+            if ny < 0 || nx < 0 {
+                continue;
+            }
+            let _ = route_data.grid.visit_cell(nx as u32, ny as u32, |idx: u16| {
+                if let Some(seg) = route_data.get_node(idx as usize) {
+                    let d2 = segment_score(gps_x, gps_y, gps_heading, gps_speed, &seg);
+
+                    // Update best_any tracker
+                    if d2 < best_any_dist2 {
+                        best_any_dist2 = d2;
+                        best_any_idx = idx as usize;
+                    }
+
+                    // Update best_eligible tracker if heading matches
+                    if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg) {
+                        if d2 < best_eligible_dist2 {
+                            best_eligible_dist2 = d2;
+                            best_eligible_idx = idx as usize;
+                            eligible_found = true;
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    // If no segment in window or grid passed the heading filter, fall back to
+    // pure distance over the window. This is an explicit, logged degradation —
+    // not a silent wrong answer.
+    if !eligible_found {
+        #[cfg(feature = "firmware")]
+        defmt::warn!(
+            "heading filter: no eligible segments at speed={} cdeg heading={}, \
+             falling back to pure-distance selection",
+            gps_speed, gps_heading
+        );
+        return best_any_idx;
+    }
+
+    best_eligible_idx
 }
 
 /// Heading-weighted segment score (DEPRECATED: now pure distance)
