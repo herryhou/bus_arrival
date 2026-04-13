@@ -191,6 +191,35 @@ impl<'a> State<'a> {
                     // First fix initializes Kalman but doesn't run update_adaptive
                     // Counts toward timeout but NOT convergence
                     self.warmup_total_ticks = 1;
+
+                    // Apply persisted state if valid and within 500m threshold
+                    if let Some(ps) = self.pending_persisted.take() {
+                        // Check 500m threshold from spec (Section 11.4)
+                        // Only trust persisted state if current GPS is close enough
+                        let delta_cm = if s_cm >= ps.last_progress_cm {
+                            s_cm - ps.last_progress_cm
+                        } else {
+                            ps.last_progress_cm - s_cm
+                        };
+
+                        if delta_cm <= 50_000 {
+                            // Within 500m: trust persisted stop index
+                            self.apply_persisted_stop_index(ps.last_stop_index);
+                            #[cfg(feature = "firmware")]
+                            defmt::info!(
+                                "Applied persisted state: stop={}, delta={}cm",
+                                ps.last_stop_index,
+                                delta_cm
+                            );
+                        } else {
+                            #[cfg(feature = "firmware")]
+                            defmt::warn!(
+                                "Persisted state too stale: delta={}cm > 500m, ignoring",
+                                delta_cm
+                            );
+                        }
+                    }
+
                     return None;
                 }
 
@@ -468,6 +497,20 @@ impl<'a> State<'a> {
             None
         } else {
             Some(self.last_known_stop_index)
+        }
+    }
+
+    /// Apply persisted stop index by marking all prior stops as Departed.
+    ///
+    /// This prevents the corridor filter from re-triggering stops that
+    /// were already passed before the reboot. Without this, the bus would
+    /// re-announce all stops from the beginning of the route.
+    fn apply_persisted_stop_index(&mut self, stop_index: u8) {
+        use shared::FsmState;
+
+        for i in 0..stop_index.min(self.stop_states.len() as u8) as usize {
+            self.stop_states[i].fsm_state = FsmState::Departed;
+            self.stop_states[i].announced = true;
         }
     }
 }
