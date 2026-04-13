@@ -74,7 +74,7 @@ fn best_eligible(
 
     for idx in range {
         if let Some(seg) = route_data.get_node(idx) {
-            let d2 = segment_score(gps_x, gps_y, gps_heading, gps_speed, &seg);
+            let d2 = segment_score(gps_x, gps_y, &seg);
 
             if d2 < best_any_dist2 {
                 best_any_dist2 = d2;
@@ -180,7 +180,7 @@ pub fn find_best_segment_restricted(
             }
             let _ = route_data.grid.visit_cell(nx as u32, ny as u32, |idx: u16| {
                 if let Some(seg) = route_data.get_node(idx as usize) {
-                    let d2 = segment_score(gps_x, gps_y, gps_heading, gps_speed, &seg);
+                    let d2 = segment_score(gps_x, gps_y, &seg);
 
                     // Update best_any tracker
                     if d2 < best_any_dist2 {
@@ -217,21 +217,19 @@ pub fn find_best_segment_restricted(
     best_eligible_idx
 }
 
-/// Heading-weighted segment score (DEPRECATED: now pure distance)
+/// Distance-squared from GPS point to segment (clamped projection).
 ///
-/// This function is kept for API compatibility during transition.
-/// Heading filtering is now handled by `heading_eligible()`.
+/// Heading is intentionally absent.  Heading belongs in the eligibility
+/// filter (`heading_eligible`), not in the ranking score.  Mixing cm² and
+/// cdeg² into one scalar requires an arbitrary scale factor that cannot be
+/// derived from first principles.
 ///
 /// The return type is `Dist2` (i64 cm²).
-#[deprecated(note = "Use heading_eligible() for filtering, then segment_score() for distance")]
 pub fn segment_score(
     gps_x: DistCm,
     gps_y: DistCm,
-    gps_heading: HeadCdeg,
-    gps_speed: SpeedCms,
     seg: &RouteNode,
-) -> i64 {
-    // Distance squared to segment
+) -> Dist2 {
     distance_to_segment_squared(gps_x, gps_y, seg)
 }
 
@@ -365,11 +363,11 @@ mod tests {
         };
 
         // Same position: score should be 0 regardless of any external heading
-        let score = segment_score(100000, 100000, 0, 0, &seg);
+        let score = segment_score(100000, 100000, &seg);
         assert_eq!(score, 0);
 
         // Different position: score is pure distance squared
-        let score_far = segment_score(100500, 100000, 0, 0, &seg); // 500 cm away from segment start
+        let score_far = segment_score(100500, 100000, &seg); // 500 cm away from segment start
         assert_eq!(score_far, 245_025); // Actual distance squared to segment
     }
 
