@@ -4,9 +4,6 @@
 //! After GPS outage recovery, first GPS should use conservative 2/10 gain
 //! instead of full Kalman gain (13-77/256)
 
-use gps_processor::kalman::process_gps_update;
-use shared::{DrState, GpsPoint, KalmanState};
-
 #[test]
 fn test_dr_soft_resync_formula() {
     // Test the soft-resync formula
