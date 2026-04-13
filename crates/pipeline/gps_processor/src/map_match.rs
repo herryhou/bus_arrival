@@ -51,6 +51,50 @@ fn heading_eligible(gps_heading: HeadCdeg, gps_speed: SpeedCms, seg_heading: Hea
     diff <= threshold
 }
 
+/// Scan a range of segment indices, returning the best eligible and best any.
+///
+/// Returns:
+/// - (best_eligible_idx, best_eligible_dist2, eligible_found,
+///    best_any_idx, best_any_dist2)
+///
+/// "Best" = minimum dist2. If no segment passes the heading filter,
+/// best_eligible_dist2 = Dist2::MAX and eligible_found = false.
+fn best_eligible(
+    gps_x: DistCm,
+    gps_y: DistCm,
+    gps_heading: HeadCdeg,
+    gps_speed: SpeedCms,
+    route_data: &RouteData,
+    range: impl Iterator<Item = usize>,
+) -> (usize, Dist2, bool, usize, Dist2) {
+    let mut best_eligible_idx: Option<usize> = None;
+    let mut best_eligible_dist2 = Dist2::MAX;
+    let mut best_any_idx: Option<usize> = None;
+    let mut best_any_dist2 = Dist2::MAX;
+
+    for idx in range {
+        if let Some(seg) = route_data.get_node(idx) {
+            let d2 = segment_score(gps_x, gps_y, gps_heading, gps_speed, &seg);
+
+            if d2 < best_any_dist2 {
+                best_any_dist2 = d2;
+                best_any_idx = Some(idx);
+            }
+
+            if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg) && d2 < best_eligible_dist2 {
+                best_eligible_dist2 = d2;
+                best_eligible_idx = Some(idx);
+            }
+        }
+    }
+
+    let eligible_found = best_eligible_idx.is_some();
+    let eligible_idx = best_eligible_idx.unwrap_or(0);
+    let any_idx = best_any_idx.unwrap_or(0);
+
+    (eligible_idx, best_eligible_dist2, eligible_found, any_idx, best_any_dist2)
+}
+
 // Import libm functions for no_std
 #[cfg(not(feature = "std"))]
 use libm::{cos as f64_cos, round as f64_round};
