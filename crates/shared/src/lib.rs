@@ -384,6 +384,62 @@ impl ArrivalEvent {
     }
 }
 
+/// State persisted across reboots to reduce cold-start latency.
+/// Stored in a dedicated flash sector; verified with CRC32 on load.
+///
+/// On reboot, if CRC matches and progress is within 500m of current estimate,
+/// last_stop_index is trusted directly (no full Recovery scan needed).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PersistedState {
+    /// Route progress at last save (cm)
+    pub last_progress_cm: i32,
+    /// Stop index at last save
+    pub last_stop_index: u8,
+    /// Padding to align checksum to 4-byte boundary
+    _pad: [u8; 3],
+    /// CRC32 over all preceding fields
+    pub checksum: u32,
+}
+
+impl PersistedState {
+    /// Invalid state sentinel for uninitialized flash
+    pub const INVALID: Self = Self {
+        last_progress_cm: 0,
+        last_stop_index: 0,
+        _pad: [0; 3],
+        checksum: 0,
+    };
+
+    /// Compute CRC over everything except the checksum field itself.
+    pub fn compute_crc(&self) -> u32 {
+        let bytes = unsafe {
+            core::slice::from_raw_parts(
+                self as *const Self as *const u8,
+                core::mem::size_of::<Self>() - 4, // exclude checksum field
+            )
+        };
+        crate::binfile::crc32(bytes)
+    }
+
+    /// Returns true if the checksum is valid.
+    pub fn is_valid(&self) -> bool {
+        self.checksum == self.compute_crc()
+    }
+
+    /// Create a new persisted state with computed checksum.
+    pub fn new(last_progress_cm: i32, last_stop_index: u8) -> Self {
+        let mut s = Self {
+            last_progress_cm,
+            last_stop_index,
+            _pad: [0; 3],
+            checksum: 0,
+        };
+        s.checksum = s.compute_crc();
+        s
+    }
+}
+
 /// Departure event emitted when bus leaves a stop
 #[cfg_attr(feature = "serde", derive(Debug, Clone, serde::Serialize))]
 pub struct DepartureEvent {
@@ -402,6 +458,8 @@ pub struct DepartureEvent {
 // and regenerate all route_data.bin files with the preprocessor.
 const _: () = assert!(core::mem::size_of::<RouteNode>() == 24);
 const _: () = assert!(core::mem::size_of::<Stop>() == 12);
+// Compile-time size check — flash read/write uses raw bytes
+const _: () = assert!(core::mem::size_of::<PersistedState>() == 12);
 
 #[cfg(test)]
 mod tests {
