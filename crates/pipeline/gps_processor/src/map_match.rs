@@ -81,17 +81,17 @@ pub fn find_best_segment_restricted(
                 continue;
             }
 
-            if let Ok(cell_indices) = route_data.grid.get_cell(nx as u32, ny as u32) {
-                for &idx in cell_indices {
-                    if let Some(seg) = route_data.get_node(idx as usize) {
-                        let score = segment_score(gps_x, gps_y, gps_heading, gps_speed, &seg);
-                        if score < best_score {
-                            best_score = score;
-                            best_idx = idx as usize;
-                        }
+            // Visit cell indices using visitor pattern (no allocation)
+            let cell_handler = |idx: u16| {
+                if let Some(seg) = route_data.get_node(idx as usize) {
+                    let score = segment_score(gps_x, gps_y, gps_heading, gps_speed, &seg);
+                    if score < best_score {
+                        best_score = score;
+                        best_idx = idx as usize;
                     }
                 }
-            }
+            };
+            let _ = route_data.grid.visit_cell(nx as u32, ny as u32, cell_handler);
         }
     }
 
