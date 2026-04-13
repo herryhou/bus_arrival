@@ -5,6 +5,12 @@ use shared::{Dist2, DistCm, HeadCdeg, RouteNode, SpeedCms};
 
 use crate::SIGMA_GPS_CM;
 
+/// Hard heading gate at full speed (w = 256, ≥ 3 km/h).
+/// A bus in motion cannot be heading >90° from the segment direction.
+/// This is the single tunable heading parameter; its units (centidegrees) are
+/// directly interpretable — no hidden scale factors.
+const MAX_HEADING_DIFF_CDEG: u32 = 9_000; // 90°
+
 // Import libm functions for no_std
 #[cfg(not(feature = "std"))]
 use libm::{cos as f64_cos, round as f64_round};
