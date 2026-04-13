@@ -8,8 +8,6 @@ use shared::binfile::RouteData;
 use shared::FsmState;
 use detection::state_machine::StopState;
 use pipeline::Pipeline;
-use super::common::{analyze_position_accuracy};
-use std::path::PathBuf;
 
 /// Test: Bus drives entire ty225 route normally
 /// Validates: All stops detected, correct arrival order

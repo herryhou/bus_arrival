@@ -2,6 +2,7 @@
 //!
 //! Manages the main state machine for processing GPS updates through
 //! the full arrival detection pipeline.
+#![allow(dead_code)]
 
 use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
 use crate::recovery_trigger::should_trigger_recovery;
@@ -82,7 +83,7 @@ pub struct State<'a> {
     /// Last stop index that was persisted to flash
     last_persisted_stop: u8,
     /// Ticks since last persist operation (for rate limiting)
-    ticks_since_persist: u16,
+    pub ticks_since_persist: u16,
 }
 
 impl<'a> State<'a> {

@@ -1,7 +1,7 @@
 //! Test for format_arrival_event output formatting
 
 use gps_processor::output::format_arrival_event;
-use shared::{ArrivalEvent, ArrivalEventType, Prob8};
+use shared::{ArrivalEvent, ArrivalEventType};
 
 #[test]
 fn test_format_arrival_event_arrival() {

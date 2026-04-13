@@ -1,4 +1,5 @@
 //! Common utilities for scenario integration tests
+#![allow(dead_code)]
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -93,6 +94,5 @@ pub mod exact_validation;
 pub mod order_validation;
 pub mod position_accuracy;
 
-pub use exact_validation::{validate_arrivals_exact, ValidationResult};
+pub use exact_validation::validate_arrivals_exact;
 pub use order_validation::{validate_arrival_order, validate_arrival_order_strict};
-pub use position_accuracy::{analyze_position_accuracy, PositionAccuracyReport, ACCEPTABLE_ARRIVAL_DISTANCE_CM};

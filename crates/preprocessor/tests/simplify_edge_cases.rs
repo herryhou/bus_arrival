@@ -347,7 +347,7 @@ fn test_180_degree_u_turn_protection() {
     );
 
     // Check that we don't have a straight line from (0,0) to (0,5000)
-    let has_turn_point = result.iter().any(|&(x, y)| x == 10000);
+    let has_turn_point = result.iter().any(|&(x, _y)| x == 10000);
     assert!(
         has_turn_point,
         "U-turn should preserve points at x=10000"

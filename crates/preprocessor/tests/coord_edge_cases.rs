@@ -308,7 +308,7 @@ fn test_conversion_at_tropic_of_cancer() {
     let lat_avg = 23.5;
 
     // --- WHEN ---
-    let (x_cm, y_cm) = latlon_to_cm_relative(lat, lon, lat_avg);
+    let (x_cm, _y_cm) = latlon_to_cm_relative(lat, lon, lat_avg);
 
     // --- THEN ---
     // cos(23.5°) ≈ 0.917
@@ -330,7 +330,7 @@ fn test_conversion_at_date_line_positive() {
     let lat_avg = 25.0;
 
     // --- WHEN ---
-    let (x_cm, y_cm) = latlon_to_cm_relative(lat, lon, lat_avg);
+    let (x_cm, _y_cm) = latlon_to_cm_relative(lat, lon, lat_avg);
 
     // --- THEN ---
     // Should handle lon=180°
@@ -346,7 +346,7 @@ fn test_conversion_at_date_line_negative() {
     let lat_avg = 25.0;
 
     // --- WHEN ---
-    let (x_cm, y_cm) = latlon_to_cm_relative(lat, lon, lat_avg);
+    let (x_cm, _y_cm) = latlon_to_cm_relative(lat, lon, lat_avg);
 
     // --- THEN ---
     // Should handle lon=-180°
@@ -370,7 +370,7 @@ fn test_conversion_precision_high_lat() {
     let lat_avg = 80.0;
 
     // --- WHEN ---
-    let (x_cm, y_cm) = latlon_to_cm_relative(lat, lon, lat_avg);
+    let (_x_cm, y_cm) = latlon_to_cm_relative(lat, lon, lat_avg);
 
     // --- THEN ---
     // cos(80°) ≈ 0.174, so x is heavily compressed
@@ -421,8 +421,8 @@ fn test_small_coordinate_difference() {
     let lat_avg = 25.0;
 
     // --- WHEN ---
-    let (x1, y1) = latlon_to_cm_relative(lat1, lon1, lat_avg);
-    let (x2, y2) = latlon_to_cm_relative(lat2, lon2, lat_avg);
+    let (_x1, y1) = latlon_to_cm_relative(lat1, lon1, lat_avg);
+    let (_x2, y2) = latlon_to_cm_relative(lat2, lon2, lat_avg);
 
     // --- THEN ---
     // Difference should be very small (~1cm or less)
@@ -441,8 +441,8 @@ fn test_large_coordinate_difference() {
     let lat_avg = 25.5;
 
     // --- WHEN ---
-    let (x1, y1) = latlon_to_cm_relative(lat1, lon1, lat_avg);
-    let (x2, y2) = latlon_to_cm_relative(lat2, lon2, lat_avg);
+    let (_x1, y1) = latlon_to_cm_relative(lat1, lon1, lat_avg);
+    let (_x2, y2) = latlon_to_cm_relative(lat2, lon2, lat_avg);
 
     // --- THEN ---
     // Y difference should be ~111km = 11,100,000cm

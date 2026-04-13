@@ -6,8 +6,7 @@
 //! CRITICAL: The visualizer expects absolute coordinates. If nodes are stored as
 //! relative coordinates, bus positions will appear far from the route path.
 
-use preprocessor::{coord, input, linearize, simplify, grid, stops};
-use shared::RouteNode;
+use preprocessor::{coord, input, linearize, grid};
 
 #[test]
 fn test_route_nodes_are_absolute_coordinates() {

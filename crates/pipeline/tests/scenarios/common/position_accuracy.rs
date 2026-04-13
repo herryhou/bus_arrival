@@ -1,6 +1,7 @@
 //! Position accuracy validation helpers
 //!
 //! Verifies that detected stops are within acceptable distance of the stop location.
+#![allow(dead_code)]
 
 /// Check if a position is acceptable for arrival detection
 ///

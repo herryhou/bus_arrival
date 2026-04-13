@@ -51,7 +51,7 @@ fn test_lat_avg_deg_roundtrip() {
                 assert!((data.lat_avg_deg - lat_avg).abs() < 0.000001,
                     "lat_avg roundtrip failed: expected {}, got {}", lat_avg, data.lat_avg_deg);
             }
-            Err(e) => {
+            Err(_e) => {
                 // Other fields may fail, but lat_avg was parsed
                 // If we get here, the header was parsed successfully
             }

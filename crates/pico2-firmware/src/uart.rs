@@ -3,6 +3,7 @@
 //! Provides line-buffered NMEA sentence reading and formatted arrival event writing.
 
 #![cfg(feature = "firmware")]
+#![allow(dead_code)]
 
 use embassy_rp::uart::BufferedUart;
 use embassy_time::{with_timeout, Duration};

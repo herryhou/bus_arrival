@@ -5,7 +5,7 @@
 //! - Distance calculation: zero-length segments, overflow
 //! - Cumulative distance: floating point accumulation
 
-use preprocessor::coord::{latlon_to_cm_relative, compute_lat_avg, R_CM};
+use preprocessor::coord::{latlon_to_cm_relative, compute_lat_avg};
 use preprocessor::linearize::linearize_route;
 
 // ============================================================================

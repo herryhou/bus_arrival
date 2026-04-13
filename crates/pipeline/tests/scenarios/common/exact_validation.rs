@@ -2,6 +2,7 @@
 //!
 //! Provides functions to compare detected arrivals against ground truth
 //! with precision/recall metrics and detailed mismatch reporting.
+#![allow(dead_code)]
 
 use serde_json::Value;
 use std::collections::HashSet;

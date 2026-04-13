@@ -29,17 +29,17 @@ fn test_pipeline_with_route_data() {
     use detection::state_machine::StopState;
 
     let mut nmea = NmeaState::new();
-    let mut kalman = KalmanState::new();
-    let mut dr = DrState::new();
+    let _kalman = KalmanState::new();
+    let _dr = DrState::new();
 
-    let mut stop_states: Vec<StopState> = route_data.stops()
+    let _stop_states: Vec<StopState> = route_data.stops()
         .iter()
         .enumerate()
         .map(|(i, _)| StopState::new(i as u8))
         .collect();
 
-    let mut arrivals: Vec<u8> = Vec::new();
-    let mut departures: Vec<u8> = Vec::new();
+    let _arrivals: Vec<u8> = Vec::new();
+    let _departures: Vec<u8> = Vec::new();
 
     // Process NMEA sentences
     for line in reader.lines() {

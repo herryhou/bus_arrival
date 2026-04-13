@@ -1,133 +1,111 @@
-Here is a systematic review across all three layers, from high-level design down to concrete implementation bugs.
 
----
+## 1. The Heading Penalty Has No Tunable λ — It Silently Overrides Distance
 
-## High-Level Design
+The spec defines:
 
-**H1 — Module ⑫ (Stop Index Recovery) is entirely missing from the firmware path**
-`state.rs` runs: corridor filter → probability → FSM → announce. It never calls `recovery::find_stop_index`. The three trigger conditions described in Section 15.1 (GPS jump > 200 m, restart mismatch, sustained position/stop divergence) are never evaluated. The recovery crate exists but is dead code in firmware.
+$$\text{score}(i) = d^2 + \lambda \cdot \text{diff}^2 \cdot w_h$$
 
-**H2 — `PersistedState` Flash persistence now implemented** ✅
-Section 11.4 specifies CRC-protected storage of `last_progress_cm` / `last_stop_index` across reboots. Implemented with CRC32-protected PersistedState (12 bytes) stored in last 4KB flash sector. Rate-limited writes (max once/60s) for endurance. Applies persisted stop index on first fix if within 500m threshold.
+and recommends λ = 1 cm²/cdeg² as a starting value. In `segment_score`, the actual code computes:
 
-**H3 — DR soft-resync now implemented** ✅
-Section 11.3 specifies: after GPS recovery, apply `ŝ_resync = ŝ_DR + (2/10)*(z_gps - ŝ_DR)`. Added `in_recovery` flag to `DrState` that is set when entering outage mode. On first post-outage GPS, soft-resync with 2/10 gain is applied instead of full Kalman gain. Per spec Section 11.3.
-
-**H4 — EMA velocity filter now implemented** ✅
-Section 11.1 specifies `v_filtered(t) = v_filtered(t-1) + 3*(v_gps - v_filtered(t-1))/10` to feed DR. Implemented `update_dr_ema()` function that applies EMA smoothing with α=3/10. DR state now uses filtered velocity instead of directly copying Kalman output.
-
----
-
-## Detailed Design
-
-**D1 — F1 and F3 are fed the same value (Kalman `s_cm`)**
-The spec deliberately uses two sources: F1 = raw GPS projection z_gps (σ = 2750 cm), F3 = Kalman-smoothed `ŝ` (σ = 2000 cm). In both the firmware `detection.rs` and `pipeline/detection/probability.rs`, only a single `s_cm` is passed to `compute_features` / `arrival_probability`, and both F1 and F3 are computed from `(s_cm - stop.progress_cm).abs()`. The raw projection is never forwarded to the detection layer. The "two independent signal sources" rationale in Section 13.2 is not realised — F1 and F3 differ only in sigma, not in input signal.
-
-**D2 — Monotonicity threshold: −10 m in spec vs −500 m in code**
-Section 8.3: reject if `z(t) − ŝ(t−1) < −1000 cm` (−10 m). `check_monotonic` in `kalman.rs` uses `z_new >= z_prev - 50000` (−500 m). The filter is intended to block reverse GPS jumps; the current threshold is so loose it accepts almost any plausible GPS noise event.
-
-**D3 — Speed constraint is far more lenient than the spec**
-Section 9.1 sets D_max = 1667 + 2000 = 3667 cm (≈37 m). In `kalman.rs`, `V_MAX_CMS = 3000 cm/s` and `SIGMA_GPS_CM = 5000 cm`, giving `max_dist = 3000 + 5000 = 8000 cm` (80 m) — more than double the spec value. The `recovery.rs` module also uses `V_MAX_CMS = 3000`. The appendix says V_max = 1667 cm/s; the implementation effectively allows 108 km/h plus a 50 m GPS margin.
-
-**D4 — `Arriving` state has no exit path back to `Idle`**
-In `state_machine.rs`, when `fsm_state == Arriving` and `s_cm` drops below `corridor_start_cm` (GPS drift backward), there is no `Arriving → Idle` transition. The FSM stays stuck in `Arriving`, `dwell_time_s` keeps incrementing, and the stop remains "active" indefinitely. Compare: `Approaching` correctly has `if s_cm < corridor_start_cm → Idle + reset dwell`.
-
-**D5 — Dwell-time counter off-by-one on corridor entry**
-The spec says `τ_dwell` starts counting from when `Approaching` is entered. In `update()`, the `Idle` arm transitions the FSM to `Approaching` but does not increment; the increment only fires on the next tick when already in `Approaching`. After T seconds in corridor, `dwell_time_s = T − 1`. For `T_ref = 10 s`, `p4 = (9 × 255 / 10) = 229` rather than `255`, under-weighting the dwell feature.
-
----
-
-## Implementation
-
-**I1 — `build.rs` arch detection is macOS-only**
 ```rust
-"x86_64" => "x86_64-apple-darwin",
-"arm64"  => "aarch64-apple-darwin",
-_        => panic!("Unknown machine architecture"),
+((heading_diff as i64).pow(2) * w as i64) >> 8
 ```
-Any Linux CI or developer machine will panic at build time. Should map to `*-unknown-linux-gnu` / `*-unknown-linux-musl` based on target OS.
 
-**I2 — UART event writer casts `i32` to `u64` unsafely**
-In `uart.rs`:
-```rust
-append_u64(&mut msg_buf, &mut pos, event.s_cm as u64)?;
-append_u64(&mut msg_buf, &mut pos, event.v_cms as u64)?;
-```
-`s_cm` and `v_cms` are `i32`. A negative value — which is possible during cold-start before Kalman converges — would be emitted as a huge number (e.g. `−1` → `4294967295`). Should use a signed formatter or assert non-negative before casting.
+λ is absent (effectively λ = 1, unitless). The problem is a unit mismatch: `heading_diff` is in centidegrees (0.01°), so a 90° difference = 9,000 cdeg, giving a heading term of 9000² × 256 >> 8 = **324,000,000**. A typical on-route `d²` for a bus 10–50 cm off the line is **100–25,000**. The heading term is 10,000× larger than the distance term, turning a soft penalty into a de facto hard exclusion. Near stops where GPS heading is unreliable (bus nearly stationary, heading jitter), this will frequently cause wrong segment selection because the low-speed weight ramp never fully zeroes the term — it approaches zero but the quadratic heading penalty is so large that even a 10% residual dominates.
 
-**I3 — `RouteNode` version comment claims 32 bytes; actual size is 24 bytes**
-In `binfile.rs` VERSION comments:
-```
-/// v4 (v8.7): ... Size now 32 bytes (28 data + 4 padding).
-```
-But `shared/src/lib.rs` asserts `size_of::<RouteNode>() == 24`. The discrepancy arises because the comment was written when `seg_len_mm` was `i64` (8 bytes); it became `i32` (4 bytes) in the same version. Any tooling that parses the comment to validate binary compatibility will be wrong.
-
-**I4 — Memory leak in `SpatialGridView::get_cell` for misaligned XIP (std path)**
-```rust
-let leaked: &'static [u16] = vec.leak();
-Ok(unsafe { core::mem::transmute::<&'static [u16], &'a [u16]>(leaked) })
-```
-Every call to `get_cell` on a misaligned address allocates and permanently leaks a `Vec<u16>`. During testing (std feature) map-matching invokes `get_cell` hundreds of times per route run. This is documented as acceptable for firmware (one-time startup) but makes long integration test runs accumulate unbounded heap. Should copy once at load time into aligned storage, or use `read_unaligned` per-element without leaking.
-
-**I5 — Warmup counter never advances if GPS is repeatedly rejected**
-In `state.rs`:
-```rust
-ProcessResult::Rejected(_) => { return None; }   // counter not incremented
-```
-If the first several GPS samples all fail the speed constraint (e.g., large initial position error), `warmup_counter` stays at 0 and the system never enters normal detection. `ProcessResult::DrOutage` does proceed to detection, but pure rejections do not advance warmup.
-
-**I6 — UART RX buffer (256 bytes) is dangerously small for a three-sentence GPS burst**
-A typical NMEA burst (`$GPRMC` + `$GPGGA` + `$GNGSA`) is ~220–260 bytes. The RX buffer is exactly 256 bytes. If the burst arrives during the 1-second sleep between outer-loop iterations, bytes may be silently dropped by the UART FIFO before the inner drain loop runs. Minimum safe size is ~512 bytes given NMEA maximums.
+The λ parameter needs to have units of cm²/cdeg² with a value of ~0.000003 to produce a numerically balanced score, or the entire heading term needs to be rethought with proper unit reconciliation.
 
 ---
 
-## Priority Summary
+## 2. The Probability Model Is a Linear Discriminant, Not Bayesian Fusion
 
-| ID | Severity | Description |
-|----|----------|-------------|
-| D1 | 🔴 High | F1 and F3 use same Kalman `s_cm` — raw GPS never forwarded |
-| D2 | 🔴 High | Monotonicity threshold −500 m vs spec −10 m |
-| D3 | 🔴 High | Speed constraint 8000 cm vs spec 3667 cm |
-| H1 | 🔴 High | Module ⑫ Recovery not wired into firmware pipeline |
-| D4 | 🟠 Med | `Arriving → Idle` transition missing on corridor exit |
-| H2 | ✅ Fixed | Flash state persistence now implemented |
-| H3 | ✅ Fixed | DR soft-resync (2/10) now implemented |
-| H4 | ✅ Fixed | EMA velocity filter now implemented |
-| I5 | 🟠 Med | Warmup counter stuck on repeated Rejected results |
-| I6 | 🟠 Med | UART RX buffer undersized for GPS burst |
-| I1 | 🟡 Low | `build.rs` macOS-only, breaks Linux |
-| I2 | 🟡 Low | UART i32→u64 cast wrong for negative values |
-| D5 | 🟡 Low | Dwell-time off-by-one on corridor entry |
-| I3 | 🟡 Low | RouteNode version comment says 32 bytes, actual is 24 |
-| I4 | 🟡 Low | Memory leak in XIP misaligned path (std tests) |
+The spec describes the probability model as "Bayesian fusion" but the formula is:
+
+$$P = \frac{13p_1 + 6p_2 + 10p_3 + 3p_4}{32}$$
+
+This is a weighted linear sum — a linear discriminant. Bayesian fusion would multiply the likelihoods: $P \propto p_1 \cdot p_2 \cdot p_3 \cdot p_4$. The choice of a linear sum vs multiplicative fusion has a concrete operational difference: in a linear sum, a single very high feature (e.g. p3 = 255 because Kalman says exactly at the stop) can push P above threshold even if p2 = 0 (bus moving fast) and p4 = 0 (just entered corridor). Multiplicative fusion would block this because any near-zero term collapses the product. The current design can be fooled by a single strong feature while others contradict arrival. Whether this is desirable is a design choice, but calling it "Bayesian" obscures the actual logic and would mislead developers trying to calibrate it.
 
 ---
 
-## Implementation Status
+## 3. F1 and F3 Are Structurally Correlated — Two Features for the Price of None
 
-*Last updated: 2026-04-13*
+The spec's rationale: F1 = raw GPS projection (noisy, independent), F3 = Kalman-smoothed position (stable, correlated across time). The intent is two independent views of the same physical fact.
 
-| ID | Status | Commits | Notes |
-|----|--------|---------|-------|
-| **D1** | ✅ Complete | d488758, 419c105, 2258556, 7d0188e, 33420d1, a291114 | F1/F3 signal separation via `PositionSignals` struct. F1 uses raw GPS (`z_gps_cm`, σ=2750), F3 uses Kalman (`s_cm`, σ=2000). |
-| **D2** | ✅ Complete | 1ca6da2, 0871ec7 | Monotonicity threshold changed from -50000 cm to -5000 cm (-50 m). |
-| **D3** | ✅ Complete | f89645f, eef532d | Speed constraint: V_MAX_CMS=1667 (60 km/h), SIGMA_GPS_CM=2000 (20 m). |
-| **D4** | ✅ Complete | a272125, d1c8fe4 | Arriving → Idle transition on corridor exit. Resets `dwell_time_s`, preserves `announced` flag. |
-| **D5** | ✅ Complete | 672d7cf, 02beea2, 0041613, a0f4624, 5dd4bfe | Dwell-time counter now starts counting from corridor entry. Removed else wrapper in Approaching branch, added increment in Idle branch. After 10s: p4=255 (not 229). |
-| **H1** | ✅ Complete | 8873959, 0dd557c, 9aa62cd | Recovery module wired into firmware with GPS jump detection. |
-| **H2** | ✅ Complete | — | Flash state persistence implemented. CRC32-protected PersistedState (12 bytes) stored in last 4KB flash sector. Rate-limited writes (max once/60s) for endurance. Applies persisted stop index on first fix if within 500m threshold. |
-| **H3** | ✅ Complete | — | DR soft-resync (2/10) implemented. Added `in_recovery` flag to `DrState`; soft-resync applied on first post-outage GPS. |
-| **H4** | ✅ Complete | — | EMA velocity filter implemented. `update_dr_ema()` function with α=3/10; applied to DR state updates. |
-| **I1** | ✅ Complete | — | build.rs removed; build system now uses standard cargo cross-compilation. |
-| **I2** | ✅ Complete | 1473313, 0b72ee9, 3b1c5b0, 84d3037 | UART i32→u64 cast fixed with signed formatter. Added `append_i64()` helper for proper signed integer formatting. |
-| **I3** | ✅ Complete | — | RouteNode version comment corrected to 24 bytes. |
-| **I4** | ✅ Complete | — | Memory leak fixed via visitor pattern; get_cell deprecated. |
-| **I5** | ✅ Complete | c1f1010, 007cc3d, 470bf75, fec1b13, 34d0dc1, 66198ec | Two-counter warmup system: valid_ticks (convergence) + total_ticks (timeout). DrOutage also updated. |
-| **I6** | ✅ Complete | — | UART RX buffer increased to 512 bytes for 1-second window. |
+The flaw: both F1 and F3 are computed from `|s_cm - stop.progress_cm|` using the **same** `s_cm`. Beyond the implementation bug already noted in the code review, there is a deeper design problem: even with a correctly-passed raw `z_gps`, F1 and F3 will be highly correlated — F3 is a smoothed version of F1. The Kalman filter's job is to reduce noise in F1. Adding F3 as a separate feature doesn't contribute independent information; it contributes a smoother repeat of F1. The linear discriminant's effective rank is therefore lower than 4, and you're wasting weight (10 out of 32) on a near-redundant feature. A better design would use F3 as a **replacement** for F1 when GPS quality is poor (HDOP-switched), not as an additive term.
 
-### Summary
+---
 
-- **16 of 16 issues resolved** (D1, D2, D3, D4, D5, H1, H2, H3, H4, I1, I2, I3, I4, I5, I6)
-- **0 High-severity remaining**
-- **0 Medium-severity remaining**
-- **0 Low-severity remaining**
+## 4. HDOP Is Always One Message Cycle Stale
+
+The NMEA parsing sequence in practice: RMC → GGA → GSA (or RMC → GSA, or GGA alone).
+
+`parse_gga` calls `core::mem::replace`, which immediately returns the completed point and resets internal state. This happens **before** GSA is parsed. The HDOP from GSA ends up in the *next cycle's* point. The HDOP-adaptive Kalman gain (Section 10.4.1) is therefore always using last cycle's quality metric. In a city-canyon where quality degrades suddenly (the bus enters a building shadow), the Kalman gain doesn't respond until the following second — the exact tick where reduced trust matters most gets the stale high-trust gain.
+
+The fix is to hold the point in a staging buffer until both a position source and a HDOP source have been received in the same burst, with a fallback if only GGA is available.
+
+---
+
+## 5. Midnight Rollover Causes DR to Stall
+
+GPS timestamps are derived from HHMMSS as `hh * 3600 + mm * 60 + ss` — a value in `[0, 86399]`. Dead-reckoning computes:
+
+```rust
+let dt = timestamp.saturating_sub(last_gps_time);
+```
+
+At midnight, `last_gps_time = 86399` and `timestamp = 0`. `(0u64).saturating_sub(86399)` = 0. `dt = 0`, so DR advances position by zero, and the decay factor `DR_DECAY_NUMERATOR[0] = 10000` leaves speed unchanged. The bus effectively freezes in the DR model for one tick. On a 1 Hz system this is minor, but a service running the overnight shift will silently stall position for one second at exactly 00:00:00.
+
+---
+
+## 6. Only One Event Returns Per Tick — Silent Drop When Corridors Overlap
+
+`process_gps` in `state.rs` iterates over active stops and returns `Some(...)` immediately on the first `StopEvent::Arrived` or announcement. If two corridors overlap (which the close-stop logic explicitly creates), and both trigger an event in the same tick, only the lower-indexed stop's event is returned. The higher-indexed stop's FSM is updated (state transitions correctly), but its arrival event is dropped. The caller never knows it happened. This is a structural limitation of returning `Option<ArrivalEvent>` rather than a `Vec<ArrivalEvent>` or a callback.
+
+---
+
+## 7. Recovery Triggers Cannot Fire Even If Wired Up
+
+The spec lists three Recovery triggers (Section 15.1): GPS jump > 200 m, restart mismatch > 500 m, and sustained position/stop divergence > 5 s. None of the state needed to detect these is tracked in `State`:
+
+- No previous `s_cm` snapshot to detect a 200 m jump (the Kalman filter absorbs or rejects the jump without recording a "before" value)
+- No divergence timer counting consecutive ticks where `|ŝ - s_i| > 200 m`
+- `PersistedState` doesn't exist for restart comparison
+
+Before Module ⑫ can be wired up, three new fields must be added to `State` and their update logic written. Recovery is not just "missing wiring" — the architectural prerequisites for triggering it are absent.
+
+---
+
+## 8. The One-Time Announcement Rule Breaks Circular Routes
+
+Section 14.4 makes `announced = true` permanent for the lifetime of a `StopState`. For a circular route (bus loops back past stop #5 twice per trip), the second pass is silent. The spec acknowledges this as "expected behavior." But many real transit routes are circular, and this architectural decision makes the system unsuitable for them without a trip-reset mechanism. The spec doesn't define what constitutes a "trip boundary" or how to detect one, leaving this as an unresolved operational gap.
+
+---
+
+## 9. The Close-Stop Corridor Adjustment and Adaptive Weights Aren't Jointly Calibrated
+
+The close-stop fix (v8.6) applies two independent interventions simultaneously: corridor resizing (Section 12.5) and weight redistribution from (13,6,10,3) to (14,7,11,0). These two changes interact: the resized corridor means dwell time accumulates differently, but the adaptive weights remove dwell time entirely for those stops. The system was validated on a single real-world case (tpF805 Stop #2→#3 at 79 m), and probability went from 185 → 222. However, the threshold θ=191 was set under the standard weights. With adaptive weights that remove p4 entirely, the score distribution shifts. Whether θ=191 remains the right threshold for the (14,7,11,0) regime was never independently evaluated — the validation just confirms "> 191," not that the threshold is still optimal.
+
+---
+
+## 10. The 80 m Pre-Corridor Is Both a Feature and a Constraint — and Creates an Edge Case at Route Start
+
+The corridor's pre-corridor width (80 m) serves two roles: it's the announcement trigger, and it's the window for dwell-time accumulation. These two purposes impose conflicting constraints. For announcement you want the corridor to start early (before the bus decelerates). For dwell-time you want it to start late (to avoid counting slow-approach time as dwell time). The system resolves this by making the corridor serve both, but the result is that `τ_dwell` and `T_ref = 10 s` must be tuned relative to corridor width and bus approach speed simultaneously — they aren't independent parameters.
+
+Additionally, the first stop on the route has `corridor_start = stop_progress - 8000 cm`. If the route starts near the depot and the first stop is less than 80 m from the route origin, `corridor_start_cm` would be negative. The `find_active_stops` check `s_cm >= stop.corridor_start_cm` would then fire the moment the system starts (s_cm ≈ 0), triggering an announcement before the bus has moved. The preprocessor's corridor overlap logic doesn't check for negative `corridor_start_cm`.
+
+---
+
+## Summary
+
+| Issue | Impact |
+|-------|--------|
+| Heading penalty lacks λ — dominates distance at 10,000× | Wrong segment selected near stops, especially during approach/low-speed |
+| Linear sum mislabeled as Bayesian — single feature can override others | False positives when one feature fires strongly and others contradict |
+| F1 and F3 are structurally correlated | Wastes 10/32 weight on near-redundant signal |
+| HDOP one cycle stale | Adaptive Kalman responds too late on rapid quality degradation |
+| Midnight rollover — DR freezes for one tick | Silent position stall at 00:00:00 |
+| Only one event per tick — second corridor event silently dropped | Missed arrival reports on close stops |
+| Recovery trigger state missing from `State` struct | Module ⑫ is unimplementable without architectural additions |
+| One-time rule breaks circular routes | System is unsuitable for loop routes without trip-reset design |
+| Close-stop threshold θ=191 not re-validated under adaptive weights | Threshold may be wrong for (14,7,11,0) regime |
+| First stop may have negative corridor start | Spurious announcement at route initialization |

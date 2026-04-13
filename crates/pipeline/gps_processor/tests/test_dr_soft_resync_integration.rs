@@ -1,10 +1,7 @@
 //! Integration test for H3: DR soft-resync after GPS recovery
 //! Tests the key behaviors of the soft-resync flow
 
-use gps_processor::kalman::process_gps_update;
-use gps_processor::route_data::RouteData;
-use shared::{DrState, GpsPoint, KalmanState};
-use shared::binfile::SpatialGridView;
+use shared::DrState;
 
 #[test]
 fn test_soft_resync_formula_verification() {

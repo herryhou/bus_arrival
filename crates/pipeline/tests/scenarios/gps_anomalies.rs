@@ -1,6 +1,6 @@
 //! GPS anomaly scenario tests (drift, jump)
 
-use super::common::{load_ty225_route, load_nmea, load_nmea_reader, ExpectedResults};
+use super::common::{load_ty225_route, load_nmea_reader, ExpectedResults};
 use super::common::{validate_arrivals_exact, load_expected_arrivals, validate_arrival_order};
 use shared::binfile::RouteData;
 use pipeline::Pipeline;

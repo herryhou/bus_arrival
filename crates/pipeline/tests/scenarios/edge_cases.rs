@@ -73,7 +73,7 @@ fn test_stationary_gps() {
     );
 
     assert!(result.is_ok());
-    let result = result.unwrap();
+    let _result = result.unwrap();
     // Stationary GPS should not trigger arrivals (speed check prevents this)
     // Assuming position is not near any stop
 }

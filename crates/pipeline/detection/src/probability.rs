@@ -304,7 +304,6 @@ mod tests {
 
         // With close stop, p4 weight is removed, should be higher
         assert!(prob > 190, "Expected probability > 190 for close stop, got {}", prob);
-        assert!(prob <= 255);
     }
 
     #[test]
@@ -355,7 +354,6 @@ mod tests {
         );
 
         // Should use standard weights
-        assert!(prob <= 255);
         assert!(prob > 150); // At stop with 10s dwell should be high
     }
 

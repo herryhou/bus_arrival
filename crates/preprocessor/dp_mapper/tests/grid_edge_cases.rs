@@ -353,13 +353,13 @@ fn test_query_at_negative_coordinates() {
 
     // Query at negative coordinates
     // --- WHEN ---
-    let result = query_neighbors(&grid, -1000, -1000, 1);
+    let _result = query_neighbors(&grid, -1000, -1000, 1);
 
     // --- THEN ---
     // The grid has x0_cm=5000, so (-1000, -1000) is outside the grid
     // Should handle gracefully (may return empty or results depending on grid implementation)
     // The key is that it shouldn't crash
-    assert!(result.len() >= 0, "negative coordinates handled gracefully");
+    // _result is always valid (Vec can't have negative length)
 }
 
 #[test]
@@ -788,11 +788,11 @@ fn test_query_at_segment_endpoint() {
 
     // Query at segment endpoint
     // --- WHEN ---
-    let result = query_neighbors(&grid, 10000, 0, 0);
+    let _result = query_neighbors(&grid, 10000, 0, 0);
 
     // --- THEN ---
     // The endpoint (10000, 0) with radius 0 may or may not return results
     // depending on cell boundary handling
     // The key is that it shouldn't crash
-    assert!(result.len() >= 0, "endpoint query handled gracefully");
+    // _result is always valid (Vec can't have negative length)
 }

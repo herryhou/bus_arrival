@@ -1,6 +1,7 @@
 //! Arrival detection logic
 //!
 //! Provides stop corridor filtering and arrival probability computation.
+#![allow(dead_code)]
 
 use crate::lut::{GAUSSIAN_LUT, LOGISTIC_LUT};
 use shared::{

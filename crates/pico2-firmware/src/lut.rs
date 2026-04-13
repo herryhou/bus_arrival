@@ -1,5 +1,6 @@
 //! LUTs for arrival probability computation
 //! Generated at build time from pipeline probability module
+#![allow(dead_code)]
 
 include!(concat!(env!("OUT_DIR"), "/lut_generated.rs"));
 

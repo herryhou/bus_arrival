@@ -17,8 +17,9 @@
 
 #![cfg(feature = "firmware")]
 
-use embassy_rp::flash::{Flash, Async, ERASE_SIZE};
+use embassy_rp::flash::{Flash, ERASE_SIZE};
 use embassy_rp::peripherals::FLASH;
+use embedded_storage_async::nor_flash::NorFlash;
 use shared::PersistedState;
 
 /// Offset from flash base for persisted state sector.
@@ -40,7 +41,7 @@ const FLASH_SIZE: usize = 2 * 1024 * 1024;
 /// - Flash is entirely erased (all 0xFF bytes)
 /// - CRC32 checksum does not match
 /// - Read operation fails
-pub async fn load(flash: &mut Flash<'_, FLASH, Async, FLASH_SIZE>) -> Option<PersistedState> {
+pub async fn load(flash: &mut Flash<'_, FLASH, embassy_rp::flash::Async, FLASH_SIZE>) -> Option<PersistedState> {
     let mut buf = [0u8; core::mem::size_of::<PersistedState>()];
 
     // Read the persisted state from flash
@@ -73,12 +74,13 @@ pub async fn load(flash: &mut Flash<'_, FLASH, Async, FLASH_SIZE>) -> Option<Per
 /// - Erase operation fails
 /// - Write operation fails
 pub async fn save(
-    flash: &mut Flash<'_, FLASH, Async, FLASH_SIZE>,
+    flash: &mut Flash<'_, FLASH, embassy_rp::flash::Async, FLASH_SIZE>,
     state: &PersistedState,
 ) -> Result<(), ()> {
     // Erase the sector first (required before write on NOR flash)
     flash
         .erase(PERSIST_FLASH_OFFSET, PERSIST_FLASH_OFFSET + ERASE_SIZE as u32)
+        .await
         .map_err(|_| ())?;
 
     // Write must be in multiples of WRITE_SIZE (1 byte for RP2350).
@@ -96,5 +98,6 @@ pub async fn save(
 
     flash
         .write(PERSIST_FLASH_OFFSET, &write_buf)
+        .await
         .map_err(|_| ())
 }

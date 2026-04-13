@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![cfg(feature = "firmware")]
+#![allow(static_mut_refs)]
 
 use defmt::*;
 use defmt_rtt as _;
@@ -20,6 +21,7 @@ use embassy_rp::flash::Flash;
 mod lut;
 mod uart;
 mod detection;
+mod recovery_trigger;
 mod state;
 mod persist;
 
@@ -32,9 +34,10 @@ mod persist;
 #[link_section = ".bi_entries"]
 static IMAGE_DEF: ImageDef = ImageDef::secure_exe();
 
-// Interrupt bindings for buffered UART
+// Interrupt bindings for buffered UART and DMA flash
 bind_interrupts!(struct Irqs {
     UART0_IRQ => BufferedInterruptHandler<embassy_rp::peripherals::UART0>;
+    DMA_IRQ_0 => embassy_rp::dma::InterruptHandler<embassy_rp::peripherals::DMA_CH0>;
 });
 
 /// Route data embedded in flash
@@ -52,7 +55,7 @@ async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
     // Initialize flash driver for state persistence
-    let mut flash = Flash::<_, _, _, { 2 * 1024 * 1024 }>::new(p.FLASH, p.DMA_CH0);
+    let mut flash = Flash::<_, embassy_rp::flash::Async, { 2 * 1024 * 1024 }>::new(p.FLASH, p.DMA_CH0, Irqs);
 
     // Initialize UART for GPS NMEA input and arrival event output
     // Using buffered UART (interrupt-based) for true async I/O without DMA requirement
