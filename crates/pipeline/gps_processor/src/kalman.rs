@@ -79,6 +79,7 @@ pub fn process_gps_update(
         gps.speed_cms,
         route_data,
         state.last_seg_idx,
+        is_first_fix,
     );
 
     // 4. Projection

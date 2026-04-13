@@ -129,13 +129,19 @@ impl<'a> State<'a> {
         // Module ⑥: Speed constraint filter
         // Module ⑦: Kalman filter
         // Module ⑧: Dead-reckoning
+        // Disable heading filter during warmup (GPS heading may be unreliable after
+        // long outages). The filter is disabled when:
+        // 1. First fix ever (self.first_fix = true)
+        // 2. During warmup (warmup_valid_ticks < WARMUP_TICKS_REQUIRED)
+        let in_warmup = self.warmup_valid_ticks < WARMUP_TICKS_REQUIRED;
+        let disable_heading_filter = self.first_fix || in_warmup;
         let result = process_gps_update(
             &mut self.kalman,
             &mut self.dr,
             gps,
             self.route_data,
             gps.timestamp,
-            self.first_fix,
+            disable_heading_filter,
         );
 
         let (s_cm, v_cms, signals) = match result {

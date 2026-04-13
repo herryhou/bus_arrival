@@ -33,25 +33,35 @@ fn heading_threshold_cdeg(w: i32) -> u32 {
 /// Returns true if this segment is a plausible direction of travel given the
 /// current GPS heading.
 ///
-/// Three cases handled explicitly:
-///   - Sentinel heading (i16::MIN): GGA-only mode, no heading data → always eligible
-///   - Stopped (w = 0): heading is unreliable → always eligible
+/// Heading filter strictness depends on mode:
+///   - First fix/recovery (is_first_fix = true): 180° relaxed threshold
+///   - Sentinel heading (i16::MIN): always eligible (GGA-only mode)
+///   - Stopped (w = 0): always eligible (heading unreliable)
 ///   - Moving: eligible iff heading_diff ≤ threshold(speed)
 ///
 /// Note: this is a hard gate, not a blended penalty.  A segment is either
 /// physically plausible or it isn't; partial credit produces commensuration
 /// problems (adding cm² to cdeg²).
-fn heading_eligible(gps_heading: HeadCdeg, gps_speed: SpeedCms, seg_heading: HeadCdeg) -> bool {
+fn heading_eligible(gps_heading: HeadCdeg, gps_speed: SpeedCms, seg_heading: HeadCdeg, is_first_fix: bool) -> bool {
     if gps_heading == i16::MIN {
         return true; // GGA-only: preserve existing sentinel behaviour
     }
     let w = heading_weight(gps_speed);
-    let threshold = heading_threshold_cdeg(w);
+    let threshold = if is_first_fix {
+        // Relaxed threshold for post-outage recovery: 180°
+        // This allows maximum flexibility while still providing some constraint
+        18_000
+    } else {
+        heading_threshold_cdeg(w)
+    };
     let diff = heading_diff_cdeg(gps_heading, seg_heading) as u32;
     diff <= threshold
 }
 
 /// Scan a range of segment indices, returning the best eligible and best any.
+///
+/// When `is_first_fix` is true, the heading filter is disabled - all segments
+/// are eligible based on pure distance only.
 ///
 /// Returns:
 /// - (best_eligible_idx, best_eligible_dist2, eligible_found,
@@ -66,6 +76,7 @@ fn best_eligible(
     gps_speed: SpeedCms,
     route_data: &RouteData,
     range: impl Iterator<Item = usize>,
+    is_first_fix: bool,
 ) -> (usize, Dist2, bool, usize, Dist2) {
     let mut best_eligible_idx: Option<usize> = None;
     let mut best_eligible_dist2 = Dist2::MAX;
@@ -81,7 +92,7 @@ fn best_eligible(
                 best_any_idx = Some(idx);
             }
 
-            if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg)
+            if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix)
                 && d2 < best_eligible_dist2
             {
                 best_eligible_dist2 = d2;
@@ -123,6 +134,10 @@ fn to_radians_compat(degrees: f64) -> f64 {
 }
 
 /// Find best route segment for GPS point with preference for segments near last_idx
+///
+/// The `is_first_fix` parameter controls the heading filter strictness:
+/// - true: Use relaxed 180° threshold for post-outage recovery
+/// - false: Use normal 90° threshold for steady-state operation
 pub fn find_best_segment_restricted(
     gps_x: DistCm,
     gps_y: DistCm,
@@ -130,6 +145,7 @@ pub fn find_best_segment_restricted(
     gps_speed: SpeedCms,
     route_data: &RouteData,
     last_idx: usize,
+    is_first_fix: bool,
 ) -> usize {
     // Early-exit threshold: if the best eligible segment in the window is
     // within SIGMA_GPS_CM (20 m), skip the expensive grid search.
@@ -156,6 +172,7 @@ pub fn find_best_segment_restricted(
         gps_speed,
         route_data,
         start..=end,
+        is_first_fix,
     );
 
     // Early exit if eligible segment found within threshold
@@ -208,7 +225,7 @@ pub fn find_best_segment_restricted(
                         }
 
                         // Update best_eligible tracker if heading matches
-                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg) {
+                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix) {
                             if d2 < best_eligible_dist2 {
                                 best_eligible_dist2 = d2;
                                 best_eligible_idx = idx as usize;
