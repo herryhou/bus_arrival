@@ -564,6 +564,7 @@ mod tests {
         assert_eq!(result.err(), Some(BusError::ChecksumMismatch));
     }
 
+    #[cfg(feature = "std")]
     #[test]
     fn test_invalid_magic() {
         let buffer = vec![0u8; 100];
@@ -571,6 +572,7 @@ mod tests {
         assert_eq!(result.err(), Some(BusError::InvalidMagic));
     }
 
+    #[cfg(feature = "std")]
     #[test]
     fn test_grid_misaligned_access() {
         // Test XIP scenario: grid data at odd memory address
@@ -607,9 +609,10 @@ mod tests {
             None => return, // Skip if allocator is too aligned (rare)
         };
 
-        // Should handle misaligned access without panic
-        let cell_data = misaligned_grid.get_cell(0, 0).unwrap();
-        assert_eq!(cell_data, &[42, 99], "Data should match even when misaligned");
+        // Should handle misaligned access without panic or leak
+        let mut collected = Vec::new();
+        misaligned_grid.visit_cell(0, 0, |idx| collected.push(idx)).unwrap();
+        assert_eq!(collected, vec![42, 99], "Data should match even when misaligned");
     }
 }
 
