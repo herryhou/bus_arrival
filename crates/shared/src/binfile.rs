@@ -153,7 +153,11 @@ pub struct SpatialGridView<'a> {
 
 impl<'a> SpatialGridView<'a> {
     /// Returns the segment indices for a specific cell.
-    /// Uses bitmask for sparse cell lookup and u16 offsets.
+    ///
+    /// **Deprecated:** Use `visit_cell()` instead to avoid memory leaks with
+    /// misaligned XIP addresses. This method may allocate and leak memory in
+    /// std builds when the binary file is loaded at an odd address.
+    #[deprecated(note = "Use visit_cell() instead — avoids allocation for misaligned XIP")]
     pub fn get_cell(&self, col: u32, row: u32) -> Result<&'a [u16], BusError> {
         if col >= self.cols || row >= self.rows {
             return Err(BusError::OutOfBounds);
@@ -246,6 +250,51 @@ impl<'a> SpatialGridView<'a> {
         }
 
         count
+    }
+
+    /// Visit each segment index in the cell with a callback.
+    /// Uses unaligned reads for XIP compatibility; zero allocation on ARM Cortex-M33.
+    pub fn visit_cell<F>(&self, col: u32, row: u32, mut f: F) -> Result<(), BusError>
+    where
+        F: FnMut(u16),
+    {
+        if col >= self.cols || row >= self.rows {
+            return Err(BusError::OutOfBounds);
+        }
+        let cell_idx = (row * self.cols + col) as usize;
+
+        // Check bitmask to see if cell has data
+        let byte_idx = cell_idx / 8;
+        let bit_mask = 1 << (cell_idx % 8);
+        let bitmask_byte = unsafe { *self.bitmask_base.add(byte_idx) };
+
+        if bitmask_byte & bit_mask == 0 {
+            return Ok(()); // Empty cell
+        }
+
+        // Find the offset index by counting set bits before this cell
+        let offset_idx = self.count_set_bits_before(cell_idx);
+
+        // Read offset as u16 (2 bytes)
+        let offset_ptr = unsafe { self.offsets_base.add(offset_idx * 2) as *const u16 };
+        let start_offset = unsafe { core::ptr::read_unaligned(offset_ptr) } as usize;
+
+        // Calculate actual pointer into data section
+        let data_ptr = unsafe { self.data_base.add(start_offset) };
+
+        // Read count (first u16 in cell data)
+        let count = unsafe { core::ptr::read_unaligned(data_ptr as *const u16) } as usize;
+        if count == 0 {
+            return Ok(());
+        }
+
+        // Visit each index with unaligned read (LDRH on ARM Cortex-M33)
+        let indices_ptr = unsafe { data_ptr.add(2) as *const u16 };
+        for i in 0..count {
+            let idx = unsafe { core::ptr::read_unaligned(indices_ptr.add(i)) };
+            f(idx);
+        }
+        Ok(())
     }
 }
 
