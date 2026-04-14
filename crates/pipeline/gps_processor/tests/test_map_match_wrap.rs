@@ -64,13 +64,13 @@ fn test_gps_outside_bounds_returns_last_idx() {
     let gps_y = 105000; // Within y bounds
     let last_idx = 0;
 
-    let result = find_best_segment_restricted(gps_x, gps_y, 0, 0, &route_data, last_idx, false);
+    let (seg_idx, _dist2) = find_best_segment_restricted(gps_x, gps_y, 0, 0, &route_data, last_idx, false);
 
     // Should return last_idx conservatively, not wrap to garbage grid coordinates
     assert_eq!(
-        result, last_idx,
+        seg_idx, last_idx,
         "GPS outside bounds should return last_idx conservatively, but got {}",
-        result
+        seg_idx
     );
 }
 
@@ -121,13 +121,13 @@ fn test_gps_outside_y_bounds_returns_last_idx() {
     let gps_y = 50000; // Less than y0_cm=100000
     let last_idx = 0;
 
-    let result = find_best_segment_restricted(gps_x, gps_y, 0, 0, &route_data, last_idx, false);
+    let (seg_idx, _dist2) = find_best_segment_restricted(gps_x, gps_y, 0, 0, &route_data, last_idx, false);
 
     // Should return last_idx conservatively
     assert_eq!(
-        result, last_idx,
+        seg_idx, last_idx,
         "GPS outside y bounds should return last_idx conservatively, but got {}",
-        result
+        seg_idx
     );
 }
 
@@ -178,12 +178,12 @@ fn test_gps_inside_bounds_works_normally() {
     let gps_y = 105000; // Within y bounds
     let last_idx = 0;
 
-    let result = find_best_segment_restricted(gps_x, gps_y, 0, 0, &route_data, last_idx, false);
+    let (seg_idx, _dist2) = find_best_segment_restricted(gps_x, gps_y, 0, 0, &route_data, last_idx, false);
 
     // Should find a valid segment (either 0 or 1)
     assert!(
-        result <= 1,
+        seg_idx <= 1,
         "GPS inside bounds should find valid segment, but got {}",
-        result
+        seg_idx
     );
 }

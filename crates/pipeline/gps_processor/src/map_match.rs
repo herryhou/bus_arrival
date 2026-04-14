@@ -135,6 +135,10 @@ fn to_radians_compat(degrees: f64) -> f64 {
 
 /// Find best route segment for GPS point with preference for segments near last_idx
 ///
+/// Returns (segment_index, distance_squared) where:
+/// - segment_index: the best matching segment index
+/// - distance_squared: the distance² from GPS point to that segment (in cm²)
+///
 /// The `is_first_fix` parameter controls the heading filter strictness:
 /// - true: Use relaxed 180° threshold for post-outage recovery
 /// - false: Use normal 90° threshold for steady-state operation
@@ -146,7 +150,7 @@ pub fn find_best_segment_restricted(
     route_data: &RouteData,
     last_idx: usize,
     is_first_fix: bool,
-) -> usize {
+) -> (usize, i64) {
     // Early-exit threshold: if the best eligible segment in the window is
     // within SIGMA_GPS_CM (20 m), skip the expensive grid search.
     // Now that scores are pure dist2, this comparison is physically meaningful.
@@ -177,12 +181,12 @@ pub fn find_best_segment_restricted(
 
     // Early exit if eligible segment found within threshold
     if window_eligible_found && window_eligible_dist2 < MAX_DIST2_EARLY_EXIT {
-        return window_best_eligible;
+        return (window_best_eligible, window_eligible_dist2);
     }
 
     // Fallback: full grid search.
     if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
-        return window_best_any; // Outside bounding box — keep window result
+        return (window_best_any, window_any_dist2); // Outside bounding box — keep window result
     }
 
     let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
@@ -248,10 +252,10 @@ pub fn find_best_segment_restricted(
             gps_speed,
             gps_heading
         );
-        return best_any_idx;
+        return (best_any_idx, best_any_dist2);
     }
 
-    best_eligible_idx
+    (best_eligible_idx, best_eligible_dist2)
 }
 
 /// Distance-squared from GPS point to segment (clamped projection).
