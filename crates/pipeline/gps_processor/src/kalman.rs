@@ -28,6 +28,15 @@ const DR_DECAY_NUMERATOR: [u32; 11] = [
     3487,  // dt=10: 0.3487
 ];
 
+/// Off-route distance threshold (cm²) — 50m² = 25,000,000 cm²
+const OFF_ROUTE_D2_THRESHOLD: i64 = 25_000_000;
+
+/// Ticks to confirm off-route (avoid false positives from multipath)
+const OFF_ROUTE_CONFIRM_TICKS: u8 = 5;
+
+/// Ticks to clear off-route (fast re-acquisition)
+const OFF_ROUTE_CLEAR_TICKS: u8 = 2;
+
 /// ProcessResult from GPS update
 pub enum ProcessResult {
     Valid {
