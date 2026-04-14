@@ -80,7 +80,7 @@ pub fn process_gps_update(
     // Use relaxed heading threshold during recovery (first fix OR post-outage recovery)
     // This improves segment matching when GPS heading is unreliable after signal loss
     let use_relaxed_heading = is_first_fix || dr.in_recovery;
-    let (seg_idx, _match_d2) = crate::map_match::find_best_segment_restricted(
+    let (seg_idx, match_d2) = crate::map_match::find_best_segment_restricted(
         gps_x,
         gps_y,
         gps.heading_cdeg,
