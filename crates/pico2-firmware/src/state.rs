@@ -270,6 +270,43 @@ impl<'a> State<'a> {
                 // Update timestamp for next iteration
                 self.last_gps_timestamp = gps.timestamp;
 
+                // Check for re-acquisition recovery
+                if self.needs_recovery_on_reacquisition {
+                    self.needs_recovery_on_reacquisition = false;
+
+                    // Calculate elapsed time since freeze
+                    let elapsed_seconds = if let Some(freeze_time) = self.off_route_freeze_time {
+                        gps.timestamp.saturating_sub(freeze_time)
+                    } else {
+                        1  // Default if not set
+                    };
+
+                    // Clear freeze time
+                    self.off_route_freeze_time = None;
+
+                    // Run recovery to find correct stop index
+                    let mut stops_vec = heapless::Vec::<Stop, 256>::new();
+                    for i in 0..self.route_data.stop_count {
+                        if let Some(stop) = self.route_data.get_stop(i) {
+                            let _ = stops_vec.push(stop);
+                        }
+                    }
+
+                    if let Some(recovered_idx) = detection::recovery::find_stop_index(
+                        s_cm,
+                        v_cms,
+                        elapsed_seconds,
+                        &stops_vec,
+                        self.last_known_stop_index,
+                    ) {
+                        #[cfg(feature = "firmware")]
+                        defmt::info!("Re-acquisition recovered stop index: {}", recovered_idx);
+                        self.last_known_stop_index = recovered_idx as u8;
+                        self.reset_stop_states_after_recovery(recovered_idx);
+                    }
+                    // If recovery returns None, continue with existing states
+                }
+
                 // Return s_cm, v_cms, and signals for detection
                 (s_cm, v_cms, signals)
             }
@@ -528,6 +565,16 @@ impl<'a> State<'a> {
         } else {
             Some(self.last_known_stop_index)
         }
+    }
+
+    /// Get the recovery flag state (for testing)
+    pub fn needs_recovery_on_reacquisition(&self) -> bool {
+        self.needs_recovery_on_reacquisition
+    }
+
+    /// Get the freeze time (for testing)
+    pub fn off_route_freeze_time(&self) -> Option<u64> {
+        self.off_route_freeze_time
     }
 
     /// Apply persisted stop index by marking all prior stops as Departed.
