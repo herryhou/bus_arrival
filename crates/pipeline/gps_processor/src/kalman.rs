@@ -1,5 +1,24 @@
 //! Kalman filter and GPS processing pipeline
 
+/// Off-Route Detection Notes:
+///
+/// This module implements off-route detection to handle sustained GPS drift where
+/// positions consistently don't fit route geometry (distance > 50m for 5+ seconds).
+///
+/// This feature detects:
+/// - Urban canyon multipath causing GPS drift away from road
+/// - Physical deviations (detour, depot, wrong route loaded)
+///
+/// LIMITATION: Cannot detect "along-route drift" where GPS stays on the road
+/// but advances faster than the bus. This requires external ground truth and
+/// is not detectable with a single GPS sensor.
+///
+/// The detection uses hysteresis (5 ticks to confirm, 2 to clear) to avoid
+/// false positives from transient multipath. Position is frozen during off-route
+/// episodes, and recovery re-synchronizes stop indices when GPS returns to route.
+///
+/// See: docs/superpowers/specs/2026-04-14-off-route-detection-design.md
+
 use core::cmp::Ord;
 
 use crate::route_data::RouteData;
