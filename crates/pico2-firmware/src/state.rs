@@ -337,11 +337,21 @@ impl<'a> State<'a> {
                 let signals = PositionSignals { z_gps_cm: s_cm, s_cm };
                 (s_cm, v_cms, signals)
             }
-            ProcessResult::OffRoute { last_valid_s: _, last_valid_v: _ } => {
+            ProcessResult::OffRoute { last_valid_s, last_valid_v } => {
+                // Set flag for recovery on re-acquisition
+                self.needs_recovery_on_reacquisition = true;
+
+                // Record freeze time
+                self.off_route_freeze_time = Some(gps.timestamp);
+
                 #[cfg(feature = "firmware")]
-                defmt::warn!("GPS off-route detected, position frozen");
-                // Block detection during off-route state
-                // Re-acquisition will be handled in future task
+                defmt::warn!(
+                    "Off-route detected: GPS > 50m from route for 5s. Freezing at s={}cm.",
+                    last_valid_s
+                );
+
+                // Position is frozen - do NOT update last_valid_s_cm
+                // Suspend arrival detection by returning None
                 return None;
             }
         };
