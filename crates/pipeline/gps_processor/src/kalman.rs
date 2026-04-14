@@ -99,6 +99,29 @@ pub fn process_gps_update(
         use_relaxed_heading,
     );
 
+    // Off-route detection (only when not in warmup)
+    if !is_first_fix {
+        if match_d2 > OFF_ROUTE_D2_THRESHOLD {
+            state.off_route_suspect_ticks = state.off_route_suspect_ticks.saturating_add(1);
+            state.off_route_clear_ticks = 0;
+
+            if state.off_route_suspect_ticks >= OFF_ROUTE_CONFIRM_TICKS {
+                // Confirmed off-route: return with last valid position
+                return ProcessResult::OffRoute {
+                    last_valid_s: state.s_cm,
+                    last_valid_v: state.v_cms,
+                };
+            }
+        } else {
+            // Good GPS match: increment clear counter
+            state.off_route_clear_ticks = state.off_route_clear_ticks.saturating_add(1);
+            // After 2 consecutive good matches, reset suspect counter
+            if state.off_route_clear_ticks >= OFF_ROUTE_CLEAR_TICKS {
+                state.off_route_suspect_ticks = 0;
+            }
+        }
+    }
+
     // 4. Projection
     let z_raw = crate::map_match::project_to_route(gps_x, gps_y, seg_idx, route_data);
 
