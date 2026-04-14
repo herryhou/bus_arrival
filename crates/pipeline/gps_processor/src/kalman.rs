@@ -41,6 +41,11 @@ pub enum ProcessResult {
         s_cm: DistCm,
         v_cms: SpeedCms,
     },
+    /// GPS is off-route — position frozen, awaiting re-acquisition
+    OffRoute {
+        last_valid_s: DistCm,
+        last_valid_v: SpeedCms,
+    },
 }
 
 /// Main processing pipeline for each GPS update
