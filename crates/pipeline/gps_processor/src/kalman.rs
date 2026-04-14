@@ -72,6 +72,9 @@ pub fn process_gps_update(
     );
 
     // 3. Map matching
+    // Use relaxed heading threshold during recovery (first fix OR post-outage recovery)
+    // This improves segment matching when GPS heading is unreliable after signal loss
+    let use_relaxed_heading = is_first_fix || dr.in_recovery;
     let seg_idx = crate::map_match::find_best_segment_restricted(
         gps_x,
         gps_y,
@@ -79,7 +82,7 @@ pub fn process_gps_update(
         gps.speed_cms,
         route_data,
         state.last_seg_idx,
-        is_first_fix,
+        use_relaxed_heading,
     );
 
     // 4. Projection
@@ -204,6 +207,10 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
     };
 
     if dt > 10 {
+        // Set recovery flag even for long outages to allow relaxed heading filter
+        // on first GPS fix after recovery. This improves map matching when GPS
+        // heading is unreliable after extended signal loss.
+        dr.in_recovery = true;
         return ProcessResult::Outage;
     }
 
