@@ -84,6 +84,10 @@ pub struct State<'a> {
     last_persisted_stop: u8,
     /// Ticks since last persist operation (for rate limiting)
     pub ticks_since_persist: u16,
+    /// Flag indicating recovery should run on next valid GPS after off-route
+    needs_recovery_on_reacquisition: bool,
+    /// Timestamp when position was frozen (for recovery dt calculation)
+    off_route_freeze_time: Option<u64>,
 }
 
 impl<'a> State<'a> {
@@ -117,6 +121,8 @@ impl<'a> State<'a> {
             pending_persisted: persisted,
             last_persisted_stop: if let Some(ps) = persisted { ps.last_stop_index } else { 0 },
             ticks_since_persist: 0,
+            needs_recovery_on_reacquisition: false,
+            off_route_freeze_time: None,
         }
     }
 
@@ -330,6 +336,13 @@ impl<'a> State<'a> {
                 // Timeout expired: detection enabled, proceed with DR estimates
                 let signals = PositionSignals { z_gps_cm: s_cm, s_cm };
                 (s_cm, v_cms, signals)
+            }
+            ProcessResult::OffRoute { last_valid_s: _, last_valid_v: _ } => {
+                #[cfg(feature = "firmware")]
+                defmt::warn!("GPS off-route detected, position frozen");
+                // Block detection during off-route state
+                // Re-acquisition will be handled in future task
+                return None;
             }
         };
 
