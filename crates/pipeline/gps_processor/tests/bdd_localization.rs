@@ -429,6 +429,7 @@ fn scenario_monotonicity_tolerance(route_data: &RouteData, start_x: i32, start_y
         ProcessResult::Valid { .. } => panic!("Should reject - exceeds 50m tolerance"),
         ProcessResult::Rejected(_) => panic!("Should return DR outage, not Rejected"),
         ProcessResult::Outage => panic!("Should not return outage"),
+        ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
     }
 }
 
@@ -466,6 +467,7 @@ fn scenario_max_speed_rejection(route_data: &RouteData, start_x: i32, start_y: i
         ProcessResult::Rejected(_) => panic!("Should not reject - within speed limit"),
         ProcessResult::Outage => panic!("Should not return outage"),
         ProcessResult::DrOutage { .. } => panic!("Should not return DR outage"),
+        ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
     }
 }
 
@@ -567,6 +569,7 @@ fn scenario_handle_gps_jump(route_data: &RouteData, start_x: i32, start_y: i32) 
         ProcessResult::Rejected(_) => panic!("Should not reject - jump is within speed limit"),
         ProcessResult::Outage => panic!("Should not return outage"),
         ProcessResult::DrOutage { .. } => panic!("Should not return DR outage"),
+        ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
     }
 }
 
@@ -835,6 +838,7 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
             panic!("Should return DR outage, not Rejected");
         }
         ProcessResult::Outage => panic!("Should not return outage"),
+        ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
     }
 }
 
@@ -882,6 +886,7 @@ fn scenario_large_backward_jump_rejection(route_data: &RouteData, start_x: i32, 
             panic!("Should return DR outage, not Rejected");
         }
         ProcessResult::Outage => panic!("Should not return outage"),
+        ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
     }
 }
 
