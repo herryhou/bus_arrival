@@ -299,11 +299,14 @@ fn test_full_off_route_cycle() {
     println!("Recovery completed after GPS returned to route");
 
     // Process 2 more good ticks to ensure stable operation
-    for i in 1..=2 {
+    // Note: The GPS processor's off-route state machine needs 2 good ticks to clear,
+    // so we provide 3 good ticks total (1 above + 2 more) to ensure stable operation
+    for i in 1..=3 {
         let gps_good = create_gps_point_with_time(1500, 6, 500, i);
         let _event = state.process_gps(&gps_good);
 
-        // Should remain in normal operation
+        // Should remain in normal operation after recovery cleared
+        // (The first tick after recovery might still have internal state clearing)
         assert!(!state.needs_recovery_on_reacquisition(),
             "Tick {} should not need recovery (back to normal)", i);
         assert!(state.off_route_freeze_time().is_none(),
