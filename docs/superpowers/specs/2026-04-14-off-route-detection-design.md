@@ -50,26 +50,26 @@ The system cannot distinguish these causes — and shouldn't need to. The correc
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  ┌──────────┐    match_d2 > 25M for 5 ticks    ┌─────────┐ │
-│  │  Normal  │───────────────────────────────────│ Suspended│ │
+│  │  Normal  │──────────────────────────────────→│ Suspended│ │
 │  │Operation│                                   │ (Off-   │ │
-│  │          │                                   │  Route) │ │
-│  └────┬─────┘                                   └────┬────┘ │
-│       │                                              │       │
-│       │ match_d2 < 25M for 2 ticks                   │       │
-│       │              ┌───────────────────────────────┘       │
-│       │              │                                       │
-│       ▼              ▼                                       │
-│  ┌────────────────────────────┐                              │
-│  │   Re-acquisition           │                              │
-│  │   (run recovery scan)      │                              │
-│  └────────────────────────────┘                              │
+│  │          │←──────────────────────────────────│  Route) │ │
+│  └──────────┘    match_d2 < 25M for 2 ticks     └────┬────┘ │
+│       ▲                                              │       │
+│       │              match_d2 < 25M for 2 ticks    │       │
+│       │                                              ▼       │
+│       │                                    ┌─────────────────┐│
+│       │                                    │  Re-acquisition  ││
+│       │                                    │  (run recovery)  ││
+│       │                                    └─────────────────┘│
+│       └──────────────────────────────────────────────────────┘
 │                                                             │
+│ Linear chain: Normal → Suspended → Re-acquisition → Normal │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ### New State Fields
 
-**In `KalmanState`:**
+**In `KalmanState` (shared/src/lib.rs):**
 ```rust
 pub struct KalmanState {
     // ... existing fields ...
@@ -82,22 +82,22 @@ pub struct KalmanState {
 }
 ```
 
-**In `State`:**
-```rust
-pub struct State<'a> {
-    // ... existing fields ...
-
-    /// Flag indicating recovery should run on next valid GPS
-    needs_recovery_on_reacquisition: bool,
-}
-```
-
 ### New ProcessResult Variant
 
+**In `ProcessResult` (shared/src/lib.rs):**
 ```rust
 pub enum ProcessResult {
-    // ... existing variants ...
-
+    Valid {
+        signals: PositionSignals,
+        v_cms: SpeedCms,
+        seg_idx: usize,
+    },
+    Rejected(&'static str),
+    Outage,
+    DrOutage {
+        s_cm: DistCm,
+        v_cms: SpeedCms,
+    },
     /// GPS is off-route — position frozen, awaiting re-acquisition
     OffRoute {
         last_valid_s: DistCm,
@@ -105,6 +105,8 @@ pub enum ProcessResult {
     },
 }
 ```
+
+**Note:** `match_d2` is NOT added to `ProcessResult::Valid` — it's only used internally in `kalman.rs` for the off-route threshold check.
 
 ---
 
@@ -116,19 +118,25 @@ pub enum ProcessResult {
    - Change `find_best_segment_restricted()` return type: `(usize, i64)`
    - Extract pure distance² without heading penalty
 
-2. **`kalman.rs`**
-   - Update `ProcessResult` enum with `OffRoute` variant
-   - Add off-route detection logic after map matching
+2. **`shared/src/lib.rs`**
    - Add `off_route_suspect_ticks`, `off_route_clear_ticks` to `KalmanState`
-   - Return `OffRoute` when threshold exceeded for 5 ticks
+   - Add `ProcessResult::OffRoute` variant
+   - Note: These types are defined in shared, not kalman.rs
 
-3. **`state.rs`**
-   - Add `needs_recovery_on_reacquisition` field to `State`
+3. **`kalman.rs`**
+   - Update `find_best_segment_restricted()` call to capture `(seg_idx, match_d2)`
+   - Add off-route detection logic after map matching
+   - Return `OffRoute` when threshold exceeded for 5 ticks
+   - Reset both counters in `handle_outage()`
+   - Disable detection during warmup (check in_warmup flag)
+
+4. **`state.rs`**
+   - Add `needs_recovery_on_reacquisition` and `off_route_freeze_time` fields to `State`
    - Handle `ProcessResult::OffRoute` variant
-   - Implement re-acquisition recovery logic
+   - Implement re-acquisition recovery logic with elapsed time calculation
    - Freeze position, suspend detection during off-route
 
-4. **`recovery.rs`**
+5. **`recovery.rs`**
    - No changes (existing `find_stop_index()` will be used)
 
 ### Configurable Constants
@@ -188,12 +196,13 @@ kalman.rs returns ProcessResult::Valid
     ↓
 state.rs checks needs_recovery_on_reacquisition
     ↓
+Calculate elapsed_seconds = gps.timestamp - off_route_freeze_time
+    ↓
 Call recovery::find_stop_index(s_cm, v_cms, elapsed_seconds, stops, last_idx)
-    Note: elapsed_seconds = time since position was frozen (tracked via timestamps)
     ↓
-Apply recovered stop index
+Apply recovered stop index (or continue with existing if recovery returns None)
     ↓
-Resume normal operation
+Clear off_route_freeze_time, resume normal operation
 ```
 
 ---
@@ -221,7 +230,8 @@ Resume normal operation
 
 1. **Route start/end**
    - Off-route detection works normally
-   - Recovery may find no valid stop (handled above)
+   - Recovery may return None if no stop is within 200m (spatial miss)
+   - Continue with existing stop states; normal operation self-corrects
 
 2. **Sparse stop regions**
    - Distance to nearest stop may be > 200m
@@ -233,12 +243,14 @@ Resume normal operation
    - Recovery handles re-synchronization
 
 4. **Simultaneous GPS outage + off-route**
-   - Outage takes precedence (existing behavior)
-   - Off-route counter resets on outage
+   - Outage takes precedence (checked first in process_gps_update)
+   - **Off-route counters MUST be explicitly reset in handle_outage()**
+   - This prevents immediate re-trigger on GPS recovery when positions are good
 
-5. **First GPS fix ever**
-   - Off-route detection disabled during warmup
-   - Avoids false positives during initialization
+5. **First GPS fix ever / Warmup period**
+   - Off-route detection MUST be disabled during warmup
+   - Cold-start with noisy first fix could trigger false off-route
+   - Detection only enabled after WARMUP_TICKS_REQUIRED (3 ticks)
 
 ### Documented Limitations
 
@@ -294,15 +306,20 @@ Resume normal operation
 
 ## Implementation Tasks
 
-- [ ] Change `find_best_segment_restricted` return type to `(usize, i64)`
-- [ ] Add `match_d2` field to `ProcessResult::Valid`
-- [ ] Add `ProcessResult::OffRoute` variant
-- [ ] Add state fields: `off_route_suspect_ticks`, `off_route_clear_ticks`, `needs_recovery_on_reacquisition`
-- [ ] Implement off-route detection in `process_gps_update` (kalman.rs)
-- [ ] Implement OffRoute handling in `state.rs`
-- [ ] Implement re-acquisition recovery logic
-- [ ] Unit tests for off-route detection hysteresis
-- [ ] Integration tests for full off-route → re-acquisition cycle
+- [ ] Add `off_route_suspect_ticks`, `off_route_clear_ticks` to `KalmanState` (shared/src/lib.rs)
+- [ ] Add `ProcessResult::OffRoute` variant to `ProcessResult` enum (shared/src/lib.rs)
+- [ ] Add `needs_recovery_on_reacquisition`, `off_route_freeze_time` to `State` (state.rs)
+- [ ] Change `find_best_segment_restricted` return type to `(usize, i64)` (map_match.rs)
+- [ ] Update `find_best_segment_restricted()` call in `process_gps_update` to capture `match_d2` (kalman.rs)
+- [ ] Add off-route detection logic in `process_gps_update` with hysteresis (kalman.rs)
+- [ ] Add warmup guard: disable off-route detection during warmup (kalman.rs)
+- [ ] Reset off-route counters in `handle_outage()` (kalman.rs)
+- [ ] Handle `ProcessResult::OffRoute` in `state.rs` process_gps
+- [ ] Implement re-acquisition recovery logic with elapsed time calculation (state.rs)
+- [ ] Unit tests for off-route detection hysteresis (kalman.rs tests)
+- [ ] Unit tests for counter reset on outage (kalman.rs tests)
+- [ ] Unit tests for warmup guard preventing false triggers (kalman.rs tests)
+- [ ] Integration tests for full off-route → re-acquisition cycle (state.rs tests)
 - [ ] Document limitation: cannot detect along-route drift
 
 ---
