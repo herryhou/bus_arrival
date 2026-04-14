@@ -445,3 +445,102 @@ fn test_off_route_hysteresis_partial_clear() {
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1006, false);
     assert!(matches!(result, ProcessResult::OffRoute { .. }), "Should trigger OffRoute after 5th bad tick");
 }
+
+#[test]
+fn test_off_route_counter_resets_on_outage() {
+    // Create test route
+    let nodes = vec![
+        RouteNode {
+            x_cm: 0,
+            y_cm: 0,
+            cum_dist_cm: 0,
+            seg_len_mm: 100000,
+            dx_cm: 10000,
+            dy_cm: 0,
+            heading_cdeg: 9000,
+            _pad: 0,
+        },
+        RouteNode {
+            x_cm: 10000,
+            y_cm: 0,
+            cum_dist_cm: 10000,
+            seg_len_mm: 100000,
+            dx_cm: 10000,
+            dy_cm: 0,
+            heading_cdeg: 9000,
+            _pad: 0,
+        },
+        RouteNode {
+            x_cm: 20000,
+            y_cm: 0,
+            cum_dist_cm: 20000,
+            seg_len_mm: 0,
+            dx_cm: 0,
+            dy_cm: 0,
+            heading_cdeg: 9000,
+            _pad: 0,
+        },
+    ];
+
+    let grid = SpatialGrid {
+        cells: vec![vec![0, 1], vec![0, 1]],
+        grid_size_cm: 10000,
+        cols: 2,
+        rows: 2,
+        x0_cm: 0,
+        y0_cm: 0,
+    };
+
+    let mut buffer = Vec::new();
+    shared::binfile::pack_route_data(&nodes, &[], &grid, 0.0, &mut buffer)
+        .expect("Failed to pack test route data");
+
+    let route_data = shared::binfile::RouteData::load(&buffer).expect("Failed to load route data");
+
+    let mut state = KalmanState::new();
+    let mut dr = DrState::new();
+
+    // Initialize with valid GPS
+    let init_gps = GpsPoint {
+        timestamp: 1000,
+        lat: 20.0,  // 20°N (on route)
+        lon: 120.0, // 120°E (on route)
+        heading_cdeg: 9000,
+        speed_cms: 500,
+        hdop_x10: 10,
+        has_fix: true,
+    };
+    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true);
+
+    // Build up suspect count
+    for i in 1..=3 {
+        let gps = GpsPoint {
+            timestamp: 1000 + i,
+            lat: 20.0005, // ~60m north of route
+            lon: 120.0,
+            heading_cdeg: 9000,
+            speed_cms: 500,
+            hdop_x10: 10,
+            has_fix: true,
+        };
+        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false);
+    }
+
+    assert_eq!(state.off_route_suspect_ticks, 3, "Should have 3 suspect ticks");
+
+    // Simulate GPS outage
+    let outage_gps = GpsPoint {
+        timestamp: 1004,
+        lat: 20.0005,
+        lon: 120.0,
+        heading_cdeg: 9000,
+        speed_cms: 500,
+        hdop_x10: 10,
+        has_fix: false,  // NO FIX
+    };
+    let _ = process_gps_update(&mut state, &mut dr, &outage_gps, &route_data, 1004, false);
+
+    // Counters should be reset
+    assert_eq!(state.off_route_suspect_ticks, 0, "Suspect ticks should be reset after outage");
+    assert_eq!(state.off_route_clear_ticks, 0, "Clear ticks should be reset after outage");
+}

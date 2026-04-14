@@ -262,6 +262,10 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
     let decay_factor = DR_DECAY_NUMERATOR[dt_idx];
     dr.filtered_v = (dr.filtered_v as u32 * decay_factor / 10000) as SpeedCms;
 
+    // Reset off-route counters on outage
+    state.off_route_suspect_ticks = 0;
+    state.off_route_clear_ticks = 0;
+
     ProcessResult::DrOutage {
         s_cm: state.s_cm,
         v_cms: dr.filtered_v,
