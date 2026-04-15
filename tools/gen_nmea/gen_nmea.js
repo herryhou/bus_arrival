@@ -550,55 +550,50 @@ function simulate(route, cfg) {
     // Check for shortcut trigger
     if (shortcut && !shortcutActive && !shortcutCompleted && seg.stopBefore && stopIndexMap[si] === shortcutFromStop) {
       shortcutActive = true;
-      console.log(`Shortcut triggered at stop ${shortcutFromStop}, going to stop ${shortcutToStop}`);
-
-      // Find the coordinates of from_stop and to_stop
-      const fromStopIdx = stops.indexOf(stops.find((s, i) => stopIndexMap[segs.findIndex(seg => seg.stopBefore && stopIndexMap[segs.indexOf(seg)] === shortcutFromStop)] === shortcutFromStop) || stops[shortcutFromStop]);
-      const toStopIdx = stops.indexOf(stops.find((s, i) => stopIndexMap[segs.findIndex(seg => seg.stopBefore && stopIndexMap[segs.indexOf(seg)] === shortcutToStop)] === shortcutToStop) || stops[shortcutToStop]);
+      console.log(`Shortcut triggered at stop ${shortcutFromStop} (route point ${stops[shortcutFromStop]}), going to stop ${shortcutToStop} (route point ${stops[shortcutToStop]})`);
 
       // Get coordinates from route points
-      const fromLat = seg.from[0];
-      const fromLon = seg.from[1];
+      // stops array contains route point indices for each stop
+      const fromRoutePointIdx = stops[shortcutFromStop];
+      const toRoutePointIdx = stops[shortcutToStop];
 
-      // Find the segment containing the to_stop
-      const toSegIdx = segs.findIndex(s => s.stopBefore && stopIndexMap[segs.indexOf(s)] === shortcutToStop);
-      if (toSegIdx >= 0) {
-        const toLat = segs[toSegIdx].from[0];
-        const toLon = segs[toSegIdx].from[1];
+      const fromLat = route_points[fromRoutePointIdx][0];
+      const fromLon = route_points[fromRoutePointIdx][1];
+      const toLat = route_points[toRoutePointIdx][0];
+      const toLon = route_points[toRoutePointIdx][1];
 
-        // Calculate shortcut distance and bearing
-        const shortcutDist = haversine([fromLat, fromLon], [toLat, toLon]);
-        const shortcutBearing = bearing([fromLat, fromLon], [toLat, toLon]);
+      // Calculate shortcut distance and bearing
+      const shortcutDist = haversine([fromLat, fromLon], [toLat, toLon]);
+      const shortcutBearing = bearing([fromLat, fromLon], [toLat, toLon]);
 
-        console.log(`Shortcut: ${shortcutDist.toFixed(0)}m, bearing ${shortcutBearing.toFixed(1)}°`);
+      console.log(`Shortcut: ${shortcutDist.toFixed(0)}m, bearing ${shortcutBearing.toFixed(1)}°`);
 
-        // Dwell at from_stop before shortcut
-        emitStatic([fromLat, fromLon], shortcutBearing, false);
-        groundTruth.push({ stop_idx: stopSeqIdx, lat: fromLat, lon: fromLon, timestamp: ts - STOP_DWELL_S, phase: 'shortcut_start', event: 'departure_shortcut' });
+      // Dwell at from_stop before shortcut
+      emitStatic([fromLat, fromLon], shortcutBearing, false);
+      groundTruth.push({ stop_idx: stopSeqIdx, lat: fromLat, lon: fromLon, timestamp: ts - STOP_DWELL_S, phase: 'shortcut_start', event: 'departure_shortcut' });
 
-        // Generate GPS points along shortcut
-        const shortcutStartTS = ts;
-        let traveled = 0;
-        let speedMs = CRUISE_MS * 0.4;
+      // Generate GPS points along shortcut
+      const shortcutStartTS = ts;
+      let traveled = 0;
+      let speedMs = CRUISE_MS * 0.4;
 
-        while (traveled < shortcutDist) {
-          const targetMs = CRUISE_MS;
-          if (speedMs < targetMs) speedMs = Math.min(speedMs + ACCEL_MS2, targetMs);
-          else speedMs = Math.max(speedMs - DECEL_MS2, targetMs);
+      while (traveled < shortcutDist) {
+        const targetMs = CRUISE_MS;
+        if (speedMs < targetMs) speedMs = Math.min(speedMs + ACCEL_MS2, targetMs);
+        else speedMs = Math.max(speedMs - DECEL_MS2, targetMs);
 
-          const step = Math.min(speedMs, shortcutDist - traveled);
-          traveled += step;
+        const step = Math.min(speedMs, shortcutDist - traveled);
+        traveled += step;
 
-          const frac = traveled / shortcutDist;
-          const lat = fromLat + (toLat - fromLat) * frac;
-          const lon = fromLon + (toLon - fromLon) * frac;
-          emitGPS(lat, lon, speedMs, shortcutBearing, false);
-        }
-
-        const offRouteDuration = ts - shortcutStartTS;
-        console.log(`Shortcut duration: ${offRouteDuration}s`);
-        groundTruth.push({ stop_idx: stopSeqIdx, lat: toLat, lon: toLon, timestamp: ts, phase: 'shortcut_end', event: 're_acquisition', off_route_duration_s: offRouteDuration });
+        const frac = traveled / shortcutDist;
+        const lat = fromLat + (toLat - fromLat) * frac;
+        const lon = fromLon + (toLon - fromLon) * frac;
+        emitGPS(lat, lon, speedMs, shortcutBearing, false);
       }
+
+      const offRouteDuration = ts - shortcutStartTS;
+      console.log(`Shortcut duration: ${offRouteDuration}s`);
+      groundTruth.push({ stop_idx: stopSeqIdx, lat: toLat, lon: toLon, timestamp: ts, phase: 'shortcut_end', event: 're_acquisition', off_route_duration_s: offRouteDuration });
     }
 
     // Skip segments during shortcut (we've already injected GPS)
