@@ -40,8 +40,18 @@ const GENERATE_SCHEMA = {
     "scenario": {
       "type": "string",
       "description": "Simulation scenario preset",
-      "enum": ["normal", "drift", "jump", "outage"],
+      "enum": ["normal", "drift", "jump", "outage", "shortcut"],
       "default": "normal"
+    },
+    "shortcut_from_stop": {
+      "type": "number",
+      "description": "Starting stop index for shortcut (0-based, only used when scenario=shortcut)",
+      "default": 1
+    },
+    "shortcut_to_stop": {
+      "type": "number",
+      "description": "Ending stop index for shortcut (0-based, only used when scenario=shortcut)",
+      "default": 5
     },
     "outage_start_seg": {
       "type": "number",
@@ -125,6 +135,8 @@ function parseArgs(argv) {
     scenario: 'normal',
     outage_start_seg: 15,
     outage_end_seg: 17,
+    shortcut_from_stop: 1,
+    shortcut_to_stop: 5,
     out_nmea: 'test.nmea',
     out_gt: 'ground_truth.json',
   };
@@ -172,6 +184,16 @@ function parseArgs(argv) {
 
     if (arg === '--scenario') {
       args.scenario = argv[++i];
+      continue;
+    }
+
+    if (arg === '--shortcut-from-stop') {
+      args.shortcut_from_stop = parseInt(argv[++i]);
+      continue;
+    }
+
+    if (arg === '--shortcut-to-stop') {
+      args.shortcut_to_stop = parseInt(argv[++i]);
       continue;
     }
 
@@ -243,10 +265,11 @@ function parseArgs(argv) {
 // ─── 常數 / 場景設定 ─────────────────────────────────────────────────────────
 
 const SCENARIOS = {
-  normal: { hdop: 3.5, sigmaM: 15, sigmaHeading: 5.0, sats: 8, jump: false, outage: false, canyon: false },
-  drift: { hdop: 7.0, sigmaM: 35, sigmaHeading: 15.0, sats: 5, jump: false, outage: false, canyon: true },
-  jump: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: true, outage: false, canyon: false },
-  outage: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: false, outage: true, canyon: false },
+  normal: { hdop: 3.5, sigmaM: 15, sigmaHeading: 5.0, sats: 8, jump: false, outage: false, canyon: false, shortcut: false },
+  drift: { hdop: 7.0, sigmaM: 35, sigmaHeading: 15.0, sats: 5, jump: false, outage: false, canyon: true, shortcut: false },
+  jump: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: true, outage: false, canyon: false, shortcut: false },
+  outage: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: false, outage: true, canyon: false, shortcut: false },
+  shortcut: { hdop: 3.5, sigmaM: 15, sigmaHeading: 5.0, sats: 8, jump: false, outage: false, canyon: false, shortcut: true },
 };
 
 const CRUISE_KMH = 28;
@@ -457,7 +480,7 @@ function simulate(route, cfg) {
   const segs = buildSegments(route_points, stops, traffic_lights || []);
   const totalDist = segs.reduce((s, g) => s + g.dist, 0);
 
-  const { hdop, sigmaM, sigmaHeading, sats, outageStartSeg, outageEndSeg } = cfg;
+  const { hdop, sigmaM, sigmaHeading, sats, outageStartSeg, outageEndSeg, shortcut, shortcutFromStop, shortcutToStop } = cfg;
   const noiseN = new AR1Noise(sigmaM);
   const noiseE = new AR1Noise(sigmaM);
   const noiseHeading = new AR1Noise(sigmaHeading);
@@ -471,6 +494,26 @@ function simulate(route, cfg) {
   let ts = BASE_TS;
   let travelledDist = 0;
   let stopSeqIdx = 0;
+
+  // Build stop index mapping for shortcut scenario
+  const stopIndexMap = [];
+  let stopCount = 0;
+  for (let i = 0; i < segs.length; i++) {
+    if (segs[i].stopBefore) {
+      stopIndexMap[i] = stopCount++;
+    }
+  }
+
+  // Helper to emit GPS at a position
+  const emitGPS = (lat, lon, speedMs, brng, outage = false) => {
+    if (!outage) {
+      const [nl, no] = addNoiseMeters([lat, lon], noiseN.next(), noiseE.next());
+      const noisyBearing = (brng + noiseHeading.next() + 360) % 360;
+      nmeaLines.push(makeGPRMC(ts, nl, no, speedMs * 1.94384, noisyBearing));
+      nmeaLines.push(makeGPGGA(ts, nl, no, hdop, sats));
+    }
+    ts++;
+  };
 
   // 輸出一秒靜止訊號的輔助函式
   const emitStatic = (pos, brng, outage) => {
@@ -495,10 +538,81 @@ function simulate(route, cfg) {
     for (let t = 0; t < dwell; t++) emitStatic(firstSeg.from, firstSeg.bearing, isOutage);
   }
 
+  // Shortcut state
+  let shortcutActive = false;
+  let shortcutCompleted = false;
+
   for (let si = 0; si < segs.length; si++) {
     const seg = segs[si];
     const isOutage = cfg.outage && si >= outageStartSeg && si <= outageEndSeg;
     const prevSeg = si > 0 ? segs[si - 1] : null;
+
+    // Check for shortcut trigger
+    if (shortcut && !shortcutActive && !shortcutCompleted && seg.stopBefore && stopIndexMap[si] === shortcutFromStop) {
+      shortcutActive = true;
+      console.log(`Shortcut triggered at stop ${shortcutFromStop}, going to stop ${shortcutToStop}`);
+
+      // Find the coordinates of from_stop and to_stop
+      const fromStopIdx = stops.indexOf(stops.find((s, i) => stopIndexMap[segs.findIndex(seg => seg.stopBefore && stopIndexMap[segs.indexOf(seg)] === shortcutFromStop)] === shortcutFromStop) || stops[shortcutFromStop]);
+      const toStopIdx = stops.indexOf(stops.find((s, i) => stopIndexMap[segs.findIndex(seg => seg.stopBefore && stopIndexMap[segs.indexOf(seg)] === shortcutToStop)] === shortcutToStop) || stops[shortcutToStop]);
+
+      // Get coordinates from route points
+      const fromLat = seg.from[0];
+      const fromLon = seg.from[1];
+
+      // Find the segment containing the to_stop
+      const toSegIdx = segs.findIndex(s => s.stopBefore && stopIndexMap[segs.indexOf(s)] === shortcutToStop);
+      if (toSegIdx >= 0) {
+        const toLat = segs[toSegIdx].from[0];
+        const toLon = segs[toSegIdx].from[1];
+
+        // Calculate shortcut distance and bearing
+        const shortcutDist = haversine([fromLat, fromLon], [toLat, toLon]);
+        const shortcutBearing = bearing([fromLat, fromLon], [toLat, toLon]);
+
+        console.log(`Shortcut: ${shortcutDist.toFixed(0)}m, bearing ${shortcutBearing.toFixed(1)}°`);
+
+        // Dwell at from_stop before shortcut
+        emitStatic([fromLat, fromLon], shortcutBearing, false);
+        groundTruth.push({ stop_idx: stopSeqIdx, lat: fromLat, lon: fromLon, timestamp: ts - STOP_DWELL_S, phase: 'shortcut_start', event: 'departure_shortcut' });
+
+        // Generate GPS points along shortcut
+        const shortcutStartTS = ts;
+        let traveled = 0;
+        let speedMs = CRUISE_MS * 0.4;
+
+        while (traveled < shortcutDist) {
+          const targetMs = CRUISE_MS;
+          if (speedMs < targetMs) speedMs = Math.min(speedMs + ACCEL_MS2, targetMs);
+          else speedMs = Math.max(speedMs - DECEL_MS2, targetMs);
+
+          const step = Math.min(speedMs, shortcutDist - traveled);
+          traveled += step;
+
+          const frac = traveled / shortcutDist;
+          const lat = fromLat + (toLat - fromLat) * frac;
+          const lon = fromLon + (toLon - fromLon) * frac;
+          emitGPS(lat, lon, speedMs, shortcutBearing, false);
+        }
+
+        const offRouteDuration = ts - shortcutStartTS;
+        console.log(`Shortcut duration: ${offRouteDuration}s`);
+        groundTruth.push({ stop_idx: stopSeqIdx, lat: toLat, lon: toLon, timestamp: ts, phase: 'shortcut_end', event: 're_acquisition', off_route_duration_s: offRouteDuration });
+      }
+    }
+
+    // Skip segments during shortcut (we've already injected GPS)
+    if (shortcutActive) {
+      if (seg.stopBefore && stopIndexMap[si] === shortcutToStop) {
+        shortcutActive = false;
+        shortcutCompleted = true;
+        console.log(`Shortcut completed at stop ${shortcutToStop}, resuming normal route`);
+        // Continue processing this segment normally
+      } else {
+        // Skip this segment during shortcut
+        continue;
+      }
+    }
 
     // DEBUG: Log every 20th segment
     if (si % 20 === 0) {
@@ -612,9 +726,11 @@ GENERATE OPTIONS:
   --json-payload '{"route":"path","scenario":"normal"}'    Structured JSON input (recommended for agents)
   --route <path>                                           Route JSON file (default: route.json)
   --stops <path>                                           Stops JSON file with lat/lon (optional, uses route.stops if not provided)
-  --scenario <name>                                        Scenario: normal, drift, jump, outage (default: normal)
+  --scenario <name>                                        Scenario: normal, drift, jump, outage, shortcut (default: normal)
   --outage-start-seg <num>                                 Starting segment index for GPS outage (default: 15)
   --outage-end-seg <num>                                   Ending segment index for GPS outage (default: 17)
+  --shortcut-from-stop <num>                               Starting stop index for shortcut (default: 1)
+  --shortcut-to-stop <num>                                 Ending stop index for shortcut (default: 5)
   --out-nmea <path>                                        NMEA output file (default: test.nmea)
   --out-gt <path>                                          Ground truth output file (default: ground_truth.json)
 
@@ -630,6 +746,7 @@ SCENARIOS:
   drift     HDOP=7.0, σ(pos)=35m, σ(heading)=15°, 5 sats, urban canyon drift
   jump      Normal GPS, but with 100m+ position jump at 30% distance
   outage    GPS signal outage on segments 15-17
+  shortcut  Bus takes shortcut from --shortcut-from-stop to --shortcut-to-stop (off-route)
 
 AGENT USAGE EXAMPLES:
   # Step 1: Discover parameter shapes
@@ -688,6 +805,12 @@ function cmdGenerate(args) {
   if (args.scenario === 'outage') {
     cfg.outageStartSeg = args.outage_start_seg;
     cfg.outageEndSeg = args.outage_end_seg;
+  }
+
+  // Add custom shortcut parameters for shortcut scenario
+  if (args.scenario === 'shortcut') {
+    cfg.shortcutFromStop = args.shortcut_from_stop;
+    cfg.shortcutToStop = args.shortcut_to_stop;
   }
 
   // Load route file
