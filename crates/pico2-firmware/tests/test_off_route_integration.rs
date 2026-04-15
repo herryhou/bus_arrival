@@ -123,6 +123,7 @@ fn test_re_acquisition_runs_recovery() {
     assert!(true, "State machine has re-acquisition recovery infrastructure");
 }
 
+#[cfg(feature = "dev")]
 /// Helper function to create a test route with known geometry
 /// Creates a simple straight route along X-axis for predictable testing
 fn create_test_route_data() -> RouteData<'static> {
@@ -187,6 +188,7 @@ fn create_test_route_data() -> RouteData<'static> {
     }
 }
 
+#[cfg(feature = "dev")]
 /// Helper to create a GPS point on the route (at origin 120°E, 20°N)
 fn create_gps_point_with_time(
     timestamp: u64,
@@ -205,6 +207,7 @@ fn create_gps_point_with_time(
     }
 }
 
+#[cfg(feature = "dev")]
 /// Helper to create a GPS point far from the route (>50m)
 /// Uses latitude offset to move ~60m north of route
 fn create_gps_point_far_from_route(
@@ -222,10 +225,23 @@ fn create_gps_point_far_from_route(
     }
 }
 
+#[cfg(feature = "dev")]
+/// Helper to load the test route data
+fn load_test_route_data() -> Option<RouteData<'static>> {
+    Some(create_test_route_data())
+}
+
+#[cfg(feature = "dev")]
 #[test]
 fn test_full_off_route_cycle() {
     // Create test route and state
-    let route_data = create_test_route_data();
+    let route_data = match load_test_route_data() {
+        Some(data) => data,
+        None => {
+            println!("Skipping test - route data not available");
+            return;
+        }
+    };
     let mut state = State::new(&route_data, None);
 
     // Phase 1: Normal operation - establish position

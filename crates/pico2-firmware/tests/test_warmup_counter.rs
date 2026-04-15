@@ -304,7 +304,8 @@ fn test_warmup_timeout_after_repeated_rejections() {
     let mut state = State::new(&route_data, None);
 
     // First fix: total=1, valid=0
-    let gps1 = make_gps(0, 120.0, 25.0, 10000, 0, 100, true);
+    // Use coordinates near ty225 route (25.004°N, 121.286°E)
+    let gps1 = make_gps(0, 25.00425, 121.28645, 100, 0, 100, true);
     state.process_gps(&gps1);
     assert_eq!(state.warmup_valid_ticks, 0, "First fix should not count as valid");
     assert_eq!(state.warmup_total_ticks, 1, "First fix should count toward total");
@@ -312,26 +313,26 @@ fn test_warmup_timeout_after_repeated_rejections() {
     // Simulate scenario where GPS is accepted but doesn't provide enough valid ticks
     // This could happen if GPS quality is marginal
     // Send 2 more valid GPS: total=3, valid=2
-    let gps2 = make_gps(1, 120.01, 25.01, 10100, 0, 100, true);
+    let gps2 = make_gps(1, 25.00430, 121.28650, 200, 0, 100, true);
     state.process_gps(&gps2);
     assert_eq!(state.warmup_valid_ticks, 1, "Should have 1 valid tick");
     assert_eq!(state.warmup_total_ticks, 2, "Should have 2 total ticks");
 
-    let gps3 = make_gps(2, 120.02, 25.02, 10200, 0, 100, true);
+    let gps3 = make_gps(2, 25.00435, 121.28655, 300, 0, 100, true);
     state.process_gps(&gps3);
     assert_eq!(state.warmup_valid_ticks, 2, "Should have 2 valid ticks");
     assert_eq!(state.warmup_total_ticks, 3, "Should have 3 total ticks");
 
     // Now simulate GPS outage - this resets the counters
     let tick = 13; // 10 seconds later
-    let gps_outage = make_gps(tick, 120.0, 25.0, 10000, 0, 100, false);
+    let gps_outage = make_gps(tick, 25.00425, 121.28645, 100, 0, 100, false);
     state.process_gps(&gps_outage);
     assert_eq!(state.warmup_valid_ticks, 0, "Outage should reset valid ticks");
     assert_eq!(state.warmup_total_ticks, 0, "Outage should reset total ticks");
 
     // After outage, send GPS that repeatedly get rejected (simulated by rapid position changes)
     // First fix after outage: total=1, valid=0
-    let gps4 = make_gps(14, 120.0, 25.0, 10000, 0, 100, true);
+    let gps4 = make_gps(14, 25.00425, 121.28645, 100, 0, 100, true);
     state.process_gps(&gps4);
     assert_eq!(state.warmup_valid_ticks, 0, "First fix after outage should not count as valid");
     assert_eq!(state.warmup_total_ticks, 1, "First fix after outage should count toward total");
@@ -339,10 +340,10 @@ fn test_warmup_timeout_after_repeated_rejections() {
     // Send 8 more GPS with marginal quality
     // Some may be accepted, some rejected, but total should reach 10
     for i in 15..=23 {
-        // Alternate between valid and marginal GPS
-        let lat = 120.0 + ((i % 3) as f64) * 0.001;
-        let lon = 25.0 + ((i % 3) as f64) * 0.001;
-        let gps = make_gps(i, lat, lon, (10000 + i * 100) as i64, 0, 100, true);
+        // Small position variations along the route
+        let lat = 25.00425 + ((i % 3) as f64) * 0.00001;
+        let lon = 121.28645 + ((i % 3) as f64) * 0.00001;
+        let gps = make_gps(i, lat, lon, 100 + (i as i64) * 10, 0, 100, true);
         state.process_gps(&gps);
     }
 
@@ -353,7 +354,7 @@ fn test_warmup_timeout_after_repeated_rejections() {
 
     // Detection should now be enabled via timeout
     // Next valid GPS should proceed to detection
-    let gps_final = make_gps(24, 120.1, 25.01, 10000, 0, 0, true); // At stop
+    let gps_final = make_gps(24, 25.004283, 121.286559, 0, 0, 0, true); // Near first stop
     let _result = state.process_gps(&gps_final);
     // We don't assert on the result because the exact position may not trigger arrival
     // The key is that detection is enabled (no early return from warmup logic)
