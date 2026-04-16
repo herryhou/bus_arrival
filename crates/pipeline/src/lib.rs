@@ -89,6 +89,7 @@ pub struct TraceRecord {
     pub stop_states: Vec<StopTraceState>,
     pub gps_jump: bool,
     pub recovery_idx: Option<u8>,
+    pub status: String,
 }
 
 /// Stop state in trace
@@ -184,34 +185,37 @@ impl<'a> LocalizationState<'a> {
         match result {
             gps_processor::kalman::ProcessResult::Valid { signals, v_cms, seg_idx: _ } => {
                 let shared::PositionSignals { z_gps_cm: _, s_cm } = signals;
-                Some(gps::GpsRecord {
-                    time: gps.timestamp,
-                    lat: gps.lat,
-                    lon: gps.lon,
+                Some(gps::GpsRecord::new(
+                    gps.timestamp,
+                    gps.lat,
+                    gps.lon,
                     s_cm,
                     v_cms,
-                    heading_cdeg: Some(gps.heading_cdeg),
-                })
+                    Some(gps.heading_cdeg),
+                    "valid",
+                ))
             }
             gps_processor::kalman::ProcessResult::DrOutage { s_cm, v_cms } => {
-                Some(gps::GpsRecord {
-                    time: gps.timestamp,
-                    lat: gps.lat,
-                    lon: gps.lon,
+                Some(gps::GpsRecord::new(
+                    gps.timestamp,
+                    gps.lat,
+                    gps.lon,
                     s_cm,
                     v_cms,
-                    heading_cdeg: None,
-                })
+                    None,
+                    "dr_outage",
+                ))
             }
             gps_processor::kalman::ProcessResult::OffRoute { last_valid_s, last_valid_v } => {
-                Some(gps::GpsRecord {
-                    time: gps.timestamp,
-                    lat: gps.lat,
-                    lon: gps.lon,
-                    s_cm: last_valid_s,
-                    v_cms: last_valid_v,
-                    heading_cdeg: None,
-                })
+                Some(gps::GpsRecord::new(
+                    gps.timestamp,
+                    gps.lat,
+                    gps.lon,
+                    last_valid_s,
+                    last_valid_v,
+                    None,
+                    "off_route",
+                ))
             }
             gps_processor::kalman::ProcessResult::Rejected(_) => None,
             gps_processor::kalman::ProcessResult::Outage => None,
@@ -531,6 +535,7 @@ impl PipelineResult {
                 stop_states,
                 gps_jump: false,  // TODO: implement GPS jump detection
                 recovery_idx: None, // TODO: implement recovery
+                status: record.status.to_string(),
             });
         }
     }
