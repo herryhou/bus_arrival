@@ -34,6 +34,9 @@ ROUTE_NAME ?= ty225
 SCENARIO ?= normal
 SHORTCUT_FROM_STOP ?= 1
 SHORTCUT_TO_STOP ?= 5
+# For detour scenario (stop 6 in re-indexed, which is stop 11 in original)
+DETOUR_FROM_STOP ?= 1  # For detour scenario (stop 6 in re-indexed)
+DETOUR_TO_STOP ?= 6    # For detour scenario (stop 11 in re-indexed)
 
 # Input files
 ROUTE_JSON := $(DATA_DIR)/$(ROUTE_NAME)_route.json

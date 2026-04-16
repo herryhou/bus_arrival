@@ -203,7 +203,18 @@ impl<'a> LocalizationState<'a> {
                     heading_cdeg: None,
                 })
             }
-            _ => None,
+            gps_processor::kalman::ProcessResult::OffRoute { last_valid_s, last_valid_v } => {
+                Some(gps::GpsRecord {
+                    time: gps.timestamp,
+                    lat: gps.lat,
+                    lon: gps.lon,
+                    s_cm: last_valid_s,
+                    v_cms: last_valid_v,
+                    heading_cdeg: None,
+                })
+            }
+            gps_processor::kalman::ProcessResult::Rejected(_) => None,
+            gps_processor::kalman::ProcessResult::Outage => None,
         }
     }
 }
