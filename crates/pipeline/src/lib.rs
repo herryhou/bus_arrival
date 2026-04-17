@@ -90,6 +90,7 @@ pub struct TraceRecord {
     pub gps_jump: bool,
     pub recovery_idx: Option<u8>,
     pub status: String,
+    pub off_route: bool,
 }
 
 /// Stop state in trace
@@ -233,6 +234,8 @@ pub struct DetectionState {
     arrived_this_frame: Vec<u8>,
     /// Active stop indices from last update (for trace output)
     active_indices: Vec<usize>,
+    /// Track whether the bus is currently off-route (detouring)
+    off_route: bool,
 }
 
 impl DetectionState {
@@ -247,6 +250,7 @@ impl DetectionState {
             current_timestamp: 0,
             arrived_this_frame: Vec::new(),
             active_indices: Vec::new(),
+            off_route: false,
         }
     }
 
@@ -271,6 +275,21 @@ impl DetectionState {
         let s_cm = record.s_cm;
         let v_cms = record.v_cms;
         let stops = route_data.stops();
+
+        // Update off-route state based on GPS record status
+        // Once we're off-route, stay off-route until we get a valid fix
+        match record.status {
+            "off_route" => {
+                self.off_route = true;
+            }
+            "valid" => {
+                // Clear off_route as soon as we get a valid fix
+                self.off_route = false;
+            }
+            _ => {
+                // Keep current state for dr_outage and other statuses
+            }
+        }
 
         // Find active stops (corridor filter)
         for (idx, stop) in stops.iter().enumerate() {
@@ -327,8 +346,9 @@ impl DetectionState {
         }
 
         // Check for announcements (v8.4: corridor entry announcement)
+        // Suppress announcements when off-route (detouring)
         #[cfg(feature = "std")]
-        if result.announce_events.is_some() {
+        if result.announce_events.is_some() && !self.off_route {
             for (idx, stop_state) in self.stop_states.iter_mut().enumerate() {
                 if stop_state.should_announce(s_cm, stops[idx].corridor_start_cm) {
                     result.announce_events.as_mut().unwrap().push(AnnounceEvent {
@@ -536,6 +556,7 @@ impl PipelineResult {
                 gps_jump: false,  // TODO: implement GPS jump detection
                 recovery_idx: None, // TODO: implement recovery
                 status: record.status.to_string(),
+                off_route: det_state.off_route,
             });
         }
     }
