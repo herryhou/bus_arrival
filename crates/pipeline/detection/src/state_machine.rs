@@ -29,6 +29,8 @@ pub struct StopState {
     /// Whether this stop has been announced in this trip (v8.6: one-time announcement)
     /// Once true, this stop can never be announced again in the same trip
     pub announced: bool,
+    /// Previous distance to stop (for re-acquisition detection)
+    pub previous_distance_cm: Option<i32>,
 }
 
 impl StopState {
@@ -40,6 +42,7 @@ impl StopState {
             last_probability: 0,
             last_announced_stop: u8::MAX,
             announced: false,
+            previous_distance_cm: None,
         }
     }
 
@@ -67,6 +70,10 @@ impl StopState {
         probability: Prob8,
     ) -> StopEvent {
         let d_to_stop = (s_cm - stop_progress).abs();
+
+        // Track previous distance for re-acquisition detection
+        let current_distance = (stop_progress as i32) - (s_cm as i32);
+        self.previous_distance_cm = Some(current_distance);
 
         match self.fsm_state {
             FsmState::Idle => {

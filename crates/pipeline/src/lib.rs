@@ -277,7 +277,7 @@ impl DetectionState {
         let stops = route_data.stops();
 
         // Update off-route state based on GPS record status
-        // Once we're off-route, stay off-route until we get a valid fix
+        // Once we're off-route, stay off-route until we get a valid fix OR re-acquire route
         match record.status {
             "off_route" => {
                 self.off_route = true;
@@ -286,8 +286,30 @@ impl DetectionState {
                 // Clear off_route as soon as we get a valid fix
                 self.off_route = false;
             }
+            "dr_outage" => {
+                // Check if we've re-acquired the route (approaching a stop)
+                // This can happen when returning from a detour even if constraints fail
+                if self.off_route {
+                    // Check if we're approaching any stop with decreasing distance
+                    for (idx, stop) in stops.iter().enumerate() {
+                        if let Some(stop_state) = self.stop_states.get(idx) {
+                            let current_distance = (stop.progress_cm as i32) - (s_cm as i32);
+                            // If we have a previous distance and we're getting closer
+                            if let Some(prev_dist) = stop_state.previous_distance_cm {
+                                let distance_decreasing = current_distance < prev_dist;
+                                let approaching = current_distance > -50000 && current_distance < 100000; // Within 500m in either direction
+                                if distance_decreasing && approaching {
+                                    // Re-acquired route: clear off_route state
+                                    self.off_route = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             _ => {
-                // Keep current state for dr_outage and other statuses
+                // Keep current state for other statuses
             }
         }
 
