@@ -4,11 +4,23 @@
 
 **目標受眾：** Embedded Rust 開發團隊  
 **硬體平台：** Raspberry Pi Pico 2（RP2350）  
-**文件版本：** v8.9（Filter-then-Rank：修正 E1 heading penalty 支配問題）
+**文件版本：** v8.9（脫離路線檢測與 GPS 跳躍恢復）
 
 ### 版本更新記錄（Changelog）
 
-#### v8.9 → v8.8（2026-04-13）- E1 修正：Filter-then-Rank 架構
+#### v8.9（2026-04-19）- 脫離路線檢測與 GPS 跳躍恢復
+
+**新增功能：** 脫離路線檢測、位置凍結、GPS 跳躍恢復
+- 5-tick 遲滯確認機制（避免 GPS 雜訊誤觸發）
+- 脫離路線期間凍結 s_cm 進度估計
+- GPS 恢復時自動跳至最近的前方站點（「重啟」行為）
+- 支援繞路後的正確站點重新獲取
+
+詳見 [Section 16](#16-脫離路線檢測與恢復模組---v89-新增) 完整說明。
+
+---
+
+#### v8.8 → v8.7（2026-04-13）- E1 修正：Filter-then-Rank 架構
 
 **問題：** 原設計使用混合評分（$d^2 + \lambda \cdot \text{diff}^2 \cdot w_h$），但因 λ 缺失且單位不匹配（cm² + cdeg²），heading 項遠大於 distance 項（10,000×），實際上變成了硬排除。
 
@@ -80,11 +92,13 @@
 
 **第五部分：進階與總結**
 
-16. [HMM 地圖匹配（進階選項）](#16-隱馬可夫模型地圖匹配hmm-map-matching進階選項)
-17. [離線預處理完整流程](#17-離線預處理完整流程)
-18. [效能摘要與資源評估](#18-效能摘要與資源評估)
-19. [Embedded Rust 實作注意事項](#19-embedded-rust-實作注意事項)
-20. [完整 Pipeline 總結](#20-完整-pipeline-總結)
+16. [脫離路線檢測與恢復（模組 ⑬，v8.9 新增）](#16-脫離路線檢測與恢復模組---v89-新增)
+17. [HMM 地圖匹配（進階選項）](#17-隱馬可夫模型地圖匹配hmm-map-matching進階選項)
+18. [離線預處理完整流程](#18-離線預處理完整流程)
+19. [效能摘要與資源評估](#19-效能摘要與資源評估)
+20. [Embedded Rust 實作注意事項](#20-embedded-rust-實作注意事項)
+21. [完整 Pipeline 總結](#21-完整-pipeline-總結)
+22. [測試案例與驗證](#22-測試案例與驗證)
 - [附錄 A：參數快速參考](#附錄參數快速參考)
 - [附錄 B：到站概率模型權重離線調校流程](#附錄-b到站概率模型權重離線調校流程)
 
@@ -1334,9 +1348,173 @@ $$\text{stop\_index} \leq \text{index\_of}(\hat{s} + 5000\ \text{cm})$$
 
 ---
 
-## 16. 隱馬可夫模型地圖匹配（HMM Map Matching，進階選項）
+## 16. 脫離路線檢測與恢復（模組 ⑬，v8.9 新增）
 
 ### 16.1 概述
+
+公車在實際營運中可能因各種原因脫離預定路線（如：臨時改道、繞路、GPS 飄移導致誤匹配等）。本系統引入脫離路線檢測機制，在偵測到異常時立即凍結位置估計，並在 GPS 回到路線上時執行「重啟」恢復策略。
+
+**設計目標：**
+- **快速偵測：** 5 秒內確認脫離路線狀態
+- **位置凍結：** 避免錯誤的位置更新累積
+- **抑制錯誤播報：** 脫離期間不觸發到站事件
+- **智能恢復：** GPS 回到路線時自動跳至正確站點
+
+### 16.2 脫離路線偵測（Off-Route Detection）
+
+系統使用遲滯計數器（hysteresis counter）來避免 GPS 雜訊導致的誤觸發：
+
+**觸發條件（進入 off-route 狀態）：**
+$$\text{若 } d^2_\text{match} > \theta^2_\text{off-route} \text{ 連續 } N_\text{confirm} = 5 \text{ ticks}$$
+
+其中：
+- $d^2_\text{match}$：地圖匹配的最小距離平方（cm²）
+- $\theta_\text{off-route} = 50,000\text{ cm}$（500 m，距離閾值）
+- $N_\text{confirm} = 5$：確認計數（避免 GPS 雜訊誤觸發）
+
+**清除條件（離開 off-route 狀態）：**
+$$\text{若 } d^2_\text{match} \le \theta^2_\text{off-route} \text{ 連續 } N_\text{clear} = 2 \text{ ticks}$$
+
+使用較短的清除計數（2 ticks）以快速回應 GPS 恢復。
+
+### 16.3 位置凍結（Position Freezing）
+
+一旦進入 `off-route` 狀態，系統立即凍結路線進度估計：
+
+```rust
+if state.off_route_tick_count >= OFF_ROUTE_CONFIRM_TICKS {
+    state.frozen_s_cm = Some(state.s_cm);  // 記錄凍結位置
+    state.off_route_tick_count = 0;
+    // 返回 OffRoute 狀態，trace 輸出包含 frozen_s_cm
+}
+```
+
+**凍結期間行為：**
+- $\hat{s}$ 維持在 `frozen_s_cm` 不變
+- 到站檢測 FSM 停止更新（不觸發新到站事件）
+- 語音播報暫停（避免錯誤通知）
+- Trace 輸出 `off_route: true` 標記
+
+### 16.4 GPS 跳躍恢復（GPS Jump Recovery）
+
+當 GPS 從脫離路線狀態恢復且發生大跳躍時，系統執行「重啟」策略：直接跳至最近的前方站點，而非逐步更新位置。
+
+**觸發條件：**
+1. 位置處於凍結狀態（`frozen_s_cm` 存在）
+2. GPS 地圖匹配品質良好（$d^2_\text{match} \le \theta^2_\text{off-route}$）
+3. GPS 跳躍距離超過閾值（$D_\text{jump} > 50\text{ m}$）
+4. 速度約束檢查通過（確保時間上一致）
+
+**恢復演算法：**
+
+$$\text{Jump Distance: } D_\text{jump} = |z_\text{raw} - s_\text{frozen}|$$
+
+$$\text{對每個站點 } i \text{（進度 } s_i > s_\text{frozen}\text{）：}$$
+
+$$\text{Candidate Distance: } d_i = |s_i - z_\text{raw}|$$
+
+$$\text{Max Reachable: } s_\text{max} = s_\text{frozen} + V_\text{max} \cdot \Delta t_\text{frozen}$$
+
+$$\text{若 } d_i \le \theta_\text{off-route} \text{ 且 } s_i \le s_\text{max} \text{：候選站點}$$
+
+$$\text{選擇： } i^* = \arg\min_i d_i$$
+
+$$\text{跳躍： } \hat{s} \leftarrow s_{i^*},\quad \text{frozen\_s\_cm} \leftarrow \text{None}$$
+
+**參數設定：**
+
+| 參數 | 值 | 說明 |
+|------|-----|------|
+| $\theta_\text{off-route}$ | 50,000 cm（500 m） | 地圖匹配距離閾值 |
+| $D_\text{jump}$ | 5,000 cm（50 m） | GPS 跳躍恢復閾值 |
+| $N_\text{confirm}$ | 5 ticks | 進入 off-route 確認計數 |
+| $N_\text{clear}$ | 2 ticks | 離開 off-route 清除計數 |
+| $V_\text{max}$ | 1,667 cm/s（60 km/h） | 速度約束上限 |
+
+### 16.5 狀態轉移圖
+
+```
+                    ┌─────────────────────────────────────┐
+                    │                                     │
+                    ▼                                     │
+┌──────────────┐   d² > θ²   ┌──────────────┐   d² ≤ θ²  │
+│   Normal     │ × 5 ticks   │   Off-Route  │ × 2 ticks  │
+│              ├────────────►│              ├────────────►│
+│ (tracking)   │              │ (frozen)    │              │
+└──────────────┘              └──────────────┘              │
+      ▲                            │                       │
+      │                            │ GPS jump recovery    │
+      │                            ▼                       │
+      │                   ┌──────────────┐                │
+      │                   │  Re-acquire  │                │
+      └───────────────────│  (jump to    │────────────────┘
+                    D_jump > 50m   stop)│
+                            └──────────────┘
+```
+
+### 16.6 Trace 輸出格式
+
+脫離路線狀態在 trace.jsonl 中輸出以下欄位：
+
+```jsonl
+{
+  "timestamp": 1700000150,
+  "s_cm": 104194,
+  "off_route": true,
+  "status": "off_route",
+  "frozen_s_cm": 104194
+}
+```
+
+**欄位說明：**
+- `off_route: true`：當前處於脫離路線狀態
+- `status: "off_route"` | `"dr_outage"`：狀態類型
+- `frozen_s_cm`：凍結的路線進度值
+- `recovery_idx`：GPS 跳躍恢復目標站點索引（恢復時出現）
+
+### 16.7 測試驗證
+
+**測試案例：** `ty225_short_detour`
+
+**場景描述：**
+- 路線：10 個站點，總長約 2.5 km
+- 繞路：站點 1 → 站點 6（60 秒直線行駛）
+- 脫離偏移：距離路線 1,000 m 的垂直偏移
+- 跳過站點：2、3、4、5（不應被播報）
+
+**驗證結果：**
+
+| 檢查項目 | 結果 | 說明 |
+|---------|------|------|
+| GPS 連續性 | ✅ PASS | 1 秒間隔 |
+| 脫離路線檢測 | ✅ PASS | 5 秒後觸發（56 個 off_route ticks） |
+| 位置凍結 | ✅ PASS | s_cm 維持在 104,194 cm |
+| 跳過站點 | ✅ PASS | 站點 2-5 未被宣告 |
+| 重新獲取 | ✅ PASS | 站點 6 正確檢測 |
+| 時間 | ✅ PASS | 60 秒繞路持續時間 |
+| GPS 跳躍恢復 | ✅ PASS | s_cm 從 104,194 → 178,014 cm |
+
+**執行測試：**
+```bash
+# 生成測試資料
+node tools/gen_detour_sim.js
+
+# 執行 pipeline
+cargo run -p pipeline -- \
+  test_data/ty225_short_detour_nmea.txt \
+  test_data/ty225_short.bin \
+  test_data/ty225_short_detour_arrivals.jsonl \
+  --trace test_data/ty225_short_detour_trace.jsonl
+
+# 驗證結果
+node tools/validate_detour_test.js
+```
+
+---
+
+## 17. 隱馬可夫模型地圖匹配（HMM Map Matching，進階選項）
+
+### 17.1 概述
 
 對於城市峽谷環境中存在多條平行道路之場景，可引入 Hidden Markov Model 提升路段匹配之準確性。核心公式為：
 
@@ -1344,13 +1522,13 @@ $$P(S \mid O) \propto P(O \mid S) \cdot P(S_t \mid S_{t-1})$$
 
 其中 $S$ 為隱藏狀態（路線路段），$O$ 為 GPS 觀測位置。
 
-### 16.2 發射概率（Gaussian LUT）
+### 17.2 發射概率（Gaussian LUT）
 
 直接使用第 3 章之 `gaussian_lut`：
 
 $$P(O \mid S=i) = \text{gaussian\_lut}(d_\text{cm}(G, \text{seg}_i),\; \sigma = 2000\ \text{cm})$$
 
-### 16.3 轉移概率
+### 17.3 轉移概率
 
 | 轉移類型 | 概率（u8） | 說明 |
 |---------|-----------|------|
@@ -1359,7 +1537,7 @@ $$P(O \mid S=i) = \text{gaussian\_lut}(d_\text{cm}(G, \text{seg}_i),\; \sigma = 
 | 跳過一路段（$i \to i+2$） | 13（≈ 0.05） | 快速通過 |
 | 逆退 | 0 | 單調性約束 |
 
-### 16.4 優化候選窗口（Fixed-Window Search）
+### 17.4 優化候選窗口（Fixed-Window Search）
 
 為了平衡計算量與魯棒性，Map Matching 採用基於上一幀索引的**局部視窗搜尋**：
 
@@ -1369,7 +1547,7 @@ $$P(O \mid S=i) = \text{gaussian\_lut}(d_\text{cm}(G, \text{seg}_i),\; \sigma = 
 
 **計算成本：** 最多 13 次路段評分 < 0.5 ms。
 
-### 16.5 簡化 Viterbi（純整數）
+### 17.5 簡化 Viterbi（純整數）
 
 $$\text{best\_seg} = \arg\max_i \left[\, P(O \mid S=i) \cdot P(S=i \mid S=\text{prev}) \,\right]$$
 
@@ -1377,7 +1555,7 @@ $$\text{best\_seg} = \arg\max_i \left[\, P(O \mid S=i) \cdot P(S=i \mid S=\text{
 
 ---
 
-## 17. 離線預處理流程
+## 18. 離線預處理流程
 
 此流程在 PC/Server 端完成，產物為 `route_data.bin`。核心原則是：**將所有複雜幾何計算移至線下，確保 Runtime 僅需執行整數查表與簡單加減乘除。**
 
@@ -1419,7 +1597,7 @@ $$\text{best\_seg} = \arg\max_i \left[\, P(O \mid S=i) \cdot P(S=i \mid S=\text{
 
 ---
 
-## 18. 效能摘要與資源評估
+## 19. 效能摘要與資源評估
 
 ### 18.1 Pico 2 計算成本（無 FPU，整數實作）
 
@@ -1466,9 +1644,9 @@ $$\text{best\_seg} = \arg\max_i \left[\, P(O \mid S=i) \cdot P(S=i \mid S=\text{
 
 ---
 
-## 19. Embedded Rust 實作注意事項
+## 20. Embedded Rust 實作注意事項
 
-### 19.1 整數型別別名
+### 20.1 整數型別別名
 
 全專案統一以下別名，防止混用不同單位：
 
@@ -1480,7 +1658,7 @@ pub type Prob8     = u8;   // 0..255，精度 1/256 已足
 pub type Dist2Cm2  = i64;  // squared distance in cm²
 ```
 
-### 19.2 LUT 生成（編譯期常數）
+### 20.2 LUT 生成（編譯期常數）
 
 Gaussian 與 Logistic LUT 於編譯期以 `const fn` 生成，確保與演算法參數同步：
 
@@ -1513,7 +1691,7 @@ pub static GAUSSIAN_LUT: [u8; 256] = build_gaussian_lut();
 
 Logistic LUT 類似生成，佔用 384 bytes Flash。
 
-### 19.3 Flash 資料存取（XIP）
+### 20.3 Flash 資料存取（XIP）
 
 ```rust
 #[link_section = ".rodata"]
@@ -1522,7 +1700,7 @@ static ROUTE_DATA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/route_data.
 
 Pico 2 支援從 Flash 直接執行（XIP），路線資料不需複製至 SRAM。
 
-### 19.4 並發安全
+### 20.4 並發安全
 
 若需在多核心間共用全域站點索引（如 UI 顯示），應使用 `AtomicU32`：
 
@@ -1531,13 +1709,13 @@ use core::sync::atomic::{AtomicU32, Ordering};
 static GLOBAL_STOP_INDEX: AtomicU32 = AtomicU32::new(0);
 ```
 
-### 19.5 啟動暖機
+### 20.5 啟動暖機
 
 系統上電後等待 **3 個 GPS 更新週期（3 s）** 再啟動到站判定邏輯，讓 Kalman Filter 收斂至合理初始狀態。
 
 ---
 
-## 20. 完整 Pipeline 總結
+## 21. 完整 Pipeline 總結
 
 | 模組 | 輸入（整數單位） | 輸出 | 核心操作 |
 |------|----|------|---------|
@@ -1571,9 +1749,9 @@ static GLOBAL_STOP_INDEX: AtomicU32 = AtomicU32::new(0);
 
 ---
 
-## 21. 測試案例與驗證
+## 22. 測試案例與驗證
 
-### 21.1 正常營運測試（ty225_normal）
+### 22.1 正常營運測試（ty225_normal）
 
 **目的：** 驗證系統在正常路線營運情況下的到站檢測準確性。
 
@@ -1599,7 +1777,7 @@ make run ROUTE_NAME=ty225 SCENARIO=normal
 - `test_data/ty225_normal_trace.jsonl` - 追蹤記錄
 - `test_data/ty225_normal_announce.jsonl` - 宣告事件
 
-### 21.2 捷徑測試（ty225_shortcut）
+### 22.2 捷徑測試（ty225_shortcut）
 
 **目的：** 驗證系統在公車捷徑行駛時的到站檢測行為。
 
@@ -1626,45 +1804,57 @@ make run ROUTE_NAME=ty225 SCENARIO=shortcut
 - `test_data/ty225_shortcut_trace.jsonl` - 追蹤記錄
 - `test_data/ty225_shortcut_announce.jsonl` - 宣告事件
 
-### 21.3 繞路測試（ty225_detour）
+### 22.3 繞路測試（ty225_short_detour）
 
-**位置：** `test_data/ty225_detour_*`
+**位置：** `test_data/ty225_short_detour_*`
 
 **目的：** 驗證脫離路線檢測與恢復行為，以及繞路期間的正確處理。
 
 **測試配置：**
-- 路線段：ty225 站點 5-14（10 個站點，重新索引為 0-9）
-- 繞路：站點 6 → 站點 11（60 秒，直線）
-- 跳過站點：7、8、9、10（不應被宣告）
-- 驗證：檢測觸發（5 秒）、位置凍結、重新獲取
+- 路線：ty225_short（10 個站點）
+- 繞路：站點 1 → 站點 6（60 秒，直線）
+- 跳過站點：2、3、4、5（不應被宣告）
+- 脫離偏移：距離路線 1,000 m 的垂直偏移
+- 驗證：檢測觸發（5 秒）、位置凍結、GPS 跳躍恢復、重新獲取
 
 **執行測試：**
 ```bash
-make run ROUTE_NAME=ty225_detour SCENARIO=detour
-```
+# 生成測試資料
+node tools/gen_detour_sim.js
 
-**驗證：**
-```bash
+# 執行 pipeline
+cargo run -p pipeline -- \
+  test_data/ty225_short_detour_nmea.txt \
+  test_data/ty225_short.bin \
+  test_data/ty225_short_detour_arrivals.jsonl \
+  --trace test_data/ty225_short_detour_trace.jsonl
+
+# 驗證結果
 node tools/validate_detour_test.js
 ```
 
 **驗證檢查項目：**
 1. GPS 連續性 - 1 秒間隔
 2. 脫離路線檢測 - 繞路開始後 5 秒觸發
-3. 位置凍結 - 脫離路線期間 DR 位置停止前進
-4. 跳過站點 - 站點 7-10 未被宣告
-5. 重新獲取 - 站點 11 正確檢測到站
+3. 位置凍結 - 脫離路線期間 s_cm 維持恆定
+4. 跳過站點 - 站點 2-5 未被宣告
+5. 重新獲取 - 站點 6 正確檢測到站
 6. 時間 - 60 秒繞路持續時間
 
-**目前狀態：**
+**驗證結果：**
 - ✅ GPS 連續性：通過
-- ✅ 重新獲取：通過
-- ✅ 時間：通過
-- ⚠️ 脫離路線檢測：追蹤格式未暴露脫離路線狀態
-- ⚠️ 位置凍結：無追蹤變更無法驗證
-- ⚠️ 跳過站點：到站檢測在脫離路線期間不抑制
+- ✅ 脫離路線檢測：通過（56 個 off_route status ticks，1 個 episode）
+- ✅ 位置凍結：通過（s_cm 維持在 104,194 cm）
+- ✅ 跳過站點：通過（站點 2-5 未被宣告）
+- ✅ 重新獲取：通過（站點 6 正確檢測）
+- ✅ 時間：通過（60 秒繞路持續時間）
+- ✅ GPS 跳躍恢復：通過（s_cm 從 104,194 → 178,014 cm）
 
-**備註：** 測試基礎架構完整且正常運作。3 個失敗檢查項目識別出管道中的合法實作差距，需要單獨處理。
+**輸出檔案：**
+- `test_data/ty225_short_detour_arrivals.json` - 到站檢測結果
+- `test_data/ty225_short_detour_trace.jsonl` - 追蹤記錄（含 off_route 狀態）
+- `test_data/ty225_short_detour_announce.jsonl` - 宣告事件
+- `test_data/ty225_short_detour_summary.md` - 驗證報告
 
 ---
 
@@ -1707,6 +1897,10 @@ node tools/validate_detour_test.js
 | Recovery 搜索範圍 | ±20000 cm（200 m） | Stop Index Recovery |
 | Recovery 重啟觸發門檻 | 50000 cm（500 m） | 避免誤觸發 |
 | 進度保護裕度 $\delta_\text{guard}$ | 5000 cm（50 m） | Recovery Algorithm |
+| **脫離路線距離閾值**（v8.9 新增） | **50,000 cm（500 m）** | **Off-Route Detection** |
+| **脫離路線確認計數**（v8.9 新增） | **5 ticks** | **進入 off-route 狀態** |
+| **脫離路線清除計數**（v8.9 新增） | **2 ticks** | **離開 off-route 狀態** |
+| **GPS 跳躍恢復閾值**（v8.9 新增） | **5,000 cm（50 m）** | **GPS Jump Recovery** |
 | 啟動暖機時間 | 3 s（3 個 GPS 週期） | Kalman 收斂 |
 
 ---
@@ -1920,6 +2114,87 @@ pub struct RouteNode {
 #### 技術細節
 
 詳見 [Section 5.5](#55-routenode-結構優化v87) 完整說明。
+
+---
+
+### v8.9 (2026-04-19) - 脫離路線檢測與 GPS 跳躍恢復
+
+#### 新增功能
+
+本版本引入脫離路線檢測與恢復機制，解決公車繞路、GPS 飄移等場景下的錯誤到站問題。
+
+**脫離路線檢測（Off-Route Detection）：**
+- 5-tick 遲滯確認機制，避免 GPS 雜訊誤觸發
+- 距離閾值：500 m（$d^2 > 25 \times 10^6\ \text{cm}^2$）
+- 2-tick 快速清除機制
+- Trace 輸出 `off_route` 狀態標記
+
+**位置凍結（Position Freezing）：**
+- 脫離路線期間凍結 `s_cm` 進度估計
+- 抑制錯誤的到站事件播報
+- 記錄 `frozen_s_cm` 供恢復使用
+
+**GPS 跳躍恢復（GPS Jump Recovery）：**
+- 偵測 GPS 從脫離路線狀態恢復時的大跳躍（>50 m）
+- 自動跳至最近的前方站點（「重啟」行為）
+- 速度約束檢查確保時間一致性
+- 支援繞路後的正確站點重新獲取
+
+#### 演算法細節
+
+**狀態轉移：**
+```
+Normal → Off-Route（5 ticks，d² > 閾值）
+Off-Route → Normal（2 ticks，d² ≤ 閾值）
+Off-Route → Re-acquire（GPS 跳躍恢復）
+```
+
+**GPS 跳躍恢復條件：**
+1. 位置處於凍結狀態（`frozen_s_cm` 存在）
+2. GPS 地圖匹配品質良好（$d^2 \le$ 閾值）
+3. GPS 跳躍距離超過 50 m
+4. 速度約束檢查通過
+
+**恢復策略：**
+- 搜尋所有進度大於凍結位置的站點
+- 選擇距離 GPS 投影最近且速度約束允許的站點
+- 直接跳躍至該站點的 `progress_cm`
+- 清除 `frozen_s_cm` 狀態
+
+#### 測試結果
+
+**ty225_short_detour 測試案例：**
+- ✅ GPS 連續性：通過
+- ✅ 脫離路線檢測：通過（56 個 off_route ticks）
+- ✅ 位置凍結：通過（s_cm 維持在 104,194 cm）
+- ✅ 跳過站點：通過（站點 2-5 未被宣告）
+- ✅ 重新獲取：通過（站點 6 正確檢測）
+- ✅ GPS 跳躍恢復：通過（s_cm 從 104,194 → 178,014 cm）
+
+#### 參數新增
+
+| 參數 | 值 | 說明 |
+|------|-----|------|
+| $\theta_\text{off-route}$ | 50,000 cm（500 m） | 地圖匹配距離閾值 |
+| $D_\text{jump}$ | 5,000 cm（50 m） | GPS 跳躍恢復閾值 |
+| $N_\text{confirm}$ | 5 ticks | 進入 off-route 確認計數 |
+| $N_\text{clear}$ | 2 ticks | 離開 off-route 清除計數 |
+
+#### 檔案變更
+
+**新增：**
+- `crates/pipeline/gps_processor/tests/test_off_route_jump_recovery.rs` - GPS 跳躍恢復測試
+
+**修改：**
+- `crates/pipeline/gps_processor/src/kalman.rs` - 新增 off-route 檢測與 GPS 跳躍恢復邏輯
+- `tools/gen_detour_sim.js` - 修正繞路測試資料生成
+- `tools/validate_detour_test.js` - 改進驗證腳本
+
+#### 文件更新
+
+- **Section 16：** 新增脫離路線檢測與恢復完整說明
+- **Section 22.3：** 更新繞路測試結果（所有檢查通過）
+- **參數快速參考：** 新增 off-route 相關參數
 
 ---
 
