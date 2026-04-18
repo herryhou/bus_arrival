@@ -248,8 +248,8 @@ const fromStop = stops[DETOUR_FROM_STOP];
 const toStop = stops[DETOUR_TO_STOP];
 
 // Define the waypoint
-const WAYPOINT_LAT = 24.994;
-const WAYPOINT_LON = 121.30111;
+const WAYPOINT_LAT = 24.99207;
+const WAYPOINT_LON = 121.29562;
 
 const leg1Dist = haversine(fromStop.lat, fromStop.lon, WAYPOINT_LAT, WAYPOINT_LON);
 const leg2Dist = haversine(WAYPOINT_LAT, WAYPOINT_LON, toStop.lat, toStop.lon);
