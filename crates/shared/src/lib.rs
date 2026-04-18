@@ -208,11 +208,13 @@ pub struct KalmanState {
     pub off_route_suspect_ticks: u8,
     /// Consecutive ticks with good GPS match (off-route clear counter)
     pub off_route_clear_ticks: u8,
+    /// Frozen position when off-route is first suspected (for immediate position freezing)
+    pub frozen_s_cm: Option<DistCm>,
 }
 
 impl KalmanState {
     pub fn new() -> Self {
-        KalmanState { s_cm: 0, v_cms: 0, last_seg_idx: 0, off_route_suspect_ticks: 0, off_route_clear_ticks: 0 }
+        KalmanState { s_cm: 0, v_cms: 0, last_seg_idx: 0, off_route_suspect_ticks: 0, off_route_clear_ticks: 0, frozen_s_cm: None }
     }
 
     /// Cold start initialization from first valid GPS fix.
@@ -224,6 +226,7 @@ impl KalmanState {
             last_seg_idx: seg_idx,
             off_route_suspect_ticks: 0,
             off_route_clear_ticks: 0,
+            frozen_s_cm: None,
         }
     }
 

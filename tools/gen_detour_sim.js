@@ -260,7 +260,7 @@ groundTruth.push({
 
 // Travel detour (off-route!) - exactly 60 seconds
 // Add perpendicular offset to ensure GPS stays far from route
-const PERPENDICULAR_OFFSET_M = 500; // 500m perpendicular offset (increased from 300m)
+const PERPENDICULAR_OFFSET_M = 500; // 500m perpendicular offset
 const perpBearing = (detourBearing + 90) % 360; // Perpendicular bearing
 const [offsetLat, offsetLon] = movePoint(
   fromStop.lat, fromStop.lon,
