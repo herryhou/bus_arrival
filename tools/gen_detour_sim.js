@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
  * gen_detour_sim.js — Generate NMEA for detour scenario
- * Bus goes off-route from stop 6 to stop 11 (60-second detour)
+ * Bus goes off-route from stop #2 to waypoint (14.994, 121.30111) to stop #7 (60-second detour)
  * Fixed timing: exactly 1 second between GPS updates
  *
  * Usage: node tools/gen_detour_sim.js
- * Output: test_data/ty225_detour_detour_nmea.txt
- *         test_data/ty225_detour_detour_gt.json
+ * Output: test_data/ty225_short_detour_nmea.txt
+ *         test_data/ty225_short_detour_gt.json
  */
 
 'use strict';
@@ -242,16 +242,28 @@ const phase1NmeaAdded = (nmeaLines.length - phase1StartNmeaCount) / 2;
 console.log(`Phase 1 complete: ${phase1Duration}s, ${phase1NmeaAdded} GPS points, segments ${stopSegments[0]}-${stopSegments[1]}`);
 stopSeqIdx++;
 
-// Phase 2: DETOUR from stop 6 to stop 11 (straight line, 60 seconds)
-console.log('\nPhase 2: DETOUR Stop 6 to Stop 11 (off-route)');
+// Phase 2: DETOUR from stop #2 → waypoint (14.994, 121.30111) → stop #7
+console.log('\nPhase 2: DETOUR Stop #2 → Waypoint → Stop #7 (off-route)');
 const fromStop = stops[DETOUR_FROM_STOP];
 const toStop = stops[DETOUR_TO_STOP];
 
-const detourDist = haversine(fromStop.lat, fromStop.lon, toStop.lat, toStop.lon);
-const detourBearing = bearing(fromStop.lat, fromStop.lon, toStop.lat, toStop.lon);
-console.log(`Detour distance: ${detourDist.toFixed(0)}m, bearing: ${detourBearing.toFixed(1)}°`);
+// Define the waypoint
+const WAYPOINT_LAT = 24.994;
+const WAYPOINT_LON = 121.30111;
 
-emitStatic(fromStop.lat, fromStop.lon, detourBearing, STOP_DWELL_S);
+const leg1Dist = haversine(fromStop.lat, fromStop.lon, WAYPOINT_LAT, WAYPOINT_LON);
+const leg2Dist = haversine(WAYPOINT_LAT, WAYPOINT_LON, toStop.lat, toStop.lon);
+const totalDetourDist = leg1Dist + leg2Dist;
+
+const leg1Bearing = bearing(fromStop.lat, fromStop.lon, WAYPOINT_LAT, WAYPOINT_LON);
+const leg2Bearing = bearing(WAYPOINT_LAT, WAYPOINT_LON, toStop.lat, toStop.lon);
+
+console.log(`Leg 1: Stop #2 → Waypoint: ${leg1Dist.toFixed(0)}m, bearing: ${leg1Bearing.toFixed(1)}°`);
+console.log(`Waypoint: ${WAYPOINT_LAT.toFixed(5)}, ${WAYPOINT_LON.toFixed(5)}`);
+console.log(`Leg 2: Waypoint → Stop #7: ${leg2Dist.toFixed(0)}m, bearing: ${leg2Bearing.toFixed(1)}°`);
+console.log(`Total detour distance: ${totalDetourDist.toFixed(0)}m`);
+
+emitStatic(fromStop.lat, fromStop.lon, leg1Bearing, STOP_DWELL_S);
 const detourStartTS = ts;
 
 groundTruth.push({
@@ -259,34 +271,30 @@ groundTruth.push({
   lat: fromStop.lat,
   lon: fromStop.lon,
   timestamp: ts,
-  phase: 'shortcut_start',
-  event: 'departure_shortcut'
+  phase: 'detour_start',
+  event: 'departure_detour',
+  waypoint_lat: WAYPOINT_LAT,
+  waypoint_lon: WAYPOINT_LON
 });
 
-// Travel detour (off-route!) - exactly 60 seconds
-// Add perpendicular offset to ensure GPS stays far from route
-const PERPENDICULAR_OFFSET_M = 1000; // 1000m perpendicular offset (increased for better off-route detection)
-const perpBearing = (detourBearing + 90) % 360; // Perpendicular bearing
-const [offsetLat, offsetLon] = movePoint(
-  fromStop.lat, fromStop.lon,
-  perpBearing, PERPENDICULAR_OFFSET_M
-);
+// Split 60 seconds evenly between the two legs (30 seconds each)
+const LEG1_DURATION_S = DETOUR_DURATION_S / 2;
+const LEG2_DURATION_S = DETOUR_DURATION_S / 2;
 
-console.log(`Detour perpendicular offset: ${PERPENDICULAR_OFFSET_M}m, bearing: ${perpBearing.toFixed(1)}°`);
-console.log(`Offset start: ${offsetLat.toFixed(5)}, ${offsetLon.toFixed(5)}`);
+console.log(`\nGenerating Leg 1 (${LEG1_DURATION_S}s): Stop #2 → Waypoint`);
+for (let t = 0; t < LEG1_DURATION_S; t++) {
+  const frac = (t + 1) / LEG1_DURATION_S;
+  const lat = fromStop.lat + (WAYPOINT_LAT - fromStop.lat) * frac;
+  const lon = fromStop.lon + (WAYPOINT_LON - fromStop.lon) * frac;
+  emitGPS(lat, lon, CRUISE_MS, leg1Bearing);
+}
 
-console.log(`\nGenerating ${DETOUR_DURATION_S} detour GPS points...`);
-for (let t = 0; t < DETOUR_DURATION_S; t++) {
-  const frac = (t + 1) / DETOUR_DURATION_S;
-  // Linear interpolation along detour path
-  const lat = fromStop.lat + (toStop.lat - fromStop.lat) * frac;
-  const lon = fromStop.lon + (toStop.lon - fromStop.lon) * frac;
-  // Apply perpendicular offset at each point along the path (constant offset)
-  const [offsetLat2, offsetLon2] = movePoint(lat, lon, perpBearing, PERPENDICULAR_OFFSET_M);
-  if (t === 0 || t === DETOUR_DURATION_S - 1) {
-    console.log(`  t=${t}: original=${lat.toFixed(5)},${lon.toFixed(5)} offset=${offsetLat2.toFixed(5)},${offsetLon2.toFixed(5)}`);
-  }
-  emitGPS(offsetLat2, offsetLon2, CRUISE_MS, detourBearing);
+console.log(`Generating Leg 2 (${LEG2_DURATION_S}s): Waypoint → Stop #7`);
+for (let t = 0; t < LEG2_DURATION_S; t++) {
+  const frac = (t + 1) / LEG2_DURATION_S;
+  const lat = WAYPOINT_LAT + (toStop.lat - WAYPOINT_LAT) * frac;
+  const lon = WAYPOINT_LON + (toStop.lon - WAYPOINT_LON) * frac;
+  emitGPS(lat, lon, CRUISE_MS, leg2Bearing);
 }
 console.log(`Detour GPS points generated. Total NMEA lines so far: ${nmeaLines.length}`);
 
@@ -294,28 +302,30 @@ const detourDuration = ts - detourStartTS;
 console.log(`Detour duration: ${detourDuration}s (expected: ${DETOUR_DURATION_S}s)`);
 
 groundTruth.push({
-  stop_idx: DETOUR_TO_STOP,  // Use correct stop index (6 = stop 11)
+  stop_idx: DETOUR_TO_STOP,  // Stop #7 (index 6)
   lat: toStop.lat,
   lon: toStop.lon,
   timestamp: ts,
-  phase: 'shortcut_end',
+  phase: 'detour_end',
   event: 're_acquisition',
-  off_route_duration_s: detourDuration
+  off_route_duration_s: detourDuration,
+  waypoint_lat: WAYPOINT_LAT,
+  waypoint_lon: WAYPOINT_LON
 });
 
-// Phase 3: Re-acquire at stop 11, continue to stop 14
-console.log('\nPhase 3: Re-acquire at Stop 11, continue to Stop 14');
+// Phase 3: Re-acquire at stop #7, continue to end
+console.log('\nPhase 3: Re-acquire at Stop #7, continue to end');
 
 emitStatic(toStop.lat, toStop.lon, segments[stopSegments[DETOUR_TO_STOP]].bearing, STOP_DWELL_S);
 groundTruth.push({
-  stop_idx: DETOUR_TO_STOP,  // Use correct stop index (6 = stop 11)
+  stop_idx: DETOUR_TO_STOP,  // Stop #7 (index 6)
   seg_idx: stopSegments[DETOUR_TO_STOP],
   timestamp: ts - STOP_DWELL_S,
   dwell_s: STOP_DWELL_S
 });
 stopSeqIdx = DETOUR_TO_STOP + 1;  // Skip to stop after re-acquisition
 
-// Continue from stop 11 to stop 14 (indices 6-9)
+// Continue from stop #7 to end (indices 6 to last segment)
 for (let segIdx = stopSegments[DETOUR_TO_STOP]; segIdx < segments.length; segIdx++) {
   const seg = segments[segIdx];
 
@@ -358,4 +368,5 @@ console.log(`Wrote ground truth to ${OUT_GT}`);
 console.log(`\nSimulation summary:`);
 console.log(`  - Total GPS points: ${nmeaLines.length / 2}`);
 console.log(`  - Detour duration: ${detourDuration}s`);
-console.log(`  - Expected: Off-route detected at 5s, position frozen, recovery at stop 11`);
+console.log(`  - Detour path: Stop #2 → Waypoint (${WAYPOINT_LAT.toFixed(5)}, ${WAYPOINT_LON.toFixed(5)}) → Stop #7`);
+console.log(`  - Expected: Off-route detected at 5s, position frozen, recovery at stop #7`);

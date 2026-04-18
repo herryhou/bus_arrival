@@ -68,7 +68,7 @@ console.log(`  ${results.gpsContinuity.pass ? 'PASS' : 'FAIL'}`);
 // Check 2: Off-Route Detection Timing
 console.log('Check 2: Off-Route Detection Timing...');
 const groundTruth = JSON.parse(fs.readFileSync(GT_FILE, 'utf8'));
-const detourStart = groundTruth.find(e => e.event === 'departure_shortcut');
+const detourStart = groundTruth.find(e => e.event === 'departure_detour');
 const detourEnd = groundTruth.find(e => e.event === 're_acquisition');
 
 if (detourStart && detourEnd) {
@@ -81,6 +81,7 @@ if (detourStart && detourEnd) {
   }
   results.offRouteDetection.details.push(`Detour start at timestamp ${detourStart.timestamp}`);
   results.offRouteDetection.details.push(`Expected detection at ${detourStart.timestamp + 5}`);
+  results.offRouteDetection.details.push(`Waypoint: ${detourStart.waypoint_lat}, ${detourStart.waypoint_lon}`);
 }
 console.log(`  Timing: ${results.timing.pass ? 'PASS' : 'FAIL'}`);
 
@@ -219,13 +220,13 @@ const summaryLines = [
   '## Test Configuration',
   '',
   '- Route: ty225_short (10 stops)',
-  '- Detour: Stop 1 (2nd stop) → Stop 6 (7th stop, 60 seconds)',
+  '- Detour: Stop 1 (2nd stop) → Waypoint (24.994, 121.30111) → Stop 6 (7th stop, 60 seconds)',
   '- Skipped stops: 2, 3, 4, 5 (4 stops)',
   '',
   '## Expected Behavior',
   '',
   '1. Bus travels normally from stop 0 to stop 1',
-  '2. At stop 1, bus departs on detour (straight line to stop 6)',
+  '2. At stop 1, bus departs on detour via waypoint (24.994, 121.30111) to stop 6',
   '3. Off-route detection triggers after 5 seconds',
   '4. s_cm (route progress) freezes during off-route state',
   '5. Stops 2, 3, 4, 5 are NOT announced (skipped)',
