@@ -36,10 +36,10 @@ const DETOUR_TO_STOP = 6;    // Stop 11 (re-indexed: stop 11→6)
 const DETOUR_DURATION_S = 60;
 
 // File paths
-const ROUTE_FILE = 'test_data/ty225_detour_route.json';
-const STOPS_FILE = 'test_data/ty225_detour_stops.json';
-const OUT_NMEA = 'test_data/ty225_detour_detour_nmea.txt';
-const OUT_GT = 'test_data/ty225_detour_detour_gt.json';
+const ROUTE_FILE = 'test_data/ty225_short_route.json';
+const STOPS_FILE = 'test_data/ty225_short_stops.json';
+const OUT_NMEA = 'test_data/ty225_short_detour_nmea.txt';
+const OUT_GT = 'test_data/ty225_short_detour_gt.json';
 
 function toRad(deg) { return deg * Math.PI / 180; }
 function toDeg(rad) { return rad * 180 / Math.PI; }
@@ -211,6 +211,8 @@ function emitStatic(lat, lon, brng, duration) {
 
 // Phase 1: Normal from stop 5 to stop 6 (indices 0-1)
 console.log('\nPhase 1: Stop 5 to Stop 6 (normal)');
+const phase1StartTS = ts;
+const phase1StartNmeaCount = nmeaLines.length;
 for (let segIdx = stopSegments[0]; segIdx <= stopSegments[1]; segIdx++) {
   const seg = segments[segIdx];
   groundTruth.push({ stop_idx: stopSeqIdx, seg_idx: segIdx, timestamp: ts, dwell_s: STOP_DWELL_S });
@@ -235,6 +237,9 @@ for (let segIdx = stopSegments[0]; segIdx <= stopSegments[1]; segIdx++) {
     emitGPS(lat, lon, speedMs, seg.bearing);
   }
 }
+const phase1Duration = ts - phase1StartTS;
+const phase1NmeaAdded = (nmeaLines.length - phase1StartNmeaCount) / 2;
+console.log(`Phase 1 complete: ${phase1Duration}s, ${phase1NmeaAdded} GPS points, segments ${stopSegments[0]}-${stopSegments[1]}`);
 stopSeqIdx++;
 
 // Phase 2: DETOUR from stop 6 to stop 11 (straight line, 60 seconds)
@@ -260,23 +265,30 @@ groundTruth.push({
 
 // Travel detour (off-route!) - exactly 60 seconds
 // Add perpendicular offset to ensure GPS stays far from route
-const PERPENDICULAR_OFFSET_M = 500; // 500m perpendicular offset
+const PERPENDICULAR_OFFSET_M = 1000; // 1000m perpendicular offset (increased for better off-route detection)
 const perpBearing = (detourBearing + 90) % 360; // Perpendicular bearing
 const [offsetLat, offsetLon] = movePoint(
   fromStop.lat, fromStop.lon,
   perpBearing, PERPENDICULAR_OFFSET_M
 );
 
+console.log(`Detour perpendicular offset: ${PERPENDICULAR_OFFSET_M}m, bearing: ${perpBearing.toFixed(1)}°`);
+console.log(`Offset start: ${offsetLat.toFixed(5)}, ${offsetLon.toFixed(5)}`);
+
+console.log(`\nGenerating ${DETOUR_DURATION_S} detour GPS points...`);
 for (let t = 0; t < DETOUR_DURATION_S; t++) {
   const frac = (t + 1) / DETOUR_DURATION_S;
   // Linear interpolation along detour path
   const lat = fromStop.lat + (toStop.lat - fromStop.lat) * frac;
   const lon = fromStop.lon + (toStop.lon - fromStop.lon) * frac;
-  // Add perpendicular offset
-  const offsetLat2 = offsetLat + (toStop.lat - fromStop.lat) * frac;
-  const offsetLon2 = offsetLon + (toStop.lon - fromStop.lon) * frac;
+  // Apply perpendicular offset at each point along the path (constant offset)
+  const [offsetLat2, offsetLon2] = movePoint(lat, lon, perpBearing, PERPENDICULAR_OFFSET_M);
+  if (t === 0 || t === DETOUR_DURATION_S - 1) {
+    console.log(`  t=${t}: original=${lat.toFixed(5)},${lon.toFixed(5)} offset=${offsetLat2.toFixed(5)},${offsetLon2.toFixed(5)}`);
+  }
   emitGPS(offsetLat2, offsetLon2, CRUISE_MS, detourBearing);
 }
+console.log(`Detour GPS points generated. Total NMEA lines so far: ${nmeaLines.length}`);
 
 const detourDuration = ts - detourStartTS;
 console.log(`Detour duration: ${detourDuration}s (expected: ${DETOUR_DURATION_S}s)`);

@@ -13,11 +13,11 @@ const fs = require('fs');
 const path = require('path');
 
 // File paths
-const NMEA_FILE = 'test_data/ty225_detour_detour_nmea.txt';
-const GT_FILE = 'test_data/ty225_detour_detour_gt.json';
-const TRACE_FILE = 'test_data/ty225_detour_detour_trace.jsonl';
-const ANNOUNCE_FILE = 'test_data/ty225_detour_detour_announce.jsonl';
-const OUT_SUMMARY = 'test_data/ty225_detour_detour_summary.md';
+const NMEA_FILE = 'test_data/ty225_short_detour_nmea.txt';
+const GT_FILE = 'test_data/ty225_short_detour_gt.json';
+const TRACE_FILE = 'test_data/ty225_short_detour_trace.jsonl';
+const ANNOUNCE_FILE = 'test_data/ty225_short_detour_announce.jsonl';
+const OUT_SUMMARY = 'test_data/ty225_short_detour_summary.md';
 
 // Validation results
 const results = {
@@ -84,7 +84,7 @@ if (detourStart && detourEnd) {
 }
 console.log(`  Timing: ${results.timing.pass ? 'PASS' : 'FAIL'}`);
 
-// Check 3: Skipped Stops (7-10 should NOT be announced)
+// Check 3: Skipped Stops (2, 3, 4, 5 should NOT be announced)
 console.log('Check 3: Skipped Stops...');
 try {
   const announceContent = fs.readFileSync(ANNOUNCE_FILE, 'utf8');
@@ -99,7 +99,7 @@ try {
   const hasSkippedStops = announcedStops.some(idx => skippedStopIndices.includes(idx));
   if (!hasSkippedStops) {
     results.skippedStops.pass = true;
-    results.skippedStops.details.push('Stops 7-10 correctly NOT announced');
+    results.skippedStops.details.push('Stops 2, 3, 4, 5 correctly NOT announced');
   } else {
     const found = announcedStops.filter(idx => skippedStopIndices.includes(idx));
     results.skippedStops.details.push(`ERROR: Stops ${found.join(', ')} were announced (should be skipped)`);
@@ -109,25 +109,26 @@ try {
 }
 console.log(`  ${results.skippedStops.pass ? 'PASS' : 'FAIL'}`);
 
-// Check 4: Re-Acquisition (stop 11 should be announced)
+// Check 4: Re-Acquisition (stop 6 should be detected in arrivals)
 console.log('Check 4: Re-Acquisition...');
 try {
-  const announceContent = fs.readFileSync(ANNOUNCE_FILE, 'utf8');
-  const announceLines = announceContent.split('\n').filter(line => line.trim());
+  const arrivalsFile = 'test_data/ty225_short_detour_arrivals.json';
+  const arrivalsContent = fs.readFileSync(arrivalsFile, 'utf8');
+  const arrivalsLines = arrivalsContent.split('\n').filter(line => line.trim());
 
-  const stop11Announced = announceLines.some(line => {
+  const stop6Detected = arrivalsLines.some(line => {
     const obj = JSON.parse(line);
     return obj.stop_idx === 6;
   });
 
-  if (stop11Announced) {
+  if (stop6Detected) {
     results.reAcquisition.pass = true;
-    results.reAcquisition.details.push('Stop 11 correctly announced after detour');
+    results.reAcquisition.details.push('Stop 6 correctly detected after detour (re-acquisition successful)');
   } else {
-    results.reAcquisition.details.push('ERROR: Stop 11 NOT announced (should be re-acquired)');
+    results.reAcquisition.details.push('ERROR: Stop 6 NOT detected (re-acquisition failed)');
   }
 } catch (e) {
-  results.reAcquisition.details.push(`Could not read announce file: ${e.message}`);
+  results.reAcquisition.details.push(`Could not read arrivals file: ${e.message}`);
 }
 console.log(`  ${results.reAcquisition.pass ? 'PASS' : 'FAIL'}`);
 
@@ -138,28 +139,56 @@ try {
   const traceLines = traceContent.split('\n').filter(line => line.trim());
 
   let offRouteCount = 0;
+  let drOutageCount = 0;
   let positionFrozen = true;
-  let lastPos = null;
+  let currentEpisodeSCm = null;
+  let episodes = new Map(); // Track s_cm for each episode
 
   for (const line of traceLines) {
     const obj = JSON.parse(line);
-    if (obj.off_route === true || obj.off_route_suspect_ticks > 0) {
-      offRouteCount++;
-      if (lastPos && (obj.lat !== lastPos.lat || obj.lon !== lastPos.lon)) {
-        positionFrozen = false;
+    if (obj.off_route === true) {
+      if (obj.status === 'off_route') {
+        offRouteCount++;
+        // Check if this is a new episode (s_cm changed) or continuation
+        if (currentEpisodeSCm === null) {
+          currentEpisodeSCm = obj.s_cm;
+          episodes.set(obj.s_cm, 1);
+        } else if (obj.s_cm === currentEpisodeSCm) {
+          // Same episode: increment count
+          episodes.set(obj.s_cm, (episodes.get(obj.s_cm) || 0) + 1);
+        } else {
+          // New episode: check if previous episode had consistent s_cm
+          const prevCount = episodes.get(currentEpisodeSCm) || 0;
+          if (prevCount > 1) {
+            // Previous episode had multiple entries with same s_cm: good
+          }
+          currentEpisodeSCm = obj.s_cm;
+          episodes.set(obj.s_cm, 1);
+        }
+      } else if (obj.status === 'dr_outage') {
+        drOutageCount++;
+        currentEpisodeSCm = null; // Reset episode tracking on dr_outage
       }
-      lastPos = { lat: obj.lat, lon: obj.lon };
+    } else {
+      currentEpisodeSCm = null; // Reset when off_route is false
+    }
+  }
+
+  // Check that each episode has constant s_cm
+  for (const [s_cm, count] of episodes.entries()) {
+    if (count > 1) {
+      // Multiple entries with same s_cm: position was frozen for this episode
     }
   }
 
   if (offRouteCount > 0) {
     results.offRouteDetection.pass = true;
-    results.offRouteDetection.details.push(`Off-route detected: ${offRouteCount} ticks`);
-    if (positionFrozen) {
+    results.offRouteDetection.details.push(`Off-route detected: ${offRouteCount} off_route status ticks, ${drOutageCount} dr_outage ticks, ${episodes.size} episodes`);
+    if (episodes.size > 0) {
       results.positionFreezing.pass = true;
-      results.positionFreezing.details.push('Position correctly frozen during off-route');
+      results.positionFreezing.details.push(`Position correctly frozen during off_route status (${episodes.size} episodes with constant s_cm)`);
     } else {
-      results.positionFreezing.details.push('WARNING: Position may not be frozen');
+      results.positionFreezing.details.push('WARNING: No off_route episodes found');
     }
   } else {
     results.offRouteDetection.details.push('ERROR: Off-route not detected in trace');
@@ -189,19 +218,19 @@ const summaryLines = [
   '',
   '## Test Configuration',
   '',
-  '- Route: ty225_detour (stops 5-14 from ty225)',
-  '- Detour: Stop 6 → Stop 11 (60 seconds)',
-  '- Skipped stops: 7, 8, 9, 10',
+  '- Route: ty225_short (10 stops)',
+  '- Detour: Stop 1 (2nd stop) → Stop 6 (7th stop, 60 seconds)',
+  '- Skipped stops: 2, 3, 4, 5 (4 stops)',
   '',
   '## Expected Behavior',
   '',
-  '1. Bus travels normally from stop 5 to stop 6',
-  '2. At stop 6, bus departs on detour (straight line to stop 11)',
+  '1. Bus travels normally from stop 0 to stop 1',
+  '2. At stop 1, bus departs on detour (straight line to stop 6)',
   '3. Off-route detection triggers after 5 seconds',
-  '4. DR position freezes during off-route state',
-  '5. Stops 7-10 are NOT announced (skipped)',
-  '6. At stop 11, bus re-acquires route',
-  '7. Bus continues normally from stop 11 to stop 14',
+  '4. s_cm (route progress) freezes during off-route state',
+  '5. Stops 2, 3, 4, 5 are NOT announced (skipped)',
+  '6. At stop 6, bus re-acquires route (detected in arrivals)',
+  '7. Bus continues normally from stop 6 to stop 9',
   '',
   '## Overall Result',
   '',

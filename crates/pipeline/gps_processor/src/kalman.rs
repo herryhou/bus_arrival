@@ -159,6 +159,86 @@ pub fn process_gps_update(
     // 4. Projection
     let z_raw = crate::map_match::project_to_route(gps_x, gps_y, seg_idx, route_data);
 
+    // 4.5. GPS Jump Recovery after off-route
+    // Check if we're returning from off-route with a large GPS jump
+    if state.frozen_s_cm.is_some() && match_d2 <= OFF_ROUTE_D2_THRESHOLD && !is_first_fix {
+        // GPS is now valid, check if this is a large jump from frozen position
+        let frozen_s = state.frozen_s_cm.unwrap();
+        let jump_distance = (z_raw - frozen_s).abs();
+
+        // If GPS jumped more than 50m (5000cm), trigger recovery
+        const JUMP_RECOVERY_THRESHOLD: i64 = 5000;
+
+        if jump_distance > JUMP_RECOVERY_THRESHOLD as i32 {
+            // GPS jump recovery: find the closest stop ahead of frozen position
+            // Only consider stops ahead of frozen_s (not behind)
+            let mut best_stop_idx: Option<usize> = None;
+            let mut best_distance: i32 = OFF_ROUTE_D2_THRESHOLD as i32;
+
+            for i in 0..route_data.stop_count {
+                if let Some(stop) = route_data.get_stop(i) {
+                    // Only consider stops ahead of frozen position
+                    if stop.progress_cm > frozen_s {
+                        let dist = (stop.progress_cm - z_raw).abs();
+
+                        // Filter: must be within 200m and velocity constraint satisfied
+                        if dist < OFF_ROUTE_D2_THRESHOLD as i32 {
+                            let dt_since_last_fix = match dr.last_gps_time {
+                                Some(t) => gps.timestamp.saturating_sub(t),
+                                None => 1,
+                            };
+
+                            // Velocity constraint: can we reach this stop given elapsed time?
+                            let dist_to_stop = stop.progress_cm - frozen_s;
+                            let max_reachable = V_MAX_CMS as u64 * dt_since_last_fix;
+
+                            if dist_to_stop as u64 <= max_reachable {
+                                if dist < best_distance {
+                                    best_distance = dist;
+                                    best_stop_idx = Some(i);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If we found a valid stop, jump to it
+            if let Some(recovered_idx) = best_stop_idx {
+                if let Some(recovered_stop) = route_data.get_stop(recovered_idx) {
+                    state.s_cm = recovered_stop.progress_cm;
+
+                    // Clear frozen state
+                    state.frozen_s_cm = None;
+                    state.off_route_suspect_ticks = 0;
+                    state.off_route_clear_ticks = 0;
+
+                    // Set recovery flag for soft resync
+                    dr.in_recovery = true;
+                    dr.last_gps_time = Some(gps.timestamp);
+
+                    // Construct position signals
+                    let signals = PositionSignals {
+                        z_gps_cm: z_raw,
+                        s_cm: state.s_cm,
+                    };
+
+                    return ProcessResult::Valid {
+                        signals,
+                        v_cms: state.v_cms,
+                        seg_idx,
+                    };
+                }
+            }
+        }
+
+        // No recovery needed or recovery failed, continue normal processing
+        // Clear frozen state since GPS is now valid
+        state.frozen_s_cm = None;
+        state.off_route_suspect_ticks = 0;
+        state.off_route_clear_ticks = 0;
+    }
+
     if is_first_fix {
         state.s_cm = z_raw;
 
