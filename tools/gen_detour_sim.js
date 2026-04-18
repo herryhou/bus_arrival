@@ -259,18 +259,30 @@ groundTruth.push({
 });
 
 // Travel detour (off-route!) - exactly 60 seconds
+// Add perpendicular offset to ensure GPS stays far from route
+const PERPENDICULAR_OFFSET_M = 500; // 500m perpendicular offset (increased from 300m)
+const perpBearing = (detourBearing + 90) % 360; // Perpendicular bearing
+const [offsetLat, offsetLon] = movePoint(
+  fromStop.lat, fromStop.lon,
+  perpBearing, PERPENDICULAR_OFFSET_M
+);
+
 for (let t = 0; t < DETOUR_DURATION_S; t++) {
   const frac = (t + 1) / DETOUR_DURATION_S;
+  // Linear interpolation along detour path
   const lat = fromStop.lat + (toStop.lat - fromStop.lat) * frac;
   const lon = fromStop.lon + (toStop.lon - fromStop.lon) * frac;
-  emitGPS(lat, lon, CRUISE_MS, detourBearing);
+  // Add perpendicular offset
+  const offsetLat2 = offsetLat + (toStop.lat - fromStop.lat) * frac;
+  const offsetLon2 = offsetLon + (toStop.lon - fromStop.lon) * frac;
+  emitGPS(offsetLat2, offsetLon2, CRUISE_MS, detourBearing);
 }
 
 const detourDuration = ts - detourStartTS;
 console.log(`Detour duration: ${detourDuration}s (expected: ${DETOUR_DURATION_S}s)`);
 
 groundTruth.push({
-  stop_idx: stopSeqIdx,
+  stop_idx: DETOUR_TO_STOP,  // Use correct stop index (6 = stop 11)
   lat: toStop.lat,
   lon: toStop.lon,
   timestamp: ts,
@@ -284,12 +296,12 @@ console.log('\nPhase 3: Re-acquire at Stop 11, continue to Stop 14');
 
 emitStatic(toStop.lat, toStop.lon, segments[stopSegments[DETOUR_TO_STOP]].bearing, STOP_DWELL_S);
 groundTruth.push({
-  stop_idx: stopSeqIdx,
+  stop_idx: DETOUR_TO_STOP,  // Use correct stop index (6 = stop 11)
   seg_idx: stopSegments[DETOUR_TO_STOP],
   timestamp: ts - STOP_DWELL_S,
   dwell_s: STOP_DWELL_S
 });
-stopSeqIdx++;
+stopSeqIdx = DETOUR_TO_STOP + 1;  // Skip to stop after re-acquisition
 
 // Continue from stop 11 to stop 14 (indices 6-9)
 for (let segIdx = stopSegments[DETOUR_TO_STOP]; segIdx < segments.length; segIdx++) {
