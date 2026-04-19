@@ -37,6 +37,9 @@ SHORTCUT_TO_STOP ?= 5
 # For detour scenario (stop 6 in re-indexed, which is stop 11 in original)
 DETOUR_FROM_STOP ?= 1  # For detour scenario (stop 6 in re-indexed)
 DETOUR_TO_STOP ?= 6    # For detour scenario (stop 11 in re-indexed)
+DETOUR_WAYPOINT_LAT ?= 24.99207
+DETOUR_WAYPOINT_LON ?= 121.29562
+DETOUR_DURATION_S ?= 60
 
 # Input files
 ROUTE_JSON := $(DATA_DIR)/$(ROUTE_NAME)_route.json
@@ -54,7 +57,7 @@ ANNOUNCE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_announce.jsonl
 # Node.js executable
 NODE := node
 
-.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware
+.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour
 
 # Default target
 all: run
@@ -70,6 +73,11 @@ run: build gen_nmea preprocess pipeline
 	@echo "Output: $(DETECTOR_OUT)"
 	@echo "Trace output: $(TRACE_OUT)"
 	@echo "Announce output: $(ANNOUNCE_OUT)"
+
+# Run detour scenario (ty225_short route)
+run-detour:
+	@echo "=== Running detour scenario (ty225_short) ==="
+	$(MAKE) run ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.99207 DETOUR_WAYPOINT_LON=121.29562 DETOUR_DURATION_S=60
 
 # Legacy two-step workflow (deprecated - use 'make run' instead)
 run-legacy: build gen_nmea preprocess simulate detect
@@ -131,7 +139,8 @@ gen_nmea:
 		--scenario $(SCENARIO) \
 		--out_nmea $(NMEA_OUT) \
 		--out_gt $(GROUND_TRUTH_OUT) \
-		$(if $(filter shortcut,$(SCENARIO)),--shortcut-from-stop $(SHORTCUT_FROM_STOP) --shortcut-to-stop $(SHORTCUT_TO_STOP))
+		$(if $(filter shortcut,$(SCENARIO)),--shortcut-from-stop $(SHORTCUT_FROM_STOP) --shortcut-to-stop $(SHORTCUT_TO_STOP)) \
+		$(if $(filter detour,$(SCENARIO)),--detour-from-stop $(DETOUR_FROM_STOP) --detour-to-stop $(DETOUR_TO_STOP) --detour-waypoint-lat $(DETOUR_WAYPOINT_LAT) --detour-waypoint-lon $(DETOUR_WAYPOINT_LON) --detour-duration-s $(DETOUR_DURATION_S))
 	@echo "Generated: $(NMEA_OUT)"
 	@echo "Generated: $(GROUND_TRUTH_OUT)"
 
@@ -182,6 +191,7 @@ help:
 	@echo "Pipeline Usage:"
 	@echo "  make run ROUTE_NAME=<route> SCENARIO=<name>     Run full unified pipeline"
 	@echo "                                                    (default: ROUTE_NAME=ty225 SCENARIO=normal)"
+	@echo "  make run-detour                                  Run detour scenario (ty225_short)"
 	@echo "  make pipeline ROUTE_NAME=<route> SCENARIO=<name> Run unified pipeline (same as 'run')"
 	@echo "  make gen_nmea ROUTE_NAME=<route> SCENARIO=<name> Generate NMEA test data"
 	@echo "  make preprocess ROUTE_NAME=<route>               Generate route_data.bin"
@@ -200,7 +210,7 @@ help:
 	@echo "  ROUTE_NAME    Route identifier (default: ty225)"
 	@echo "                Expects files: test_data/<ROUTE_NAME>_route.json"
 	@echo "                           and test_data/<ROUTE_NAME>_stops.json"
-	@echo "  SCENARIO      Test scenario: normal, drift, jump, outage (default: normal)"
+	@echo "  SCENARIO      Test scenario: normal, drift, jump, outage, shortcut, detour (default: normal)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make run ROUTE_NAME=ty225 SCENARIO=normal"

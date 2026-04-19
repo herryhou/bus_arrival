@@ -17,3 +17,9 @@ pub const SPEED_LUT_MAX_IDX: usize = 127;
 
 /// Gaussian LUT resolution: 0-255 index -> 0-255 probability
 pub const GAUSSIAN_LUT_SIZE: usize = 256;
+
+/// Divergence threshold above which s_cm is considered phantom (50 m).
+/// When z_gps_cm and s_cm diverge by more than this, the Kalman state
+/// has likely drifted from actual bus position (detour / DR drift).
+/// Per spec: 2×SIGMA_D_CM ≈ 55 m, rounded to 50 m for clean threshold.
+pub const PHANTOM_DIVERGENCE_CM: i32 = 5_000;
