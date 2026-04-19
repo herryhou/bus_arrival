@@ -119,30 +119,125 @@ pub fn process_gps_update(
     );
 
     // Off-route detection (only when not in warmup)
+    // CRITICAL: Check BEFORE projection to prevent s_cm from advancing during detour
     if !is_first_fix {
         if match_d2 > OFF_ROUTE_D2_THRESHOLD {
+            // First tick of off-route suspect: freeze position immediately
+            if state.off_route_suspect_ticks == 0 {
+                state.frozen_s_cm = Some(state.s_cm);
+            }
             state.off_route_suspect_ticks = state.off_route_suspect_ticks.saturating_add(1);
             state.off_route_clear_ticks = 0;
 
             if state.off_route_suspect_ticks >= OFF_ROUTE_CONFIRM_TICKS {
-                // Confirmed off-route: return with last valid position
+                // Confirmed off-route: return with frozen position
+                let frozen_s = state.frozen_s_cm.unwrap_or(state.s_cm);
                 return ProcessResult::OffRoute {
-                    last_valid_s: state.s_cm,
+                    last_valid_s: frozen_s,
                     last_valid_v: state.v_cms,
                 };
             }
+
+            // During off-route suspicion, skip projection and filters to prevent s_cm advance
+            // Return DrOutage with frozen position immediately
+            dr.last_gps_time = Some(gps.timestamp);
+            return ProcessResult::DrOutage {
+                s_cm: state.frozen_s_cm.unwrap_or(state.s_cm),
+                v_cms: state.v_cms,
+            };
         } else {
             // Good GPS match: increment clear counter
             state.off_route_clear_ticks = state.off_route_clear_ticks.saturating_add(1);
-            // After 2 consecutive good matches, reset suspect counter
+            // After 2 consecutive good matches, reset suspect counter and unfreeze
             if state.off_route_clear_ticks >= OFF_ROUTE_CLEAR_TICKS {
                 state.off_route_suspect_ticks = 0;
+                state.frozen_s_cm = None;
             }
         }
     }
 
     // 4. Projection
     let z_raw = crate::map_match::project_to_route(gps_x, gps_y, seg_idx, route_data);
+
+    // 4.5. GPS Jump Recovery after off-route
+    // Check if we're returning from off-route with a large GPS jump
+    if state.frozen_s_cm.is_some() && match_d2 <= OFF_ROUTE_D2_THRESHOLD && !is_first_fix {
+        // GPS is now valid, check if this is a large jump from frozen position
+        let frozen_s = state.frozen_s_cm.unwrap();
+        let jump_distance = (z_raw - frozen_s).abs();
+
+        // If GPS jumped more than 50m (5000cm), trigger recovery
+        const JUMP_RECOVERY_THRESHOLD: i64 = 5000;
+
+        if jump_distance > JUMP_RECOVERY_THRESHOLD as i32 {
+            // GPS jump recovery: find the closest stop ahead of frozen position
+            // Only consider stops ahead of frozen_s (not behind)
+            let mut best_stop_idx: Option<usize> = None;
+            let mut best_distance: i32 = OFF_ROUTE_D2_THRESHOLD as i32;
+
+            for i in 0..route_data.stop_count {
+                if let Some(stop) = route_data.get_stop(i) {
+                    // Only consider stops ahead of frozen position
+                    if stop.progress_cm > frozen_s {
+                        let dist = (stop.progress_cm - z_raw).abs();
+
+                        // Filter: must be within 200m and velocity constraint satisfied
+                        if dist < OFF_ROUTE_D2_THRESHOLD as i32 {
+                            let dt_since_last_fix = match dr.last_gps_time {
+                                Some(t) => gps.timestamp.saturating_sub(t),
+                                None => 1,
+                            };
+
+                            // Velocity constraint: can we reach this stop given elapsed time?
+                            let dist_to_stop = stop.progress_cm - frozen_s;
+                            let max_reachable = V_MAX_CMS as u64 * dt_since_last_fix;
+
+                            if dist_to_stop as u64 <= max_reachable {
+                                if dist < best_distance {
+                                    best_distance = dist;
+                                    best_stop_idx = Some(i);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If we found a valid stop, jump to it
+            if let Some(recovered_idx) = best_stop_idx {
+                if let Some(recovered_stop) = route_data.get_stop(recovered_idx) {
+                    state.s_cm = recovered_stop.progress_cm;
+
+                    // Clear frozen state
+                    state.frozen_s_cm = None;
+                    state.off_route_suspect_ticks = 0;
+                    state.off_route_clear_ticks = 0;
+
+                    // Set recovery flag for soft resync
+                    dr.in_recovery = true;
+                    dr.last_gps_time = Some(gps.timestamp);
+
+                    // Construct position signals
+                    let signals = PositionSignals {
+                        z_gps_cm: z_raw,
+                        s_cm: state.s_cm,
+                    };
+
+                    return ProcessResult::Valid {
+                        signals,
+                        v_cms: state.v_cms,
+                        seg_idx,
+                    };
+                }
+            }
+        }
+
+        // No recovery needed or recovery failed, continue normal processing
+        // Clear frozen state since GPS is now valid
+        state.frozen_s_cm = None;
+        state.off_route_suspect_ticks = 0;
+        state.off_route_clear_ticks = 0;
+    }
 
     if is_first_fix {
         state.s_cm = z_raw;
@@ -167,26 +262,49 @@ pub fn process_gps_update(
     }
 
     // 5. Speed constraint filter
-    if !check_speed_constraint(z_raw, state.s_cm, dt) {
+    // Use frozen position if off-route is suspected (immediate position freezing)
+    let current_s = state.frozen_s_cm.unwrap_or(state.s_cm);
+    if !check_speed_constraint(z_raw, current_s, dt) {
         // Per spec Section 9.2: "拒絕後的行為：跳過 Kalman 更新步驟，僅執行 predict step（ŝ += v̂），等效於短暫 Dead-Reckoning"
         // Do prediction step (DR mode) instead of returning Rejected with zero position
-        state.s_cm += state.v_cms * (dt as DistCm);
-        dr.last_gps_time = Some(gps.timestamp);
-        return ProcessResult::DrOutage {
-            s_cm: state.s_cm,
-            v_cms: state.v_cms,
-        };
+        // If off-route is suspected, keep position frozen instead of advancing
+        if state.frozen_s_cm.is_some() {
+            // Keep frozen position, don't advance
+            dr.last_gps_time = Some(gps.timestamp);
+            return ProcessResult::DrOutage {
+                s_cm: state.frozen_s_cm.unwrap(),
+                v_cms: state.v_cms,
+            };
+        } else {
+            state.s_cm += state.v_cms * (dt as DistCm);
+            dr.last_gps_time = Some(gps.timestamp);
+            return ProcessResult::DrOutage {
+                s_cm: state.s_cm,
+                v_cms: state.v_cms,
+            };
+        }
     }
 
     // 6. Monotonicity filter
-    if !check_monotonic(z_raw, state.s_cm) {
+    // Use frozen position if off-route is suspected
+    if !check_monotonic(z_raw, current_s) {
         // Per spec Section 9.2: same behavior as speed constraint rejection
-        state.s_cm += state.v_cms * (dt as DistCm);
-        dr.last_gps_time = Some(gps.timestamp);
-        return ProcessResult::DrOutage {
-            s_cm: state.s_cm,
-            v_cms: state.v_cms,
-        };
+        // If off-route is suspected, keep position frozen instead of advancing
+        if state.frozen_s_cm.is_some() {
+            // Keep frozen position, don't advance
+            dr.last_gps_time = Some(gps.timestamp);
+            return ProcessResult::DrOutage {
+                s_cm: state.frozen_s_cm.unwrap(),
+                v_cms: state.v_cms,
+            };
+        } else {
+            state.s_cm += state.v_cms * (dt as DistCm);
+            dr.last_gps_time = Some(gps.timestamp);
+            return ProcessResult::DrOutage {
+                s_cm: state.s_cm,
+                v_cms: state.v_cms,
+            };
+        }
     }
 
     // 7. Kalman update (HDOP-adaptive) with soft-resync for GPS recovery

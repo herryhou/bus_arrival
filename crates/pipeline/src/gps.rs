@@ -17,6 +17,8 @@ pub struct GpsRecord {
     pub v_cms: SpeedCms,
     /// Heading (hundredths of degrees, -18000 to 18000)
     pub heading_cdeg: Option<HeadCdeg>,
+    /// Processing status (for trace output)
+    pub status: &'static str,
 }
 
 impl GpsRecord {
@@ -28,6 +30,7 @@ impl GpsRecord {
         s_cm: DistCm,
         v_cms: SpeedCms,
         heading_cdeg: Option<HeadCdeg>,
+        status: &'static str,
     ) -> Self {
         Self {
             time,
@@ -36,6 +39,7 @@ impl GpsRecord {
             s_cm,
             v_cms,
             heading_cdeg,
+            status,
         }
     }
 }

@@ -24,6 +24,7 @@ pub fn project_stops_validated(
     let mut final_stops: Vec<Stop> = Vec::with_capacity(progress_values.len());
 
     for progress_cm in progress_values.iter() {
+        // Standard corridor bounds (80m before, 40m after)
         let mut corridor_start_cm = progress_cm - 8000;
         let corridor_end_cm = progress_cm + 4000;
 

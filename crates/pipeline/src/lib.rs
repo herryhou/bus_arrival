@@ -89,6 +89,8 @@ pub struct TraceRecord {
     pub stop_states: Vec<StopTraceState>,
     pub gps_jump: bool,
     pub recovery_idx: Option<u8>,
+    pub status: String,
+    pub off_route: bool,
 }
 
 /// Stop state in trace
@@ -184,26 +186,40 @@ impl<'a> LocalizationState<'a> {
         match result {
             gps_processor::kalman::ProcessResult::Valid { signals, v_cms, seg_idx: _ } => {
                 let shared::PositionSignals { z_gps_cm: _, s_cm } = signals;
-                Some(gps::GpsRecord {
-                    time: gps.timestamp,
-                    lat: gps.lat,
-                    lon: gps.lon,
+                Some(gps::GpsRecord::new(
+                    gps.timestamp,
+                    gps.lat,
+                    gps.lon,
                     s_cm,
                     v_cms,
-                    heading_cdeg: Some(gps.heading_cdeg),
-                })
+                    Some(gps.heading_cdeg),
+                    "valid",
+                ))
             }
             gps_processor::kalman::ProcessResult::DrOutage { s_cm, v_cms } => {
-                Some(gps::GpsRecord {
-                    time: gps.timestamp,
-                    lat: gps.lat,
-                    lon: gps.lon,
+                Some(gps::GpsRecord::new(
+                    gps.timestamp,
+                    gps.lat,
+                    gps.lon,
                     s_cm,
                     v_cms,
-                    heading_cdeg: None,
-                })
+                    None,
+                    "dr_outage",
+                ))
             }
-            _ => None,
+            gps_processor::kalman::ProcessResult::OffRoute { last_valid_s, last_valid_v } => {
+                Some(gps::GpsRecord::new(
+                    gps.timestamp,
+                    gps.lat,
+                    gps.lon,
+                    last_valid_s,
+                    last_valid_v,
+                    None,
+                    "off_route",
+                ))
+            }
+            gps_processor::kalman::ProcessResult::Rejected(_) => None,
+            gps_processor::kalman::ProcessResult::Outage => None,
         }
     }
 }
@@ -218,6 +234,8 @@ pub struct DetectionState {
     arrived_this_frame: Vec<u8>,
     /// Active stop indices from last update (for trace output)
     active_indices: Vec<usize>,
+    /// Track whether the bus is currently off-route (detouring)
+    off_route: bool,
 }
 
 impl DetectionState {
@@ -232,6 +250,7 @@ impl DetectionState {
             current_timestamp: 0,
             arrived_this_frame: Vec::new(),
             active_indices: Vec::new(),
+            off_route: false,
         }
     }
 
@@ -256,6 +275,43 @@ impl DetectionState {
         let s_cm = record.s_cm;
         let v_cms = record.v_cms;
         let stops = route_data.stops();
+
+        // Update off-route state based on GPS record status
+        // Once we're off-route, stay off-route until we get a valid fix OR re-acquire route
+        match record.status {
+            "off_route" => {
+                self.off_route = true;
+            }
+            "valid" => {
+                // Clear off_route as soon as we get a valid fix
+                self.off_route = false;
+            }
+            "dr_outage" => {
+                // Check if we've re-acquired the route (approaching a stop)
+                // This can happen when returning from a detour even if constraints fail
+                if self.off_route {
+                    // Check if we're approaching any stop with decreasing distance
+                    for (idx, stop) in stops.iter().enumerate() {
+                        if let Some(stop_state) = self.stop_states.get(idx) {
+                            let current_distance = (stop.progress_cm as i32) - (s_cm as i32);
+                            // If we have a previous distance and we're getting closer
+                            if let Some(prev_dist) = stop_state.previous_distance_cm {
+                                let distance_decreasing = current_distance < prev_dist;
+                                let approaching = current_distance > -50000 && current_distance < 100000; // Within 500m in either direction
+                                if distance_decreasing && approaching {
+                                    // Re-acquired route: clear off_route state
+                                    self.off_route = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Keep current state for other statuses
+            }
+        }
 
         // Find active stops (corridor filter)
         for (idx, stop) in stops.iter().enumerate() {
@@ -312,8 +368,9 @@ impl DetectionState {
         }
 
         // Check for announcements (v8.4: corridor entry announcement)
+        // Suppress announcements when off-route (detouring)
         #[cfg(feature = "std")]
-        if result.announce_events.is_some() {
+        if result.announce_events.is_some() && !self.off_route {
             for (idx, stop_state) in self.stop_states.iter_mut().enumerate() {
                 if stop_state.should_announce(s_cm, stops[idx].corridor_start_cm) {
                     result.announce_events.as_mut().unwrap().push(AnnounceEvent {
@@ -520,6 +577,8 @@ impl PipelineResult {
                 stop_states,
                 gps_jump: false,  // TODO: implement GPS jump detection
                 recovery_idx: None, // TODO: implement recovery
+                status: record.status.to_string(),
+                off_route: det_state.off_route,
             });
         }
     }
