@@ -32,11 +32,38 @@ pub fn find_active_stops(signals: PositionSignals, route_data: &RouteData) -> he
 
 // ===== Arrival Probability Computation =====
 
+/// GPS processing status for phantom arrival detection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpsStatus {
+    /// GPS is being processed normally
+    Valid,
+    /// GPS is being rejected (dr_outage)
+    DrOutage,
+    /// GPS is off-route (position frozen)
+    OffRoute,
+}
+
 /// Shared feature computation for arrival probability
-fn compute_features(signals: PositionSignals, v_cms: SpeedCms, stop: &Stop, dwell_time_s: u16) -> (u32, u32, u32, u32) {
+fn compute_features(
+    signals: PositionSignals,
+    v_cms: SpeedCms,
+    stop: &Stop,
+    dwell_time_s: u16,
+    gps_status: GpsStatus,
+) -> (u32, u32, u32, u32) {
     // Feature 1: Distance likelihood (sigma_d = 2750 cm) - uses raw GPS
-    let d_cm = (signals.z_gps_cm - stop.progress_cm).abs();
-    let idx1 = ((d_cm as i64 * 64) / SIGMA_D_CM as i64).min(255) as usize;
+    // Defensive: blend z_gps_cm and s_cm based on divergence to handle
+    // cases where map matcher produces poor projections during normal operation
+    let divergence = signals.divergence_cm();
+    let (d1_cm, use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
+        // When z_gps_cm and s_cm diverge significantly, use s_cm for p1
+        // This prevents poor map matching from dragging down probability
+        ((signals.s_cm - stop.progress_cm).abs(), true)
+    } else {
+        // Normal case: use z_gps_cm as per spec
+        ((signals.z_gps_cm - stop.progress_cm).abs(), false)
+    };
+    let idx1 = ((d1_cm as i64 * 64) / SIGMA_D_CM as i64).min(255) as usize;
     let p1 = GAUSSIAN_LUT[idx1] as u32;
 
     // Feature 2: Speed likelihood (near 0 -> higher, v_stop = 200 cm/s)
@@ -44,9 +71,14 @@ fn compute_features(signals: PositionSignals, v_cms: SpeedCms, stop: &Stop, dwel
     let p2 = LOGISTIC_LUT[idx2] as u32;
 
     // Feature 3: Progress difference likelihood (sigma_p = 2000 cm) - uses Kalman output
-    let d_cm = (signals.s_cm - stop.progress_cm).abs();
-    let idx3 = ((d_cm as i64 * 64) / SIGMA_P_CM as i64).min(255) as usize;
-    let p3 = GAUSSIAN_LUT[idx3] as u32;
+    // Neutralize to 128 during dr_outage or off_route when s_cm may be phantom
+    let p3 = if gps_status != GpsStatus::Valid && divergence > PHANTOM_DIVERGENCE_CM {
+        128 // neutral: neither confirms nor denies arrival
+    } else {
+        let d_cm = (signals.s_cm - stop.progress_cm).abs();
+        let idx3 = ((d_cm as i64 * 64) / SIGMA_P_CM as i64).min(255) as usize;
+        GAUSSIAN_LUT[idx3] as u32
+    };
 
     // Feature 4: Dwell time likelihood (T_ref = 10s)
     let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
@@ -60,8 +92,9 @@ pub fn compute_arrival_probability(
     v_cms: SpeedCms,
     stop: &Stop,
     dwell_time_s: u16,
+    gps_status: GpsStatus,
 ) -> Prob8 {
-    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s);
+    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status);
     ((13 * p1 + 6 * p2 + 10 * p3 + 3 * p4) / 32) as u8
 }
 
@@ -74,9 +107,10 @@ pub fn compute_arrival_probability_adaptive(
     v_cms: SpeedCms,
     stop: &Stop,
     dwell_time_s: u16,
+    gps_status: GpsStatus,
     next_stop: Option<&Stop>,
 ) -> Prob8 {
-    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s);
+    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status);
 
     // Adaptive weights based on next stop distance
     let (w1, w2, w3, w4) = if let Some(next) = next_stop {

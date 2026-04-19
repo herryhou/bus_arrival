@@ -44,12 +44,23 @@ fn compute_features(
     v_cms: SpeedCms,
     stop: &Stop,
     dwell_time_s: u16,
+    gps_status: GpsStatus,
     gaussian_lut: &[u8; 256],
     logistic_lut: &[u8; 128],
 ) -> (u32, u32, u32, u32) {
     // Feature 1: Distance likelihood (sigma_d = 2750 cm)
     // Uses RAW GPS projection z_gps_cm per spec Section 13.2
-    let d1_cm = (signals.z_gps_cm - stop.progress_cm).abs();
+    // Defensive: blend z_gps_cm and s_cm based on divergence to handle
+    // cases where map matcher produces poor projections during normal operation
+    let divergence = signals.divergence_cm();
+    let (d1_cm, use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
+        // When z_gps_cm and s_cm diverge significantly, use s_cm for p1
+        // This prevents poor map matching from dragging down probability
+        ((signals.s_cm - stop.progress_cm).abs(), true)
+    } else {
+        // Normal case: use z_gps_cm as per spec
+        ((signals.z_gps_cm - stop.progress_cm).abs(), false)
+    };
     let idx1 = ((d1_cm as i64 * 64) / SIGMA_D_CM as i64).min(255) as usize;
     let p1 = gaussian_lut[idx1] as u32;
 
@@ -59,14 +70,30 @@ fn compute_features(
 
     // Feature 3: Progress difference likelihood (sigma_p = 2000 cm)
     // Uses KALMAN-FILTERED position s_cm per spec Section 13.2
-    let d3_cm = (signals.s_cm - stop.progress_cm).abs();
-    let idx3 = ((d3_cm as i64 * 64) / SIGMA_P_CM as i64).min(255) as usize;
-    let p3 = gaussian_lut[idx3] as u32;
+    // Neutralize to 128 during dr_outage or off_route when s_cm may be phantom
+    let p3 = if gps_status != GpsStatus::Valid && divergence > PHANTOM_DIVERGENCE_CM {
+        128 // neutral: neither confirms nor denies arrival
+    } else {
+        let d3_cm = (signals.s_cm - stop.progress_cm).abs();
+        let idx3 = ((d3_cm as i64 * 64) / SIGMA_P_CM as i64).min(255) as usize;
+        gaussian_lut[idx3] as u32
+    };
 
     // Feature 4: Dwell time likelihood (T_ref = 10s)
     let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
 
     (p1, p2, p3, p4)
+}
+
+/// GPS processing status for phantom arrival detection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpsStatus {
+    /// GPS is being processed normally
+    Valid,
+    /// GPS is being rejected (dr_outage)
+    DrOutage,
+    /// GPS is off-route (position frozen)
+    OffRoute,
 }
 
 /// Arrival threshold: 75% probability
@@ -79,10 +106,11 @@ pub fn compute_arrival_probability(
     v_cms: SpeedCms,
     stop: &Stop,
     dwell_time_s: u16,
+    gps_status: GpsStatus,
     gaussian_lut: &[u8; 256],
     logistic_lut: &[u8; 128],
 ) -> Prob8 {
-    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gaussian_lut, logistic_lut);
+    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status, gaussian_lut, logistic_lut);
     ((13 * p1 + 6 * p2 + 10 * p3 + 3 * p4) / 32) as u8
 }
 
@@ -95,11 +123,12 @@ pub fn compute_arrival_probability_adaptive(
     v_cms: SpeedCms,
     stop: &Stop,
     dwell_time_s: u16,
+    gps_status: GpsStatus,
     gaussian_lut: &[u8; 256],
     logistic_lut: &[u8; 128],
     next_stop: Option<&Stop>,
 ) -> Prob8 {
-    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gaussian_lut, logistic_lut);
+    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status, gaussian_lut, logistic_lut);
 
     // Adaptive weights based on next stop distance
     let (w1, w2, w3, w4) = if let Some(next) = next_stop {
@@ -131,9 +160,9 @@ pub fn arrival_probability(
     gaussian_lut: &[u8; 256],
     logistic_lut: &[u8; 128],
 ) -> Prob8 {
-    // For backward compatibility, use s_cm for both signals
+    // For backward compatibility, use s_cm for both signals and Valid status
     let signals = PositionSignals::new(s_cm, s_cm);
-    compute_arrival_probability(signals, v_cms, stop, dwell_time_s, gaussian_lut, logistic_lut)
+    compute_arrival_probability(signals, v_cms, stop, dwell_time_s, GpsStatus::Valid, gaussian_lut, logistic_lut)
 }
 
 /// Compute arrival probability with adaptive weights for close stops.
@@ -155,9 +184,9 @@ pub fn arrival_probability_adaptive(
     logistic_lut: &[u8; 128],
     next_stop: Option<&shared::Stop>,
 ) -> Prob8 {
-    // For backward compatibility, use s_cm for both signals
+    // For backward compatibility, use s_cm for both signals and Valid status
     let signals = PositionSignals::new(s_cm, s_cm);
-    compute_arrival_probability_adaptive(signals, v_cms, stop, dwell_time_s, gaussian_lut, logistic_lut, next_stop)
+    compute_arrival_probability_adaptive(signals, v_cms, stop, dwell_time_s, GpsStatus::Valid, gaussian_lut, logistic_lut, next_stop)
 }
 
 /// Compute individual feature scores for trace output
@@ -171,7 +200,7 @@ pub fn compute_feature_scores(
     gaussian_lut: &[u8; 256],
     logistic_lut: &[u8; 128],
 ) -> FeatureScores {
-    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gaussian_lut, logistic_lut);
+    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, GpsStatus::Valid, gaussian_lut, logistic_lut);
     FeatureScores { p1: p1 as u8, p2: p2 as u8, p3: p3 as u8, p4: p4 as u8 }
 }
 
@@ -192,7 +221,7 @@ pub fn compute_probability(
 
 /// Get or build the Gaussian LUT (cached in std environments)
 #[cfg(feature = "std")]
-fn gaussian_lut() -> &'static [u8; 256] {
+pub fn gaussian_lut() -> &'static [u8; 256] {
     use std::sync::OnceLock;
     static GAUSSIAN_LUT: OnceLock<[u8; 256]> = OnceLock::new();
     GAUSSIAN_LUT.get_or_init(build_gaussian_lut)
@@ -200,7 +229,7 @@ fn gaussian_lut() -> &'static [u8; 256] {
 
 /// Get or build the logistic LUT (cached in std environments)
 #[cfg(feature = "std")]
-fn logistic_lut() -> &'static [u8; 128] {
+pub fn logistic_lut() -> &'static [u8; 128] {
     use std::sync::OnceLock;
     static LOGISTIC_LUT: OnceLock<[u8; 128]> = OnceLock::new();
     LOGISTIC_LUT.get_or_init(build_logistic_lut)
@@ -360,6 +389,7 @@ mod tests {
     #[test]
     fn test_position_signals_f1_uses_z_gps() {
         // Test that F1 (distance likelihood) uses raw GPS projection z_gps_cm
+        // when divergence is below fallback threshold (< 2000 cm)
         let g_lut = super::build_gaussian_lut();
         let l_lut = super::build_logistic_lut();
         let stop = Stop { progress_cm: 10000, corridor_start_cm: 2000, corridor_end_cm: 14000 };
@@ -367,14 +397,15 @@ mod tests {
         // Case 1: Both signals aligned at stop
         let signals_aligned = PositionSignals::new(10000, 10000);
         let prob_aligned = super::compute_arrival_probability(
-            signals_aligned, 0, &stop, 10, &g_lut, &l_lut
+            signals_aligned, 0, &stop, 10, super::GpsStatus::Valid, &g_lut, &l_lut
         );
 
         // Case 2: Raw GPS far from stop, Kalman at stop (GPS noise scenario)
+        // Use 1500 cm deviation (< 2000 cm threshold) to avoid fallback logic
         // F1 should drop because z_gps_cm is far, F3 should stay high because s_cm is at stop
-        let signals_divergent = PositionSignals::new(20000, 10000); // z_gps_cm=20m, s_cm=10m
+        let signals_divergent = PositionSignals::new(11500, 10000); // z_gps_cm=11.5m, s_cm=10m, divergence=1500cm
         let prob_divergent = super::compute_arrival_probability(
-            signals_divergent, 0, &stop, 10, &g_lut, &l_lut
+            signals_divergent, 0, &stop, 10, super::GpsStatus::Valid, &g_lut, &l_lut
         );
 
         // Divergent signals should produce lower probability than aligned
@@ -382,10 +413,11 @@ mod tests {
             "Divergent signals (z_gps_cm far, s_cm at stop) should have lower probability than aligned signals");
 
         // Case 3: Raw GPS at stop, Kalman far from stop (Kalman lag scenario)
+        // Use 1500 cm deviation (< 2000 cm threshold) to avoid fallback logic
         // F1 should stay high because z_gps_cm is at stop, F3 should drop because s_cm is far
-        let signals_lag = PositionSignals::new(10000, 20000); // z_gps_cm=10m, s_cm=20m
+        let signals_lag = PositionSignals::new(10000, 11500); // z_gps_cm=10m, s_cm=11.5m, divergence=1500cm
         let prob_lag = super::compute_arrival_probability(
-            signals_lag, 0, &stop, 10, &g_lut, &l_lut
+            signals_lag, 0, &stop, 10, super::GpsStatus::Valid, &g_lut, &l_lut
         );
 
         // Lag scenario should also produce lower probability than aligned
@@ -395,7 +427,7 @@ mod tests {
 
     #[test]
     fn test_position_signals_independence() {
-        // Test that F1 and F3 are computed independently
+        // Test that F1 and F3 are computed independently (when divergence < fallback threshold)
         let g_lut = super::build_gaussian_lut();
         let l_lut = super::build_logistic_lut();
         let stop = Stop { progress_cm: 10000, corridor_start_cm: 2000, corridor_end_cm: 14000 };
@@ -403,7 +435,8 @@ mod tests {
         // Test with different sigma values
         // F1 uses sigma_d=2750cm, F3 uses sigma_p=2000cm
         // Same distance deviation should affect F3 more than F1 (smaller sigma = steeper drop)
-        let distance_deviation = 3000; // 30m deviation
+        // Use 1500 cm deviation (< 2000 cm threshold) to avoid fallback logic
+        let distance_deviation = 1500; // 15m deviation
 
         // Case 1: Only z_gps_cm deviates (affects F1)
         let signals_f1_deviation = PositionSignals::new(
@@ -411,7 +444,7 @@ mod tests {
             10000                       // s_cm at stop
         );
         let (p1_only, _, p3_only, _) = super::compute_features(
-            signals_f1_deviation, 0, &stop, 10, &g_lut, &l_lut
+            signals_f1_deviation, 0, &stop, 10, super::GpsStatus::Valid, &g_lut, &l_lut
         );
 
         // Case 2: Only s_cm deviates (affects F3)
@@ -420,7 +453,7 @@ mod tests {
             10000 + distance_deviation // s_cm deviates
         );
         let (p1_alt, _, p3_alt, _) = super::compute_features(
-            signals_f3_deviation, 0, &stop, 10, &g_lut, &l_lut
+            signals_f3_deviation, 0, &stop, 10, super::GpsStatus::Valid, &g_lut, &l_lut
         );
 
         // When only s_cm deviates, F1 should be high (255) and F3 should be lower
@@ -461,12 +494,12 @@ mod tests {
 
         // Close stop: should use (14, 7, 11, 0) weights
         let prob_close = super::compute_arrival_probability_adaptive(
-            signals, 0, &stop_current, 5, &g_lut, &l_lut, Some(&stop_next_close)
+            signals, 0, &stop_current, 5, super::GpsStatus::Valid, &g_lut, &l_lut, Some(&stop_next_close)
         );
 
         // Far stop: should use (13, 6, 10, 3) weights
         let prob_far = super::compute_arrival_probability_adaptive(
-            signals, 0, &stop_current, 5, &g_lut, &l_lut, Some(&stop_next_far)
+            signals, 0, &stop_current, 5, super::GpsStatus::Valid, &g_lut, &l_lut, Some(&stop_next_far)
         );
 
         // Close stop should have higher probability (no p4 penalty)
@@ -486,7 +519,7 @@ mod tests {
 
         // New API: compute_arrival_probability with PositionSignals
         let signals = PositionSignals::new(10000, 10000);
-        let prob_new = super::compute_arrival_probability(signals, 0, &stop, 10, &g_lut, &l_lut);
+        let prob_new = super::compute_arrival_probability(signals, 0, &stop, 10, super::GpsStatus::Valid, &g_lut, &l_lut);
 
         // Should produce identical results when signals are aligned
         assert_eq!(prob_old, prob_new,
@@ -497,7 +530,7 @@ mod tests {
             10000, 0, &stop, 5, &g_lut, &l_lut, None
         );
         let prob_new_adaptive = super::compute_arrival_probability_adaptive(
-            signals, 0, &stop, 5, &g_lut, &l_lut, None
+            signals, 0, &stop, 5, super::GpsStatus::Valid, &g_lut, &l_lut, None
         );
 
         assert_eq!(prob_old_adaptive, prob_new_adaptive,
@@ -559,8 +592,9 @@ mod tests {
         let signals_normal = PositionSignals { z_gps_cm: 10_100, s_cm: 10_050 };
         let scores_normal = super::compute_feature_scores(signals_normal, 0, &stop, 5, &g_lut, &l_lut);
 
-        // GPS noise event: raw GPS jumps 30m, Kalman filters to 5m
-        let signals_noise = PositionSignals { z_gps_cm: 13_000, s_cm: 10_500 };
+        // GPS noise event: raw GPS jumps 20m, Kalman filters to 5m
+        // Use divergence < 2000 cm to avoid fallback logic (13000 - 10500 = 2500 would trigger fallback)
+        let signals_noise = PositionSignals { z_gps_cm: 12_000, s_cm: 10_500 };
         let scores_noise = super::compute_feature_scores(signals_noise, 0, &stop, 6, &g_lut, &l_lut);
 
         // F1 should drop significantly (raw GPS noise)

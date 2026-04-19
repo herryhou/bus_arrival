@@ -185,11 +185,12 @@ impl<'a> LocalizationState<'a> {
 
         match result {
             gps_processor::kalman::ProcessResult::Valid { signals, v_cms, seg_idx: _ } => {
-                let shared::PositionSignals { z_gps_cm: _, s_cm } = signals;
+                let shared::PositionSignals { z_gps_cm, s_cm } = signals;
                 Some(gps::GpsRecord::new(
                     gps.timestamp,
                     gps.lat,
                     gps.lon,
+                    z_gps_cm,
                     s_cm,
                     v_cms,
                     Some(gps.heading_cdeg),
@@ -197,10 +198,12 @@ impl<'a> LocalizationState<'a> {
                 ))
             }
             gps_processor::kalman::ProcessResult::DrOutage { s_cm, v_cms } => {
+                // During DR outage, z_gps_cm = s_cm (no new GPS projection)
                 Some(gps::GpsRecord::new(
                     gps.timestamp,
                     gps.lat,
                     gps.lon,
+                    s_cm, // z_gps_cm = s_cm during DR
                     s_cm,
                     v_cms,
                     None,
@@ -208,10 +211,12 @@ impl<'a> LocalizationState<'a> {
                 ))
             }
             gps_processor::kalman::ProcessResult::OffRoute { last_valid_s, last_valid_v } => {
+                // During off-route, z_gps_cm = frozen position
                 Some(gps::GpsRecord::new(
                     gps.timestamp,
                     gps.lat,
                     gps.lon,
+                    last_valid_s, // z_gps_cm = frozen position
                     last_valid_s,
                     last_valid_v,
                     None,
@@ -325,12 +330,22 @@ impl DetectionState {
             let stop = &stops[*idx];
             let stop_state = &mut self.stop_states[*idx];
 
-            // Compute probability
-            let probability = detection::probability::compute_probability(
-                s_cm,
+            // Compute probability using PositionSignals for phantom arrival prevention
+            let signals = shared::PositionSignals::new(record.z_gps_cm, record.s_cm);
+            let gps_status = match record.status {
+                "valid" => detection::probability::GpsStatus::Valid,
+                "dr_outage" => detection::probability::GpsStatus::DrOutage,
+                "off_route" => detection::probability::GpsStatus::OffRoute,
+                _ => detection::probability::GpsStatus::Valid,
+            };
+            let probability = detection::probability::compute_arrival_probability(
+                signals,
                 v_cms,
-                stop.progress_cm,
+                stop,
                 stop_state.dwell_time_s,
+                gps_status,
+                &detection::probability::gaussian_lut(),
+                &detection::probability::logistic_lut(),
             );
 
             // Update state machine

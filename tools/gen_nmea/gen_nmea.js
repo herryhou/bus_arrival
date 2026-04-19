@@ -40,7 +40,7 @@ const GENERATE_SCHEMA = {
     "scenario": {
       "type": "string",
       "description": "Simulation scenario preset",
-      "enum": ["normal", "drift", "jump", "outage", "shortcut"],
+      "enum": ["normal", "drift", "jump", "outage", "shortcut", "detour"],
       "default": "normal"
     },
     "shortcut_from_stop": {
@@ -52,6 +52,31 @@ const GENERATE_SCHEMA = {
       "type": "number",
       "description": "Ending stop index for shortcut (0-based, only used when scenario=shortcut)",
       "default": 5
+    },
+    "detour_from_stop": {
+      "type": "number",
+      "description": "Starting stop index for detour (0-based, only used when scenario=detour)",
+      "default": 1
+    },
+    "detour_to_stop": {
+      "type": "number",
+      "description": "Ending stop index for detour (0-based, only used when scenario=detour)",
+      "default": 6
+    },
+    "detour_waypoint_lat": {
+      "type": "number",
+      "description": "Waypoint latitude for detour (only used when scenario=detour)",
+      "default": 24.99207
+    },
+    "detour_waypoint_lon": {
+      "type": "number",
+      "description": "Waypoint longitude for detour (only used when scenario=detour)",
+      "default": 121.29562
+    },
+    "detour_duration_s": {
+      "type": "number",
+      "description": "Duration of detour in seconds (only used when scenario=detour)",
+      "default": 60
     },
     "outage_start_seg": {
       "type": "number",
@@ -137,6 +162,11 @@ function parseArgs(argv) {
     outage_end_seg: 17,
     shortcut_from_stop: 1,
     shortcut_to_stop: 5,
+    detour_from_stop: 1,
+    detour_to_stop: 6,
+    detour_waypoint_lat: 24.99207,
+    detour_waypoint_lon: 121.29562,
+    detour_duration_s: 60,
     out_nmea: 'test.nmea',
     out_gt: 'ground_truth.json',
   };
@@ -196,6 +226,26 @@ function parseArgs(argv) {
       args.shortcut_to_stop = parseInt(argv[++i]);
       continue;
     }
+    if (arg === '--detour-from-stop') {
+      args.detour_from_stop = parseInt(argv[++i]);
+      continue;
+    }
+    if (arg === '--detour-to-stop') {
+      args.detour_to_stop = parseInt(argv[++i]);
+      continue;
+    }
+    if (arg === '--detour-waypoint-lat') {
+      args.detour_waypoint_lat = parseFloat(argv[++i]);
+      continue;
+    }
+    if (arg === '--detour-waypoint-lon') {
+      args.detour_waypoint_lon = parseFloat(argv[++i]);
+      continue;
+    }
+    if (arg === '--detour-duration-s') {
+      args.detour_duration_s = parseInt(argv[++i]);
+      continue;
+    }
 
     // Check for global flags first
     if (arg === '--json') {
@@ -253,7 +303,10 @@ function parseArgs(argv) {
     if (arg.startsWith('--')) {
       // Convert hyphenated to snake_case for known options
       const knownOptions = ['route', 'stops', 'scenario', 'outage-start-seg', 'outage-end-seg', 'out-nmea', 'out-gt',
-                            'outage_start_seg', 'outage_end_seg', 'out_nmea', 'out_gt', 'json-payload'];
+                            'outage_start_seg', 'outage_end_seg', 'out_nmea', 'out_gt', 'json-payload',
+                            'shortcut-from-stop', 'shortcut-to-stop', 'shortcut_from_stop', 'shortcut_to_stop',
+                            'detour-from-stop', 'detour-to-stop', 'detour-waypoint-lat', 'detour-waypoint-lon', 'detour-duration-s',
+                            'detour_from_stop', 'detour_to_stop', 'detour_waypoint_lat', 'detour_waypoint_lon', 'detour_duration_s'];
       if (!knownOptions.includes(arg.slice(2)) && !knownOptions.includes(arg.replace(/-/g, '_').slice(2))) {
         exitError(1, `Unknown option: ${arg}`, [`Use --help for usage information`]);
       }
@@ -265,11 +318,12 @@ function parseArgs(argv) {
 // ─── 常數 / 場景設定 ─────────────────────────────────────────────────────────
 
 const SCENARIOS = {
-  normal: { hdop: 3.5, sigmaM: 15, sigmaHeading: 5.0, sats: 8, jump: false, outage: false, canyon: false, shortcut: false },
-  drift: { hdop: 7.0, sigmaM: 35, sigmaHeading: 15.0, sats: 5, jump: false, outage: false, canyon: true, shortcut: false },
-  jump: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: true, outage: false, canyon: false, shortcut: false },
-  outage: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: false, outage: true, canyon: false, shortcut: false },
-  shortcut: { hdop: 3.5, sigmaM: 15, sigmaHeading: 5.0, sats: 8, jump: false, outage: false, canyon: false, shortcut: true },
+  normal: { hdop: 3.5, sigmaM: 15, sigmaHeading: 5.0, sats: 8, jump: false, outage: false, canyon: false, shortcut: false, detour: false },
+  drift: { hdop: 7.0, sigmaM: 35, sigmaHeading: 15.0, sats: 5, jump: false, outage: false, canyon: true, shortcut: false, detour: false },
+  jump: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: true, outage: false, canyon: false, shortcut: false, detour: false },
+  outage: { hdop: 3.5, sigmaM: 18, sigmaHeading: 5.0, sats: 8, jump: false, outage: true, canyon: false, shortcut: false, detour: false },
+  shortcut: { hdop: 3.5, sigmaM: 15, sigmaHeading: 5.0, sats: 8, jump: false, outage: false, canyon: false, shortcut: true, detour: false },
+  detour: { hdop: 3.5, sigmaM: 15, sigmaHeading: 5.0, sats: 8, jump: false, outage: false, canyon: false, shortcut: false, detour: true },
 };
 
 const CRUISE_KMH = 28;
@@ -480,7 +534,7 @@ function simulate(route, cfg) {
   const segs = buildSegments(route_points, stops, traffic_lights || []);
   const totalDist = segs.reduce((s, g) => s + g.dist, 0);
 
-  const { hdop, sigmaM, sigmaHeading, sats, outageStartSeg, outageEndSeg, shortcut, shortcutFromStop, shortcutToStop } = cfg;
+  const { hdop, sigmaM, sigmaHeading, sats, outageStartSeg, outageEndSeg, shortcut, shortcutFromStop, shortcutToStop, detour, detourFromStop, detourToStop, detourWaypointLat, detourWaypointLon, detourDurationS } = cfg;
   const noiseN = new AR1Noise(sigmaM);
   const noiseE = new AR1Noise(sigmaM);
   const noiseHeading = new AR1Noise(sigmaHeading);
@@ -542,6 +596,10 @@ function simulate(route, cfg) {
   let shortcutActive = false;
   let shortcutCompleted = false;
 
+  // Detour state
+  let detourActive = false;
+  let detourCompleted = false;
+
   for (let si = 0; si < segs.length; si++) {
     const seg = segs[si];
     const isOutage = cfg.outage && si >= outageStartSeg && si <= outageEndSeg;
@@ -596,6 +654,65 @@ function simulate(route, cfg) {
       groundTruth.push({ stop_idx: stopSeqIdx, lat: toLat, lon: toLon, timestamp: ts, phase: 'shortcut_end', event: 're_acquisition', off_route_duration_s: offRouteDuration });
     }
 
+    // Check for detour trigger
+    if (detour && !detourActive && !detourCompleted && seg.stopBefore && stopIndexMap[si] === detourFromStop) {
+      detourActive = true;
+      console.log(`Detour triggered at stop ${detourFromStop}, going via waypoint (${detourWaypointLat}, ${detourWaypointLon}) to stop ${detourToStop}`);
+
+      // Get coordinates from route points
+      const fromRoutePointIdx = stops[detourFromStop];
+      const toRoutePointIdx = stops[detourToStop];
+
+      const fromLat = route_points[fromRoutePointIdx][0];
+      const fromLon = route_points[fromRoutePointIdx][1];
+      const toLat = route_points[toRoutePointIdx][0];
+      const toLon = route_points[toRoutePointIdx][1];
+
+      // Calculate detour distances and bearings
+      const leg1Dist = haversine([fromLat, fromLon], [detourWaypointLat, detourWaypointLon]);
+      const leg1Bearing = bearing([fromLat, fromLon], [detourWaypointLat, detourWaypointLon]);
+      const leg2Dist = haversine([detourWaypointLat, detourWaypointLon], [toLat, toLon]);
+      const leg2Bearing = bearing([detourWaypointLat, detourWaypointLon], [toLat, toLon]);
+      const totalDetourDist = leg1Dist + leg2Dist;
+
+      console.log(`Detour leg1: ${leg1Dist.toFixed(0)}m, bearing ${leg1Bearing.toFixed(1)}°`);
+      console.log(`Detour leg2: ${leg2Dist.toFixed(0)}m, bearing ${leg2Bearing.toFixed(1)}°`);
+      console.log(`Total detour distance: ${totalDetourDist.toFixed(0)}m, target duration: ${detourDurationS}s`);
+
+      // Dwell at from_stop before detour
+      emitStatic([fromLat, fromLon], leg1Bearing, false);
+      groundTruth.push({ stop_idx: stopSeqIdx, lat: fromLat, lon: fromLon, timestamp: ts - STOP_DWELL_S, phase: 'detour_start', event: 'departure_detour' });
+
+      // Generate GPS points along detour leg 1 (from_stop -> waypoint)
+      const detourStartTS = ts;
+      const speedMs = totalDetourDist / detourDurationS; // Constant speed to match duration
+      let traveled = 0;
+
+      while (traveled < leg1Dist) {
+        const step = Math.min(speedMs, leg1Dist - traveled);
+        traveled += step;
+        const frac = traveled / leg1Dist;
+        const lat = fromLat + (detourWaypointLat - fromLat) * frac;
+        const lon = fromLon + (detourWaypointLon - fromLon) * frac;
+        emitGPS(lat, lon, speedMs, leg1Bearing, false);
+      }
+
+      // Leg 2 (waypoint -> to_stop)
+      traveled = 0;
+      while (traveled < leg2Dist) {
+        const step = Math.min(speedMs, leg2Dist - traveled);
+        traveled += step;
+        const frac = traveled / leg2Dist;
+        const lat = detourWaypointLat + (toLat - detourWaypointLat) * frac;
+        const lon = detourWaypointLon + (toLon - detourWaypointLon) * frac;
+        emitGPS(lat, lon, speedMs, leg2Bearing, false);
+      }
+
+      const offRouteDuration = ts - detourStartTS;
+      console.log(`Detour duration: ${offRouteDuration}s`);
+      groundTruth.push({ stop_idx: stopSeqIdx, lat: toLat, lon: toLon, timestamp: ts, phase: 'detour_end', event: 're_acquisition', off_route_duration_s: offRouteDuration });
+    }
+
     // Skip segments during shortcut (we've already injected GPS)
     if (shortcutActive) {
       if (seg.stopBefore && stopIndexMap[si] === shortcutToStop) {
@@ -605,6 +722,19 @@ function simulate(route, cfg) {
         // Continue processing this segment normally
       } else {
         // Skip this segment during shortcut
+        continue;
+      }
+    }
+
+    // Skip segments during detour (we've already injected GPS)
+    if (detourActive) {
+      if (seg.stopBefore && stopIndexMap[si] === detourToStop) {
+        detourActive = false;
+        detourCompleted = true;
+        console.log(`Detour completed at stop ${detourToStop}, resuming normal route`);
+        // Continue processing this segment normally
+      } else {
+        // Skip this segment during detour
         continue;
       }
     }
@@ -806,6 +936,15 @@ function cmdGenerate(args) {
   if (args.scenario === 'shortcut') {
     cfg.shortcutFromStop = args.shortcut_from_stop;
     cfg.shortcutToStop = args.shortcut_to_stop;
+  }
+
+  // Add custom detour parameters for detour scenario
+  if (args.scenario === 'detour') {
+    cfg.detourFromStop = args.detour_from_stop;
+    cfg.detourToStop = args.detour_to_stop;
+    cfg.detourWaypointLat = args.detour_waypoint_lat;
+    cfg.detourWaypointLon = args.detour_waypoint_lon;
+    cfg.detourDurationS = args.detour_duration_s;
   }
 
   // Load route file
