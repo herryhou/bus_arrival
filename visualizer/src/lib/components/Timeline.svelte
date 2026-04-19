@@ -28,6 +28,7 @@
 	let currentTimePercent = $derived.by(() =>
 		timeMax > timeMin ? ((currentTime - timeMin) / (timeMax - timeMin)) * 100 : 0
 	);
+	let timeOffset = $derived.by(() => Math.round(currentTime - timeMin));
 
 	// Format time for display
 	function formatTime(seconds: number): string {
@@ -48,7 +49,7 @@
 	}
 
 	// Keyboard handler
-	const SEEK_AMOUNT = 5; // seconds
+	const SEEK_AMOUNT = 1; // seconds
 
 	onMount(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
@@ -111,7 +112,7 @@
 		</div>
 
 		<div class="time-info">
-			<span class="current">{formatTime(currentTime)}</span>
+			<span class="current">{formatTime(currentTime)} ({timeOffset})</span>
 			<span class="sep">/</span>
 			<span class="total">{formatTime(timeMax)}</span>
 		</div>

@@ -13,6 +13,7 @@
 
 	interface LogEvent {
 		time: number;
+		timeDiff: number;
 		type: EventType;
 		message: string;
 		stopIdx?: number;
@@ -23,8 +24,11 @@
 	let events = $derived.by(() => {
 		const log: LogEvent[] = [];
 		let lastStates = new Map<number, FsmState>();
+		let lastTime = 0;
 
 		traceData.forEach((record, i) => {
+			const timeDiff = record.time - lastTime;
+			lastTime = record.time;
 			// 1. GPS Jump
 			if (record.gps_jump) {
 				log.push({
@@ -50,6 +54,7 @@
 				if (lastState && lastState !== stop.fsm_state) {
 					log.push({
 						time: record.time,
+						timeDiff,
 						type: 'TRANSITION',
 						message: `Stop ${stop.stop_idx}: ${lastState} → ${stop.fsm_state}`,
 						stopIdx: stop.stop_idx,
@@ -62,6 +67,7 @@
 				if (stop.just_arrived) {
 					log.push({
 						time: record.time,
+						timeDiff,
 						type: 'ARRIVAL',
 						message: `Stop ${stop.stop_idx}: ARRIVED!`,
 						stopIdx: stop.stop_idx
@@ -101,7 +107,7 @@
 				}}
 			>
 				<div class="event-meta">
-					<span class="event-time">{formatTime(event.time)}</span>
+					<span class="event-time">{formatTime(event.time)} ({event.timeDiff})</span>
 					<span class="event-badge">{event.type}</span>
 				</div>
 				<div class="event-message">{event.message}</div>
