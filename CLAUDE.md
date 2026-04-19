@@ -4,13 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Source of Truth
 
-**Primary:** `docs/bus_arrival_tech_report_v8.md` - Complete system design, algorithms, and constraints for the GPS-based bus arrival detection system.
+**LLM Specs (READ THESE FIRST):**
+- `docs/SPEC.md` — Master spec index with task→spec mapping
+- `docs/specs/00-constraints.md` — **MUST read before any work** — Integer-only, semantic types, budgets
 
-**Binary Format:** `docs/spatial_grid_binary_format.md` + `crates/shared/src/binfile.rs` - Grid index v5.1 format (sparse bitmask + u16 offsets, XIP support)
+**Implementation Details:**
+- `docs/specs/*.md` — Module-specific specs (map matching, Kalman, detection, etc.)
+
+**Background Reading (not for implementation):**
+- `docs/bus_arrival_tech_report_v8.md` — Algorithm explanations (why things work)
+- `docs/spatial_grid_binary_format.md` — Grid index v5.1 format details
 
 **Related:**
-- `docs/dev_guide.md` - Embedded Rust development guide for RP2350 (no_std, embassy-rp)
-- `docs/arrival_detector_test.md` - BDD-style test plan and validation approach
+- `docs/dev_guide.md` — Embedded Rust development guide for RP2350 (no_std, embassy-rp)
+- `docs/arrival_detector_test.md` — BDD-style test plan and validation approach
 
 ## Build Commands
 
