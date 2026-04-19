@@ -32,6 +32,8 @@ FIRMWARE_ELF := target/thumbv8m.main-none-eabi/release/pico2-firmware
 # Route configuration (can be overridden)
 ROUTE_NAME ?= ty225
 SCENARIO ?= normal
+SHORTCUT_FROM_STOP ?= 1
+SHORTCUT_TO_STOP ?= 5
 
 # Input files
 ROUTE_JSON := $(DATA_DIR)/$(ROUTE_NAME)_route.json
@@ -40,6 +42,7 @@ STOPS_JSON := $(DATA_DIR)/$(ROUTE_NAME)_stops.json
 # Output files (named by route and scenario)
 NMEA_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_nmea.txt
 ROUTE_DATA_BIN := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO).bin
+GROUND_TRUTH_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_gt.json
 # SIMULATOR_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_sim.json  # Deprecated
 DETECTOR_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_arrivals.json
 TRACE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_trace.jsonl
@@ -123,8 +126,11 @@ gen_nmea:
 		--route $(ROUTE_JSON) \
 		--stops $(STOPS_JSON) \
 		--scenario $(SCENARIO) \
-		--out_nmea $(NMEA_OUT)
+		--out_nmea $(NMEA_OUT) \
+		--out_gt $(GROUND_TRUTH_OUT) \
+		$(if $(filter shortcut,$(SCENARIO)),--shortcut-from-stop $(SHORTCUT_FROM_STOP) --shortcut-to-stop $(SHORTCUT_TO_STOP))
 	@echo "Generated: $(NMEA_OUT)"
+	@echo "Generated: $(GROUND_TRUTH_OUT)"
 
 # Preprocess route and stops into binary route data
 preprocess:
