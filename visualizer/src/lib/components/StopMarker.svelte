@@ -9,9 +9,12 @@
     fsmState: FsmState | null;
     isSelected: boolean;
     isHovered: boolean;
+    onstopclick?: (e: CustomEvent<{ stopIndex: number }>) => void;
+    onstophover?: (e: CustomEvent<{ stopIndex: number }>) => void;
+    onstophoverend?: (e: CustomEvent<{ stopIndex: number }>) => void;
   }
 
-  let { stopIndex, probability, fsmState, isSelected, isHovered }: Props = $props();
+  let { stopIndex, probability, fsmState, isSelected, isHovered, onstopclick, onstophover, onstophoverend }: Props = $props();
 
   const color = $derived(getProbabilityColor(probability));
   const stateColor = $derived(fsmState ? FSM_STATE_COLORS[fsmState] : '#666');
@@ -23,6 +26,7 @@
       detail: { stopIndex }
     });
     dispatchEvent(event);
+    onstopclick?.(event);
   }
 
   function dispatchHover() {
@@ -31,6 +35,7 @@
       detail: { stopIndex }
     });
     dispatchEvent(event);
+    onstophover?.(event);
   }
 
   function dispatchHoverEnd() {
@@ -39,6 +44,7 @@
       detail: { stopIndex }
     });
     dispatchEvent(event);
+    onstophoverend?.(event);
   }
 </script>
 
