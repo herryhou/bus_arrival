@@ -109,18 +109,18 @@
 
     <!-- Stops -->
     <div class="stops-row">
-      {#each routeData.stops as stop (stop.progress_cm)}
-        {@const stopState = getStopState(routeData.stops.indexOf(stop))}
-        {@const isHighlighted = highlightedEvent?.stopIdx === routeData.stops.indexOf(stop)}
-        {@const isHovered = hoveredStop === routeData.stops.indexOf(stop)}
-        {@const isSelected = false} // Will be passed from parent
+      {#each routeData.stops as stop, stopIndex (stopIndex)}
+        {@const stopState = getStopState(stopIndex)}
+        {@const isHighlighted = highlightedEvent?.stopIdx === stopIndex}
+        {@const isHovered = hoveredStop === stopIndex}
+        {@const isSelected = false}
 
         <div
           class="stop-wrapper"
           style="left: {progressToPercent(stop.progress_cm)}%"
         >
           <StopMarker
-            stopIndex={routeData.stops.indexOf(stop)}
+            {stopIndex}
             probability={stopState?.probability ?? 0}
             fsmState={stopState?.fsm_state ?? null}
             isSelected={isHighlighted}
