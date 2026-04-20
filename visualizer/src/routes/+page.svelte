@@ -6,9 +6,10 @@
 	import CompactSidebar from '$lib/components/CompactSidebar.svelte';
 	import LinearRouteWidget from '$lib/components/LinearRouteWidget.svelte';
 	import Timeline from '$lib/components/Timeline.svelte';
+	import UploadScreen from '$lib/components/UploadScreen.svelte';
 	import type { RouteData, TraceData, FsmState } from '$lib/types';
-	import { loadRouteData, getInterpolatedBusState } from '$lib/parsers/routeData';
-	import { loadTraceFile, getTraceTimeRange } from '$lib/parsers/trace';
+	import { getInterpolatedBusState } from '$lib/parsers/routeData';
+	import { getTraceTimeRange } from '$lib/parsers/trace';
 
 	let routeData = $state<RouteData | null>(null);
 	let traceData = $state<TraceData | null>(null);
@@ -32,12 +33,7 @@
 	let isPlaying = $state(false);
 	let playbackSpeed = $state(1); // 1x, 2x, 5x, 10x
 
-	let routeFileInput = $state<HTMLInputElement | null>(null);
-	let traceFileInput = $state<HTMLInputElement | null>(null);
-
 	let showUpload = $state(true);
-	let loading = $state(false);
-	let error = $state<string | null>(null);
 
 	// Playback timer
 	onMount(() => {
@@ -59,42 +55,13 @@
 		return () => clearInterval(interval);
 	});
 
-	async function handleRouteUpload() {
-		const file = routeFileInput?.files?.[0];
-		if (!file) return;
-		loading = true;
-		try {
-			routeData = await loadRouteData(file);
-			routeFileName = file.name;
-			checkReady();
-		} catch (e) {
-			error = `Failed to load route: ${e instanceof Error ? e.message : String(e)}`;
-		} finally {
-			loading = false;
-		}
-	}
-
-	async function handleTraceUpload() {
-		const file = traceFileInput?.files?.[0];
-		if (!file) return;
-		loading = true;
-		try {
-			traceData = await loadTraceFile(file);
-			[timeMin, timeMax] = getTraceTimeRange(traceData);
-			currentTime = timeMin;
-			currentTimePercent = 0;
-			checkReady();
-		} catch (e) {
-			error = `Failed to load trace: ${e instanceof Error ? e.message : String(e)}`;
-		} finally {
-			loading = false;
-		}
-	}
-
-	function checkReady() {
-		if (routeData && traceData) {
-			showUpload = false;
-		}
+	function handleDataLoad(data: { routeData: RouteData; traceData: TraceData }) {
+		routeData = data.routeData;
+		traceData = data.traceData;
+		[timeMin, timeMax] = getTraceTimeRange(traceData);
+		currentTime = timeMin;
+		currentTimePercent = 0;
+		showUpload = false;
 	}
 
 	function handleSeek(time: number) {
@@ -118,7 +85,7 @@
 	const currentRecord = $derived.by(() => {
 		if (!traceData || traceData.length === 0) return null;
 		// Binary search or closest record for better performance
-		return traceData.reduce((prev, curr) => 
+		return traceData.reduce((prev, curr) =>
 			Math.abs(curr.time - currentTime) < Math.abs(prev.time - currentTime) ? curr : prev
 		);
 	});
@@ -144,7 +111,6 @@
 		selectedStop = null;
 		routeFileName = null;
 		showUpload = true;
-		error = null;
 	}
 
 	function handleEventClick(info: { time: number; stopIdx?: number; state?: FsmState }) {
@@ -165,36 +131,7 @@
 
 <div class="app-container dark">
 	{#if showUpload}
-		<div class="upload-screen">
-			<div class="upload-card">
-				<h1 class="title">Bus Arrival Lab</h1>
-				<p class="subtitle">Scientific Arrival Detection Visualization</p>
-
-				{#if error}
-					<div class="error-banner">{error}</div>
-				{/if}
-
-				<div class="upload-section">
-					<div class="upload-item">
-						<label for="route-file" class="file-label">
-							<div class="label-text">Route Data (.bin)</div>
-						</label>
-						<input bind:this={routeFileInput} id="route-file" type="file" accept=".bin" onchange={handleRouteUpload} class="file-input" />
-						{#if routeData}<div class="status-badge success">READY</div>{/if}
-					</div>
-
-					<div class="upload-item">
-						<label for="trace-file" class="file-label">
-							<div class="label-text">Trace Data (.jsonl)</div>
-						</label>
-						<input bind:this={traceFileInput} id="trace-file" type="file" accept=".jsonl" onchange={handleTraceUpload} class="file-input" />
-						{#if traceData}<div class="status-badge success">READY</div>{/if}
-					</div>
-				</div>
-
-				{#if loading}<div class="loading">Parsing binary structures...</div>{/if}
-			</div>
-		</div>
+		<UploadScreen onLoad={handleDataLoad} />
 	{:else}
 		<div class="dashboard-layout">
 			<!-- Header -->
@@ -218,7 +155,7 @@
 							{busPosition}
 							{selectedStop}
 							{highlightedEvent}
-							onStopClick={(idx) => selectedStop = idx}
+							onStopClick={(idx: number) => selectedStop = idx}
 							onClearHighlight={clearHighlight}
 							bind:this={mapViewRef}
 						/>
@@ -258,17 +195,20 @@
 					{/if}
 				</section>
 
-				<!-- Linear Route Panel -->
-				<section class="panel linear-route-panel">
-					{#if routeData && currentRecord}
-						<LinearRouteWidget
-							{routeData}
-							busProgress={currentRecord.s_cm}
-							busSpeed={currentRecord.v_cms}
-							{highlightedEvent}
-						/>
-					{/if}
-				</section>
+					<!-- Linear Route Panel -->
+					<section class="panel linear-route-panel">
+						{#if routeData && currentRecord}
+							<LinearRouteWidget
+								{routeData}
+								busProgress={currentRecord.s_cm}
+								busSpeed={currentRecord.v_cms}
+								{highlightedEvent}
+								{traceData}
+								{currentTime}
+								onStopClick={(idx: number) => selectedStop = idx}
+							/>
+						{/if}
+					</section>
 			</main>
 
 			<!-- Bottom: Timeline & Playback -->
@@ -305,42 +245,6 @@
 		flex-direction: column;
 		font-family: 'JetBrains Mono', 'Monaco', monospace;
 	}
-
-	/* Upload Screen */
-	.upload-screen {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		height: 100%;
-	}
-
-	.upload-card {
-		background-color: #1a1a1a;
-		border: 1px solid #333;
-		border-radius: 0.5rem;
-		padding: 2.5rem;
-		width: 450px;
-		text-align: center;
-		box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-	}
-
-	.title { font-size: 1.5rem; margin-bottom: 0.5rem; color: #fff; }
-	.subtitle { font-size: 0.875rem; color: #666; margin-bottom: 2rem; }
-
-	.upload-section { display: flex; flex-direction: column; gap: 1rem; }
-	.upload-item {
-		background-color: #111;
-		border: 1px dashed #444;
-		border-radius: 0.25rem;
-		padding: 1rem;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-
-	.file-label { cursor: pointer; color: #3b82f6; font-size: 0.875rem; }
-	.file-input { display: none; }
-	.status-badge.success { color: #22c55e; font-size: 0.75rem; font-weight: bold; }
 
 	/* Dashboard Layout */
 	.dashboard-layout {
