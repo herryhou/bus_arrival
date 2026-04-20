@@ -101,16 +101,16 @@ fn test_off_route_confirms_after_5_ticks() {
 
         match i {
             1..=4 => {
-                // First 4 ticks should NOT trigger OffRoute
+                // First 4 ticks should NOT trigger OffRoute yet
                 assert!(
                     !matches!(result, ProcessResult::OffRoute { .. }),
                     "Tick {} should NOT trigger OffRoute yet",
                     i
                 );
-                // Should still get Valid result (with noisy position)
+                // During suspect state, should return DrOutage with frozen position
                 assert!(
-                    matches!(result, ProcessResult::Valid { .. }),
-                    "Tick {} should return Valid",
+                    matches!(result, ProcessResult::DrOutage { .. }),
+                    "Tick {} should return DrOutage (suspect state)",
                     i
                 );
                 // Verify suspect counter is incrementing

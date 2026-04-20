@@ -233,10 +233,8 @@ pub fn process_gps_update(
         }
 
         // No recovery needed or recovery failed, continue normal processing
-        // Clear frozen state since GPS is now valid
-        state.frozen_s_cm = None;
-        state.off_route_suspect_ticks = 0;
-        state.off_route_clear_ticks = 0;
+        // NOTE: Don't clear frozen_s_cm or counters here - let hysteresis logic handle it
+        // The counters will be cleared after 2 consecutive good ticks (lines 151-154)
     }
 
     if is_first_fix {
