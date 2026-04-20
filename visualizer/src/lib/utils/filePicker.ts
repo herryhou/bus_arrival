@@ -26,7 +26,7 @@ export function isFileSystemAccessAPISupported(): boolean {
 /**
  * Extract basename from filename (without extension)
  */
-function extractBasename(filename: string): string {
+export function extractBasename(filename: string): string {
   const lastDot = filename.lastIndexOf('.');
   return lastDot >= 0 ? filename.substring(0, lastDot) : filename;
 }
@@ -34,7 +34,7 @@ function extractBasename(filename: string): string {
 /**
  * Generate possible trace filenames from route basename
  */
-function generateTraceFilenames(routeBasename: string): string[] {
+export function generateTraceFilenames(routeBasename: string): string[] {
   return [
     `${routeBasename}_trace.jsonl`,
     `${routeBasename}.jsonl`,
