@@ -20,6 +20,7 @@ export interface FilePickerOptions {
  * Check if File System Access API is supported
  */
 export function isFileSystemAccessAPISupported(): boolean {
+  if (typeof window === 'undefined') return false;
   return 'showOpenFilePicker' in window;
 }
 
