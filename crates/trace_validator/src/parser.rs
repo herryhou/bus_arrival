@@ -73,7 +73,7 @@ mod tests {
     #[test]
     fn test_parse_trace_valid_record() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
-        let json_line = r#"{"time":1,"lat":25.0,"lon":121.0,"s_cm":0,"v_cms":100,"heading_cdeg":0,"active_stops":[0],"stop_states":[{"stop_idx":0,"distance_cm":-7000,"fsm_state":"Approaching","dwell_time_s":0,"probability":10,"features":{"p1":5,"p2":3,"p3":2,"p4":0},"just_arrived":false}],"gps_jump":false,"recovery_idx":null}"#;
+        let json_line = r#"{"time":1,"lat":25.0,"lon":121.0,"s_cm":0,"v_cms":100,"heading_cdeg":0,"active_stops":[0],"stop_states":[{"stop_idx":0,"gps_distance_cm":-7000,"progress_distance_cm":-7000,"fsm_state":"Approaching","dwell_time_s":0,"probability":10,"features":{"p1":5,"p2":3,"p3":2,"p4":0},"just_arrived":false}],"gps_jump":false,"recovery_idx":null,"segment_idx":0,"heading_constraint_met":true,"divergence_cm":5,"hdop":1.5,"num_sats":12,"fix_type":"3d","variance_cm2":100,"corridor_start_cm":null,"corridor_end_cm":null,"next_stop":null}"#;
         writeln!(file, "{}", json_line).unwrap();
 
         let result = Parser::parse_trace(file.path()).unwrap();
@@ -81,5 +81,13 @@ mod tests {
         assert_eq!(result[0].time, 1);
         assert_eq!(result[0].stop_states.len(), 1);
         assert_eq!(result[0].stop_states[0].features.p1, 5);
+        // Verify new fields
+        assert_eq!(result[0].segment_idx, Some(0));
+        assert_eq!(result[0].heading_constraint_met, true);
+        assert_eq!(result[0].divergence_cm, 5);
+        assert_eq!(result[0].hdop, Some(1.5));
+        assert_eq!(result[0].num_sats, Some(12));
+        assert_eq!(result[0].fix_type, Some("3d".to_string()));
+        assert_eq!(result[0].variance_cm2, 100);
     }
 }

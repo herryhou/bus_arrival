@@ -3,10 +3,10 @@ use tempfile::NamedTempFile;
 
 #[test]
 fn test_basic_trace_validation() {
-    // Create sample trace file
+    // Create sample trace file with new required fields
     let mut trace_file = NamedTempFile::new().unwrap();
-    writeln!(trace_file, r#"{{"time":1,"lat":25.0,"lon":121.0,"s_cm":0,"v_cms":100,"heading_cdeg":0,"active_stops":[0],"stop_states":[{{"stop_idx":0,"distance_cm":-7000,"fsm_state":"Approaching","dwell_time_s":0,"probability":10,"features":{{"p1":5,"p2":3,"p3":2,"p4":0}},"just_arrived":false}}],"gps_jump":false,"recovery_idx":null}}"#).unwrap();
-    writeln!(trace_file, r#"{{"time":10,"lat":25.001,"lon":121.001,"s_cm":500,"v_cms":50,"heading_cdeg":0,"active_stops":[0],"stop_states":[{{"stop_idx":0,"distance_cm":0,"fsm_state":"AtStop","dwell_time_s":1,"probability":255,"features":{{"p1":10,"p2":10,"p3":10,"p4":10}},"just_arrived":true}}],"gps_jump":false,"recovery_idx":null}}"#).unwrap();
+    writeln!(trace_file, r#"{{"time":1,"lat":25.0,"lon":121.0,"s_cm":0,"v_cms":100,"heading_cdeg":0,"active_stops":[0],"stop_states":[{{"stop_idx":0,"gps_distance_cm":-7000,"progress_distance_cm":-7000,"fsm_state":"Approaching","dwell_time_s":0,"probability":10,"features":{{"p1":5,"p2":3,"p3":2,"p4":0}},"just_arrived":false}}],"gps_jump":false,"recovery_idx":null,"segment_idx":0,"heading_constraint_met":true,"divergence_cm":5,"hdop":1.5,"num_sats":12,"fix_type":"3d","variance_cm2":100,"corridor_start_cm":null,"corridor_end_cm":null,"next_stop":null}}"#).unwrap();
+    writeln!(trace_file, r#"{{"time":10,"lat":25.001,"lon":121.001,"s_cm":500,"v_cms":50,"heading_cdeg":0,"active_stops":[0],"stop_states":[{{"stop_idx":0,"gps_distance_cm":0,"progress_distance_cm":0,"fsm_state":"AtStop","dwell_time_s":1,"probability":255,"features":{{"p1":10,"p2":10,"p3":10,"p4":10}},"just_arrived":true}}],"gps_jump":false,"recovery_idx":null,"segment_idx":1,"heading_constraint_met":true,"divergence_cm":0,"hdop":1.2,"num_sats":14,"fix_type":"3d","variance_cm2":50,"corridor_start_cm":null,"corridor_end_cm":null,"next_stop":null}}"#).unwrap();
 
     let output_file = NamedTempFile::new().unwrap();
 

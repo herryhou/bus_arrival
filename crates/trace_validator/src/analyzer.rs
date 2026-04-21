@@ -127,7 +127,8 @@ mod tests {
             active_stops: vec![0],
             stop_states: vec![StopTraceState {
                 stop_idx: 0,
-                distance_cm: -100,
+                gps_distance_cm: -100,
+                progress_distance_cm: -100,
                 fsm_state: FsmState::Approaching,
                 dwell_time_s: 0,
                 probability: 10,
