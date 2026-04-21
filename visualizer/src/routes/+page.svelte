@@ -3,6 +3,7 @@
 	import MapView from '$lib/components/MapView.svelte';
 	import FsmInspector from '$lib/components/FsmInspector.svelte';
 	import ProbabilityScope from '$lib/components/ProbabilityScope.svelte';
+	import BusDiagnostic from '$lib/components/BusDiagnostic.svelte';
 	import CompactSidebar from '$lib/components/CompactSidebar.svelte';
 	import LinearRouteWidget from '$lib/components/LinearRouteWidget.svelte';
 	import Timeline from '$lib/components/Timeline.svelte';
@@ -34,6 +35,9 @@
 	let playbackSpeed = $state(1); // 1x, 2x, 5x, 10x
 
 	let showUpload = $state(true);
+
+	// Lab panel tab: 'stop' | 'bus'
+	let labTab = $state<'stop' | 'bus'>('stop');
 
 	// Playback timer
 	onMount(() => {
@@ -164,18 +168,42 @@
 
 				<!-- Center: The Lab (Algorithm) -->
 				<section class="panel lab-panel">
+					<!-- Tab buttons -->
+					<div class="lab-tabs">
+						<button
+							class="tab-btn"
+							class:active={labTab === 'stop'}
+							onclick={() => labTab = 'stop'}
+						>
+							Stop Analysis
+						</button>
+						<button
+							class="tab-btn"
+							class:active={labTab === 'bus'}
+							onclick={() => labTab = 'bus'}
+						>
+							Bus Diagnostic
+						</button>
+					</div>
+
+					<!-- Tab content -->
 					<div class="lab-scroll">
-						{#if activeStopState && currentRecord && traceData}
-							<!-- Detailed view for selected stop -->
-							<ProbabilityScope stopState={activeStopState} v_cms={currentRecord.v_cms} />
-							<div class="spacer"></div>
-							<FsmInspector {traceData} {selectedStop} {currentTime} />
+						{#if labTab === 'stop'}
+							{#if activeStopState && currentRecord && traceData}
+								<!-- Detailed view for selected stop -->
+								<ProbabilityScope stopState={activeStopState} v_cms={currentRecord.v_cms} />
+								<div class="spacer"></div>
+								<FsmInspector {traceData} {selectedStop} {currentTime} />
+							{:else}
+								<!-- Empty state when no stop selected -->
+								<div class="empty-lab">
+									<div class="lab-icon">🔬</div>
+									<p>Select a stop from the sidebar to see detailed analysis</p>
+								</div>
+							{/if}
 						{:else}
-							<!-- Empty state when no stop selected -->
-							<div class="empty-lab">
-								<div class="lab-icon">🔬</div>
-								<p>Select a stop from the sidebar to see detailed analysis</p>
-							</div>
+							<!-- Bus Diagnostic tab -->
+							<BusDiagnostic record={currentRecord} />
 						{/if}
 					</div>
 				</section>
@@ -301,6 +329,43 @@
 
 	.sidebar-panel {
 		overflow: hidden;
+	}
+
+	.lab-panel {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.lab-tabs {
+		display: flex;
+		gap: 1px;
+		background-color: #333;
+		border-bottom: 1px solid #333;
+	}
+
+	.tab-btn {
+		flex: 1;
+		padding: 8px 16px;
+		background-color: #1a1a1a;
+		border: none;
+		color: #888;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		cursor: pointer;
+		transition: background-color 0.15s, color 0.15s;
+	}
+
+	.tab-btn:hover {
+		background-color: #222;
+		color: #ccc;
+	}
+
+	.tab-btn.active {
+		background-color: #0a0a0a;
+		color: #22c55e;
+		border-bottom: 2px solid #22c55e;
 	}
 
 	.lab-scroll {
