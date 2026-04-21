@@ -37,14 +37,58 @@ pub struct TraceRecord {
 
     /// Recovery: new stop index if jumped
     pub recovery_idx: Option<u8>,
+
+    // === New: Map matching ===
+    /// Which route segment we're matched to (None if off-route)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segment_idx: Option<u16>,
+
+    /// Did the heading constraint pass? (±90° rule)
+    pub heading_constraint_met: bool,
+
+    // === New: Divergence ===
+    /// Raw GPS projection - Kalman filtered position (cm)
+    /// Positive = GPS ahead of filter, Negative = GPS behind
+    pub divergence_cm: i32,
+
+    // === New: GPS quality ===
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hdop: Option<f32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_sats: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix_type: Option<String>,
+
+    // === New: Kalman state ===
+    /// Position variance (cm²), represents filter uncertainty
+    pub variance_cm2: i32,
+
+    // === New: Corridor info ===
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub corridor_start_cm: Option<i32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub corridor_end_cm: Option<i32>,
+
+    // === New: Next stop (outside corridor) ===
+    /// Next stop index and probability (even if not in corridor)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_stop: Option<(u8, Prob8)>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct StopTraceState {
     pub stop_idx: u8,
 
-    /// Distance to stop (cm)
-    pub distance_cm: DistCm,
+    /// GPS distance to stop (cm) - based on raw GPS projection (z_gps_cm)
+    /// Used for p1 (Feature 1: distance likelihood)
+    pub gps_distance_cm: DistCm,
+
+    /// Progress distance to stop (cm) - based on Kalman-filtered position (s_cm)
+    /// Used for p3 (Feature 3: progress difference likelihood)
+    pub progress_distance_cm: DistCm,
 
     /// FSM state - using FsmState directly lets serde handle serialization
     pub fsm_state: FsmState,

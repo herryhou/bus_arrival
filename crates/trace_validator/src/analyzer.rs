@@ -27,9 +27,9 @@ impl Analyzer {
                     .or_insert_with(|| StopAnalysis::new(stop_idx));
 
                 record_event(analysis, record.time, stop_state.fsm_state,
-                             stop_state.distance_cm, record.s_cm, record.v_cms,
+                             stop_state.progress_distance_cm, record.s_cm, record.v_cms,
                              stop_state.just_arrived);
-                track_corridor(analysis, record.time, stop_state.distance_cm);
+                track_corridor(analysis, record.time, stop_state.progress_distance_cm);
             }
         }
 
@@ -96,6 +96,16 @@ mod tests {
             stop_states: vec![],
             gps_jump: false,
             recovery_idx: None,
+            segment_idx: None,
+            heading_constraint_met: true,
+            divergence_cm: 0,
+            hdop: None,
+            num_sats: None,
+            fix_type: None,
+            variance_cm2: 0,
+            corridor_start_cm: None,
+            corridor_end_cm: None,
+            next_stop: None,
         }];
 
         let result = Analyzer::analyze(records);
@@ -126,6 +136,16 @@ mod tests {
             }],
             gps_jump: false,
             recovery_idx: None,
+            segment_idx: Some(5),
+            heading_constraint_met: true,
+            divergence_cm: 10,
+            hdop: Some(1.2),
+            num_sats: Some(12),
+            fix_type: Some("3d".to_string()),
+            variance_cm2: 100,
+            corridor_start_cm: Some(2000),
+            corridor_end_cm: Some(14000),
+            next_stop: Some((1, 50)),
         }];
 
         let result = Analyzer::analyze(records);
@@ -146,6 +166,16 @@ mod tests {
             stop_states: vec![],
             gps_jump: true,  // GPS jump
             recovery_idx: None,
+            segment_idx: None,
+            heading_constraint_met: false,
+            divergence_cm: 0,
+            hdop: None,
+            num_sats: None,
+            fix_type: None,
+            variance_cm2: 0,
+            corridor_start_cm: None,
+            corridor_end_cm: None,
+            next_stop: None,
         }, TraceRecord {
             time: 2,
             lat: 25.0,
@@ -157,6 +187,16 @@ mod tests {
             stop_states: vec![],
             gps_jump: false,
             recovery_idx: None,
+            segment_idx: Some(0),
+            heading_constraint_met: true,
+            divergence_cm: 5,
+            hdop: None,
+            num_sats: None,
+            fix_type: None,
+            variance_cm2: 50,
+            corridor_start_cm: None,
+            corridor_end_cm: None,
+            next_stop: None,
         }];
 
         let result = Analyzer::analyze(records);

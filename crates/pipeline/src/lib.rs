@@ -91,6 +91,29 @@ pub struct TraceRecord {
     pub recovery_idx: Option<u8>,
     pub status: String,
     pub off_route: bool,
+    // === New: Map matching ===
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segment_idx: Option<u16>,
+    pub heading_constraint_met: bool,
+    // === New: Divergence ===
+    pub divergence_cm: i32,
+    // === New: GPS quality ===
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hdop: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_sats: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix_type: Option<String>,
+    // === New: Kalman state ===
+    pub variance_cm2: i32,
+    // === New: Corridor info ===
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub corridor_start_cm: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub corridor_end_cm: Option<i32>,
+    // === New: Next stop (outside corridor) ===
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_stop: Option<(u8, u8)>,
 }
 
 /// Stop state in trace
@@ -98,22 +121,15 @@ pub struct TraceRecord {
 #[derive(Debug, Clone, ::serde::Serialize)]
 pub struct StopTraceState {
     pub stop_idx: u8,
-    pub distance_cm: i32,
+    /// GPS distance to stop (cm) - based on raw GPS projection (z_gps_cm)
+    pub gps_distance_cm: i32,
+    /// Progress distance to stop (cm) - based on Kalman-filtered position (s_cm)
+    pub progress_distance_cm: i32,
     pub fsm_state: String,
     pub dwell_time_s: u16,
     pub probability: u8,
-    pub features: FeatureScores,
+    pub features: detection::trace::FeatureScores,
     pub just_arrived: bool,
-}
-
-/// Feature scores for probability model
-#[cfg(feature = "std")]
-#[derive(Debug, Clone, ::serde::Serialize)]
-pub struct FeatureScores {
-    pub p1: u8,
-    pub p2: u8,
-    pub p3: u8,
-    pub p4: u8,
 }
 
 /// Announce event
@@ -184,43 +200,64 @@ impl<'a> LocalizationState<'a> {
         self.is_first_fix = false;
 
         match result {
-            gps_processor::kalman::ProcessResult::Valid { signals, v_cms, seg_idx: _ } => {
+            gps_processor::kalman::ProcessResult::Valid { signals, v_cms, seg_idx } => {
                 let shared::PositionSignals { z_gps_cm, s_cm } = signals;
+                let divergence_cm = z_gps_cm as i32 - s_cm as i32;
+                let hdop = if gps.hdop_x10 > 0 { Some(gps.hdop_x10 as f32 / 10.0) } else { None };
                 Some(gps::GpsRecord::new(
                     gps.timestamp,
                     gps.lat,
                     gps.lon,
-                    z_gps_cm,
                     s_cm,
                     v_cms,
                     Some(gps.heading_cdeg),
                     "valid",
+                ).with_diagnostics(
+                    Some(seg_idx as u16),
+                    true,  // heading constraint met (we got Valid result)
+                    divergence_cm,
+                    hdop,
+                    None,  // num_sats not available in GpsPoint
+                    None,  // fix_type not available in GpsPoint
+                    0,     // variance_cm2 not available in KalmanState
                 ))
             }
             gps_processor::kalman::ProcessResult::DrOutage { s_cm, v_cms } => {
-                // During DR outage, z_gps_cm = s_cm (no new GPS projection)
                 Some(gps::GpsRecord::new(
                     gps.timestamp,
                     gps.lat,
                     gps.lon,
-                    s_cm, // z_gps_cm = s_cm during DR
                     s_cm,
                     v_cms,
                     None,
                     "dr_outage",
+                ).with_diagnostics(
+                    None,
+                    false,
+                    0,
+                    None,
+                    None,
+                    None,
+                    0,
                 ))
             }
             gps_processor::kalman::ProcessResult::OffRoute { last_valid_s, last_valid_v } => {
-                // During off-route, z_gps_cm = frozen position
                 Some(gps::GpsRecord::new(
                     gps.timestamp,
                     gps.lat,
                     gps.lon,
-                    last_valid_s, // z_gps_cm = frozen position
                     last_valid_s,
                     last_valid_v,
                     None,
                     "off_route",
+                ).with_diagnostics(
+                    None,  // off-route = no segment match
+                    false,
+                    0,
+                    None,
+                    None,
+                    None,
+                    0,
                 ))
             }
             gps_processor::kalman::ProcessResult::Rejected(_) => None,
@@ -331,7 +368,8 @@ impl DetectionState {
             let stop_state = &mut self.stop_states[*idx];
 
             // Compute probability using PositionSignals for phantom arrival prevention
-            let signals = shared::PositionSignals::new(record.z_gps_cm, record.s_cm);
+            // Note: GpsRecord no longer stores z_gps_cm, so use s_cm for both
+            let signals = shared::PositionSignals::new(record.s_cm, record.s_cm);
             let gps_status = match record.status {
                 "valid" => detection::probability::GpsStatus::Valid,
                 "dr_outage" => detection::probability::GpsStatus::DrOutage,
@@ -407,10 +445,26 @@ impl DetectionState {
         // Build active_stops list
         let active_stops: Vec<u8> = self.active_indices.iter().map(|i| *i as u8).collect();
 
+        // Compute z_gps_cm from divergence: z_gps_cm = s_cm + divergence_cm
+        let z_gps_cm = record.s_cm + record.divergence_cm;
+
         // Build stop_states list for active stops
         let stop_states: Vec<StopTraceState> = self.active_indices.iter().map(|&idx| {
             let stop = &stops[idx];
             let stop_state = &self.stop_states[idx];
+
+            // Use PositionSignals for feature computation (same as in process_gps_record)
+            let signals = shared::PositionSignals::new(record.s_cm, record.s_cm);
+
+            // Compute feature scores for trace output
+            let features = detection::probability::compute_feature_scores(
+                signals,
+                record.v_cms,
+                stop,
+                stop_state.dwell_time_s,
+                &detection::probability::gaussian_lut(),
+                &detection::probability::logistic_lut(),
+            );
 
             // Re-compute probability for trace output
             let probability = detection::probability::compute_probability(
@@ -422,16 +476,12 @@ impl DetectionState {
 
             StopTraceState {
                 stop_idx: idx as u8,
-                distance_cm: (record.s_cm - stop.progress_cm) as i32,
+                gps_distance_cm: (z_gps_cm - stop.progress_cm) as i32,
+                progress_distance_cm: (record.s_cm - stop.progress_cm) as i32,
                 fsm_state: format!("{:?}", stop_state.fsm_state),
                 dwell_time_s: stop_state.dwell_time_s,
                 probability,
-                features: FeatureScores {
-                    p1: 0, // TODO: compute actual feature scores
-                    p2: 0,
-                    p3: 0,
-                    p4: 0,
-                },
+                features,
                 just_arrived: self.arrived_this_frame.contains(&(idx as u8)),
             }
         }).collect();
@@ -581,6 +631,36 @@ impl PipelineResult {
         if let Some(ref mut trace) = self.trace_records {
             let (active_stops, stop_states) = det_state.get_trace_info(record, route_data);
 
+            // Compute corridor info from first active stop
+            let (corridor_start_cm, corridor_end_cm) = if let Some(&first_idx) = det_state.active_indices.first() {
+                let stop = &route_data.stops()[first_idx];
+                (Some(stop.corridor_start_cm as i32), Some(stop.corridor_end_cm as i32))
+            } else {
+                (None, None)
+            };
+
+            // Find next stop outside corridor
+            let next_stop = if let Some(end) = corridor_end_cm {
+                let mut result = None;
+                for (idx, stop) in route_data.stops().iter().enumerate() {
+                    if stop.progress_cm as i32 > end {
+                        // Get probability from stop_states if available
+                        let prob = stop_states.iter()
+                            .find(|s| s.stop_idx == idx as u8)
+                            .map(|s| s.probability)
+                            .unwrap_or(0);
+                        // Only include if not at final stop
+                        if idx < route_data.stops().len() - 1 {
+                            result = Some((idx as u8, prob));
+                            break;
+                        }
+                    }
+                }
+                result
+            } else {
+                None
+            };
+
             trace.push(TraceRecord {
                 time: record.time,
                 lat: record.lat,
@@ -594,6 +674,17 @@ impl PipelineResult {
                 recovery_idx: None, // TODO: implement recovery
                 status: record.status.to_string(),
                 off_route: det_state.off_route,
+                // New fields
+                segment_idx: record.segment_idx,
+                heading_constraint_met: record.heading_constraint_met,
+                divergence_cm: record.divergence_cm,
+                hdop: record.hdop,
+                num_sats: record.num_sats,
+                fix_type: record.fix_type.clone(),
+                variance_cm2: record.variance_cm2,
+                corridor_start_cm,
+                corridor_end_cm,
+                next_stop,
             });
         }
     }

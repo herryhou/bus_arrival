@@ -5,7 +5,7 @@ use shared::FsmState;
 
 #[test]
 fn test_trace_serialization_valid_json() {
-    // Verify TraceRecord serializes to valid JSON with FsmState
+    // Verify TraceRecord serializes to valid JSON with FsmState and new fields
     let record = TraceRecord {
         time: 1234567890,
         lat: 25.00425,
@@ -17,7 +17,8 @@ fn test_trace_serialization_valid_json() {
         stop_states: vec![
             StopTraceState {
                 stop_idx: 0,
-                distance_cm: 500,
+                gps_distance_cm: 480,
+                progress_distance_cm: 500,
                 fsm_state: FsmState::Approaching,
                 dwell_time_s: 0,
                 probability: 128,
@@ -26,7 +27,8 @@ fn test_trace_serialization_valid_json() {
             },
             StopTraceState {
                 stop_idx: 1,
-                distance_cm: -300,
+                gps_distance_cm: -320,
+                progress_distance_cm: -300,
                 fsm_state: FsmState::AtStop,
                 dwell_time_s: 10,
                 probability: 230,
@@ -36,6 +38,17 @@ fn test_trace_serialization_valid_json() {
         ],
         gps_jump: false,
         recovery_idx: None,
+        // New fields
+        segment_idx: Some(5),
+        heading_constraint_met: true,
+        divergence_cm: 15,
+        hdop: Some(1.2),
+        num_sats: Some(12),
+        fix_type: Some("3d".to_string()),
+        variance_cm2: 100,
+        corridor_start_cm: Some(9500),
+        corridor_end_cm: Some(10500),
+        next_stop: Some((2, 200)),
     };
 
     // Serialize to JSON
@@ -59,6 +72,19 @@ fn test_trace_serialization_valid_json() {
     assert!(json.contains(r#""p1":200"#));
     assert!(json.contains(r#""just_arrived":false"#));
     assert!(json.contains(r#""just_arrived":true"#));
+
+    // Verify new fields
+    assert_eq!(parsed["segment_idx"], 5);
+    assert_eq!(parsed["heading_constraint_met"], true);
+    assert_eq!(parsed["divergence_cm"], 15);
+    assert_eq!(parsed["hdop"], 1.2);
+    assert_eq!(parsed["num_sats"], 12);
+    assert_eq!(parsed["fix_type"], "3d");
+    assert_eq!(parsed["variance_cm2"], 100);
+    assert_eq!(parsed["corridor_start_cm"], 9500);
+    assert_eq!(parsed["corridor_end_cm"], 10500);
+    assert_eq!(parsed["next_stop"][0], 2);
+    assert_eq!(parsed["next_stop"][1], 200);
 }
 
 #[test]
