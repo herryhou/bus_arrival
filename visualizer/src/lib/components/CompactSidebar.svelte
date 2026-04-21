@@ -260,7 +260,7 @@
 
 					<!-- Metrics row -->
 					<div class="metrics-compact">
-						<span class="metric">dist: {Math.round(stopState.distance_cm / 100)}m</span>
+						<span class="metric">dist: {Math.round(stopState.progress_distance_cm / 100)}m</span>
 						<span class="metric">dwell: {stopState.dwell_time_s}s</span>
 					</div>
 

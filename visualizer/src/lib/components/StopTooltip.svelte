@@ -68,16 +68,16 @@
 
     <div class="metrics-section">
       <div class="metric">
-        <span class="metric-label">Dist</span>
-        <span class="metric-value">{Math.abs(stopState.distance_cm)} cm</span>
+        <span class="metric-label">GPS Dist</span>
+        <span class="metric-value">{Math.abs(stopState.gps_distance_cm)} cm</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Prog Dist</span>
+        <span class="metric-value">{Math.abs(stopState.progress_distance_cm)} cm</span>
       </div>
       <div class="metric">
         <span class="metric-label">Speed</span>
         <span class="metric-value">{vCms} cm/s</span>
-      </div>
-      <div class="metric">
-        <span class="metric-label">Dwell</span>
-        <span class="metric-value">{stopState.dwell_time_s} s</span>
       </div>
     </div>
   </div>
