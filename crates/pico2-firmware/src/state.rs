@@ -150,9 +150,11 @@ impl<'a> State<'a> {
             disable_heading_filter,
         );
 
-        let (s_cm, v_cms, signals) = match result {
+        let (s_cm, v_cms, signals, gps_status) = match result {
             ProcessResult::Valid { signals, v_cms, seg_idx: _ } => {
+                use crate::detection::GpsStatus;
                 let PositionSignals { z_gps_cm: _, s_cm } = signals;
+                let gps_status = GpsStatus::Valid;
 
                 // Check for GPS jump requiring recovery (H1)
                 let prev_s_cm = self.last_valid_s_cm;
@@ -307,8 +309,8 @@ impl<'a> State<'a> {
                     // If recovery returns None, continue with existing states
                 }
 
-                // Return s_cm, v_cms, and signals for detection
-                (s_cm, v_cms, signals)
+                // Return s_cm, v_cms, signals, and gps_status for detection
+                (s_cm, v_cms, signals, gps_status)
             }
             ProcessResult::Rejected(reason) => {
                 #[cfg(feature = "firmware")]
@@ -371,8 +373,9 @@ impl<'a> State<'a> {
                 }
 
                 // Timeout expired: detection enabled, proceed with DR estimates
+                use crate::detection::GpsStatus;
                 let signals = PositionSignals { z_gps_cm: s_cm, s_cm };
-                (s_cm, v_cms, signals)
+                (s_cm, v_cms, signals, GpsStatus::DrOutage)
             }
             ProcessResult::OffRoute { last_valid_s, last_valid_v } => {
                 // Set flag for recovery on re-acquisition
@@ -419,6 +422,7 @@ impl<'a> State<'a> {
                 v_cms,
                 &stop,
                 stop_state.dwell_time_s,
+                gps_status,
                 next_stop,
             );
 

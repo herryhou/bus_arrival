@@ -1,7 +1,7 @@
 // Tests for adaptive weights in arrival probability computation
 // Run with: cargo test --package pico2-firmware --features dev
 
-use pico2_firmware::detection::compute_arrival_probability_adaptive;
+use pico2_firmware::detection::{compute_arrival_probability_adaptive, GpsStatus};
 use shared::{PositionSignals, Stop};
 
 #[test]
@@ -27,6 +27,7 @@ fn test_adaptive_weights_close_stop() {
         600,      // v_cms (approaching)
         &stop_current,
         5,        // dwell_time_s
+        GpsStatus::Valid,
         Some(&stop_next),
     );
 
@@ -52,7 +53,7 @@ fn test_adaptive_weights_normal_stop() {
         s_cm: 100_000,
     };
     let prob = compute_arrival_probability_adaptive(
-        signals, 600, &stop_current, 5, Some(&stop_next)
+        signals, 600, &stop_current, 5, GpsStatus::Valid, Some(&stop_next)
     );
 
     // Normal stop: verify computation succeeds
@@ -72,7 +73,7 @@ fn test_adaptive_weights_last_stop() {
         s_cm: 100_000,
     };
     let prob = compute_arrival_probability_adaptive(
-        signals, 0, &stop, 10, None
+        signals, 0, &stop, 10, GpsStatus::Valid, None
     );
 
     // Last stop: at stop with zero speed and 10s dwell should have high probability

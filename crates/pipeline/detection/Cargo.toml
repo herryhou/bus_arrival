@@ -14,6 +14,13 @@ serde_json = { workspace = true, optional = true }
 # For floating-point operations in no_std
 libm = "0.2"
 
+# Integration tests need std enabled
+[dev-dependencies]
+shared = { path = "../../shared", features = ["serde", "std"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+detection = { path = ".", features = ["std"] }
+
 [[bin]]
 name = "gen_luts"
 path = "src/bin/gen_luts.rs"

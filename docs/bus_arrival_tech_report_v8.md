@@ -1456,59 +1456,99 @@ $$\text{跳躍： } \hat{s} \leftarrow s_{i^*},\quad \text{frozen\_s\_cm} \lefta
 
 脫離路線狀態在 trace.jsonl 中輸出以下欄位：
 
+**Off-Route 狀態（位置凍結）：**
 ```jsonl
 {
-  "timestamp": 1700000150,
-  "s_cm": 104194,
+  "time": 80110,
+  "lat": 24.99392,
+  "lon": 121.29495,
+  "s_cm": 57972,
   "off_route": true,
-  "status": "off_route",
-  "frozen_s_cm": 104194
+  "status": "off_route"
+}
+```
+
+**Re-acquisition（恢復到路線）：**
+```jsonl
+{
+  "time": 80245,
+  "lat": 24.99190,
+  "lon": 121.30151,
+  "s_cm": 123847,
+  "off_route": false,
+  "status": "valid",
+  "active_stops": [6],
+  "stop_states": [{"stop_idx": 6, "fsm_state": "Approaching"}]
 }
 ```
 
 **欄位說明：**
-- `off_route: true`：當前處於脫離路線狀態
-- `status: "off_route"` | `"dr_outage"`：狀態類型
-- `frozen_s_cm`：凍結的路線進度值
-- `recovery_idx`：GPS 跳躍恢復目標站點索引（恢復時出現）
+- `off_route: true`：當前處於脫離路線狀態（位置凍結）
+- `off_route: false`：已恢復到正常路線追蹤
+- `status: "off_route"` | `"dr_outage"` | `"valid"`：狀態類型
+- `s_cm`：路線進度（off-route 期間維持不變）
+- `active_stops`：恢復後檢測到的目標站點索引
 
 ### 16.7 測試驗證
 
 **測試案例：** `ty225_short_detour`
 
 **場景描述：**
-- 路線：10 個站點，總長約 2.5 km
-- 繞路：站點 1 → 站點 6（60 秒直線行駛）
-- 脫離偏移：距離路線 1,000 m 的垂直偏移
-- 跳過站點：2、3、4、5（不應被播報）
+- 路線：10 個站點（ty225_short），總長約 2.5 km
+- 繞路路徑：Stop 2 (idx 1) → 繞路點 (24.99183, 121.297665) → Stop 7 (idx 6)
+- 繞路策略：先向西偏離路線，再向南行駛至繞路點，最後向東回到路線
+- 脫離偏移：距離路線約 300 m 的南方偏移
+- 跳過站點：Stop 3, 4, 5, 6 (idx 2, 3, 4, 5) 不應被播報
+
+**時間線：**
+- Stop 1 (idx 0) arrival: time 80002
+- Stop 2 (idx 1) arrival: time 80098
+- Off-route detection: time 80103 (5 seconds after departure)
+- Detour point reached: time 80144
+- Re-acquisition: time 80245 (approaching Stop 7)
+- Stop 7 (idx 6) arrival: time 80247
+- Off-route duration: ~142 seconds
 
 **驗證結果：**
 
 | 檢查項目 | 結果 | 說明 |
 |---------|------|------|
-| GPS 連續性 | ✅ PASS | 1 秒間隔 |
-| 脫離路線檢測 | ✅ PASS | 5 秒後觸發（56 個 off_route ticks） |
-| 位置凍結 | ✅ PASS | s_cm 維持在 104,194 cm |
-| 跳過站點 | ✅ PASS | 站點 2-5 未被宣告 |
-| 重新獲取 | ✅ PASS | 站點 6 正確檢測 |
-| 時間 | ✅ PASS | 60 秒繞路持續時間 |
-| GPS 跳躍恢復 | ✅ PASS | s_cm 從 104,194 → 178,014 cm |
+| GPS 連續性 | ✅ PASS | 1 秒間隔，321 個 GPS 更新 |
+| 脫離路線檢測 | ✅ PASS | 5 秒後觸發（time 80103） |
+| 位置凍結 | ✅ PASS | s_cm 維持在 57,972 cm |
+| 跳過站點 | ✅ PASS | Stop 3-6 (idx 2-5) 未被宣告 |
+| 重新獲取 | ✅ PASS | Stop 7 (idx 6) 正確檢測於 time 80247 |
+| 繞路持續時間 | ✅ PASS | 142 秒（time 80103-80245） |
+| 繞路點到達 | ✅ PASS | (24.99183, 121.297665) 於 time 80144 |
+| 後續站點恢復 | ✅ PASS | Stop 8 (idx 7), Stop 9 (idx 8) 正常檢測 |
+
+**Trace 關鍵數據：**
+```jsonl
+{"time":80098,"stop_idx":1,"s_cm":57972,"event_type":"Arrival"}  // Stop 2 arrival
+{"time":80103,"status":"off_route","off_route":true}            // Off-route detected
+{"time":80144,"lat":24.99183,"lon":121.297665}                  // Detour point reached
+{"time":80245,"status":"valid","off_route":false,"stop_idx":6}  // Re-acquisition
+{"time":80247,"stop_idx":6,"event_type":"Arrival"}               // Stop 7 arrival
+```
 
 **執行測試：**
 ```bash
-# 生成測試資料
-node tools/gen_detour_sim.js
-
 # 執行 pipeline
 cargo run -p pipeline -- \
   test_data/ty225_short_detour_nmea.txt \
-  test_data/ty225_short.bin \
+  test_data/ty225_short_normal.bin \
   test_data/ty225_short_detour_arrivals.jsonl \
   --trace test_data/ty225_short_detour_trace.jsonl
 
-# 驗證結果
-node tools/validate_detour_test.js
+# 預期 arrivals: Stop 1 (idx 0), Stop 2 (idx 1), Stop 7 (idx 6), Stop 8 (idx 7), Stop 9 (idx 8)
+# Stop 3-6 (idx 2-5) 應被跳過
 ```
+
+**實現細節：**
+- 繞路路徑使用中間路徑點（waypoint）避免誤觸發 Stop 3 的檢測廊道
+- 先向西移動 0.002 經度，再向南行駛至繞路點
+- Off-route 檢測使用 5-tick 遲滯確認機制避免 GPS 雜訊誤觸發
+- 位置凍結期間 s_cm 維持不變，防止錯誤的到站事件
 
 ---
 
@@ -1812,43 +1852,39 @@ make run ROUTE_NAME=ty225 SCENARIO=shortcut
 
 **測試配置：**
 - 路線：ty225_short（10 個站點）
-- 繞路：站點 1 → 站點 6（60 秒，直線）
-- 跳過站點：2、3、4、5（不應被宣告）
-- 脫離偏移：距離路線 1,000 m 的垂直偏移
-- 驗證：檢測觸發（5 秒）、位置凍結、GPS 跳躍恢復、重新獲取
+- 繞路路徑：Stop 2 (idx 1) → 繞路點 (24.99183, 121.297665) → Stop 7 (idx 6)
+- 繞路策略：先向西偏離路線，再向南行駛至繞路點
+- 跳過站點：Stop 3, 4, 5, 6 (idx 2, 3, 4, 5) 不應被宣告
+- 脫離偏移：距離路線約 300 m 的南方偏移
+- 驗證：檢測觸發（5 秒）、位置凍結、重新獲取、後續站點恢復
 
 **執行測試：**
 ```bash
-# 生成測試資料
-node tools/gen_detour_sim.js
-
 # 執行 pipeline
 cargo run -p pipeline -- \
   test_data/ty225_short_detour_nmea.txt \
-  test_data/ty225_short.bin \
+  test_data/ty225_short_normal.bin \
   test_data/ty225_short_detour_arrivals.jsonl \
   --trace test_data/ty225_short_detour_trace.jsonl
-
-# 驗證結果
-node tools/validate_detour_test.js
 ```
 
 **驗證檢查項目：**
 1. GPS 連續性 - 1 秒間隔
 2. 脫離路線檢測 - 繞路開始後 5 秒觸發
 3. 位置凍結 - 脫離路線期間 s_cm 維持恆定
-4. 跳過站點 - 站點 2-5 未被宣告
-5. 重新獲取 - 站點 6 正確檢測到站
-6. 時間 - 60 秒繞路持續時間
+4. 跳過站點 - Stop 3-6 (idx 2-5) 未被宣告
+5. 重新獲取 - Stop 7 (idx 6) 正確檢測到站
+6. 時間 - 142 秒繞路持續時間
 
 **驗證結果：**
-- ✅ GPS 連續性：通過
-- ✅ 脫離路線檢測：通過（56 個 off_route status ticks，1 個 episode）
-- ✅ 位置凍結：通過（s_cm 維持在 104,194 cm）
-- ✅ 跳過站點：通過（站點 2-5 未被宣告）
-- ✅ 重新獲取：通過（站點 6 正確檢測）
-- ✅ 時間：通過（60 秒繞路持續時間）
-- ✅ GPS 跳躍恢復：通過（s_cm 從 104,194 → 178,014 cm）
+- ✅ GPS 連續性：通過（321 個 GPS 更新，1 秒間隔）
+- ✅ 脫離路線檢測：通過（time 80103 觸發，142 個 off_route ticks）
+- ✅ 位置凍結：通過（s_cm 維持在 57,972 cm）
+- ✅ 跳過站點：通過（Stop 3-6 未被宣告）
+- ✅ 重新獲取：通過（Stop 7 於 time 80247 正確檢測）
+- ✅ 時間：通過（142 秒繞路持續時間）
+- ✅ 繞路點：通過（24.99183, 121.297665 於 time 80144 到達）
+- ✅ 後續站點：通過（Stop 8, 9 正常檢測）
 
 **輸出檔案：**
 - `test_data/ty225_short_detour_arrivals.json` - 到站檢測結果
@@ -2164,12 +2200,14 @@ Off-Route → Re-acquire（GPS 跳躍恢復）
 #### 測試結果
 
 **ty225_short_detour 測試案例：**
-- ✅ GPS 連續性：通過
-- ✅ 脫離路線檢測：通過（56 個 off_route ticks）
-- ✅ 位置凍結：通過（s_cm 維持在 104,194 cm）
-- ✅ 跳過站點：通過（站點 2-5 未被宣告）
-- ✅ 重新獲取：通過（站點 6 正確檢測）
-- ✅ GPS 跳躍恢復：通過（s_cm 從 104,194 → 178,014 cm）
+- ✅ GPS 連續性：通過（321 個 GPS 更新）
+- ✅ 脫離路線檢測：通過（142 個 off_route ticks）
+- ✅ 位置凍結：通過（s_cm 維持在 57,972 cm）
+- ✅ 跳過站點：通過（Stop 3-6 (idx 2-5) 未被宣告）
+- ✅ 重新獲取：通過（Stop 7 (idx 6) 於 time 80247 正確檢測）
+- ✅ 繞路持續時間：通過（142 秒）
+- ✅ 繞路點到達：通過（(24.99183, 121.297665) 於 time 80144）
+- ✅ 後續站點恢復：通過（Stop 8, 9 正常檢測）
 
 #### 參數新增
 
@@ -2182,13 +2220,17 @@ Off-Route → Re-acquire（GPS 跳躍恢復）
 
 #### 檔案變更
 
-**新增：**
-- `crates/pipeline/gps_processor/tests/test_off_route_jump_recovery.rs` - GPS 跳躍恢復測試
+**測試資料新增：**
+- `test_data/ty225_short_detour_nmea.txt` - 繞路 GPS 追蹤資料（321 個更新）
+- `test_data/ty225_short_detour_trace.jsonl` - 追蹤記錄（含 off_route 狀態）
+- `test_data/ty225_short_detour_arrivals.jsonl` - 到站檢測結果
+- `test_data/ty225_short_detour_gt.json` - 預期結果（Ground Truth）
+- `test_data/ty225_short_detour_summary.md` - 測試說明文件
 
-**修改：**
-- `crates/pipeline/gps_processor/src/kalman.rs` - 新增 off-route 檢測與 GPS 跳躍恢復邏輯
-- `tools/gen_detour_sim.js` - 修正繞路測試資料生成
-- `tools/validate_detour_test.js` - 改進驗證腳本
+**測試配置：**
+- 原始路線：`test_data/ty225_short_normal.bin`（與 ty225_short 測試共用）
+- 原始路線：`test_data/ty225_short_route.json`
+- 站點資料：`test_data/ty225_short_stops.json`
 
 #### 文件更新
 

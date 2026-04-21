@@ -74,6 +74,33 @@ export interface TraceRecord {
 	gps_jump: boolean;
 	/** Recovery: new stop index if jumped */
 	recovery_idx: number | null;
+
+	// === New: Map matching ===
+	/** Which route segment we're matched to (null if off-route) */
+	segment_idx?: number | null;
+	/** Did the heading constraint pass? (±90° rule) */
+	heading_constraint_met: boolean;
+	// === New: Divergence ===
+	/** Raw GPS projection - Kalman filtered position (cm) */
+	divergence_cm: number;
+	// === New: GPS quality ===
+	/** GPS quality: HDOP */
+	hdop?: number | null;
+	/** GPS quality: number of satellites */
+	num_sats?: number | null;
+	/** GPS quality: fix type - "none", "2d", "3d" */
+	fix_type?: string | null;
+	// === New: Kalman state ===
+	/** Position variance (cm²), represents filter uncertainty */
+	variance_cm2: number;
+	// === New: Corridor info ===
+	/** Corridor start position (cm) */
+	corridor_start_cm?: number | null;
+	/** Corridor end position (cm) */
+	corridor_end_cm?: number | null;
+	// === New: Next stop (outside corridor) ===
+	/** Next stop index and probability (even if not in corridor) */
+	next_stop?: [number, number] | null;
 }
 
 /**

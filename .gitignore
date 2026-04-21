@@ -29,6 +29,7 @@ tools/data/stops.json
 *.bak
 *.swp
 .playwright-cli/
+.playwright-mcp/
 .playwright-test/
 settings.local.json
 test_data/

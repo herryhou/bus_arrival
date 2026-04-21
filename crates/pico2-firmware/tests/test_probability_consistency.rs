@@ -4,6 +4,7 @@
 use pico2_firmware::detection::{
     compute_arrival_probability,
     compute_arrival_probability_adaptive,
+    GpsStatus,
 };
 use shared::{PositionSignals, Stop};
 
@@ -29,7 +30,7 @@ fn test_consistency_standard_weights() {
             z_gps_cm: s_cm,
             s_cm,
         };
-        let prob_standard = compute_arrival_probability(signals, v_cms, &stop, dwell_time_s);
+        let prob_standard = compute_arrival_probability(signals, v_cms, &stop, dwell_time_s, GpsStatus::Valid);
 
         // When next_stop is None or far (>12m), adaptive should use standard weights
         let prob_adaptive_none = compute_arrival_probability_adaptive(
@@ -37,6 +38,7 @@ fn test_consistency_standard_weights() {
             v_cms,
             &stop,
             dwell_time_s,
+            GpsStatus::Valid,
             None,
         );
 
@@ -50,6 +52,7 @@ fn test_consistency_standard_weights() {
             v_cms,
             &stop,
             dwell_time_s,
+            GpsStatus::Valid,
             Some(&far_stop),
         );
 
@@ -92,12 +95,13 @@ fn test_consistency_close_stop_differs() {
             z_gps_cm: s_cm,
             s_cm,
         };
-        let prob_standard = compute_arrival_probability(signals, v_cms, &stop, dwell_time_s);
+        let prob_standard = compute_arrival_probability(signals, v_cms, &stop, dwell_time_s, GpsStatus::Valid);
         let prob_adaptive_close = compute_arrival_probability_adaptive(
             signals,
             v_cms,
             &stop,
             dwell_time_s,
+            GpsStatus::Valid,
             Some(&close_stop),
         );
 
