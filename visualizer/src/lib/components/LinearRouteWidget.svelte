@@ -4,6 +4,7 @@
   import { getProbabilityColor } from '$lib/utils/probabilityColors';
   import StopMarker from './StopMarker.svelte';
   import StopTooltip from './StopTooltip.svelte';
+  import BusTooltip from './BusTooltip.svelte';
 
   interface Props {
     routeData: RouteData;
@@ -202,6 +203,14 @@
       vCms={currentRecord?.v_cms ?? 0}
       x={tooltipPos.x}
       y={tooltipPos.y}
+    />
+  {/if}
+
+  {#if hoveredBus && busTooltipPos && currentRecord}
+    <BusTooltip
+      record={currentRecord}
+      x={busTooltipPos.x}
+      y={busTooltipPos.y}
     />
   {/if}
 </div>
