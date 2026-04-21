@@ -76,7 +76,7 @@
 		<!-- P1: Distance -->
 		<div class="scope-card">
 			<div class="scope-info">
-				<span class="scope-name">p₁: Distance</span>
+				<span class="scope-name">p₁: GPS Dist</span>
 				<span class="scope-weight">W: 13/32</span>
 				<span class="scope-val">{stopState.features.p1}</span>
 			</div>
@@ -84,16 +84,16 @@
 				<svg viewBox="0 0 200 60" preserveAspectRatio="none">
 					<path d={generatePath('p1', 200, 60)} class="pdf-curve" />
 					<line 
-						x1={getMarkerPos('p1', Math.abs(stopState.distance_cm), 200)} 
+						x1={getMarkerPos('p1', Math.abs(stopState.gps_distance_cm), 200)} 
 						y1="0" 
-						x2={getMarkerPos('p1', Math.abs(stopState.distance_cm), 200)} 
+						x2={getMarkerPos('p1', Math.abs(stopState.gps_distance_cm), 200)} 
 						y2="60" 
 						class="marker-line" 
 					/>
 				</svg>
 				<div class="axis-labels">
 					<span>0</span>
-					<span>{Math.abs(stopState.distance_cm)} cm</span>
+					<span>{Math.abs(stopState.gps_distance_cm)} cm</span>
 					<span>80m</span>
 				</div>
 			</div>
@@ -130,7 +130,7 @@
 		<!-- P3: Progress -->
 		<div class="scope-card">
 			<div class="scope-info">
-				<span class="scope-name">p₃: Progress</span>
+				<span class="scope-name">p₃: Prog Dist</span>
 				<span class="scope-weight">W: 10/32</span>
 				<span class="scope-val">{stopState.features.p3}</span>
 			</div>
@@ -138,16 +138,16 @@
 				<svg viewBox="0 0 200 60" preserveAspectRatio="none">
 					<path d={generatePath('p3', 200, 60)} class="pdf-curve" />
 					<line 
-						x1={getMarkerPos('p3', Math.abs(stopState.distance_cm), 200)} 
+						x1={getMarkerPos('p3', Math.abs(stopState.progress_distance_cm), 200)} 
 						y1="0" 
-						x2={getMarkerPos('p3', Math.abs(stopState.distance_cm), 200)} 
+						x2={getMarkerPos('p3', Math.abs(stopState.progress_distance_cm), 200)} 
 						y2="60" 
 						class="marker-line" 
 					/>
 				</svg>
 				<div class="axis-labels">
 					<span>0</span>
-					<span>{Math.abs(stopState.distance_cm)} cm</span>
+					<span>{Math.abs(stopState.progress_distance_cm)} cm</span>
 					<span>60m</span>
 				</div>
 			</div>

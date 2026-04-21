@@ -1,349 +1,307 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import type { RouteData, FsmState, Stop } from '$lib/types';
-	import { FSM_STATE_COLORS } from '$lib/constants/fsmColors';
+  import type { RouteData, FsmState, Stop, TraceRecord, StopTraceState } from '$lib/types';
+  import { FSM_STATE_COLORS, FSM_STATE_ABBREVS } from '$lib/constants/fsmColors';
+  import { getProbabilityColor } from '$lib/utils/probabilityColors';
+  import StopMarker from './StopMarker.svelte';
+  import StopTooltip from './StopTooltip.svelte';
 
-	interface Props {
-		routeData: RouteData;
-		busProgress: number;
-		busSpeed?: number; // cm/s
-		highlightedEvent?: {
-			stopIdx: number;
-			state: FsmState;
-		} | null;
-	}
+  interface Props {
+    routeData: RouteData;
+    busProgress: number;
+    busSpeed?: number;
+    highlightedEvent?: {
+      stopIdx: number;
+      state: FsmState;
+    } | null;
+    traceData?: TraceRecord[] | null;
+    currentTime?: number;
+    onStopClick?: (idx: number) => void;
+  }
 
-	let { routeData, busProgress: busProgressProp, busSpeed = 0, highlightedEvent = null }: Props = $props();
-	let busProgress = $derived.by(() => busProgressProp);
+  let {
+    routeData,
+    busProgress: busProgressProp,
+    busSpeed = 0,
+    highlightedEvent = null,
+    traceData = null,
+    currentTime = 0,
+    onStopClick
+  } = $props();
 
-	let canvas: HTMLCanvasElement;
-	let ctx: CanvasRenderingContext2D | null = null;
-	let resizeObserver: ResizeObserver | null = null;
+  let busProgress = $derived.by(() => busProgressProp);
+  let hoveredStop = $state<number | null>(null);
+  let tooltipPos = $state<{ x: number; y: number } | null>(null);
 
-	let width = $state(0);
-	let height = $state(200);
+  const maxProgress = $derived.by(() => {
+    if (routeData.nodes.length === 0) return 100000;
+    return routeData.nodes[routeData.nodes.length - 1].cum_dist_cm;
+  });
 
-	const LAYOUT = {
-		topRowY: 45,
-		scaleRowY: 85,
-		detailPanelY: 125, // Start of detail panel
-		paddingX: 30,
-		stopLabelOffset: 20,
-	};
+  // Find current trace record
+  const currentRecord = $derived.by(() => {
+    if (!traceData || traceData.length === 0) return null;
+    return traceData.reduce((prev: TraceRecord, curr: TraceRecord) =>
+      Math.abs(curr.time - currentTime) < Math.abs(prev.time - currentTime) ? curr : prev
+    );
+  });
 
-	// Find stops within a certain distance of current position
-	const nearbyStops = $derived.by(() => {
-		const SEARCH_RADIUS_CM = 100000; // 1km
-		return routeData.stops
-			.map((stop, index) => ({
-				stop,
-				index,
-				distance: Math.abs(stop.progress_cm - busProgress)
-			}))
-			.filter(({ distance }) => distance <= SEARCH_RADIUS_CM)
-			.sort((a, b) => a.distance - b.distance)
-			.slice(0, 3); // Show up to 3 nearby stops
-	});
+  // Get stop state for a stop at current time
+  function getStopState(stopIndex: number): StopTraceState | null {
+    if (!currentRecord) return null;
+    return currentRecord.stop_states.find((s: StopTraceState) => s.stop_idx === stopIndex) || null;
+  }
 
-	// Calculate speed in km/h
-	const speedKmh = $derived.by(() => {
-		return (busSpeed * 3600) / 100000; // cm/s to km/h
-	});
+  function progressToPercent(progressCm: number): number {
+    return maxProgress > 0 ? (Math.min(progressCm, maxProgress) / maxProgress) * 100 : 0;
+  }
 
-	const maxProgress = $derived.by(() => {
-		if (routeData.nodes.length === 0) return 100000;
-		return routeData.nodes[routeData.nodes.length - 1].cum_dist_cm;
-	});
+  function handleStopClick(idx: number) {
+    onStopClick?.(idx);
+  }
 
-	const scale = $derived.by(() => {
-		const drawWidth = width - LAYOUT.paddingX * 2;
-		return maxProgress > 0 ? drawWidth / maxProgress : 1;
-	});
+  function handleStopHover(idx: number, event: CustomEvent) {
+    hoveredStop = idx;
+    // Get the target element from the event to calculate position
+    const target = event.target as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    tooltipPos = { x: rect.left + rect.width / 2, y: rect.bottom + 8 };
+  }
 
-	function progressToX(progressCm: number): number {
-		return LAYOUT.paddingX + Math.min(progressCm, maxProgress) * scale;
-	}
+  function handleStopHoverEnd() {
+    hoveredStop = null;
+    tooltipPos = null;
+  }
 
-	function findSegment(progressCm: number): { start: number; end: number } | null {
-		if (routeData.nodes.length < 2) return null;
-		if (progressCm < routeData.nodes[0].cum_dist_cm) return null;
-		if (progressCm >= routeData.nodes[routeData.nodes.length - 1].cum_dist_cm) {
-			const lastIdx = routeData.nodes.length - 2;
-			return {
-				start: routeData.nodes[lastIdx].cum_dist_cm,
-				end: routeData.nodes[lastIdx + 1].cum_dist_cm
-			};
-		}
+  const speedKmh = $derived.by(() => {
+    return (busSpeed * 3600) / 100000;
+  });
 
-		for (let i = 0; i < routeData.nodes.length - 1; i++) {
-			const node = routeData.nodes[i];
-			const nextNode = routeData.nodes[i + 1];
-			if (progressCm >= node.cum_dist_cm && progressCm < nextNode.cum_dist_cm) {
-				return { start: node.cum_dist_cm, end: nextNode.cum_dist_cm };
-			}
-		}
-		return null;
-	}
+  const progressKm = $derived.by(() => (busProgress / 100000).toFixed(2));
+  const totalKm = $derived.by(() => (maxProgress / 100000).toFixed(1));
+  const progressPercent = $derived.by(() => ((busProgress / maxProgress) * 100).toFixed(0));
 
-	function render() {
-		if (!ctx || width === 0) return;
-
-		const context = ctx;
-
-		// Clear canvas
-		context.clearRect(0, 0, width, height);
-
-		// ========== TOP ROW: Route line ==========
-		const routeY = LAYOUT.topRowY;
-
-		// Draw base line
-		context.strokeStyle = '#4a5568';
-		context.lineWidth = 3;
-		context.lineCap = 'round';
-		context.beginPath();
-		context.moveTo(LAYOUT.paddingX, routeY);
-		context.lineTo(width - LAYOUT.paddingX, routeY);
-		context.stroke();
-
-		// Current segment highlight
-		if (busProgress > 0) {
-			const segment = findSegment(busProgress);
-			if (segment) {
-				const x1 = progressToX(segment.start);
-				const x2 = progressToX(segment.end);
-
-				context.shadowColor = '#3b82f6';
-				context.shadowBlur = 10;
-				context.strokeStyle = 'rgba(59, 130, 246, 0.8)';
-				context.lineWidth = 5;
-				context.beginPath();
-				context.moveTo(x1, routeY);
-				context.lineTo(x2, routeY);
-				context.stroke();
-				context.shadowBlur = 0;
-			}
-		}
-
-		// Draw stops
-		routeData.stops.forEach((stop, index) => {
-			const x = progressToX(stop.progress_cm);
-			const isHighlighted = highlightedEvent && highlightedEvent.stopIdx === index;
-
-			// Tick mark
-			context.strokeStyle = '#ef4444';
-			context.lineWidth = 2;
-			context.beginPath();
-			context.moveTo(x, routeY - 6);
-			context.lineTo(x, routeY + 6);
-			context.stroke();
-
-			// Stop number
-			context.fillStyle = isHighlighted ? '#f59e0b' : '#ffffff';
-			context.font = 'bold 15px JetBrains Mono, Monaco, monospace';
-			context.textAlign = 'center';
-			context.textBaseline = 'bottom';
-			context.fillText(`#${index + 1}`, x, routeY - LAYOUT.stopLabelOffset);
-
-			// Highlight ring
-			if (isHighlighted && highlightedEvent) {
-				context.fillStyle = FSM_STATE_COLORS[highlightedEvent.state];
-				context.beginPath();
-				context.arc(x, routeY, 7, 0, Math.PI * 2);
-				context.fill();
-				context.strokeStyle = '#ffffff';
-				context.lineWidth = 2;
-				context.stroke();
-			}
-		});
-
-		// Bus emoji
-		const busX = progressToX(busProgress);
-		context.font = '20px serif';
-		context.textAlign = 'center';
-		context.textBaseline = 'middle';
-		context.fillText('🚌', busX, routeY);
-
-		// ========== MIDDLE ROW: Scale ==========
-		const scaleY = LAYOUT.scaleRowY;
-
-		// Scale line
-		context.strokeStyle = '#718096';
-		context.lineWidth = 2;
-		context.beginPath();
-		context.moveTo(LAYOUT.paddingX, scaleY);
-		context.lineTo(width - LAYOUT.paddingX, scaleY);
-		context.stroke();
-
-		// Scale markers (1.5km intervals - 5x the previous 500m)
-		const intervalCm = 150000; // 2.5km
-		for (let d = 0; d <= maxProgress; d += intervalCm) {
-			const x = progressToX(d);
-
-			context.strokeStyle = '#718096';
-			context.lineWidth = 1;
-			context.beginPath();
-			context.moveTo(x, scaleY - 4);
-			context.lineTo(x, scaleY + 4);
-			context.stroke();
-
-			context.fillStyle = '#cbd5e0';
-			context.font = '13px JetBrains Mono, Monaco, monospace';
-			context.textAlign = 'center';
-			context.textBaseline = 'top';
-			const km = (d / 100000).toFixed(1);
-			context.fillText(`${km}km`, x, scaleY + 8);
-		}
-
-		// ========== BOTTOM ROW: Event info ==========
-		if (highlightedEvent) {
-			const stop = routeData.stops[highlightedEvent.stopIdx];
-			if (stop) {
-				const eventY = 105;
-				const x = progressToX(stop.progress_cm);
-				const color = FSM_STATE_COLORS[highlightedEvent.state];
-
-				// Connecting line
-				context.strokeStyle = color;
-				context.lineWidth = 1;
-				context.setLineDash([4, 4]);
-				context.beginPath();
-				context.moveTo(x, routeY + LAYOUT.stopLabelOffset);
-				context.lineTo(x, eventY - 8);
-				context.stroke();
-				context.setLineDash([]);
-
-				// Event text
-				context.textAlign = 'center';
-				context.textBaseline = 'top';
-
-				// Stop number
-				context.font = 'bold 15px JetBrains Mono, Monaco, monospace';
-				context.fillStyle = color;
-				context.fillText(`Stop #${highlightedEvent.stopIdx + 1}`, x, eventY);
-
-				// State
-				context.font = '14px JetBrains Mono, Monaco, monospace';
-				context.fillStyle = '#e2e8f0';
-				context.fillText(`→ ${highlightedEvent.state}`, x, eventY + 16);
-			}
-		}
-
-		// ========== DETAIL PANEL ==========
-		const detailY = LAYOUT.detailPanelY;
-
-		// Panel background
-		context.fillStyle = 'rgba(30, 41, 59, 0.8)';
-		roundRect(context, LAYOUT.paddingX - 10, detailY - 8, width - LAYOUT.paddingX * 2 + 20, 40, 8);
-		context.fill();
-
-		// Raw speed (left side)
-		context.textAlign = 'left';
-		context.textBaseline = 'top';
-		context.font = 'bold 16px JetBrains Mono, Monaco, monospace';
-		context.fillStyle = busSpeed > 0 ? '#22c55e' : '#64748b';
-		context.fillText(`${busSpeed} cm/s`, LAYOUT.paddingX, detailY + 12);
-
-		// Raw progress (center)
-		context.textAlign = 'center';
-		context.font = 'bold 16px JetBrains Mono, Monaco, monospace';
-		context.fillStyle = '#e2e8f0';
-		context.fillText(`${busProgress} / ${maxProgress} cm`, width / 2, detailY + 12);
-
-		// Nearby stops (right side, compact)
-		if (nearbyStops.length > 0) {
-			const rightX = width - LAYOUT.paddingX;
-			const { stop, index, distance } = nearbyStops[0];
-			const direction = stop.progress_cm > busProgress ? '→' : '←';
-
-			context.textAlign = 'right';
-			context.font = '14px JetBrains Mono, Monaco, monospace';
-			context.fillStyle = distance < 50000 ? '#22c55e' : '#cbd5e0';
-			context.fillText(`#${index + 1} ${direction} ${distance}cm`, rightX, detailY + 12);
-		}
-	}
-
-	// Helper for rounded rectangle
-	function roundRect(
-		ctx: CanvasRenderingContext2D,
-		x: number,
-		y: number,
-		w: number,
-		h: number,
-		r: number
-	) {
-		ctx.beginPath();
-		ctx.moveTo(x + r, y);
-		ctx.lineTo(x + w - r, y);
-		ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-		ctx.lineTo(x + w, y + h - r);
-		ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-		ctx.lineTo(x + r, y + h);
-		ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-		ctx.lineTo(x, y + r);
-		ctx.quadraticCurveTo(x, y, x + r, y);
-		ctx.closePath();
-	}
-
-	$effect(() => {
-		busProgress;
-		routeData;
-		highlightedEvent;
-		render();
-	});
-
-	onMount(() => {
-		ctx = canvas.getContext('2d');
-		if (!ctx) return;
-
-		updateSize();
-
-		resizeObserver = new ResizeObserver(() => {
-			updateSize();
-		});
-		resizeObserver.observe(canvas);
-
-		return () => {
-			resizeObserver?.disconnect();
-		};
-	});
-
-	function updateSize() {
-		const rect = canvas.getBoundingClientRect();
-		width = rect.width;
-		height = rect.height;
-
-		const dpr = window.devicePixelRatio || 1;
-		canvas.width = rect.width * dpr;
-		canvas.height = rect.height * dpr;
-
-		if (ctx) {
-			ctx.scale(dpr, dpr);
-		}
-
-		render();
-	}
-
-	onDestroy(() => {
-		resizeObserver?.disconnect();
-	});
+  // Nearby stops for detail panel
+  const nearbyStops = $derived.by(() => {
+    const SEARCH_RADIUS_CM = 100000;
+    return routeData.stops
+      .map((stop: Stop, index: number) => ({
+        stop,
+        index,
+        distance: Math.abs(stop.progress_cm - busProgress)
+      }))
+      .filter(({ distance }: { distance: number }) => distance <= SEARCH_RADIUS_CM)
+      .sort((a: { distance: number }, b: { distance: number }) => a.distance - b.distance)
+      .slice(0, 3);
+  });
 </script>
 
 <div class="linear-route-widget">
-	<canvas bind:this={canvas}></canvas>
+  <!-- Main route view -->
+  <div class="route-container">
+    <!-- Route line -->
+    <div class="route-line">
+      <div class="route-base-line"></div>
+      <div
+        class="route-progress-line"
+        style="left: {progressToPercent(busProgress)}%"
+      ></div>
+    </div>
+
+    <!-- Stops -->
+    <div class="stops-row">
+      {#each routeData.stops as stop, stopIndex (stopIndex)}
+        {@const stopState = getStopState(stopIndex)}
+        {@const isHighlighted = highlightedEvent?.stopIdx === stopIndex}
+        {@const isHovered = hoveredStop === stopIndex}
+        {@const isSelected = false}
+
+        <div
+          class="stop-wrapper"
+          style="left: {progressToPercent(stop.progress_cm)}%"
+        >
+          <StopMarker
+            {stopIndex}
+            probability={stopState?.probability ?? 0}
+            fsmState={stopState?.fsm_state ?? null}
+            isSelected={isHighlighted}
+            isHovered={isHovered}
+            onstopclick={(e) => handleStopClick(e.detail.stopIndex)}
+            onstophover={(e) => handleStopHover(e.detail.stopIndex, e)}
+            onstophoverend={handleStopHoverEnd}
+          />
+        </div>
+      {/each}
+
+      <!-- Bus emoji -->
+      <div class="bus-marker" style="left: {progressToPercent(busProgress)}%">🚌</div>
+    </div>
+  </div>
+
+  <!-- Detail panel -->
+  <div class="detail-panel">
+    <!-- Speed -->
+    <div class="detail-section">
+      <span class="detail-label">SPEED</span>
+      <span class="detail-value" style="color: {speedKmh > 0 ? '#22c55e' : '#64748b'}">
+        {speedKmh.toFixed(1)} km/h
+      </span>
+    </div>
+
+    <!-- Progress -->
+    <div class="detail-section center">
+      <span class="detail-label">PROGRESS</span>
+      <span class="detail-value">{progressKm} / {totalKm} km</span>
+      <span class="detail-percent" style="color: #f59e0b">{progressPercent}%</span>
+    </div>
+
+    <!-- Nearby stops -->
+    {#if nearbyStops.length > 0}
+      <div class="detail-section right">
+        <span class="detail-label">NEARBY STOPS</span>
+        <div class="nearby-list">
+          {#each nearbyStops as { stop, index, distance }}
+            {@const distanceKm = (distance / 100000).toFixed(2)}
+            {@const direction = stop.progress_cm > busProgress ? '→' : '←'}
+            <span
+              class="nearby-item"
+              style="color: {distance < 50000 ? '#22c55e' : '#cbd5e0'}"
+            >
+              #{index + 1} {direction} {distanceKm}km
+            </span>
+          {/each}
+        </div>
+      </div>
+    {/if}
+  </div>
+
+  <!-- Tooltip -->
+  {#if hoveredStop !== null && tooltipPos}
+    {@const stopState = getStopState(hoveredStop)}
+    <StopTooltip
+      stopIndex={hoveredStop}
+      stopState={stopState}
+      vCms={currentRecord?.v_cms ?? 0}
+      x={tooltipPos.x}
+      y={tooltipPos.y}
+    />
+  {/if}
 </div>
 
 <style>
-	.linear-route-widget {
-		width: 100%;
-		height: 100%;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
+  .linear-route-widget {
+    width: 100%;
+    height: 100%;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    position: relative;
+  }
 
-	canvas {
-		width: 100%;
-		height: 100%;
-		display: block;
-	}
+  .route-container {
+    position: relative;
+    height: 80px;
+  }
+
+  .route-line {
+    position: absolute;
+    top: 35px;
+    left: 0;
+    right: 0;
+    height: 6px;
+  }
+
+  .route-base-line {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background-color: #4a5568;
+    border-radius: 3px;
+  }
+
+  .route-progress-line {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    width: 6px;
+    background-color: #3b82f6;
+    border-radius: 3px;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.8);
+    transform: translateX(-50%);
+  }
+
+  .stops-row {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 100%;
+  }
+
+  .stop-wrapper {
+    position: absolute;
+    transform: translateX(-50%);
+  }
+
+  .bus-marker {
+    position: absolute;
+    top: 22px;
+    transform: translateX(-50%);
+    font-size: 20px;
+    z-index: 10;
+  }
+
+  .detail-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1rem;
+    background-color: rgba(30, 41, 59, 0.8);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+
+  .detail-section {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .detail-section.center {
+    align-items: center;
+  }
+
+  .detail-section.right {
+    align-items: flex-end;
+  }
+
+  .detail-label {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #94a3b8;
+    margin-bottom: 0.25rem;
+  }
+
+  .detail-value {
+    font-size: 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: bold;
+    color: #e2e8f0;
+  }
+
+  .detail-percent {
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: 0.25rem;
+  }
+
+  .nearby-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .nearby-item {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+  }
 </style>

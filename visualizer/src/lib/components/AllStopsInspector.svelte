@@ -82,7 +82,7 @@
 					<!-- Distance -->
 					<div class="metric-row">
 						<span class="metric-label">Distance</span>
-						<span class="metric-value">{Math.round(stopState.distance_cm / 100)}m</span>
+						<span class="metric-value">{Math.round(stopState.progress_distance_cm / 100)}m</span>
 					</div>
 
 					<!-- Dwell Time -->

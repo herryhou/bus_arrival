@@ -26,3 +26,15 @@ export const FSM_STATE_LABELS: Record<FsmState, string> = {
 	'Departed': 'Departed',
 	'TripComplete': 'Trip Complete'
 };
+
+/**
+ * Abbreviated labels for FSM states (for small badges)
+ */
+export const FSM_STATE_ABBREVS: Record<FsmState, string> = {
+	'Idle': 'Idl',
+	'Approaching': 'App',
+	'Arriving': 'Arr',
+	'AtStop': 'AtS',
+	'Departed': 'Dep',
+	'TripComplete': 'Com'
+};

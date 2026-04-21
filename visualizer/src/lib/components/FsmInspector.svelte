@@ -126,7 +126,7 @@
 			</div>
 			<div class="metric-row">
 				<span class="label">Distance</span>
-				<span class="value">{Math.round(stopState.distance_cm / 100)}m</span>
+				<span class="value">{Math.round(stopState.progress_distance_cm / 100)}m</span>
 			</div>
 			<div class="metric-row">
 				<span class="label">Just Arrived</span>

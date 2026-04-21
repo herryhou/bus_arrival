@@ -33,8 +33,10 @@ export interface FeatureScores {
 export interface StopTraceState {
 	/** Stop index */
 	stop_idx: number;
-	/** Distance to stop (cm) - can be negative if past stop */
-	distance_cm: number;
+	/** GPS distance to stop (cm) - based on raw GPS projection (z_gps_cm), used for p1 */
+	gps_distance_cm: number;
+	/** Progress distance to stop (cm) - based on Kalman-filtered position (s_cm), used for p3 */
+	progress_distance_cm: number;
 	/** FSM state as string name */
 	fsm_state: FsmState;
 	/** Dwell time (seconds) */
