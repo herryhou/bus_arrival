@@ -31,6 +31,8 @@
   let busProgress = $derived.by(() => busProgressProp);
   let hoveredStop = $state<number | null>(null);
   let tooltipPos = $state<{ x: number; y: number } | null>(null);
+  let hoveredBus = $state(false);
+  let busTooltipPos = $state<{ x: number; y: number } | null>(null);
 
   const maxProgress = $derived.by(() => {
     if (routeData.nodes.length === 0) return 100000;
@@ -70,6 +72,18 @@
   function handleStopHoverEnd() {
     hoveredStop = null;
     tooltipPos = null;
+  }
+
+  function handleBusHover(event: MouseEvent) {
+    hoveredBus = true;
+    const target = event.target as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    busTooltipPos = { x: rect.left + rect.width / 2, y: rect.top - 8 };
+  }
+
+  function handleBusHoverEnd() {
+    hoveredBus = false;
+    busTooltipPos = null;
   }
 
   const speedKmh = $derived.by(() => {
@@ -133,7 +147,12 @@
       {/each}
 
       <!-- Bus emoji -->
-      <div class="bus-marker" style="left: {progressToPercent(busProgress)}%">🚌</div>
+      <div
+        class="bus-marker"
+        style="left: {progressToPercent(busProgress)}%"
+        onmouseenter={handleBusHover}
+        onmouseleave={handleBusHoverEnd}
+      >🚌</div>
     </div>
   </div>
 
@@ -249,6 +268,7 @@
     transform: translateX(-50%);
     font-size: 20px;
     z-index: 10;
+    cursor: help;
   }
 
   .detail-panel {
