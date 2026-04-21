@@ -233,57 +233,32 @@
 
 		// Panel background
 		context.fillStyle = 'rgba(30, 41, 59, 0.8)';
-		roundRect(context, LAYOUT.paddingX - 10, detailY - 8, width - LAYOUT.paddingX * 2 + 20, 65, 8);
+		roundRect(context, LAYOUT.paddingX - 10, detailY - 8, width - LAYOUT.paddingX * 2 + 20, 40, 8);
 		context.fill();
 
-		// Speed indicator (left side)
+		// Raw speed (left side)
 		context.textAlign = 'left';
 		context.textBaseline = 'top';
+		context.font = 'bold 16px JetBrains Mono, Monaco, monospace';
+		context.fillStyle = busSpeed > 0 ? '#22c55e' : '#64748b';
+		context.fillText(`${busSpeed} cm/s`, LAYOUT.paddingX, detailY + 12);
 
-		context.font = '12px JetBrains Mono, Monaco, monospace';
-		context.fillStyle = '#94a3b8';
-		context.fillText('SPEED', LAYOUT.paddingX, detailY + 4);
-
-		context.font = 'bold 24px JetBrains Mono, Monaco, monospace';
-		context.fillStyle = speedKmh > 0 ? '#22c55e' : '#64748b';
-		context.fillText(`${speedKmh.toFixed(1)} km/h`, LAYOUT.paddingX, detailY + 20);
-
-		// Progress info (center)
-		const progressKm = (busProgress / 100000).toFixed(2);
-		const totalKm = (maxProgress / 100000).toFixed(1);
-		const progressPercent = ((busProgress / maxProgress) * 100).toFixed(0);
-
+		// Raw progress (center)
 		context.textAlign = 'center';
-		context.font = '12px JetBrains Mono, Monaco, monospace';
-		context.fillStyle = '#94a3b8';
-		context.fillText('PROGRESS', width / 2, detailY + 4);
-
 		context.font = 'bold 16px JetBrains Mono, Monaco, monospace';
 		context.fillStyle = '#e2e8f0';
-		context.fillText(`${progressKm} / ${totalKm} km`, width / 2, detailY + 20);
+		context.fillText(`${busProgress} / ${maxProgress} cm`, width / 2, detailY + 12);
 
-		context.font = '13px JetBrains Mono, Monaco, monospace';
-		context.fillStyle = '#f59e0b';
-		context.fillText(`${progressPercent}%`, width / 2, detailY + 40);
-
-		// Nearby stops (right side)
+		// Nearby stops (right side, compact)
 		if (nearbyStops.length > 0) {
 			const rightX = width - LAYOUT.paddingX;
+			const { stop, index, distance } = nearbyStops[0];
+			const direction = stop.progress_cm > busProgress ? '→' : '←';
 
 			context.textAlign = 'right';
-			context.font = '12px JetBrains Mono, Monaco, monospace';
-			context.fillStyle = '#94a3b8';
-			context.fillText('NEARBY STOPS', rightX, detailY + 4);
-
-			nearbyStops.forEach(({ stop, index, distance }, i) => {
-				const y = detailY + 20 + i * 14;
-				const distanceKm = (distance / 100000).toFixed(2);
-				const direction = stop.progress_cm > busProgress ? '→' : '←';
-
-				context.font = '12px JetBrains Mono, Monaco, monospace';
-				context.fillStyle = distance < 50000 ? '#22c55e' : '#cbd5e0'; // Green if < 500m
-				context.fillText(`#${index + 1} ${direction} ${distanceKm}km`, rightX, y);
-			});
+			context.font = '14px JetBrains Mono, Monaco, monospace';
+			context.fillStyle = distance < 50000 ? '#22c55e' : '#cbd5e0';
+			context.fillText(`#${index + 1} ${direction} ${distance}cm`, rightX, detailY + 12);
 		}
 	}
 
