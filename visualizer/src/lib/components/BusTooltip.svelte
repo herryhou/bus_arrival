@@ -14,10 +14,24 @@
   const jsonDisplay = $derived(
     record ? JSON.stringify(record, null, 2) : ""
   );
+
+  // Estimate tooltip height and adjust position to avoid bottom overflow
+  const tooltipY = $derived(() => {
+    if (y === null) return 0;
+    const viewportHeight = window.innerHeight;
+    const estimatedHeight = Math.min(400, jsonDisplay.length * 1.5); // rough estimate
+    const bottomSpace = viewportHeight - y;
+
+    // If not enough space below, position above the bus marker
+    if (bottomSpace < estimatedHeight + 20) {
+      return y - estimatedHeight - 20;
+    }
+    return y;
+  });
 </script>
 
 {#if record && x !== null && y !== null}
-  <div class="bus-tooltip" style="left: {x}px; top: {y}px;">
+  <div class="bus-tooltip" style="left: {x}px; top: {tooltipY}px;">
     <div class="tooltip-header">
       <span class="title">TRACE RECORD</span>
     </div>
