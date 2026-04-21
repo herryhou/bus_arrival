@@ -3,31 +3,38 @@
   import type { TraceRecord } from '$lib/types';
 
   interface Props {
-    record: TraceRecord;
-    x: number;
-    y: number;
+    record: TraceRecord | null;
+    x: number | null;
+    y: number | null;
   }
 
   let { record, x, y }: Props = $props();
 
+  // Safe number formatting with NaN/null checks
+  const safeToFixed = (value: number | null | undefined, digits: number): string => {
+    if (value === null || value === undefined || Number.isNaN(value)) return '-';
+    return value.toFixed(digits);
+  };
+
   // Format helpers - Position
-  const lat = $derived(record.lat.toFixed(4));
-  const lon = $derived(record.lon.toFixed(4));
-  const progressKm = $derived((record.s_cm / 100000).toFixed(2));
+  const lat = $derived(safeToFixed(record?.lat ?? null, 4));
+  const lon = $derived(safeToFixed(record?.lon ?? null, 4));
+  const progressKm = $derived(safeToFixed((record?.s_cm ?? 0) / 100000, 2));
 
   // Format helpers - Motion
-  const speedKmh = $derived((record.v_cms * 3600 / 100000).toFixed(1));
-  const heading = $derived(record.heading_cdeg ? Math.round(record.heading_cdeg / 100) : null);
+  const speedKmh = $derived(safeToFixed((record?.v_cms ?? 0) * 3600 / 100000, 1));
+  const heading = $derived(record?.heading_cdeg ? Math.round(record.heading_cdeg / 100) : null);
 
   // Format helpers - Map matching
-  const divergenceM = $derived((record.divergence_cm / 100).toFixed(1));
-  const segmentDisplay = $derived(record.segment_idx ?? 'Off-route');
+  const divergenceM = $derived(safeToFixed((record?.divergence_cm ?? 0) / 100, 1));
+  const segmentDisplay = $derived(record?.segment_idx ?? 'Off-route');
 
   // Fix type badge color
-  const fixBadgeClass = $derived(record.fix_type === '3d' ? 'fix-3d' : record.fix_type === '2d' ? 'fix-2d' : 'fix-none');
+  const fixBadgeClass = $derived(record?.fix_type === '3d' ? 'fix-3d' : record?.fix_type === '2d' ? 'fix-2d' : 'fix-none');
 </script>
 
-{#if record}
+{#if record && x !== null && y !== null}
+  <!-- Fixed positioning ensures tooltip stays in viewport -->
   <div class="bus-tooltip" style="left: {x}px; top: {y}px;">
     <!-- Header -->
     <div class="tooltip-header">
