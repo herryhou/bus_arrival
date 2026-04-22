@@ -8,9 +8,26 @@
 
   let { record }: Props = $props();
 
-  // Format record as readable JSON
+  // Simple JSON syntax highlighter
+  function highlightJson(json: string): string {
+    return json.replace(
+      /("(?:[^"\\]|\\.)*")\s*:|("(?:[^"\\]|\\.)*")|(\b\d+\.?\d*\b)|(\btrue\b|\bfalse\b)|(\bnull\b)/g,
+      (match, key, string, number, boolean, nullVal) => {
+        if (key) return `<span class="json-key">${key}</span>:`;
+        if (string) return `<span class="json-string">${string}</span>`;
+        if (number) return `<span class="json-number">${number}</span>`;
+        if (boolean) return `<span class="json-boolean">${boolean}</span>`;
+        if (nullVal) return `<span class="json-null">${nullVal}</span>`;
+        return match;
+      },
+    );
+  }
+
+  // Format record as readable JSON with syntax highlighting
   const jsonDisplay = $derived(
-    record ? JSON.stringify(record, null, 2) : "No trace data available"
+    record
+      ? highlightJson(JSON.stringify(record, null, 2))
+      : "No trace data available",
   );
 </script>
 
@@ -23,7 +40,7 @@
       </span>
     {/if}
   </div>
-  <pre class="json-content">{jsonDisplay}</pre>
+  <pre class="json-content">{@html jsonDisplay}</pre>
 </div>
 
 <style>
@@ -68,19 +85,24 @@
   }
 
   /* JSON syntax highlighting */
-  .json-content :global(string) {
+  .json-content :global(.json-key) {
+    color: #ffa657;
+    font-weight: bold;
+  }
+
+  .json-content :global(.json-string) {
     color: #a5d6ff;
   }
 
-  .json-content :global(number) {
-    color: #79c0ff;
+  .json-content :global(.json-number) {
+    color: #9ed2b0;
   }
 
-  .json-content :global(boolean) {
-    color: #ff7b72;
+  .json-content :global(.json-boolean) {
+    color: #8cff72;
   }
 
-  .json-content :global(null) {
+  .json-content :global(.json-null) {
     color: #ffa657;
   }
 </style>
