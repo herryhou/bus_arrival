@@ -210,11 +210,21 @@ pub struct KalmanState {
     pub off_route_clear_ticks: u8,
     /// Frozen position when off-route is first suspected (for immediate position freezing)
     pub frozen_s_cm: Option<DistCm>,
+    /// Timestamp when position was frozen (for accurate recovery elapsed time calculation)
+    pub off_route_freeze_time: Option<u64>,
 }
 
 impl KalmanState {
     pub fn new() -> Self {
-        KalmanState { s_cm: 0, v_cms: 0, last_seg_idx: 0, off_route_suspect_ticks: 0, off_route_clear_ticks: 0, frozen_s_cm: None }
+        KalmanState {
+            s_cm: 0,
+            v_cms: 0,
+            last_seg_idx: 0,
+            off_route_suspect_ticks: 0,
+            off_route_clear_ticks: 0,
+            frozen_s_cm: None,
+            off_route_freeze_time: None,
+        }
     }
 
     /// Cold start initialization from first valid GPS fix.
@@ -227,6 +237,7 @@ impl KalmanState {
             off_route_suspect_ticks: 0,
             off_route_clear_ticks: 0,
             frozen_s_cm: None,
+            off_route_freeze_time: None,
         }
     }
 
