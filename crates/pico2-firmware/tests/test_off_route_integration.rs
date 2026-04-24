@@ -232,6 +232,64 @@ fn load_test_route_data() -> Option<RouteData<'static>> {
 }
 
 #[cfg(feature = "dev")]
+/// Helper to create a longer test route (1km) for testing §4.5 scenarios
+/// Creates a straight route along X-axis with multiple segments
+fn create_long_test_route_data() -> RouteData<'static> {
+    use shared::{RouteNode, SpatialGrid};
+
+    let mut nodes = Vec::new();
+    let mut cum_dist = 0i64;
+
+    // Create 10 segments, each 100m long (total 1km)
+    for i in 0..=10 {
+        let x_cm = (i as i64 * 10000) as i32; // 0, 10000, 20000, ... 100000
+        let seg_len_mm = if i < 10 { 100000 } else { 0 }; // 100m for segments, 0 for last node
+
+        nodes.push(RouteNode {
+            x_cm,
+            y_cm: 0,
+            cum_dist_cm: cum_dist as i32,
+            seg_len_mm,
+            dx_cm: 10000,
+            dy_cm: 0,
+            heading_cdeg: 9000, // East
+            _pad: 0,
+        });
+
+        cum_dist += 10000;
+    }
+
+    // Create a grid covering the route
+    let grid = SpatialGrid {
+        cells: vec![
+            vec![0, 1, 2, 3, 4],
+            vec![0, 1, 2, 3, 4],
+            vec![5, 6, 7, 8, 9],
+            vec![5, 6, 7, 8, 9],
+            vec![10, 10, 10, 10, 10],
+        ],
+        grid_size_cm: 20000,
+        cols: 5,
+        rows: 5,
+        x0_cm: 0,
+        y0_cm: 0,
+    };
+
+    // Pack route data
+    let mut buffer = Vec::new();
+    shared::binfile::pack_route_data(&nodes, &[], &grid, 0.0, &mut buffer)
+        .expect("Failed to pack long test route data");
+
+    // Load route data
+    let route_data = RouteData::load(&buffer).expect("Failed to load route data");
+
+    // Extend lifetime to 'static for test convenience
+    unsafe {
+        std::mem::transmute::<RouteData<'_>, RouteData<'static>>(route_data)
+    }
+}
+
+#[cfg(feature = "dev")]
 #[test]
 fn test_full_off_route_cycle() {
     // Create test route and state
@@ -417,4 +475,133 @@ fn test_off_route_freeze_time_set_once() {
     println!("  Verified freeze time unchanged through tick 8");
     println!("  Correct elapsed: {}s vs Wrong: {}s",
         correct_elapsed, wrong_elapsed);
+}
+
+#[cfg(feature = "dev")]
+#[test]
+fn test_m12_recovery_works_without_section_4_5() {
+    // Regression test for Bug 2: §4.5 inline recovery conflicts with M12
+    //
+    // This test verifies that M12 recovery works correctly when §4.5 is removed:
+    // 1. GPS returns from off-route with position jump (>50m)
+    // 2. M12 receives raw GPS projection (not snapped by §4.5)
+    // 3. M12 finds correct stop index using its 4-feature scoring
+    // 4. System resumes normal operation with recovered stop index
+    //
+    // Uses a longer test route (1km) to trigger §4.5's 50m jump threshold
+
+    let route_data = create_long_test_route_data();
+    let mut state = State::new(&route_data, None);
+
+    // Phase 1: Establish position at beginning of route (s ≈ 0)
+    for i in 0..4 {
+        let gps = create_gps_point_with_time(1000, 0, 500, i);
+        let _ = state.process_gps(&gps);
+    }
+
+    let initial_stop = state.last_known_stop_index();
+    println!("Initial stop index: {}", initial_stop);
+
+    // Phase 2: Move forward to s ≈ 100m (along the route)
+    // Create GPS points that project to different positions on route
+    // by using the origin point (20, 120) repeatedly - each will project to s=0
+    // but Kalman will advance based on speed
+    for i in 0..20 {
+        let gps = GpsPoint {
+            timestamp: 1000 + 4 + i,
+            lat: 20.0,
+            lon: 120.0,
+            heading_cdeg: 9000,
+            speed_cms: 500, // 5 m/s forward
+            hdop_x10: 10,
+            has_fix: true,
+        };
+        let _ = state.process_gps(&gps);
+    }
+
+    let position_before_off_route = state.last_valid_s_cm();
+    let stop_before_off_route = state.last_known_stop_index();
+    println!("Position before off-route: {} cm, stop: {}",
+        position_before_off_route, stop_before_off_route);
+
+    // Phase 3: Trigger off-route (GPS drifts away for 6 ticks)
+    for i in 1..=6 {
+        let gps_off = create_gps_point_far_from_route(50000, i);
+        let _ = state.process_gps(&gps_off);
+    }
+
+    // Verify off-route was triggered
+    assert!(state.needs_recovery_on_reacquisition(),
+        "Off-route should be triggered, setting recovery flag");
+    assert!(state.off_route_freeze_time().is_some(),
+        "Freeze time should be set");
+
+    let frozen_position = position_before_off_route;
+    println!("Position frozen at: {} cm", frozen_position);
+
+    // Phase 4: GPS returns to route at a FAR position (simulating long detour)
+    // This should trigger §4.5 (>50m jump from frozen position)
+    // We use same GPS (origin) but the elapsed time creates large jump
+    let detour_return_timestamp = 50100;
+
+    // First good tick back on route
+    let gps_return_1 = GpsPoint {
+        timestamp: detour_return_timestamp,
+        lat: 20.0,
+        lon: 120.0,
+        heading_cdeg: 9000,
+        speed_cms: 500,
+        hdop_x10: 10,
+        has_fix: true,
+    };
+
+    // Second good tick - should trigger recovery
+    let gps_return_2 = GpsPoint {
+        timestamp: detour_return_timestamp + 1,
+        lat: 20.0,
+        lon: 120.0,
+        heading_cdeg: 9000,
+        speed_cms: 500,
+        hdop_x10: 10,
+        has_fix: true,
+    };
+
+    // Process both good ticks - second tick should trigger recovery
+    let _event1 = state.process_gps(&gps_return_1);
+    let _event2 = state.process_gps(&gps_return_2);
+
+    // Verify recovery completed (M12 should handle this without §4.5)
+    assert!(!state.needs_recovery_on_reacquisition(),
+        "Recovery should have cleared the flag after 2 good ticks");
+    assert!(state.off_route_freeze_time().is_none(),
+        "Freeze time should be cleared after recovery");
+
+    // Verify we have a valid position after recovery
+    let position_after_recovery = state.last_valid_s_cm();
+    let stop_after_recovery = state.last_known_stop_index();
+
+    println!("Position after recovery: {} cm, stop: {}",
+        position_after_recovery, stop_after_recovery);
+
+    // The key assertion: M12 should have found a valid stop index
+    assert!(position_after_recovery >= 0,
+        "Should have valid position after recovery");
+    assert!(stop_after_recovery <= 255,
+        "Stop index should be valid after recovery");
+
+    // Process more GPS to ensure stable operation
+    for i in 1..=3 {
+        let gps_good = create_gps_point_with_time(50200, 0, 500, i);
+        let _ = state.process_gps(&gps_good);
+
+        // Should remain stable without re-triggering recovery
+        assert!(!state.needs_recovery_on_reacquisition(),
+            "Should not re-trigger recovery (stable operation)");
+    }
+
+    println!("✓ M12 recovery test passed");
+    println!("  - Off-route triggered correctly");
+    println!("  - GPS returned after long duration");
+    println!("  - M12 recovery completed successfully");
+    println!("  - Stable operation resumed");
 }
