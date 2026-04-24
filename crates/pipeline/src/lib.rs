@@ -27,6 +27,17 @@ use shared::binfile::RouteData;
 use shared::{GpsPoint, KalmanState, DrState};
 use thiserror::Error;
 
+/// Serialize f64 with at most 6 decimal places
+#[cfg(feature = "std")]
+fn serialize_f64_6dec<S>(value: &f64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: ::serde::Serializer,
+{
+    let formatted = format!("{:.6}", value);
+    let parsed: f64 = formatted.parse().unwrap_or(*value);
+    serializer.serialize_f64(parsed)
+}
+
 #[cfg(feature = "std")]
 use std::path::Path;
 #[cfg(feature = "std")]
@@ -80,7 +91,9 @@ pub type DepartureEvent = shared::DepartureEvent;
 #[derive(Debug, Clone, ::serde::Serialize)]
 pub struct TraceRecord {
     pub time: u64,
+    #[serde(serialize_with = "serialize_f64_6dec")]
     pub lat: f64,
+    #[serde(serialize_with = "serialize_f64_6dec")]
     pub lon: f64,
     pub s_cm: i32,
     pub v_cms: i32,

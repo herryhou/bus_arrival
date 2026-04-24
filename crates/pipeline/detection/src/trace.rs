@@ -1,8 +1,19 @@
 //! Trace record emission for debugging visualization
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use shared::{DistCm, SpeedCms, Prob8, FsmState, HeadCdeg};
 use std::io::{BufWriter, Write};
+
+/// Serialize f64 with at most 6 decimal places
+fn serialize_f64_6dec<S>(value: &f64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let formatted = format!("{:.6}", value);
+    // Parse back to f64 to avoid serializing as string
+    let parsed: f64 = formatted.parse().unwrap_or(*value);
+    serializer.serialize_f64(parsed)
+}
 
 /// Trace record for debugging visualization
 #[derive(Serialize, Deserialize)]
@@ -11,9 +22,11 @@ pub struct TraceRecord {
     pub time: u64,
 
     /// Input: Latitude
+    #[serde(serialize_with = "serialize_f64_6dec")]
     pub lat: f64,
 
     /// Input: Longitude
+    #[serde(serialize_with = "serialize_f64_6dec")]
     pub lon: f64,
 
     /// Input: Route progress (cm)
