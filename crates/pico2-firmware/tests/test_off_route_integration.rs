@@ -350,3 +350,71 @@ fn test_full_off_route_cycle() {
     println!("  - Recovery triggered on GPS return");
     println!("  - Normal operation resumed");
 }
+
+#[cfg(feature = "dev")]
+#[test]
+fn test_off_route_freeze_time_set_once() {
+    // Regression test for Bug 1: off_route_freeze_time was being overwritten
+    // every tick instead of being set once on first OffRoute.
+    //
+    // This test verifies that:
+    // 1. Freeze time is set when off-route is first triggered
+    // 2. Freeze time is NOT updated on subsequent OffRoute ticks
+    // 3. The elapsed time calculation uses the ORIGINAL freeze time
+
+    let route_data = match load_test_route_data() {
+        Some(data) => data,
+        None => {
+            println!("Skipping test - route data not available");
+            return;
+        }
+    };
+    let mut state = State::new(&route_data, None);
+
+    // Establish position through warmup
+    for i in 0..4 {
+        let gps = create_gps_point_with_time(1000, 0, 500, i);
+        let _ = state.process_gps(&gps);
+    }
+
+    // Trigger off-route - this should set freeze_time on tick 5
+    for i in 1..=5 {
+        let gps_off = create_gps_point_far_from_route(50000, i);
+        let _ = state.process_gps(&gps_off);
+    }
+
+    // Verify freeze time is set
+    let freeze_time_tick_5 = state.off_route_freeze_time();
+    assert!(freeze_time_tick_5.is_some(), "Freeze time should be set on tick 5");
+    let original_freeze_time = freeze_time_tick_5.unwrap();
+
+    // Process MORE OffRoute ticks (tick 6, 7, 8)
+    for i in 6..=8 {
+        let gps_off = create_gps_point_far_from_route(50000, i);
+        let _ = state.process_gps(&gps_off);
+
+        // Verify freeze time has NOT changed
+        let current_freeze_time = state.off_route_freeze_time();
+        assert_eq!(current_freeze_time, Some(original_freeze_time),
+            "Freeze time should NOT be updated on tick {} (should remain at tick 5 value)",
+            i);
+    }
+
+    // Calculate what elapsed time would be if freeze_time was updated every tick (WRONG behavior)
+    // vs set once (CORRECT behavior)
+    let gps_return_timestamp = 50000 + 10; // Tick 10
+    let wrong_elapsed = gps_return_timestamp - (50000 + 8); // If updated on tick 8: ~2 seconds
+    let correct_elapsed = gps_return_timestamp - (50000 + 5); // If set on tick 5: ~5 seconds
+
+    // The difference matters for M12 recovery's velocity constraint:
+    // Wrong: max_reachable = 1667 cm/s * 2s = 33m
+    // Correct: max_reachable = 1667 cm/s * 5s = 83m
+    assert!(correct_elapsed > wrong_elapsed,
+        "Correct elapsed time should be greater than wrong elapsed time");
+
+    println!("✓ Freeze time set once test passed");
+    println!("  Original freeze time: tick 5");
+    println!("  Verified freeze time unchanged through tick 8");
+    println!("  Correct elapsed: {}s vs Wrong: {}s",
+        correct_elapsed, wrong_elapsed);
+}

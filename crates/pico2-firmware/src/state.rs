@@ -377,12 +377,14 @@ impl<'a> State<'a> {
                 let signals = PositionSignals { z_gps_cm: s_cm, s_cm };
                 (s_cm, v_cms, signals, GpsStatus::DrOutage)
             }
-            ProcessResult::OffRoute { last_valid_s, last_valid_v } => {
+            ProcessResult::OffRoute { last_valid_s: _, last_valid_v: _ } => {
                 // Set flag for recovery on re-acquisition
                 self.needs_recovery_on_reacquisition = true;
 
-                // Record freeze time
-                self.off_route_freeze_time = Some(gps.timestamp);
+                // Record freeze time (only once, on first OffRoute tick)
+                if self.off_route_freeze_time.is_none() {
+                    self.off_route_freeze_time = Some(gps.timestamp);
+                }
 
                 #[cfg(feature = "firmware")]
                 defmt::warn!(
