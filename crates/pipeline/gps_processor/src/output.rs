@@ -138,6 +138,7 @@ pub fn write_output<W: Write>(
         super::kalman::ProcessResult::OffRoute {
             last_valid_s,
             last_valid_v,
+            freeze_time: _,
         } => OutputRecord {
             time,
             lat,

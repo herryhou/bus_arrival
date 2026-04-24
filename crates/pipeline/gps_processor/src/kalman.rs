@@ -73,6 +73,7 @@ pub enum ProcessResult {
     OffRoute {
         last_valid_s: DistCm,
         last_valid_v: SpeedCms,
+        freeze_time: u64,
     },
 }
 
@@ -125,6 +126,8 @@ pub fn process_gps_update(
             // First tick of off-route suspect: freeze position immediately
             if state.off_route_suspect_ticks == 0 {
                 state.frozen_s_cm = Some(state.s_cm);
+                // Record freeze time at the same time position is frozen (Bug 5 fix)
+                state.off_route_freeze_time = Some(gps.timestamp);
             }
             state.off_route_suspect_ticks = state.off_route_suspect_ticks.saturating_add(1);
             state.off_route_clear_ticks = 0;
@@ -132,9 +135,11 @@ pub fn process_gps_update(
             if state.off_route_suspect_ticks >= OFF_ROUTE_CONFIRM_TICKS {
                 // Confirmed off-route: return with frozen position
                 let frozen_s = state.frozen_s_cm.unwrap_or(state.s_cm);
+                let freeze_time = state.off_route_freeze_time.unwrap_or(gps.timestamp);
                 return ProcessResult::OffRoute {
                     last_valid_s: frozen_s,
                     last_valid_v: state.v_cms,
+                    freeze_time,
                 };
             }
 
@@ -152,6 +157,7 @@ pub fn process_gps_update(
             if state.off_route_clear_ticks >= OFF_ROUTE_CLEAR_TICKS {
                 state.off_route_suspect_ticks = 0;
                 state.frozen_s_cm = None;
+                state.off_route_freeze_time = None; // Clear freeze time when unfreezing
             }
         }
     }
@@ -327,6 +333,7 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
     // Reset off-route counters on outage
     state.off_route_suspect_ticks = 0;
     state.off_route_clear_ticks = 0;
+    state.off_route_freeze_time = None;
 
     ProcessResult::DrOutage {
         s_cm: state.s_cm,

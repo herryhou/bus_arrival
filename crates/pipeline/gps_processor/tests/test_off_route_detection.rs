@@ -126,7 +126,7 @@ fn test_off_route_confirms_after_5_ticks() {
                     matches!(result, ProcessResult::OffRoute { .. }),
                     "Tick 5 SHOULD trigger OffRoute"
                 );
-                if let ProcessResult::OffRoute { last_valid_s, last_valid_v } = result {
+                if let ProcessResult::OffRoute { last_valid_s, last_valid_v, freeze_time: _ } = result {
                     // Should return last valid position (frozen)
                     assert_eq!(last_valid_s, state.s_cm);
                     assert_eq!(last_valid_v, state.v_cms);

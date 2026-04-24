@@ -377,14 +377,13 @@ impl<'a> State<'a> {
                 let signals = PositionSignals { z_gps_cm: s_cm, s_cm };
                 (s_cm, v_cms, signals, GpsStatus::DrOutage)
             }
-            ProcessResult::OffRoute { last_valid_s: _, last_valid_v: _ } => {
+            ProcessResult::OffRoute { last_valid_s: _, last_valid_v: _, freeze_time } => {
                 // Set flag for recovery on re-acquisition
                 self.needs_recovery_on_reacquisition = true;
 
-                // Record freeze time (only once, on first OffRoute tick)
-                if self.off_route_freeze_time.is_none() {
-                    self.off_route_freeze_time = Some(gps.timestamp);
-                }
+                // Use freeze time from KalmanState (set when position first froze, not when OffRoute confirmed)
+                // Bug 5 fix: This is now accurate (no longer 5 ticks late)
+                self.off_route_freeze_time = Some(freeze_time);
 
                 #[cfg(feature = "firmware")]
                 defmt::warn!(

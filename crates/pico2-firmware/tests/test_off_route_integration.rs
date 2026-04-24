@@ -525,8 +525,10 @@ fn test_m12_recovery_works_without_section_4_5() {
         position_before_off_route, stop_before_off_route);
 
     // Phase 3: Trigger off-route (GPS drifts away for 6 ticks)
+    // Continue timestamp sequence from where we left off (1024)
+    let off_route_start_timestamp = 1000 + 4 + 20;
     for i in 1..=6 {
-        let gps_off = create_gps_point_far_from_route(50000, i);
+        let gps_off = create_gps_point_far_from_route(off_route_start_timestamp, i);
         let _ = state.process_gps(&gps_off);
     }
 
@@ -539,10 +541,9 @@ fn test_m12_recovery_works_without_section_4_5() {
     let frozen_position = position_before_off_route;
     println!("Position frozen at: {} cm", frozen_position);
 
-    // Phase 4: GPS returns to route at a FAR position (simulating long detour)
-    // This should trigger §4.5 (>50m jump from frozen position)
-    // We use same GPS (origin) but the elapsed time creates large jump
-    let detour_return_timestamp = 50100;
+    // Phase 4: GPS returns to route (simulating detour return)
+    // Continue timestamp sequence (no large gap)
+    let detour_return_timestamp = off_route_start_timestamp + 6;
 
     // First good tick back on route
     let gps_return_1 = GpsPoint {
