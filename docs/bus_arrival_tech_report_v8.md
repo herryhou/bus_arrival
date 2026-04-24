@@ -767,7 +767,11 @@ $$z(t) = s(t) + \varepsilon(t) \qquad \text{（觀測模型，}\sigma_\varepsilo
 
 ### 8.3 單調性約束
 
-$$\text{if } z(t) - \hat{s}(t-1) < -1000\ \text{cm} \;\Rightarrow\; \text{reject GPS sample（逆向跳點）}$$
+$$\text{if } z(t) - \hat{s}(t-1) < -5000\ \text{cm} \;\Rightarrow\; \text{reject GPS sample（逆向跳點）}$$
+
+實作使用 -5000 cm (-50 m) 作為實用平衡：
+- 容納市區峽谷條件下的 GPS 雜訊
+- 捕捉真正的異常（路線反轉、GPS 故障）
 
 此約束是系統穩定性的最強約束之一，以一次 `i32` 減法即可實現。
 
