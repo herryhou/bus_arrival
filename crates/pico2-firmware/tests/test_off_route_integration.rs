@@ -191,6 +191,157 @@ fn test_reacquisition_does_not_duplicate_or_advance_stop_state() {
     );
 }
 
+#[test]
+fn test_off_route_suppresses_announce_until_recovery_clears() {
+    let route_data = create_test_route_with_stop_data();
+    let mut control = State::new(&route_data, None);
+    let mut off_route_state = State::new(&route_data, None);
+    let base_timestamp = 30_000;
+    let mut control_announce = None;
+
+    for i in 0..4 {
+        let gps = gps_on_route_at_x(base_timestamp + i, 0, 500);
+        let _ = control.process_gps(&gps);
+        let _ = off_route_state.process_gps(&gps);
+    }
+
+    for i in 0..3 {
+        let event = control.process_gps(&gps_on_route_at_x(base_timestamp + 4 + i, 3_000, 500));
+        if control_announce.is_none() {
+            control_announce = event;
+        }
+    }
+
+    let control_event = control_announce.expect("Normal path should announce when entering the corridor");
+    assert_eq!(
+        control_event.event_type,
+        ArrivalEventType::Announce,
+        "Control path should emit an announce event at corridor entry"
+    );
+    assert_eq!(control_event.stop_idx, 0, "Control path should announce stop 0");
+
+    for i in 0..5 {
+        let event = off_route_state.process_gps(&gps_off_route_at_x(base_timestamp + 4 + i, 0, 500));
+        assert!(
+            event.is_none(),
+            "Off-route tick {} should suppress announcements while frozen",
+            i + 1
+        );
+    }
+
+    let first_good =
+        off_route_state.process_gps(&gps_on_route_at_x(base_timestamp + 9, 3_000, 500));
+    assert!(
+        first_good.is_none(),
+        "First good tick should still suppress announcement until hysteresis clears"
+    );
+    assert!(
+        off_route_state.needs_recovery_on_reacquisition(),
+        "Recovery should still be armed after only one good tick"
+    );
+
+    let mut resumed_announce = None;
+    for i in 0..3 {
+        let event = off_route_state.process_gps(&gps_on_route_at_x(base_timestamp + 10 + i, 3_000, 500));
+        if resumed_announce.is_none() {
+            resumed_announce = event;
+        }
+    }
+
+    let resumed_announce =
+        resumed_announce.expect("Announcement should resume shortly after recovery clears");
+    assert_eq!(
+        resumed_announce.event_type,
+        ArrivalEventType::Announce,
+        "Recovered path should resume announce behavior after freezing clears"
+    );
+    assert_eq!(
+        resumed_announce.stop_idx,
+        0,
+        "Recovered path should announce the same stop once freezing clears"
+    );
+    assert!(
+        !off_route_state.needs_recovery_on_reacquisition(),
+        "Recovery flag should clear after the second good tick"
+    );
+}
+
+#[test]
+fn test_reacquisition_can_progress_to_next_stop_without_duplicate_prior_announce() {
+    let route_data = create_test_route_with_recovery_stops();
+    let mut state = State::new(&route_data, None);
+    let base_timestamp = 40_000;
+    let mut saw_stop_0_announce = false;
+    let mut saw_stop_1_announce = false;
+
+    for i in 0..4 {
+        let gps = gps_on_route_at_x(base_timestamp + i, 0, 500);
+        let _ = state.process_gps(&gps);
+    }
+
+    for i in 0..3 {
+        let event = state.process_gps(&gps_on_route_at_x(base_timestamp + 4 + i, 2_500, 500));
+        if let Some(event) = event {
+            saw_stop_0_announce |=
+                event.stop_idx == 0 && event.event_type == ArrivalEventType::Announce;
+        }
+    }
+
+    assert!(
+        saw_stop_0_announce,
+        "Initial approach should announce stop 0 before the off-route episode"
+    );
+
+    for i in 0..5 {
+        let event = state.process_gps(&gps_off_route_at_x(base_timestamp + 7 + i, 2_500, 500));
+        assert!(
+            event.is_none(),
+            "Off-route tick {} should suppress arrivals while frozen",
+            i + 1
+        );
+    }
+
+    assert!(
+        state.needs_recovery_on_reacquisition(),
+        "Off-route episode should arm recovery before progressing to the next stop"
+    );
+
+    for i in 0..8 {
+        let event = state.process_gps(&gps_on_route_at_x(base_timestamp + 12 + i, 6_500, 500));
+        if let Some(event) = event {
+            assert!(
+                !(event.stop_idx == 0 && event.event_type == ArrivalEventType::Announce),
+                "Recovery path must not duplicate stop 0 announcement"
+            );
+            if event.stop_idx == 1 && event.event_type == ArrivalEventType::Announce {
+                saw_stop_1_announce = true;
+            }
+        }
+    }
+
+    assert!(
+        saw_stop_1_announce,
+        "Progressing well ahead after recovery should eventually announce stop 1"
+    );
+    assert_eq!(
+        state.last_known_stop_index(),
+        1,
+        "Post-recovery forward progress should advance the active stop index"
+    );
+    assert_eq!(
+        state.stop_states[0].fsm_state,
+        FsmState::Departed,
+        "Once recovery progresses to stop 1, stop 0 should remain passed"
+    );
+    assert!(
+        matches!(
+            state.stop_states[1].fsm_state,
+            FsmState::Approaching | FsmState::Arriving | FsmState::AtStop
+        ),
+        "Stop 1 should become active after forward recovery progress"
+    );
+}
+
 /// Helper function to create a test route with known geometry
 /// Creates a simple straight route along X-axis for predictable testing
 fn create_test_route_data() -> RouteData<'static> {
