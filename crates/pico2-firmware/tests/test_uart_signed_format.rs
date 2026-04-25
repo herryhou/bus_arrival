@@ -14,7 +14,10 @@ fn test_negative_s_cm_formats_correctly() {
 
     // The formatting should produce "-100" not "4294967196"
     let formatted = format!("{}", s_cm);
-    assert!(formatted.contains('-'), "Negative value should contain minus sign");
+    assert!(
+        formatted.contains('-'),
+        "Negative value should contain minus sign"
+    );
     assert_eq!(formatted, "-100");
 }
 
@@ -25,7 +28,10 @@ fn test_negative_v_cms_formats_correctly() {
 
     // The formatting should produce "-50" not "4294967246"
     let formatted = format!("{}", v_cms);
-    assert!(formatted.contains('-'), "Negative value should contain minus sign");
+    assert!(
+        formatted.contains('-'),
+        "Negative value should contain minus sign"
+    );
     assert_eq!(formatted, "-50");
 }
 

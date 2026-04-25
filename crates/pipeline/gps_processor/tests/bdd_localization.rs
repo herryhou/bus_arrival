@@ -512,11 +512,24 @@ fn scenario_normal_forward_movement(route_data: &RouteData, start_x: i32, start_
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false);
 
     // Then: Progress should be 1000
-    if let ProcessResult::Valid { signals, .. } = result {
-        let s_cm = signals.s_cm;
-        assert_eq!(s_cm, 1000);
-    } else {
-        panic!("Update failed");
+    match &result {
+        ProcessResult::Valid { signals, .. } => {
+            let s_cm = signals.s_cm;
+            assert_eq!(s_cm, 1000, "Expected s_cm=1000, got {}", s_cm);
+        }
+        ProcessResult::DrOutage { s_cm, .. } => {
+            panic!("Update failed: got DrOutage with s_cm={}, state.s_cm={}, state.v_cms={}",
+                   s_cm, state.s_cm, state.v_cms);
+        }
+        ProcessResult::OffRoute { .. } => {
+            panic!("Update failed: got OffRoute (unexpected)");
+        }
+        ProcessResult::Outage => {
+            panic!("Update failed: got Outage (unexpected)");
+        }
+        ProcessResult::Rejected(reason) => {
+            panic!("Update failed: got Rejected: {}", reason);
+        }
     }
 
     // When: Moving forward with GPS noise. GPS says 2500cm.

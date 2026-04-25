@@ -12,19 +12,18 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 
 // HAL imports
-use embassy_rp::uart::{BufferedInterruptHandler, BufferedUart, Config as UartConfig};
 use embassy_rp::bind_interrupts;
 use embassy_rp::block::ImageDef;
 use embassy_rp::flash::Flash;
+use embassy_rp::uart::{BufferedInterruptHandler, BufferedUart, Config as UartConfig};
 
 // Module declarations
-mod lut;
-mod uart;
 mod detection;
+mod lut;
+mod persist;
 mod recovery_trigger;
 mod state;
-mod persist;
-
+mod uart;
 
 // Note: embassy-rp doesn't require external bootloader
 // The RP2350 has built-in boot ROM
@@ -55,7 +54,8 @@ async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
     // Initialize flash driver for state persistence
-    let mut flash = Flash::<_, embassy_rp::flash::Async, { 2 * 1024 * 1024 }>::new(p.FLASH, p.DMA_CH0, Irqs);
+    let mut flash =
+        Flash::<_, embassy_rp::flash::Async, { 2 * 1024 * 1024 }>::new(p.FLASH, p.DMA_CH0, Irqs);
 
     // Initialize UART for GPS NMEA input and arrival event output
     // Using buffered UART (interrupt-based) for true async I/O without DMA requirement
@@ -81,8 +81,8 @@ async fn main(_spawner: Spawner) {
     };
 
     // Initialize route data from flash
-    let route_data = shared::binfile::RouteData::load(ROUTE_DATA)
-        .expect("Failed to load route data");
+    let route_data =
+        shared::binfile::RouteData::load(ROUTE_DATA).expect("Failed to load route data");
 
     info!(
         "Route data loaded: {} nodes, {} stops",
@@ -116,10 +116,7 @@ async fn main(_spawner: Spawner) {
 
                     // Parse NMEA sentence
                     if let Some(gps) = state.nmea.parse_sentence(sentence) {
-                        debug!(
-                            "GPS: lat={}, lon={}, fix={}",
-                            gps.lat, gps.lon, gps.has_fix
-                        );
+                        debug!("GPS: lat={}, lon={}, fix={}", gps.lat, gps.lon, gps.has_fix);
 
                         // Process GPS through full pipeline
                         if let Some(arrival) = state.process_gps(&gps) {
@@ -160,7 +157,10 @@ async fn main(_spawner: Spawner) {
                 let ps = shared::PersistedState::new(state.kalman.s_cm, current_stop);
                 match persist::save(&mut flash, &ps).await {
                     Ok(()) => {
-                        info!("Persisted state: stop={}, progress={}cm", current_stop, state.kalman.s_cm);
+                        info!(
+                            "Persisted state: stop={}, progress={}cm",
+                            current_stop, state.kalman.s_cm
+                        );
                         state.mark_persisted(current_stop);
                     }
                     Err(()) => {

@@ -23,15 +23,19 @@ fn test_adaptive_weights_close_stop() {
         s_cm: 100_000,
     };
     let prob = compute_arrival_probability_adaptive(
-        signals,  // PositionSignals
-        600,      // v_cms (approaching)
+        signals, // PositionSignals
+        600,     // v_cms (approaching)
         &stop_current,
-        5,        // dwell_time_s
+        5, // dwell_time_s
         GpsStatus::Valid,
         Some(&stop_next),
     );
 
-    assert!(prob > 190, "Expected probability > 190 for close stop, got {}", prob);
+    assert!(
+        prob > 190,
+        "Expected probability > 190 for close stop, got {}",
+        prob
+    );
 }
 
 #[test]
@@ -53,7 +57,12 @@ fn test_adaptive_weights_normal_stop() {
         s_cm: 100_000,
     };
     let prob = compute_arrival_probability_adaptive(
-        signals, 600, &stop_current, 5, GpsStatus::Valid, Some(&stop_next)
+        signals,
+        600,
+        &stop_current,
+        5,
+        GpsStatus::Valid,
+        Some(&stop_next),
     );
 
     // Normal stop: verify computation succeeds
@@ -72,9 +81,7 @@ fn test_adaptive_weights_last_stop() {
         z_gps_cm: 100_000,
         s_cm: 100_000,
     };
-    let prob = compute_arrival_probability_adaptive(
-        signals, 0, &stop, 10, GpsStatus::Valid, None
-    );
+    let prob = compute_arrival_probability_adaptive(signals, 0, &stop, 10, GpsStatus::Valid, None);
 
     // Last stop: at stop with zero speed and 10s dwell should have high probability
     assert!(prob > 150);

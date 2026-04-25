@@ -5,15 +5,17 @@
 
 use crate::lut::{GAUSSIAN_LUT, LOGISTIC_LUT};
 use shared::{
-    binfile::RouteData, probability_constants::*,
-    PositionSignals, Prob8, SpeedCms, Stop,
+    binfile::RouteData, probability_constants::*, PositionSignals, Prob8, SpeedCms, Stop,
 };
 
 // ===== Stop Corridor Filter =====
 
 /// Find stops whose corridor contains the current route progress
 /// no_std version - returns indices of active stops
-pub fn find_active_stops(signals: PositionSignals, route_data: &RouteData) -> heapless::Vec<usize, 16> {
+pub fn find_active_stops(
+    signals: PositionSignals,
+    route_data: &RouteData,
+) -> heapless::Vec<usize, 16> {
     let s_cm = signals.s_cm;
     let mut active = heapless::Vec::new();
     for i in 0..route_data.stop_count {

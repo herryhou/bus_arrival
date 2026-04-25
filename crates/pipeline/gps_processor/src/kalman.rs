@@ -80,15 +80,23 @@ pub fn update_off_route_hysteresis(
     } else {
         // Good GPS match: increment clear counter
         state.off_route_clear_ticks = state.off_route_clear_ticks.saturating_add(1);
+
+        // Only return Suspect if we're actually in a suspect state
+        // (i.e., we had prior suspect ticks or position is frozen)
+        let is_actually_suspect = state.off_route_suspect_ticks > 0 || state.frozen_s_cm.is_some();
+
         // After 2 consecutive good matches, reset suspect counter and unfreeze
         if state.off_route_clear_ticks >= OFF_ROUTE_CLEAR_TICKS {
             state.off_route_suspect_ticks = 0;
             state.frozen_s_cm = None;
             state.off_route_freeze_time = None; // Clear freeze time when unfreezing
             OffRouteStatus::Normal
-        } else {
+        } else if is_actually_suspect {
             // Still in suspect state (need more good ticks to clear)
             OffRouteStatus::Suspect
+        } else {
+            // Never been in suspect state, this is normal operation
+            OffRouteStatus::Normal
         }
     }
 }

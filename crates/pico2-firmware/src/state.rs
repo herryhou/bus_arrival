@@ -7,8 +7,10 @@
 use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
 use crate::recovery_trigger::should_trigger_recovery;
 use gps_processor::kalman::{process_gps_update, ProcessResult};
-use shared::{binfile::RouteData, ArrivalEvent, DistCm, DrState, GpsPoint, KalmanState, PositionSignals, Stop};
 use shared::FsmState;
+use shared::{
+    binfile::RouteData, ArrivalEvent, DistCm, DrState, GpsPoint, KalmanState, PositionSignals, Stop,
+};
 
 // ===== Constants =====
 
@@ -117,7 +119,11 @@ impl<'a> State<'a> {
             last_valid_s_cm: 0,
             last_gps_timestamp: 0,
             pending_persisted: persisted,
-            last_persisted_stop: if let Some(ps) = persisted { ps.last_stop_index } else { 0 },
+            last_persisted_stop: if let Some(ps) = persisted {
+                ps.last_stop_index
+            } else {
+                0
+            },
             ticks_since_persist: 0,
             needs_recovery_on_reacquisition: false,
         }
@@ -148,7 +154,11 @@ impl<'a> State<'a> {
         );
 
         let (s_cm, v_cms, signals, gps_status) = match result {
-            ProcessResult::Valid { signals, v_cms, seg_idx: _ } => {
+            ProcessResult::Valid {
+                signals,
+                v_cms,
+                seg_idx: _,
+            } => {
                 use crate::detection::GpsStatus;
                 let PositionSignals { z_gps_cm: _, s_cm } = signals;
                 let gps_status = GpsStatus::Valid;
@@ -158,8 +168,11 @@ impl<'a> State<'a> {
                 // Skip recovery on first fix - last_valid_s_cm is still 0 (initial value)
                 if !self.first_fix && should_trigger_recovery(s_cm, prev_s_cm) {
                     #[cfg(feature = "firmware")]
-                    defmt::warn!("GPS jump detected: s={}→{}, triggering recovery",
-                        prev_s_cm, s_cm);
+                    defmt::warn!(
+                        "GPS jump detected: s={}→{}, triggering recovery",
+                        prev_s_cm,
+                        s_cm
+                    );
 
                     // Call recovery module
                     // Calculate time delta since last GPS fix (in seconds)
@@ -274,11 +287,12 @@ impl<'a> State<'a> {
                     self.needs_recovery_on_reacquisition = false;
 
                     // Calculate elapsed time since freeze (from KalmanState)
-                    let elapsed_seconds = if let Some(freeze_time) = self.kalman.off_route_freeze_time {
-                        gps.timestamp.saturating_sub(freeze_time)
-                    } else {
-                        1  // Default if not set
-                    };
+                    let elapsed_seconds =
+                        if let Some(freeze_time) = self.kalman.off_route_freeze_time {
+                            gps.timestamp.saturating_sub(freeze_time)
+                        } else {
+                            1 // Default if not set
+                        };
 
                     // Clear freeze time in KalmanState
                     self.kalman.off_route_freeze_time = None;
@@ -321,7 +335,7 @@ impl<'a> State<'a> {
                     self.warmup_total_ticks = self.warmup_total_ticks.saturating_add(1);
                 }
 
-                return None;  // Still block detection
+                return None; // Still block detection
             }
             ProcessResult::Outage => {
                 #[cfg(feature = "firmware")]
@@ -371,10 +385,17 @@ impl<'a> State<'a> {
 
                 // Timeout expired: detection enabled, proceed with DR estimates
                 use crate::detection::GpsStatus;
-                let signals = PositionSignals { z_gps_cm: s_cm, s_cm };
+                let signals = PositionSignals {
+                    z_gps_cm: s_cm,
+                    s_cm,
+                };
                 (s_cm, v_cms, signals, GpsStatus::DrOutage)
             }
-            ProcessResult::OffRoute { last_valid_s: _, last_valid_v: _, freeze_time: _ } => {
+            ProcessResult::OffRoute {
+                last_valid_s: _,
+                last_valid_v: _,
+                freeze_time: _,
+            } => {
                 // Set flag for recovery on re-acquisition
                 self.needs_recovery_on_reacquisition = true;
 

@@ -2,9 +2,7 @@
 // Run with: cargo test --package pico2-firmware --features dev
 
 use pico2_firmware::detection::{
-    compute_arrival_probability,
-    compute_arrival_probability_adaptive,
-    GpsStatus,
+    compute_arrival_probability, compute_arrival_probability_adaptive, GpsStatus,
 };
 use shared::{PositionSignals, Stop};
 
@@ -17,12 +15,12 @@ fn test_consistency_standard_weights() {
     };
 
     let test_cases = [
-        (100_000, 0, 10),      // At stop, zero speed, 10s dwell
-        (100_000, 200, 5),     // At stop, moderate speed, 5s dwell
-        (95_000, 500, 0),      // Approaching, fast speed, 0s dwell
-        (105_000, 100, 15),    // Past stop, slow speed, 15s dwell
-        (90_000, 800, 3),      // At corridor start, fast
-        (110_000, 50, 20),     // At corridor end, very slow
+        (100_000, 0, 10),   // At stop, zero speed, 10s dwell
+        (100_000, 200, 5),  // At stop, moderate speed, 5s dwell
+        (95_000, 500, 0),   // Approaching, fast speed, 0s dwell
+        (105_000, 100, 15), // Past stop, slow speed, 15s dwell
+        (90_000, 800, 3),   // At corridor start, fast
+        (110_000, 50, 20),  // At corridor end, very slow
     ];
 
     for (s_cm, v_cms, dwell_time_s) in test_cases {
@@ -30,7 +28,8 @@ fn test_consistency_standard_weights() {
             z_gps_cm: s_cm,
             s_cm,
         };
-        let prob_standard = compute_arrival_probability(signals, v_cms, &stop, dwell_time_s, GpsStatus::Valid);
+        let prob_standard =
+            compute_arrival_probability(signals, v_cms, &stop, dwell_time_s, GpsStatus::Valid);
 
         // When next_stop is None or far (>12m), adaptive should use standard weights
         let prob_adaptive_none = compute_arrival_probability_adaptive(
@@ -85,9 +84,9 @@ fn test_consistency_close_stop_differs() {
     };
 
     let test_cases = [
-        (100_000, 0, 10),     // At stop, zero speed, 10s dwell
-        (100_000, 200, 5),    // At stop, moderate speed, 5s dwell
-        (95_000, 500, 0),     // Approaching, fast speed, 0s dwell
+        (100_000, 0, 10),  // At stop, zero speed, 10s dwell
+        (100_000, 200, 5), // At stop, moderate speed, 5s dwell
+        (95_000, 500, 0),  // Approaching, fast speed, 0s dwell
     ];
 
     for (s_cm, v_cms, dwell_time_s) in test_cases {
@@ -95,7 +94,8 @@ fn test_consistency_close_stop_differs() {
             z_gps_cm: s_cm,
             s_cm,
         };
-        let prob_standard = compute_arrival_probability(signals, v_cms, &stop, dwell_time_s, GpsStatus::Valid);
+        let prob_standard =
+            compute_arrival_probability(signals, v_cms, &stop, dwell_time_s, GpsStatus::Valid);
         let prob_adaptive_close = compute_arrival_probability_adaptive(
             signals,
             v_cms,

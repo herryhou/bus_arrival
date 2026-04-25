@@ -7,9 +7,9 @@
 //! - After warmup, detection is allowed
 //! - Warmup counter resets to 0 on GPS outage for conservative behavior
 
+use shared::{binfile::RouteData, GpsPoint};
 use std::fs;
 use std::path::Path;
-use shared::{binfile::RouteData, GpsPoint};
 
 #[test]
 fn test_warmup_field_exists() {
@@ -99,7 +99,12 @@ fn test_route_data_available() {
         let entries = fs::read_dir(test_assets_path).unwrap();
         let bin_files: Vec<_> = entries
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map(|ext| ext == "bin").unwrap_or(false))
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .map(|ext| ext == "bin")
+                    .unwrap_or(false)
+            })
             .map(|e| e.path().file_name().unwrap().to_string_lossy().to_string())
             .collect();
 
@@ -121,7 +126,10 @@ fn test_warmup_with_state_instance() {
     let test_data_path = Path::new("../../tools/data/ty225_normal.bin");
     if !test_data_path.exists() {
         // Skip test if route data is not available
-        println!("Skipping test - route data not found at {:?}", test_data_path);
+        println!(
+            "Skipping test - route data not found at {:?}",
+            test_data_path
+        );
         return;
     }
 
@@ -153,9 +161,9 @@ fn test_warmup_with_state_instance() {
         lat: 22.5,
         lon: 114.0,
         timestamp: base_timestamp,
-        speed_cms: 556, // ~20 km/h in cm/s
+        speed_cms: 556,     // ~20 km/h in cm/s
         heading_cdeg: 9000, // 90.00 degrees
-        hdop_x10: 15, // 1.5 HDOP
+        hdop_x10: 15,       // 1.5 HDOP
         has_fix: true,
     };
     let result1 = state.process_gps(&gps1);

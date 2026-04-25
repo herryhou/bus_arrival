@@ -41,7 +41,9 @@ const FLASH_SIZE: usize = 2 * 1024 * 1024;
 /// - Flash is entirely erased (all 0xFF bytes)
 /// - CRC32 checksum does not match
 /// - Read operation fails
-pub async fn load(flash: &mut Flash<'_, FLASH, embassy_rp::flash::Async, FLASH_SIZE>) -> Option<PersistedState> {
+pub async fn load(
+    flash: &mut Flash<'_, FLASH, embassy_rp::flash::Async, FLASH_SIZE>,
+) -> Option<PersistedState> {
     let mut buf = [0u8; core::mem::size_of::<PersistedState>()];
 
     // Read the persisted state from flash
@@ -79,7 +81,10 @@ pub async fn save(
 ) -> Result<(), ()> {
     // Erase the sector first (required before write on NOR flash)
     flash
-        .erase(PERSIST_FLASH_OFFSET, PERSIST_FLASH_OFFSET + ERASE_SIZE as u32)
+        .erase(
+            PERSIST_FLASH_OFFSET,
+            PERSIST_FLASH_OFFSET + ERASE_SIZE as u32,
+        )
         .await
         .map_err(|_| ())?;
 
