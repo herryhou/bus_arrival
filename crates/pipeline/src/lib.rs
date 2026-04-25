@@ -254,7 +254,7 @@ impl<'a> LocalizationState<'a> {
                     0,
                 ))
             }
-            gps_processor::kalman::ProcessResult::OffRoute { last_valid_s, last_valid_v } => {
+            gps_processor::kalman::ProcessResult::OffRoute { last_valid_s, last_valid_v, freeze_time: _ } => {
                 Some(gps::GpsRecord::new(
                     gps.timestamp,
                     gps.lat,
