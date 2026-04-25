@@ -326,16 +326,16 @@ fn test_full_off_route_cycle() {
         match i {
             1..=4 => {
                 // First 4 ticks: should NOT trigger off-route yet
-                // System should still process GPS (with noisy position)
+                // But position IS frozen immediately (Bug 5 fix)
                 assert!(!state.needs_recovery_on_reacquisition(),
                     "Tick {} should NOT need recovery yet", i);
-                assert!(state.off_route_freeze_time().is_none(),
-                    "Tick {} should NOT have freeze time yet", i);
+                assert!(state.off_route_freeze_time().is_some(),
+                    "Tick {} SHOULD have freeze time (position frozen immediately)", i);
             }
             5 => {
                 // After 5 ticks: should be in off-route state
                 // The GPS processor will return ProcessResult::OffRoute
-                // which sets needs_recovery_on_reacquisition and off_route_freeze_time
+                // which sets needs_recovery_on_reacquisition
                 assert!(state.needs_recovery_on_reacquisition(),
                     "Tick 5 SHOULD need recovery (off-route triggered)");
                 assert!(state.off_route_freeze_time().is_some(),
@@ -357,30 +357,37 @@ fn test_full_off_route_cycle() {
     assert!(off_route_triggered, "OffRoute should have been triggered");
 
     // Phase 3: GPS returns to route for 3 ticks
-    // After 2 good ticks, off-route should clear
-    // Recovery should run on first valid GPS after off-route
+    // After 2 good ticks, off-route should clear and recovery should run
+    // Continue from the last off-route timestamp (50006) to avoid time jumps
 
-    // First good tick back on route - this should trigger recovery
-    let gps_back = create_gps_point_with_time(1500, 6, 500, 0);
-    let _event2 = state.process_gps(&gps_back);
+    // First good tick back on route - still in suspect state (needs 2 good ticks)
+    let gps_back_1 = create_gps_point_with_time(50000, 7, 500, 0);
+    let _event2 = state.process_gps(&gps_back_1);
+
+    // Still in suspect state after 1 good tick
+    assert!(state.needs_recovery_on_reacquisition(),
+        "After 1st good GPS, still need recovery (hysteresis not cleared)");
+    assert!(state.off_route_freeze_time().is_some(),
+        "After 1st good GPS, freeze time should still be set");
+
+    // Second good tick - this should clear hysteresis and trigger recovery
+    let gps_back_2 = create_gps_point_with_time(50000, 8, 500, 0);
+    let _event3 = state.process_gps(&gps_back_2);
 
     // Verify recovery ran and cleared the off-route state
     assert!(!state.needs_recovery_on_reacquisition(),
-        "After first good GPS, recovery should have cleared the flag");
+        "After 2nd good GPS, recovery should have cleared the flag");
     assert!(state.off_route_freeze_time().is_none(),
-        "After first good GPS, freeze time should be cleared");
+        "After 2nd good GPS, freeze time should be cleared");
 
     println!("Recovery completed after GPS returned to route");
 
     // Process 2 more good ticks to ensure stable operation
-    // Note: The GPS processor's off-route state machine needs 2 good ticks to clear,
-    // so we provide 3 good ticks total (1 above + 2 more) to ensure stable operation
-    for i in 1..=3 {
-        let gps_good = create_gps_point_with_time(1500, 6, 500, i);
+    for i in 9..=10 {
+        let gps_good = create_gps_point_with_time(50000, i, 500, 0);
         let _event = state.process_gps(&gps_good);
 
         // Should remain in normal operation after recovery cleared
-        // (The first tick after recovery might still have internal state clearing)
         assert!(!state.needs_recovery_on_reacquisition(),
             "Tick {} should not need recovery (back to normal)", i);
         assert!(state.off_route_freeze_time().is_none(),

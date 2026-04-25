@@ -86,8 +86,6 @@ pub struct State<'a> {
     pub ticks_since_persist: u16,
     /// Flag indicating recovery should run on next valid GPS after off-route
     needs_recovery_on_reacquisition: bool,
-    /// Timestamp when position was frozen (for recovery dt calculation)
-    off_route_freeze_time: Option<u64>,
 }
 
 impl<'a> State<'a> {
@@ -122,7 +120,6 @@ impl<'a> State<'a> {
             last_persisted_stop: if let Some(ps) = persisted { ps.last_stop_index } else { 0 },
             ticks_since_persist: 0,
             needs_recovery_on_reacquisition: false,
-            off_route_freeze_time: None,
         }
     }
 
@@ -276,15 +273,15 @@ impl<'a> State<'a> {
                 if self.needs_recovery_on_reacquisition {
                     self.needs_recovery_on_reacquisition = false;
 
-                    // Calculate elapsed time since freeze
-                    let elapsed_seconds = if let Some(freeze_time) = self.off_route_freeze_time {
+                    // Calculate elapsed time since freeze (from KalmanState)
+                    let elapsed_seconds = if let Some(freeze_time) = self.kalman.off_route_freeze_time {
                         gps.timestamp.saturating_sub(freeze_time)
                     } else {
                         1  // Default if not set
                     };
 
-                    // Clear freeze time
-                    self.off_route_freeze_time = None;
+                    // Clear freeze time in KalmanState
+                    self.kalman.off_route_freeze_time = None;
 
                     // Run recovery to find correct stop index
                     let mut stops_vec = heapless::Vec::<Stop, 256>::new();
@@ -377,18 +374,17 @@ impl<'a> State<'a> {
                 let signals = PositionSignals { z_gps_cm: s_cm, s_cm };
                 (s_cm, v_cms, signals, GpsStatus::DrOutage)
             }
-            ProcessResult::OffRoute { last_valid_s: _, last_valid_v: _, freeze_time } => {
+            ProcessResult::OffRoute { last_valid_s: _, last_valid_v: _, freeze_time: _ } => {
                 // Set flag for recovery on re-acquisition
                 self.needs_recovery_on_reacquisition = true;
 
-                // Use freeze time from KalmanState (set when position first froze, not when OffRoute confirmed)
-                // Bug 5 fix: This is now accurate (no longer 5 ticks late)
-                self.off_route_freeze_time = Some(freeze_time);
+                // Note: freeze_time is already set in KalmanState by update_off_route_hysteresis
+                // Bug 5 fix: This is now accurate (set when position first freezes, not when OffRoute confirmed)
 
                 #[cfg(feature = "firmware")]
                 defmt::warn!(
                     "Off-route detected: GPS > 50m from route for 5s. Freezing at s={}cm.",
-                    last_valid_s
+                    self.kalman.frozen_s_cm.unwrap_or(self.kalman.s_cm)
                 );
 
                 // Position is frozen - do NOT update last_valid_s_cm
@@ -579,7 +575,7 @@ impl<'a> State<'a> {
 
     /// Get the freeze time (for testing)
     pub fn off_route_freeze_time(&self) -> Option<u64> {
-        self.off_route_freeze_time
+        self.kalman.off_route_freeze_time
     }
 
     /// Apply persisted stop index by marking all prior stops as Departed.

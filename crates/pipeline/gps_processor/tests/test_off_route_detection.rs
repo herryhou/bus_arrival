@@ -323,11 +323,23 @@ fn test_off_route_clears_after_2_good_ticks() {
         };
         let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false);
 
-        assert!(
-            matches!(result, ProcessResult::Valid { .. }),
-            "Tick {} with good GPS should return Valid",
-            i
-        );
+        match i {
+            4 => {
+                // First good tick: still in suspect state (clear_ticks = 1 < 2)
+                assert!(
+                    matches!(result, ProcessResult::DrOutage { .. }),
+                    "Tick 4 should return DrOutage (still suspect, clear_ticks=1)"
+                );
+            }
+            5 => {
+                // Second good tick: cleared (clear_ticks = 2)
+                assert!(
+                    matches!(result, ProcessResult::Valid { .. }),
+                    "Tick 5 with good GPS should return Valid (cleared)"
+                );
+            }
+            _ => unreachable!(),
+        }
     }
 
     // After 2 good ticks, suspect counter should be cleared
