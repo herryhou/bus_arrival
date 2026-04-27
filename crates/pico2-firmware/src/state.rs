@@ -591,6 +591,16 @@ impl<'a> State<'a> {
     /// Writes when stop index changes, but no more than once per 60 seconds.
     /// This rate limiting prevents excessive flash wear (~100k erase cycles).
     pub fn should_persist(&self, current_stop: u8) -> bool {
+        // M5: Gate persistence during off-route/suspect states
+        // Don't persist if position is frozen (off-route or suspect)
+        if self.kalman.freeze_ctx.is_some() {
+            return false;
+        }
+        // Don't persist if in suspect state (may be about to go off-route)
+        if self.kalman.off_route_suspect_ticks > 0 {
+            return false;
+        }
+
         // Only persist when stop index actually changes
         if current_stop == self.last_persisted_stop {
             return false;
