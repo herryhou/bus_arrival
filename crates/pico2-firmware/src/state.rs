@@ -524,7 +524,7 @@ impl<'a> State<'a> {
     }
 
     /// Find closest stop index to current position
-    fn find_closest_stop_index(&self, s_cm: DistCm) -> u8 {
+    pub fn find_closest_stop_index(&self, s_cm: DistCm) -> u8 {
         let mut closest_idx = 0;
         let mut closest_dist = i32::MAX;
 
@@ -539,6 +539,36 @@ impl<'a> State<'a> {
         }
 
         closest_idx
+    }
+
+    /// Find closest stop index in forward direction only
+    ///
+    /// Searches from last_idx to end of route only. This prevents
+    /// selecting stops behind the current position, which is important
+    /// after off-route snap re-entry.
+    ///
+    /// # Arguments
+    /// * `s_cm` - Current position along route (cm)
+    /// * `last_idx` - Starting index for search (inclusive)
+    ///
+    /// # Returns
+    /// Index of closest stop at or after last_idx
+    pub fn find_forward_closest_stop_index(&self, s_cm: DistCm, last_idx: u8) -> u8 {
+        let mut best_idx = last_idx;
+        let mut best_dist = i32::MAX;
+
+        // Only search forward: from last_idx to end of route
+        for i in last_idx as usize..self.route_data.stop_count {
+            if let Some(stop) = self.route_data.get_stop(i) {
+                let dist = (s_cm - stop.progress_cm).abs();
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_idx = i as u8;
+                }
+            }
+        }
+
+        best_idx
     }
 
     /// Reset all stop states to Idle after recovery
