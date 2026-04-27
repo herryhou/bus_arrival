@@ -89,7 +89,8 @@ pub fn update_off_route_hysteresis(
         if state.off_route_clear_ticks >= OFF_ROUTE_CLEAR_TICKS {
             state.off_route_suspect_ticks = 0;
             state.frozen_s_cm = None;
-            state.off_route_freeze_time = None; // Clear freeze time when unfreezing
+            // C1: Don't clear off_route_freeze_time here - state.rs needs it for recovery dt calculation
+            // It will be cleared after recovery completes in state.rs
             OffRouteStatus::Normal
         } else if is_actually_suspect {
             // Still in suspect state (need more good ticks to clear)

@@ -209,6 +209,9 @@ impl<'a> State<'a> {
                         #[cfg(feature = "firmware")]
                         defmt::warn!("Recovery failed: no valid stop found");
                     }
+
+                    // C1: Clear freeze time after H1 recovery completes
+                    self.kalman.off_route_freeze_time = None;
                 }
 
                 if self.first_fix {
@@ -294,9 +297,6 @@ impl<'a> State<'a> {
                             1 // Default if not set
                         };
 
-                    // Clear freeze time in KalmanState
-                    self.kalman.off_route_freeze_time = None;
-
                     // Run recovery to find correct stop index
                     let mut stops_vec = heapless::Vec::<Stop, 256>::new();
                     for i in 0..self.route_data.stop_count {
@@ -318,6 +318,9 @@ impl<'a> State<'a> {
                         self.reset_stop_states_after_recovery(recovered_idx);
                     }
                     // If recovery returns None, continue with existing states
+
+                    // C1: Clear freeze time after re-acquisition recovery completes
+                    self.kalman.off_route_freeze_time = None;
                 }
 
                 // Return s_cm, v_cms, signals, and gps_status for detection
