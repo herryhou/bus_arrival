@@ -106,6 +106,7 @@ pub fn reset_off_route_state(state: &mut KalmanState) {
     state.off_route_suspect_ticks = 0;
     state.off_route_clear_ticks = 0;
     state.off_route_freeze_time = None;
+    state.frozen_s_cm = None;  // C2 fix: clear frozen position
 }
 
 /// DR decay factors: (9/10)^dt * 10000 for integer arithmetic
