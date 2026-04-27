@@ -254,7 +254,9 @@ pub fn process_gps_update(
                     // Project to route and snap immediately
                     let z_reentry = crate::map_match::project_to_route(gps_x, gps_y, new_seg_idx, route_data);
                     state.s_cm = z_reentry;
-                    state.v_cms = gps.speed_cms;
+                    // Blend v_cms using EMA instead of hard assignment (M3 fix)
+                    let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+                    state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
                     state.last_seg_idx = new_seg_idx;
                     dr.last_gps_time = Some(gps.timestamp);
                     dr.last_valid_s = state.s_cm;
@@ -287,7 +289,9 @@ pub fn process_gps_update(
     if is_first_fix {
         state.s_cm = z_raw;
 
-        state.v_cms = gps.speed_cms;
+        // Blend v_cms using EMA instead of hard assignment (M3 fix)
+        let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+        state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
         state.last_seg_idx = seg_idx;
         dr.last_gps_time = Some(gps.timestamp);
         dr.last_valid_s = state.s_cm;
