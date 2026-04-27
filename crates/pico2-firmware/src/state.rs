@@ -151,6 +151,7 @@ impl<'a> State<'a> {
             self.route_data,
             gps.timestamp,
             disable_heading_filter,
+            self.last_known_stop_index,  // C3: pass current stop index
         );
 
         let (s_cm, v_cms, signals, gps_status) = match result {
@@ -200,6 +201,7 @@ impl<'a> State<'a> {
                         dt_since_last_fix,
                         &stops_vec,
                         self.last_known_stop_index,
+                        &self.kalman.freeze_ctx,  // C3: pass freeze context
                     ) {
                         #[cfg(feature = "firmware")]
                         defmt::info!("Recovery found stop index: {}", recovered_idx);
@@ -311,6 +313,7 @@ impl<'a> State<'a> {
                         elapsed_seconds,
                         &stops_vec,
                         self.last_known_stop_index,
+                        &self.kalman.freeze_ctx,  // C3: pass freeze context
                     ) {
                         #[cfg(feature = "firmware")]
                         defmt::info!("Re-acquisition recovered stop index: {}", recovered_idx);

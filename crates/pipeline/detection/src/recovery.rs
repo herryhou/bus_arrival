@@ -1,6 +1,6 @@
 //! Stop index recovery for GPS jump handling
 
-use shared::{DistCm, SpeedCms, Stop};
+use shared::{DistCm, SpeedCms, Stop, FreezeContext};
 
 /// Trigger conditions
 const GPS_JUMP_THRESHOLD: DistCm = 20000;  // 200 m
@@ -23,15 +23,29 @@ const V_MAX_CMS: u32 = 1667;
 /// - `dt_since_last_fix`: Seconds elapsed since last valid GPS fix
 /// - `stops`: Array of all stops on route
 /// - `last_index`: Last known stop index before GPS anomaly
+/// - `freeze_ctx`: Optional context from off-route freeze (C3 fix)
 pub fn find_stop_index(
     s_cm: DistCm,
     _v_filtered: SpeedCms,  // Reserved for future use
     dt_since_last_fix: u64,  // Seconds since last valid fix
     stops: &[Stop],
     last_index: u8,
+    freeze_ctx: &Option<FreezeContext>,  // C3: NEW PARAMETER
 ) -> Option<usize> {
     let mut best_idx: Option<usize> = None;
     let mut best_score = i32::MAX;
+
+    // C3: Spatial anchor penalty - prefer stops at or after frozen position
+    let spatial_anchor_penalty = if let Some(ctx) = freeze_ctx {
+        // If bus is behind freeze point, heavily penalize stops behind frozen_stop_idx
+        if s_cm < ctx.frozen_s_cm.saturating_sub(5000) {
+            10000  // Large penalty for backward jumps
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
     for (i, stop) in stops.iter().enumerate() {
         let d = (s_cm - stop.progress_cm).abs();
@@ -43,6 +57,9 @@ pub fn find_stop_index(
 
         let dist = (s_cm - stop.progress_cm).abs();
         let index_penalty = 5000 * (last_index as i32 - i as i32).max(0);
+
+        // C3: Add spatial anchor penalty
+        let index_penalty = index_penalty + spatial_anchor_penalty;
 
         // Velocity penalty: hard exclusion if reaching this stop requires
         // exceeding V_MAX_CMS given the elapsed time since last valid fix

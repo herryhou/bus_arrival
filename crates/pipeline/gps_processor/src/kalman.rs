@@ -60,6 +60,7 @@ pub fn update_off_route_hysteresis(
     state: &mut KalmanState,
     match_d2: i64,
     gps_timestamp: u64,
+    current_stop_idx: u8,  // C3: for freeze context
 ) -> OffRouteStatus {
     if match_d2 > OFF_ROUTE_D2_THRESHOLD {
         // Poor GPS match: increment suspect counter
@@ -68,6 +69,11 @@ pub fn update_off_route_hysteresis(
             state.frozen_s_cm = Some(state.s_cm);
             // Record freeze time at the same time position is frozen (Bug 5 fix)
             state.off_route_freeze_time = Some(gps_timestamp);
+            // C3: Store freeze context for spatial anchoring
+            state.freeze_ctx = Some(shared::FreezeContext {
+                frozen_s_cm: state.s_cm,
+                frozen_stop_idx: current_stop_idx,
+            });
         }
         state.off_route_suspect_ticks = state.off_route_suspect_ticks.saturating_add(1);
         state.off_route_clear_ticks = 0;
@@ -154,6 +160,7 @@ pub fn process_gps_update(
     route_data: &RouteData,
     _current_time: u64,
     is_first_fix: bool,
+    current_stop_idx: u8,  // C3: for freeze context
 ) -> ProcessResult {
     // 1. Check for GPS outage
     if !gps.has_fix {
@@ -196,7 +203,12 @@ pub fn process_gps_update(
     // Off-route detection (only when not in warmup)
     // CRITICAL: Check BEFORE projection to prevent s_cm from advancing during detour
     if !is_first_fix {
-        let off_route_status = update_off_route_hysteresis(state, match_d2, gps.timestamp);
+        let off_route_status = update_off_route_hysteresis(
+            state,
+            match_d2,
+            gps.timestamp,
+            current_stop_idx,  // C3: use passed value
+        );
 
         match off_route_status {
             OffRouteStatus::OffRoute => {
