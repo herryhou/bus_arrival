@@ -293,7 +293,7 @@ fn test_off_route_clears_after_2_good_ticks() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true);
+    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true, 0);
 
     // Build up suspect ticks (3 ticks)
     for i in 1..=3 {
@@ -411,7 +411,7 @@ fn test_off_route_hysteresis_partial_clear() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true);
+    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true, 0);
 
     // Build up suspect ticks (4 ticks)
     for i in 1..=4 {
@@ -438,7 +438,7 @@ fn test_off_route_hysteresis_partial_clear() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1005, false, 0));
+    let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1005, false, 0);
 
     // Suspect counter should NOT be cleared yet (need 2 good ticks)
     assert_eq!(state.off_route_suspect_ticks, 4, "Suspect ticks should remain at 4 after only 1 good tick");
@@ -454,7 +454,7 @@ fn test_off_route_hysteresis_partial_clear() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1006, false, 0));
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1006, false, 0);
     assert!(matches!(result, ProcessResult::OffRoute { .. }), "Should trigger OffRoute after 5th bad tick");
 }
 
@@ -522,7 +522,7 @@ fn test_off_route_counter_resets_on_outage() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true);
+    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true, 0);
 
     // Build up suspect count
     for i in 1..=3 {
@@ -550,7 +550,7 @@ fn test_off_route_counter_resets_on_outage() {
         hdop_x10: 10,
         has_fix: false,  // NO FIX
     };
-    let _ = process_gps_update(&mut state, &mut dr, &outage_gps, &route_data, 1004, false, 0));
+    let _ = process_gps_update(&mut state, &mut dr, &outage_gps, &route_data, 1004, false, 0);
 
     // Counters should be reset
     assert_eq!(state.off_route_suspect_ticks, 0, "Suspect ticks should be reset after outage");
