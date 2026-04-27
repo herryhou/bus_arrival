@@ -733,7 +733,7 @@ fn test_off_route_table_driven_state_contract() {
                 speed_cms: 500,
             },
             expect_event: None,
-            expect_recovery_flag: false,
+            expect_recovery_flag: true,  // M1: SuspectOffRoute sets recovery flag
             expect_freeze: true,
             expect_last_valid_moves: false,
             expect_stop_state: FsmState::Idle,
@@ -745,7 +745,7 @@ fn test_off_route_table_driven_state_contract() {
                 speed_cms: 500,
             },
             expect_event: None,
-            expect_recovery_flag: false,
+            expect_recovery_flag: true,  // M1: SuspectOffRoute sets recovery flag
             expect_freeze: true,
             expect_last_valid_moves: false,
             expect_stop_state: FsmState::Idle,
@@ -757,7 +757,7 @@ fn test_off_route_table_driven_state_contract() {
                 speed_cms: 500,
             },
             expect_event: None,
-            expect_recovery_flag: false,
+            expect_recovery_flag: true,  // M1: SuspectOffRoute sets recovery flag
             expect_freeze: true,
             expect_last_valid_moves: false,
             expect_stop_state: FsmState::Idle,
@@ -769,7 +769,7 @@ fn test_off_route_table_driven_state_contract() {
                 speed_cms: 500,
             },
             expect_event: None,
-            expect_recovery_flag: false,
+            expect_recovery_flag: true,  // M1: SuspectOffRoute sets recovery flag
             expect_freeze: true,
             expect_last_valid_moves: false,
             expect_stop_state: FsmState::Idle,
@@ -945,11 +945,12 @@ fn test_full_off_route_cycle() {
 
         match i {
             1..=4 => {
-                // First 4 ticks: should NOT trigger off-route yet
-                // But position IS frozen immediately (Bug 5 fix)
+                // First 4 ticks: suspect phase (M1)
+                // Position IS frozen immediately (Bug 5 fix)
+                // M1: SuspectOffRoute sets recovery flag for re-entry snap
                 assert!(
-                    !state.needs_recovery_on_reacquisition(),
-                    "Tick {} should NOT need recovery yet",
+                    state.needs_recovery_on_reacquisition(),
+                    "Tick {} SHOULD need recovery (M1 SuspectOffRoute)",
                     i
                 );
                 assert!(
