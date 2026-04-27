@@ -687,4 +687,55 @@ impl<'a> State<'a> {
             self.stop_states[i].announced = true;
         }
     }
+
+    /// Reset all stop states based on geometry after snap
+    ///
+    /// Unlike reset_stop_states_after_recovery which uses index-based logic,
+    /// this method uses actual geometry (s_cm vs stop positions) to determine
+    /// the correct FSM state for each stop.
+    ///
+    /// # Arguments
+    /// * `current_idx` - The stop index we believe we're at/near
+    /// * `s_cm` - Current snapped position (cm)
+    pub fn reset_stop_states_after_snap(&mut self, current_idx: u8, s_cm: DistCm) {
+        use shared::FsmState;
+
+        for i in 0..self.stop_states.len() {
+            let st = &mut self.stop_states[i];
+            let stop = match self.route_data.get_stop(i) {
+                Some(s) => s,
+                None => continue,
+            };
+
+            if i < current_idx as usize {
+                // Stops we've already passed: Departed
+                st.fsm_state = FsmState::Departed;
+                st.announced = true;
+                st.last_announced_stop = i as u8;
+            } else if i == current_idx as usize {
+                // Current stop: use geometry to determine state
+                let dist_to_stop = (s_cm - stop.progress_cm).abs();
+                if dist_to_stop < 5000 {
+                    // Already at stop (within 50m)
+                    st.fsm_state = FsmState::AtStop;
+                    st.announced = true;  // Prevent re-announcement
+                } else if s_cm > stop.progress_cm + 4000 {
+                    // Already past stop (more than 40m past)
+                    st.fsm_state = FsmState::Departed;
+                    st.announced = true;
+                } else {
+                    // Approaching stop
+                    st.fsm_state = FsmState::Approaching;
+                }
+                st.last_announced_stop = i as u8;
+            } else {
+                // Future stops: Idle
+                st.fsm_state = FsmState::Idle;
+                st.announced = false;
+                st.last_announced_stop = u8::MAX;
+            }
+            st.dwell_time_s = 0;
+            st.previous_distance_cm = None;
+        }
+    }
 }
