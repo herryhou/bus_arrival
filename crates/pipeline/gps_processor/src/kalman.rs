@@ -150,6 +150,12 @@ pub enum ProcessResult {
         last_valid_v: SpeedCms,
         freeze_time: u64,
     },
+    /// GPS is suspect off-route — position frozen, awaiting confirmation
+    /// M1: Separate from DrOutage to prevent warmup timeout exploitation
+    SuspectOffRoute {
+        s_cm: DistCm,
+        v_cms: SpeedCms,
+    },
 }
 
 /// Main processing pipeline for each GPS update
@@ -223,9 +229,9 @@ pub fn process_gps_update(
             }
             OffRouteStatus::Suspect => {
                 // During off-route suspicion, skip projection and filters to prevent s_cm advance
-                // Return DrOutage with frozen position immediately
+                // M1: Return SuspectOffRoute instead of DrOutage to distinguish from genuine GPS loss
                 dr.last_gps_time = Some(gps.timestamp);
-                return ProcessResult::DrOutage {
+                return ProcessResult::SuspectOffRoute {
                     s_cm: state.frozen_s_cm.unwrap_or(state.s_cm),
                     v_cms: state.v_cms,
                 };

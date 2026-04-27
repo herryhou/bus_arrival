@@ -418,6 +418,12 @@ impl<'a> State<'a> {
                 // Suspend arrival detection by returning None
                 return None;
             }
+            ProcessResult::SuspectOffRoute { s_cm: _, v_cms: _ } => {
+                // M1: Suspect off-route - suppress detection, don't increment warmup
+                // Mark for recovery when we return to Normal
+                self.needs_recovery_on_reacquisition = true;
+                return None;
+            }
         };
 
         // Module ⑨: Stop corridor filtering
