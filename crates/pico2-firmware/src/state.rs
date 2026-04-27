@@ -88,6 +88,8 @@ pub struct State<'a> {
     pub ticks_since_persist: u16,
     /// Flag indicating recovery should run on next valid GPS after off-route
     needs_recovery_on_reacquisition: bool,
+    /// NEW: Ticks remaining in snap cooldown period (prevents recovery interference)
+    just_snapped_ticks: u8,
 }
 
 impl<'a> State<'a> {
@@ -126,6 +128,7 @@ impl<'a> State<'a> {
             },
             ticks_since_persist: 0,
             needs_recovery_on_reacquisition: false,
+            just_snapped_ticks: 0,  // NEW: initialize to 0 (not in cooldown)
         }
     }
 
