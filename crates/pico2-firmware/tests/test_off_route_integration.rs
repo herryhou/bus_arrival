@@ -44,9 +44,10 @@ fn test_off_route_freezes_position_until_reacquisition_clears() {
             "Suspect tick {} should set freeze time immediately",
             i + 1
         );
+        // M1: SuspectOffRoute sets recovery flag to ensure snap on re-entry
         assert!(
-            !state.needs_recovery_on_reacquisition(),
-            "Suspect tick {} should not set recovery flag before confirmation",
+            state.needs_recovery_on_reacquisition(),
+            "Suspect tick {} should set recovery flag for re-entry snap",
             i + 1
         );
     }
