@@ -176,6 +176,11 @@ pub fn process_gps_update(
     // Use relaxed heading threshold during recovery (first fix OR post-outage recovery)
     // This improves segment matching when GPS heading is unreliable after signal loss
     let use_relaxed_heading = is_first_fix || dr.in_recovery;
+
+    // CRITICAL: Track frozen position BEFORE hysteresis update
+    // This is used to detect the transition from OffRoute/Suspect to Normal for re-entry snap
+    let had_frozen_position = state.frozen_s_cm.is_some();
+
     let (seg_idx, match_d2) = crate::map_match::find_best_segment_restricted(
         gps_x,
         gps_y,
@@ -212,6 +217,40 @@ pub fn process_gps_update(
                 };
             }
             OffRouteStatus::Normal => {
+                // CRITICAL: Check if we just transitioned from OffRoute/Suspect to Normal
+                // If so, snap to re-entry position immediately to avoid detecting stops during catch-up
+                if had_frozen_position && state.frozen_s_cm.is_none() {
+                    // Just transitioned from OffRoute/Suspect to Normal
+                    // Use grid-only search to find correct segment immediately
+                    let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only(
+                        gps_x,
+                        gps_y,
+                        gps.heading_cdeg,
+                        gps.speed_cms,
+                        route_data,
+                        use_relaxed_heading,
+                    );
+
+                    // Project to route and snap immediately
+                    let z_reentry = crate::map_match::project_to_route(gps_x, gps_y, new_seg_idx, route_data);
+                    state.s_cm = z_reentry;
+                    state.v_cms = gps.speed_cms;
+                    state.last_seg_idx = new_seg_idx;
+                    dr.last_gps_time = Some(gps.timestamp);
+                    dr.last_valid_s = state.s_cm;
+                    dr.filtered_v = state.v_cms;
+                    dr.in_recovery = false; // Clear recovery flag - we've snapped
+
+                    let signals = PositionSignals {
+                        z_gps_cm: z_reentry,
+                        s_cm: state.s_cm,
+                    };
+                    return ProcessResult::Valid {
+                        signals,
+                        v_cms: state.v_cms,
+                        seg_idx: new_seg_idx,
+                    };
+                }
                 // Continue normal processing
             }
         }

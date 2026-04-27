@@ -258,6 +258,78 @@ pub fn find_best_segment_restricted(
     (best_eligible_idx, best_eligible_dist2)
 }
 
+/// Find best segment using grid search only (no window search around last_idx).
+///
+/// This is used for off-route re-entry where the bus might be at a completely
+/// different part of the route than where it left off.
+///
+/// The `is_first_fix` parameter controls the heading filter strictness:
+/// - true: Use relaxed 180° threshold for post-outage recovery
+/// - false: Use normal 90° threshold for steady-state operation
+pub fn find_best_segment_grid_only(
+    gps_x: DistCm,
+    gps_y: DistCm,
+    gps_heading: HeadCdeg,
+    gps_speed: SpeedCms,
+    route_data: &RouteData,
+    is_first_fix: bool,
+) -> (usize, i64) {
+    // Check bounding box first
+    if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
+        // Outside bounding box - return segment 0 as fallback
+        return (0, i64::MAX);
+    }
+
+    let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
+    let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
+
+    // Grid search over 3x3 cells
+    let mut best_eligible_idx = 0;
+    let mut best_eligible_dist2 = Dist2::MAX;
+    let mut best_any_idx = 0;
+    let mut best_any_dist2 = Dist2::MAX;
+    let mut eligible_found = false;
+
+    for dy in 0..=2i32 {
+        for dx in 0..=2i32 {
+            let ny = gy as i32 + dy - 1;
+            let nx = gx as i32 + dx - 1;
+            if ny < 0 || nx < 0 {
+                continue;
+            }
+            let _ = route_data
+                .grid
+                .visit_cell(nx as u32, ny as u32, |idx: u16| {
+                    if let Some(seg) = route_data.get_node(idx as usize) {
+                        let d2 = segment_score(gps_x, gps_y, &seg);
+
+                        // Update best_any tracker
+                        if d2 < best_any_dist2 {
+                            best_any_dist2 = d2;
+                            best_any_idx = idx as usize;
+                        }
+
+                        // Update best_eligible tracker if heading matches
+                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix) {
+                            if d2 < best_eligible_dist2 {
+                                best_eligible_dist2 = d2;
+                                best_eligible_idx = idx as usize;
+                                eligible_found = true;
+                            }
+                        }
+                    }
+                });
+        }
+    }
+
+    // If no segment passed the heading filter, fall back to pure distance
+    if !eligible_found {
+        return (best_any_idx, best_any_dist2);
+    }
+
+    (best_eligible_idx, best_eligible_dist2)
+}
+
 /// Distance-squared from GPS point to segment (clamped projection).
 ///
 /// Heading is intentionally absent.  Heading belongs in the eligibility

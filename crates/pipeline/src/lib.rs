@@ -242,7 +242,7 @@ impl<'a> LocalizationState<'a> {
                     gps.lon,
                     s_cm,
                     v_cms,
-                    None,
+                    Some(gps.heading_cdeg),  // CRITICAL: Preserve heading even in DR mode
                     "dr_outage",
                 ).with_diagnostics(
                     None,
