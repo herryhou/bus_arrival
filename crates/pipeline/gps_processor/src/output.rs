@@ -62,6 +62,7 @@ pub fn write_output<W: Write>(
         super::kalman::ProcessResult::Valid { signals, .. } => Some(signals.s_cm),
         super::kalman::ProcessResult::DrOutage { s_cm, .. } => Some(*s_cm),
         super::kalman::ProcessResult::OffRoute { last_valid_s, .. } => Some(*last_valid_s),
+        super::kalman::ProcessResult::SuspectOffRoute { s_cm, .. } => Some(*s_cm),
         _ => None,
     };
 
@@ -147,6 +148,20 @@ pub fn write_output<W: Write>(
             v_cms: *last_valid_v as i32,
             heading_cdeg: None,
             status: "off_route".to_string(),
+            seg_idx: None,
+            active_stops,
+            stop_states,
+            gps_jump: false,
+            recovery_idx: None,
+        },
+        super::kalman::ProcessResult::SuspectOffRoute { s_cm, v_cms } => OutputRecord {
+            time,
+            lat,
+            lon,
+            s_cm: *s_cm as i64,
+            v_cms: *v_cms as i32,
+            heading_cdeg: None,
+            status: "suspect_off_route".to_string(),
             seg_idx: None,
             active_stops,
             stop_states,

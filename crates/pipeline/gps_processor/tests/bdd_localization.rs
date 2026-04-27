@@ -430,6 +430,7 @@ fn scenario_monotonicity_tolerance(route_data: &RouteData, start_x: i32, start_y
         ProcessResult::Rejected(_) => panic!("Should return DR outage, not Rejected"),
         ProcessResult::Outage => panic!("Should not return outage"),
         ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
+        ProcessResult::SuspectOffRoute { .. } => panic!("Should not return suspect off_route"),
     }
 }
 
@@ -468,6 +469,7 @@ fn scenario_max_speed_rejection(route_data: &RouteData, start_x: i32, start_y: i
         ProcessResult::Outage => panic!("Should not return outage"),
         ProcessResult::DrOutage { .. } => panic!("Should not return DR outage"),
         ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
+        ProcessResult::SuspectOffRoute { .. } => panic!("Should not return suspect off_route"),
     }
 }
 
@@ -523,6 +525,9 @@ fn scenario_normal_forward_movement(route_data: &RouteData, start_x: i32, start_
         }
         ProcessResult::OffRoute { .. } => {
             panic!("Update failed: got OffRoute (unexpected)");
+        }
+        ProcessResult::SuspectOffRoute { .. } => {
+            panic!("Update failed: got SuspectOffRoute (unexpected)");
         }
         ProcessResult::Outage => {
             panic!("Update failed: got Outage (unexpected)");
@@ -583,6 +588,7 @@ fn scenario_handle_gps_jump(route_data: &RouteData, start_x: i32, start_y: i32) 
         ProcessResult::Outage => panic!("Should not return outage"),
         ProcessResult::DrOutage { .. } => panic!("Should not return DR outage"),
         ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
+        ProcessResult::SuspectOffRoute { .. } => panic!("Should not return suspect off_route"),
     }
 }
 
@@ -852,6 +858,7 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
         }
         ProcessResult::Outage => panic!("Should not return outage"),
         ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
+        ProcessResult::SuspectOffRoute { .. } => panic!("Should not return suspect off_route"),
     }
 }
 
@@ -900,6 +907,7 @@ fn scenario_large_backward_jump_rejection(route_data: &RouteData, start_x: i32, 
         }
         ProcessResult::Outage => panic!("Should not return outage"),
         ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
+        ProcessResult::SuspectOffRoute { .. } => panic!("Should not return suspect off_route"),
     }
 }
 

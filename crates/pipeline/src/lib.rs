@@ -274,6 +274,7 @@ impl<'a> LocalizationState<'a> {
                     0,
                 ))
             }
+            gps_processor::kalman::ProcessResult::SuspectOffRoute { .. } => None,
             gps_processor::kalman::ProcessResult::Rejected(_) => None,
             gps_processor::kalman::ProcessResult::Outage => None,
         }
