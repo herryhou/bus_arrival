@@ -352,8 +352,9 @@ impl<'a> State<'a> {
                     }
                     // If recovery returns None, continue with existing states
 
-                    // C1: Clear freeze time after re-acquisition recovery completes
+                    // C1: Clear freeze time and context after re-acquisition recovery completes
                     self.kalman.off_route_freeze_time = None;
+                    self.kalman.freeze_ctx = None;
                 }
                 }
 
