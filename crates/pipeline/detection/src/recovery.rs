@@ -36,12 +36,20 @@ pub fn find_stop_index(
     let mut best_score = i32::MAX;
 
     // C3: Spatial anchor penalty - prefer stops at or after frozen position
+    // Uses smooth piecewise linear penalty to avoid discontinuity
     let spatial_anchor_penalty = if let Some(ctx) = freeze_ctx {
-        // If bus is behind freeze point, heavily penalize stops behind frozen_stop_idx
-        if s_cm < ctx.frozen_s_cm.saturating_sub(5000) {
-            10000  // Large penalty for backward jumps
+        // Backward distance in cm
+        let backward_cm = (ctx.frozen_s_cm - s_cm).max(0);
+        // Absorb small GPS jitter (~2m)
+        let backward_cm = backward_cm.saturating_sub(200);
+        let backward_m = backward_cm / 100;
+
+        if backward_m < 50 {
+            // Smooth, low-gradient region
+            5 * backward_m
         } else {
-            0
+            // Stronger penalty beyond 50m
+            250 + 20 * (backward_m - 50)
         }
     } else {
         0
