@@ -168,10 +168,16 @@ impl<'a> State<'a> {
                 let PositionSignals { z_gps_cm: _, s_cm } = signals;
                 let gps_status = GpsStatus::Valid;
 
+                // Handle cooldown decrement
+                if self.just_snapped_ticks > 0 {
+                    self.just_snapped_ticks = self.just_snapped_ticks.saturating_sub(1);
+                }
+                let in_snap_cooldown = self.just_snapped_ticks > 0;
+
                 // Check for GPS jump requiring recovery (H1)
                 let prev_s_cm = self.last_valid_s_cm;
                 // Skip recovery on first fix - last_valid_s_cm is still 0 (initial value)
-                if !self.first_fix && should_trigger_recovery(s_cm, prev_s_cm) {
+                if !snapped && !in_snap_cooldown && !self.first_fix && should_trigger_recovery(s_cm, prev_s_cm) {
                     #[cfg(feature = "firmware")]
                     defmt::warn!(
                         "GPS jump detected: s={}→{}, triggering recovery",
@@ -285,6 +291,25 @@ impl<'a> State<'a> {
                     }
                 }
 
+                // Handle snap from off-route re-entry
+                if snapped {
+                    // 1. Find forward closest stop (prevents backward selection)
+                    let new_idx = self.find_forward_closest_stop_index(s_cm, self.last_known_stop_index);
+                    self.last_known_stop_index = new_idx;
+
+                    // 2. Reset FSM based on geometry
+                    self.reset_stop_states_after_snap(new_idx, s_cm);
+
+                    // 3. Clear all recovery triggers
+                    self.needs_recovery_on_reacquisition = false;
+                    self.kalman.freeze_ctx = None;
+                    self.last_valid_s_cm = s_cm;  // Update immediately to prevent false jump detection
+
+                    // 4. Set 2-second cooldown
+                    self.just_snapped_ticks = 2;
+
+                    // Skip normal recovery and proceed to detection
+                } else {
                 // Update recovery tracking
                 self.last_known_stop_index = self.find_closest_stop_index(s_cm);
                 self.last_valid_s_cm = s_cm;
@@ -292,7 +317,7 @@ impl<'a> State<'a> {
                 self.last_gps_timestamp = gps.timestamp;
 
                 // Check for re-acquisition recovery
-                if self.needs_recovery_on_reacquisition {
+                if !snapped && !in_snap_cooldown && self.needs_recovery_on_reacquisition {
                     self.needs_recovery_on_reacquisition = false;
 
                     // Calculate elapsed time since freeze (from KalmanState)
@@ -328,6 +353,7 @@ impl<'a> State<'a> {
 
                     // C1: Clear freeze time after re-acquisition recovery completes
                     self.kalman.off_route_freeze_time = None;
+                }
                 }
 
                 // Return s_cm, v_cms, signals, and gps_status for detection
