@@ -138,6 +138,7 @@ pub enum ProcessResult {
         signals: PositionSignals,
         v_cms: SpeedCms,
         seg_idx: usize,
+        snapped: bool,  // NEW: true if this Valid result is from off-route snap
     },
     Rejected(&'static str),
     Outage,
@@ -272,6 +273,7 @@ pub fn process_gps_update(
                         signals,
                         v_cms: state.v_cms,
                         seg_idx: new_seg_idx,
+                        snapped: true,  // NEW: this is a snap operation
                     };
                 }
                 // Continue normal processing
@@ -308,6 +310,7 @@ pub fn process_gps_update(
             signals,
             v_cms: state.v_cms,
             seg_idx,
+            snapped: false,  // NEW: first fix is not a snap
         };
     }
 
@@ -395,6 +398,7 @@ pub fn process_gps_update(
         signals,
         v_cms: state.v_cms,
         seg_idx,
+        snapped: false,  // NEW: normal GPS processing is not a snap
     }
 }
 

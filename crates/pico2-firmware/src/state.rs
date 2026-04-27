@@ -159,6 +159,7 @@ impl<'a> State<'a> {
                 signals,
                 v_cms,
                 seg_idx: _,
+                snapped: _,
             } => {
                 use crate::detection::GpsStatus;
                 let PositionSignals { z_gps_cm: _, s_cm } = signals;

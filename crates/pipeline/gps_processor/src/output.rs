@@ -80,6 +80,7 @@ pub fn write_output<W: Write>(
             signals,
             v_cms,
             seg_idx,
+            snapped: _,
         } => OutputRecord {
             time,
             lat,
