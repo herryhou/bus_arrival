@@ -108,7 +108,8 @@ pub fn update_off_route_hysteresis(
     }
 }
 
-/// Reset off-route counters (called on GPS outage)
+/// Reset all off-route state including suspect/clear ticks, freeze time, and frozen position
+/// (called on GPS outage)
 pub fn reset_off_route_state(state: &mut KalmanState) {
     state.off_route_suspect_ticks = 0;
     state.off_route_clear_ticks = 0;

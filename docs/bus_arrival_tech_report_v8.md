@@ -1552,8 +1552,8 @@ Suspect 狀態（1-4 ticks）：
 {"time":80104,"stop_idx":1,"s_cm":48066,"event_type":"Arrival"}  // Stop 1 arrival
 {"time":80177,"off_route":true,"s_cm":102606,"status":"off_route"}  // Off-route detected
 {"time":80227,"off_route":true,"s_cm":102606,"status":"dr_outage"} // Last frozen tick
-{"time":80228,"s_cm":167429,"off_route":false,"status":"valid"}    // Re-entry (Suspect→Normal)
 {"time":80223,"s_cm":173088,"off_route":false,"status":"valid"}    // Re-entry snap confirmed
+{"time":80228,"s_cm":167429,"off_route":false,"status":"valid"}    // Re-entry (Suspect→Normal)
 {"time":80237,"stop_idx":6,"s_cm":178449,"event_type":"Arrival"} // Stop 6 arrival
 ```
 
@@ -1955,7 +1955,7 @@ cargo run -p pipeline -- \
 | Recovery 搜索範圍 | ±20000 cm（200 m） | Stop Index Recovery |
 | Recovery 重啟觸發門檻 | 50000 cm（500 m） | 避免誤觸發 |
 | 進度保護裕度 $\delta_\text{guard}$ | 5000 cm（50 m） | Recovery Algorithm |
-| **脫離路線距離閾值**（v8.9 新增） | **50,000 cm（500 m）** | **Off-Route Detection** |
+| **脫離路線距離閾值**（v8.9 新增） | **5,000 cm（50 m）** | **Off-Route Detection** |
 | **脫離路線確認計數**（v8.9 新增） | **5 ticks** | **進入 off-route 狀態** |
 | **脫離路線清除計數**（v8.9 新增） | **2 ticks** | **離開 off-route 狀態** |
 | **GPS 跳躍恢復閾值**（v8.9 新增） | **5,000 cm（50 m）** | **GPS Jump Recovery** |
@@ -2235,7 +2235,7 @@ Off-Route → Re-acquire（GPS 跳躍恢復）
 
 | 參數 | 值 | 說明 |
 |------|-----|------|
-| $\theta_\text{off-route}$ | 50,000 cm（500 m） | 地圖匹配距離閾值 |
+| $\theta_\text{off-route}$ | 5,000 cm（50 m） | 地圖匹配距離閾值 |
 | $D_\text{jump}$ | 5,000 cm（50 m） | GPS 跳躍恢復閾值 |
 | $N_\text{confirm}$ | 5 ticks | 進入 off-route 確認計數 |
 | $N_\text{clear}$ | 2 ticks | 離開 off-route 清除計數 |
