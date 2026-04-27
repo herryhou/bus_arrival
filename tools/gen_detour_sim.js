@@ -242,34 +242,41 @@ const phase1NmeaAdded = (nmeaLines.length - phase1StartNmeaCount) / 2;
 console.log(`Phase 1 complete: ${phase1Duration}s, ${phase1NmeaAdded} GPS points, segments ${stopSegments[0]}-${stopSegments[1]}`);
 stopSeqIdx++;
 
-// Phase 2: DETOUR from stop #2 → waypoint (14.994, 121.30111) → stop #7
-console.log('\nPhase 2: DETOUR Stop #2 → Waypoint → Stop #7 (off-route)');
-const fromStop = stops[DETOUR_FROM_STOP];
+// Phase 2: DETOUR from current position → waypoint → stop #7
+console.log('\nPhase 2: DETOUR Current position → Waypoint → Stop #7 (off-route)');
+
+// Get the actual end position of Phase 1 (end of last segment)
+const phase1EndSeg = segments[stopSegments[1]];
+const currentLat = phase1EndSeg.to[0];
+const currentLon = phase1EndSeg.to[1];
+
+console.log(`Phase 1 ended at: (${currentLat.toFixed(5)}, ${currentLon.toFixed(5)})`);
+
 const toStop = stops[DETOUR_TO_STOP];
 
-// Define the waypoint
-const WAYPOINT_LAT = 24.99207;
-const WAYPOINT_LON = 121.29562;
+// Define the waypoint - go south from current position
+const WAYPOINT_LAT = 24.992;
+const WAYPOINT_LON = currentLon;  // Keep same longitude, go south
 
-const leg1Dist = haversine(fromStop.lat, fromStop.lon, WAYPOINT_LAT, WAYPOINT_LON);
+const leg1Dist = haversine(currentLat, currentLon, WAYPOINT_LAT, WAYPOINT_LON);
 const leg2Dist = haversine(WAYPOINT_LAT, WAYPOINT_LON, toStop.lat, toStop.lon);
 const totalDetourDist = leg1Dist + leg2Dist;
 
-const leg1Bearing = bearing(fromStop.lat, fromStop.lon, WAYPOINT_LAT, WAYPOINT_LON);
+const leg1Bearing = bearing(currentLat, currentLon, WAYPOINT_LAT, WAYPOINT_LON);
 const leg2Bearing = bearing(WAYPOINT_LAT, WAYPOINT_LON, toStop.lat, toStop.lon);
 
-console.log(`Leg 1: Stop #2 → Waypoint: ${leg1Dist.toFixed(0)}m, bearing: ${leg1Bearing.toFixed(1)}°`);
+console.log(`Leg 1: Current → Waypoint: ${leg1Dist.toFixed(0)}m, bearing: ${leg1Bearing.toFixed(1)}°`);
 console.log(`Waypoint: ${WAYPOINT_LAT.toFixed(5)}, ${WAYPOINT_LON.toFixed(5)}`);
 console.log(`Leg 2: Waypoint → Stop #7: ${leg2Dist.toFixed(0)}m, bearing: ${leg2Bearing.toFixed(1)}°`);
 console.log(`Total detour distance: ${totalDetourDist.toFixed(0)}m`);
 
-emitStatic(fromStop.lat, fromStop.lon, leg1Bearing, STOP_DWELL_S);
+emitStatic(currentLat, currentLon, leg1Bearing, STOP_DWELL_S);
 const detourStartTS = ts;
 
 groundTruth.push({
   stop_idx: stopSeqIdx,
-  lat: fromStop.lat,
-  lon: fromStop.lon,
+  lat: currentLat,
+  lon: currentLon,
   timestamp: ts,
   phase: 'detour_start',
   event: 'departure_detour',
@@ -281,11 +288,11 @@ groundTruth.push({
 const LEG1_DURATION_S = DETOUR_DURATION_S / 2;
 const LEG2_DURATION_S = DETOUR_DURATION_S / 2;
 
-console.log(`\nGenerating Leg 1 (${LEG1_DURATION_S}s): Stop #2 → Waypoint`);
+console.log(`\nGenerating Leg 1 (${LEG1_DURATION_S}s): Current → Waypoint`);
 for (let t = 0; t < LEG1_DURATION_S; t++) {
   const frac = (t + 1) / LEG1_DURATION_S;
-  const lat = fromStop.lat + (WAYPOINT_LAT - fromStop.lat) * frac;
-  const lon = fromStop.lon + (WAYPOINT_LON - fromStop.lon) * frac;
+  const lat = currentLat + (WAYPOINT_LAT - currentLat) * frac;
+  const lon = currentLon + (WAYPOINT_LON - currentLon) * frac;
   emitGPS(lat, lon, CRUISE_MS, leg1Bearing);
 }
 

@@ -32,6 +32,90 @@ pub const V_MAX_CMS: SpeedCms = 1667;
 /// Per spec Section 9.1: accommodates multipath errors
 pub const SIGMA_GPS_CM: DistCm = 2000;
 
+/// Off-route distance threshold (cm²) — 50m² = 25,000,000 cm²
+pub const OFF_ROUTE_D2_THRESHOLD: i64 = 25_000_000;
+
+/// Ticks to confirm off-route (avoid false positives from multipath)
+pub const OFF_ROUTE_CONFIRM_TICKS: u8 = 5;
+
+/// Ticks to clear off-route (fast re-acquisition)
+pub const OFF_ROUTE_CLEAR_TICKS: u8 = 2;
+
+/// Result of off-route hysteresis update
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OffRouteStatus {
+    /// Normal operation - GPS is on route
+    Normal,
+    /// Suspect state - position frozen, awaiting confirmation
+    Suspect,
+    /// Confirmed off-route - position frozen, recovery needed
+    OffRoute,
+}
+
+/// Update off-route hysteresis state based on GPS match quality
+///
+/// Returns the new off-route status after updating the state.
+/// Position is frozen immediately on first suspect tick.
+pub fn update_off_route_hysteresis(
+    state: &mut KalmanState,
+    match_d2: i64,
+    gps_timestamp: u64,
+    current_stop_idx: u8,  // C3: for freeze context
+) -> OffRouteStatus {
+    if match_d2 > OFF_ROUTE_D2_THRESHOLD {
+        // Poor GPS match: increment suspect counter
+        if state.off_route_suspect_ticks == 0 {
+            // First tick of off-route suspect: freeze position immediately
+            state.frozen_s_cm = Some(state.s_cm);
+            // Record freeze time at the same time position is frozen (Bug 5 fix)
+            state.off_route_freeze_time = Some(gps_timestamp);
+            // C3: Store freeze context for spatial anchoring
+            state.freeze_ctx = Some(shared::FreezeContext {
+                frozen_s_cm: state.s_cm,
+                frozen_stop_idx: current_stop_idx,
+            });
+        }
+        state.off_route_suspect_ticks = state.off_route_suspect_ticks.saturating_add(1);
+        state.off_route_clear_ticks = 0;
+
+        if state.off_route_suspect_ticks >= OFF_ROUTE_CONFIRM_TICKS {
+            OffRouteStatus::OffRoute
+        } else {
+            OffRouteStatus::Suspect
+        }
+    } else {
+        // Good GPS match: increment clear counter
+        state.off_route_clear_ticks = state.off_route_clear_ticks.saturating_add(1);
+
+        // Only return Suspect if we're actually in a suspect state
+        // (i.e., we had prior suspect ticks or position is frozen)
+        let is_actually_suspect = state.off_route_suspect_ticks > 0 || state.frozen_s_cm.is_some();
+
+        // After 2 consecutive good matches, reset suspect counter and unfreeze
+        if state.off_route_clear_ticks >= OFF_ROUTE_CLEAR_TICKS {
+            state.off_route_suspect_ticks = 0;
+            state.frozen_s_cm = None;
+            // C1: Don't clear off_route_freeze_time here - state.rs needs it for recovery dt calculation
+            // It will be cleared after recovery completes in state.rs
+            OffRouteStatus::Normal
+        } else if is_actually_suspect {
+            // Still in suspect state (need more good ticks to clear)
+            OffRouteStatus::Suspect
+        } else {
+            // Never been in suspect state, this is normal operation
+            OffRouteStatus::Normal
+        }
+    }
+}
+
+/// Reset off-route counters (called on GPS outage)
+pub fn reset_off_route_state(state: &mut KalmanState) {
+    state.off_route_suspect_ticks = 0;
+    state.off_route_clear_ticks = 0;
+    state.off_route_freeze_time = None;
+    state.frozen_s_cm = None;  // C2 fix: clear frozen position
+}
+
 /// DR decay factors: (9/10)^dt * 10000 for integer arithmetic
 const DR_DECAY_NUMERATOR: [u32; 11] = [
     10000, // dt=0: 1.0
@@ -46,15 +130,6 @@ const DR_DECAY_NUMERATOR: [u32; 11] = [
     3874,  // dt=9: 0.3874
     3487,  // dt=10: 0.3487
 ];
-
-/// Off-route distance threshold (cm²) — 50m² = 25,000,000 cm²
-const OFF_ROUTE_D2_THRESHOLD: i64 = 25_000_000;
-
-/// Ticks to confirm off-route (avoid false positives from multipath)
-const OFF_ROUTE_CONFIRM_TICKS: u8 = 5;
-
-/// Ticks to clear off-route (fast re-acquisition)
-const OFF_ROUTE_CLEAR_TICKS: u8 = 2;
 
 /// ProcessResult from GPS update
 pub enum ProcessResult {
@@ -73,6 +148,13 @@ pub enum ProcessResult {
     OffRoute {
         last_valid_s: DistCm,
         last_valid_v: SpeedCms,
+        freeze_time: u64,
+    },
+    /// GPS is suspect off-route — position frozen, awaiting confirmation
+    /// M1: Separate from DrOutage to prevent warmup timeout exploitation
+    SuspectOffRoute {
+        s_cm: DistCm,
+        v_cms: SpeedCms,
     },
 }
 
@@ -84,6 +166,7 @@ pub fn process_gps_update(
     route_data: &RouteData,
     _current_time: u64,
     is_first_fix: bool,
+    current_stop_idx: u8,  // C3: for freeze context
 ) -> ProcessResult {
     // 1. Check for GPS outage
     if !gps.has_fix {
@@ -108,6 +191,11 @@ pub fn process_gps_update(
     // Use relaxed heading threshold during recovery (first fix OR post-outage recovery)
     // This improves segment matching when GPS heading is unreliable after signal loss
     let use_relaxed_heading = is_first_fix || dr.in_recovery;
+
+    // CRITICAL: Track frozen position BEFORE hysteresis update
+    // This is used to detect the transition from OffRoute/Suspect to Normal for re-entry snap
+    let had_frozen_position = state.frozen_s_cm.is_some();
+
     let (seg_idx, match_d2) = crate::map_match::find_best_segment_restricted(
         gps_x,
         gps_y,
@@ -121,37 +209,71 @@ pub fn process_gps_update(
     // Off-route detection (only when not in warmup)
     // CRITICAL: Check BEFORE projection to prevent s_cm from advancing during detour
     if !is_first_fix {
-        if match_d2 > OFF_ROUTE_D2_THRESHOLD {
-            // First tick of off-route suspect: freeze position immediately
-            if state.off_route_suspect_ticks == 0 {
-                state.frozen_s_cm = Some(state.s_cm);
-            }
-            state.off_route_suspect_ticks = state.off_route_suspect_ticks.saturating_add(1);
-            state.off_route_clear_ticks = 0;
+        let off_route_status = update_off_route_hysteresis(
+            state,
+            match_d2,
+            gps.timestamp,
+            current_stop_idx,  // C3: use passed value
+        );
 
-            if state.off_route_suspect_ticks >= OFF_ROUTE_CONFIRM_TICKS {
+        match off_route_status {
+            OffRouteStatus::OffRoute => {
                 // Confirmed off-route: return with frozen position
                 let frozen_s = state.frozen_s_cm.unwrap_or(state.s_cm);
+                let freeze_time = state.off_route_freeze_time.unwrap_or(gps.timestamp);
                 return ProcessResult::OffRoute {
                     last_valid_s: frozen_s,
                     last_valid_v: state.v_cms,
+                    freeze_time,
                 };
             }
+            OffRouteStatus::Suspect => {
+                // During off-route suspicion, skip projection and filters to prevent s_cm advance
+                // M1: Return SuspectOffRoute instead of DrOutage to distinguish from genuine GPS loss
+                dr.last_gps_time = Some(gps.timestamp);
+                return ProcessResult::SuspectOffRoute {
+                    s_cm: state.frozen_s_cm.unwrap_or(state.s_cm),
+                    v_cms: state.v_cms,
+                };
+            }
+            OffRouteStatus::Normal => {
+                // CRITICAL: Check if we just transitioned from OffRoute/Suspect to Normal
+                // If so, snap to re-entry position immediately to avoid detecting stops during catch-up
+                if had_frozen_position && state.frozen_s_cm.is_none() {
+                    // Just transitioned from OffRoute/Suspect to Normal
+                    // Use grid-only search to find correct segment immediately
+                    let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only(
+                        gps_x,
+                        gps_y,
+                        gps.heading_cdeg,
+                        gps.speed_cms,
+                        route_data,
+                        use_relaxed_heading,
+                    );
 
-            // During off-route suspicion, skip projection and filters to prevent s_cm advance
-            // Return DrOutage with frozen position immediately
-            dr.last_gps_time = Some(gps.timestamp);
-            return ProcessResult::DrOutage {
-                s_cm: state.frozen_s_cm.unwrap_or(state.s_cm),
-                v_cms: state.v_cms,
-            };
-        } else {
-            // Good GPS match: increment clear counter
-            state.off_route_clear_ticks = state.off_route_clear_ticks.saturating_add(1);
-            // After 2 consecutive good matches, reset suspect counter and unfreeze
-            if state.off_route_clear_ticks >= OFF_ROUTE_CLEAR_TICKS {
-                state.off_route_suspect_ticks = 0;
-                state.frozen_s_cm = None;
+                    // Project to route and snap immediately
+                    let z_reentry = crate::map_match::project_to_route(gps_x, gps_y, new_seg_idx, route_data);
+                    state.s_cm = z_reentry;
+                    // Blend v_cms using EMA instead of hard assignment (M3 fix)
+                    let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+                    state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
+                    state.last_seg_idx = new_seg_idx;
+                    dr.last_gps_time = Some(gps.timestamp);
+                    dr.last_valid_s = state.s_cm;
+                    dr.filtered_v = state.v_cms;
+                    dr.in_recovery = false; // Clear recovery flag - we've snapped
+
+                    let signals = PositionSignals {
+                        z_gps_cm: z_reentry,
+                        s_cm: state.s_cm,
+                    };
+                    return ProcessResult::Valid {
+                        signals,
+                        v_cms: state.v_cms,
+                        seg_idx: new_seg_idx,
+                    };
+                }
+                // Continue normal processing
             }
         }
     }
@@ -159,88 +281,17 @@ pub fn process_gps_update(
     // 4. Projection
     let z_raw = crate::map_match::project_to_route(gps_x, gps_y, seg_idx, route_data);
 
-    // 4.5. GPS Jump Recovery after off-route
-    // Check if we're returning from off-route with a large GPS jump
-    if state.frozen_s_cm.is_some() && match_d2 <= OFF_ROUTE_D2_THRESHOLD && !is_first_fix {
-        // GPS is now valid, check if this is a large jump from frozen position
-        let frozen_s = state.frozen_s_cm.unwrap();
-        let jump_distance = (z_raw - frozen_s).abs();
-
-        // If GPS jumped more than 50m (5000cm), trigger recovery
-        const JUMP_RECOVERY_THRESHOLD: i64 = 5000;
-
-        if jump_distance > JUMP_RECOVERY_THRESHOLD as i32 {
-            // GPS jump recovery: find the closest stop ahead of frozen position
-            // Only consider stops ahead of frozen_s (not behind)
-            let mut best_stop_idx: Option<usize> = None;
-            let mut best_distance: i32 = OFF_ROUTE_D2_THRESHOLD as i32;
-
-            for i in 0..route_data.stop_count {
-                if let Some(stop) = route_data.get_stop(i) {
-                    // Only consider stops ahead of frozen position
-                    if stop.progress_cm > frozen_s {
-                        let dist = (stop.progress_cm - z_raw).abs();
-
-                        // Filter: must be within 200m and velocity constraint satisfied
-                        if dist < OFF_ROUTE_D2_THRESHOLD as i32 {
-                            let dt_since_last_fix = match dr.last_gps_time {
-                                Some(t) => gps.timestamp.saturating_sub(t),
-                                None => 1,
-                            };
-
-                            // Velocity constraint: can we reach this stop given elapsed time?
-                            let dist_to_stop = stop.progress_cm - frozen_s;
-                            let max_reachable = V_MAX_CMS as u64 * dt_since_last_fix;
-
-                            if dist_to_stop as u64 <= max_reachable {
-                                if dist < best_distance {
-                                    best_distance = dist;
-                                    best_stop_idx = Some(i);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // If we found a valid stop, jump to it
-            if let Some(recovered_idx) = best_stop_idx {
-                if let Some(recovered_stop) = route_data.get_stop(recovered_idx) {
-                    state.s_cm = recovered_stop.progress_cm;
-
-                    // Clear frozen state
-                    state.frozen_s_cm = None;
-                    state.off_route_suspect_ticks = 0;
-                    state.off_route_clear_ticks = 0;
-
-                    // Set recovery flag for soft resync
-                    dr.in_recovery = true;
-                    dr.last_gps_time = Some(gps.timestamp);
-
-                    // Construct position signals
-                    let signals = PositionSignals {
-                        z_gps_cm: z_raw,
-                        s_cm: state.s_cm,
-                    };
-
-                    return ProcessResult::Valid {
-                        signals,
-                        v_cms: state.v_cms,
-                        seg_idx,
-                    };
-                }
-            }
-        }
-
-        // No recovery needed or recovery failed, continue normal processing
-        // NOTE: Don't clear frozen_s_cm or counters here - let hysteresis logic handle it
-        // The counters will be cleared after 2 consecutive good ticks (lines 151-154)
-    }
+    // NOTE: §4.5 (GPS Jump Recovery) removed per Bug 2 fix
+    // M12 recovery in state.rs handles all post-off-route recovery scenarios
+    // The hysteresis logic (lines 149-156) handles the off-route → normal transition
+    // M12 uses 4-feature scoring and receives clean input (z_raw, not pre-snapped)
 
     if is_first_fix {
         state.s_cm = z_raw;
 
-        state.v_cms = gps.speed_cms;
+        // Blend v_cms using EMA instead of hard assignment (M3 fix)
+        let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+        state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
         state.last_seg_idx = seg_idx;
         dr.last_gps_time = Some(gps.timestamp);
         dr.last_valid_s = state.s_cm;
@@ -398,8 +449,7 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
     dr.filtered_v = (dr.filtered_v as u32 * decay_factor / 10000) as SpeedCms;
 
     // Reset off-route counters on outage
-    state.off_route_suspect_ticks = 0;
-    state.off_route_clear_ticks = 0;
+    reset_off_route_state(state);
 
     ProcessResult::DrOutage {
         s_cm: state.s_cm,

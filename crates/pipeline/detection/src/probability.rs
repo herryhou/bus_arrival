@@ -110,6 +110,10 @@ pub fn compute_arrival_probability(
     gaussian_lut: &[u8; 256],
     logistic_lut: &[u8; 128],
 ) -> Prob8 {
+    // M2: Full suppression during off-route - probability is meaningless when not on route
+    if gps_status == GpsStatus::OffRoute {
+        return 0;
+    }
     let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status, gaussian_lut, logistic_lut);
     ((13 * p1 + 6 * p2 + 10 * p3 + 3 * p4) / 32) as u8
 }
@@ -128,6 +132,10 @@ pub fn compute_arrival_probability_adaptive(
     logistic_lut: &[u8; 128],
     next_stop: Option<&Stop>,
 ) -> Prob8 {
+    // M2: Full suppression during off-route - probability is meaningless when not on route
+    if gps_status == GpsStatus::OffRoute {
+        return 0;
+    }
     let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status, gaussian_lut, logistic_lut);
 
     // Adaptive weights based on next stop distance

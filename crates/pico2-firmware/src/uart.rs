@@ -250,7 +250,10 @@ pub async fn write_arrival_event_async(
     append!(b"cm/s");
 
     // Only append probability for Arrival and Departure events
-    if matches!(event.event_type, shared::ArrivalEventType::Arrival | shared::ArrivalEventType::Departure) {
+    if matches!(
+        event.event_type,
+        shared::ArrivalEventType::Arrival | shared::ArrivalEventType::Departure
+    ) {
         append!(b", p=");
         append_u64(&mut msg_buf, &mut pos, event.probability as u64)?;
     }

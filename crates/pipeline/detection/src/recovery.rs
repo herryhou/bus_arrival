@@ -1,6 +1,6 @@
 //! Stop index recovery for GPS jump handling
 
-use shared::{DistCm, SpeedCms, Stop};
+use shared::{DistCm, SpeedCms, Stop, FreezeContext};
 
 /// Trigger conditions
 const GPS_JUMP_THRESHOLD: DistCm = 20000;  // 200 m
@@ -23,15 +23,29 @@ const V_MAX_CMS: u32 = 1667;
 /// - `dt_since_last_fix`: Seconds elapsed since last valid GPS fix
 /// - `stops`: Array of all stops on route
 /// - `last_index`: Last known stop index before GPS anomaly
+/// - `freeze_ctx`: Optional context from off-route freeze (C3 fix)
 pub fn find_stop_index(
     s_cm: DistCm,
     _v_filtered: SpeedCms,  // Reserved for future use
     dt_since_last_fix: u64,  // Seconds since last valid fix
     stops: &[Stop],
     last_index: u8,
+    freeze_ctx: &Option<FreezeContext>,  // C3: NEW PARAMETER
 ) -> Option<usize> {
     let mut best_idx: Option<usize> = None;
     let mut best_score = i32::MAX;
+
+    // C3: Spatial anchor penalty - prefer stops at or after frozen position
+    let spatial_anchor_penalty = if let Some(ctx) = freeze_ctx {
+        // If bus is behind freeze point, heavily penalize stops behind frozen_stop_idx
+        if s_cm < ctx.frozen_s_cm.saturating_sub(5000) {
+            10000  // Large penalty for backward jumps
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
     for (i, stop) in stops.iter().enumerate() {
         let d = (s_cm - stop.progress_cm).abs();
@@ -44,6 +58,9 @@ pub fn find_stop_index(
         let dist = (s_cm - stop.progress_cm).abs();
         let index_penalty = 5000 * (last_index as i32 - i as i32).max(0);
 
+        // C3: Add spatial anchor penalty
+        let index_penalty = index_penalty + spatial_anchor_penalty;
+
         // Velocity penalty: hard exclusion if reaching this stop requires
         // exceeding V_MAX_CMS given the elapsed time since last valid fix
         // Only applies to stops ahead of the bus
@@ -52,8 +69,9 @@ pub fn find_stop_index(
         } else {
             0
         };
-        // Maximum physically reachable distance = V_MAX_CMS * dt
-        let max_reachable = V_MAX_CMS as u64 * dt_since_last_fix;
+        // Use actual filtered speed when available, otherwise worst-case (M4 fix)
+        let effective_v = if _v_filtered > 0 { _v_filtered as u64 } else { V_MAX_CMS as u64 };
+        let max_reachable = effective_v * dt_since_last_fix;
         if dist_to_stop > max_reachable {
             continue;  // Hard exclusion
         }
@@ -85,7 +103,7 @@ mod tests {
         // Stop 1: dist 100, penalty 0 -> score 100
         // Stop 0: dist 4100, penalty 0 -> score 4100 (wait, i >= 0-1=0, so stop 0 is candidate)
         // Stop 2: dist 3900, penalty 0 -> score 3900
-        assert_eq!(find_stop_index(5100, 1000, 1, &stops, 0), Some(1));
+        assert_eq!(find_stop_index(5100, 1000, 1, &stops, 0, &None), Some(1));
 
         // Jump back from idx 2 to near stop 1
         // Point s = 1100. last_index = 2.
@@ -93,21 +111,21 @@ mod tests {
         // Stop 1 (5000): dist 3900, penalty 5000, vel_penalty (dist 3900 > 1667*1) -> excluded
         // Stop 2 (9000): dist 7900, penalty 0, vel_penalty (dist 7900 > 1667*1) -> excluded
         // Both stops excluded by velocity constraint (physically impossible to reach in 1s)
-        assert_eq!(find_stop_index(1100, 1000, 1, &stops, 2), None);
+        assert_eq!(find_stop_index(1100, 1000, 1, &stops, 2, &None), None);
 
         // Jump back from idx 2 to stop 1, but much closer to 1
         // Point s = 4500.
         // Stop 1 (5000): dist 500, penalty 5000, vel_penalty 0 (dist 500 < 1667) -> score 5500
         // Stop 2 (9000): dist 4500, penalty 0, vel_penalty (dist 4500 > 1667) -> excluded
         // Stop 1 wins because stop 2 is excluded by velocity constraint.
-        assert_eq!(find_stop_index(4500, 1000, 1, &stops, 2), Some(1));
+        assert_eq!(find_stop_index(4500, 1000, 1, &stops, 2, &None), Some(1));
 
         // Jump back from idx 1 to stop 0
         // Point s = 1000. last_index = 1.
         // Stop 0 (1000): dist 0, penalty 5000, vel_penalty 0 (stop is behind) -> score 5000
         // Stop 1 (5000): dist 4000, penalty 0, vel_penalty (dist 4000 > 1667) -> excluded
         // Stop 0 wins because stop 1 is excluded by velocity constraint.
-        assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1), Some(0));
+        assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1, &None), Some(0));
 
         // Point s = -2000. last_index = 1.
         // Stop 0 (1000): dist 3000, penalty 5000 -> score 8000
@@ -143,7 +161,7 @@ mod tests {
         // Stop 0 (1000): dist 0, penalty 5000 -> score 5000
         // Stop 1 (9000): dist 8000, penalty 0 -> score 8000
         // Stop 0 wins!
-        assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1), Some(0));
+        assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1, &None), Some(0));
     }
 
     #[test]
@@ -157,35 +175,30 @@ mod tests {
         // GPS recovery scenario: 5 seconds elapsed since last valid fix
         // Bus is now at s=2000, last known index was 1 (bus was near stop 1)
         //
-        // Before fix: vel_penalty compared dist directly against V_MAX_CMS (3000 cm)
-        //   Stop 1 (5000): dist 3000 <= 3000 -> vel_penalty 0 -> score = 3000 + 0 = 3000
-        //   Stop 2 (9000): dist 7000 > 3000 -> vel_penalty i32::MAX -> excluded
-        //   Result: Some(1) (stop 2 incorrectly excluded)
-        //
-        // After fix: vel_penalty uses max_reachable = V_MAX_CMS * dt
-        //   max_reachable = 3000 * 5 = 15000 cm
+        // M4 fix: uses actual filtered speed (1000) instead of V_MAX_CMS (3000)
+        //   max_reachable = 1000 * 5 = 5000 cm
         //   Stop 1 (5000): dist 3000, vel_penalty 0 -> score = 3000
-        //   Stop 2 (9000): dist 7000 < 15000 -> vel_penalty 0 -> score = 7000
-        //   Result: Some(1) (stop 1 still wins due to lower score, but stop 2 is now correctly NOT excluded)
-        assert_eq!(find_stop_index(2000, 1000, 5, &stops, 1), Some(1));
+        //   Stop 2 (9000): dist 7000 > 5000 -> EXCLUDED by velocity penalty
+        //   Result: Some(1) (stop 1 wins, stop 2 correctly excluded as beyond physical reach)
+        assert_eq!(find_stop_index(2000, 1000, 5, &stops, 1, &None), Some(1));
 
         // GPS recovery: 10 seconds elapsed, bus has jumped forward
         // Bus at s=3000, last_index=0 (was at stop 0)
-        // max_reachable = 3000 * 10 = 30000 cm (300m - bus can travel far in 10s)
+        // M4: max_reachable = 1000 * 10 = 10000 cm (100m at 10m/s for 10s)
         // Stop 0 (1000): dist 2000, vel_penalty 0 (behind) -> score = 2000
-        // Stop 1 (5000): dist 2000 < 30000 -> vel_penalty 0 -> score = 2000
-        // Stop 2 (9000): dist 6000 < 30000 -> vel_penalty 0 -> score = 6000
+        // Stop 1 (5000): dist 2000 < 10000 -> vel_penalty 0 -> score = 2000
+        // Stop 2 (9000): dist 6000 < 10000 -> vel_penalty 0 -> score = 6000
         // Result: Some(0) or Some(1) - both have same score, first wins
-        assert_eq!(find_stop_index(3000, 1000, 10, &stops, 0), Some(0));
+        assert_eq!(find_stop_index(3000, 1000, 10, &stops, 0, &None), Some(0));
 
         // GPS recovery: 10 seconds elapsed, bus has jumped further forward
         // Bus at s=6000, last_index=0
-        // max_reachable = 3000 * 10 = 30000 cm
+        // M4: max_reachable = 1000 * 10 = 10000 cm
         // Stop 0 (1000): dist 5000, vel_penalty 0 (behind) -> score = 5000
-        // Stop 1 (5000): dist 1000 < 30000 -> vel_penalty 0 -> score = 1000
-        // Stop 2 (9000): dist 3000 < 30000 -> vel_penalty 0 -> score = 3000
-        // Result: Some(1) (closest stop ahead wins)
-        assert_eq!(find_stop_index(6000, 1000, 10, &stops, 0), Some(1));
+        // Stop 1 (5000): dist 1000 < 10000 -> vel_penalty 0 -> score = 1000
+        // Stop 2 (9000): dist 3000 < 10000 -> vel_penalty 0 -> score = 3000
+        // Result: Some(1) (closest behind wins)
+        assert_eq!(find_stop_index(6000, 1000, 10, &stops, 0, &None), Some(1));
 
         // Edge case: dt=0 (GPS fix received within same second)
         // max_reachable = 0, so any forward distance should be excluded
@@ -194,16 +207,15 @@ mod tests {
         // Stop 1 (5000): dist 3000 > 0 -> vel_penalty i32::MAX -> excluded
         // Stop 2 (9000): dist 7000 > 0 -> vel_penalty i32::MAX -> excluded
         // Result: Some(0) (only stop 0 is viable - stops ahead are excluded)
-        assert_eq!(find_stop_index(2000, 1000, 0, &stops, 0), Some(0));
+        assert_eq!(find_stop_index(2000, 1000, 0, &stops, 0, &None), Some(0));
 
-        // The key demonstration: with realistic dt (5s), stops > 30m away are NOT excluded
-        // Bus at s=1100, last_index=2 (was at stop 2), dt=5
-        // Before fix: both stop 1 (3900cm > 3000) and stop 2 (7900cm > 3000) would be excluded
-        // After fix:
-        //   max_reachable = 3000 * 5 = 15000 cm
-        //   Stop 1: dist 3900 < 15000 -> NOT excluded, score = 3900 + 5000 = 8900
-        //   Stop 2: dist 7900 < 15000 -> NOT excluded, score = 7900
-        // Result: Some(2) (stop 2 wins with lower score)
-        assert_eq!(find_stop_index(1100, 1000, 5, &stops, 2), Some(2));
+        // The key demonstration: with realistic dt (5s), stops beyond physical reach ARE excluded
+        // Bus at s=1100, last_index=2 (was at stop 2), dt=5, v_filtered=1000
+        // M4 fix: uses actual filtered speed (1000) instead of V_MAX_CMS (3000)
+        //   max_reachable = 1000 * 5 = 5000 cm
+        //   Stop 1: dist 3900 < 5000 -> NOT excluded, score = 3900 + 5000 = 8900
+        //   Stop 2: dist 7900 > 5000 -> EXCLUDED (beyond physical reach in 5s at 10m/s)
+        // Result: Some(1) (stop 1 wins - stop 2 correctly excluded by velocity constraint)
+        assert_eq!(find_stop_index(1100, 1000, 5, &stops, 2, &None), Some(1));
     }
 }

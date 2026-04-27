@@ -48,12 +48,22 @@ fn main() {
     // First, build the gen_luts binary for the ACTUAL host architecture
     let build_output = run_with_timeout(
         Command::new(&cargo)
-            .args(["build", "--package", "detection", "--bin", "gen_luts", "--features", "std", "--target", actual_host])
+            .args([
+                "build",
+                "--package",
+                "detection",
+                "--bin",
+                "gen_luts",
+                "--features",
+                "std",
+                "--target",
+                actual_host,
+            ])
             .current_dir("..")
             .env("CARGO_TARGET_DIR", &target_dir)
             .env("CARGO_BUILD_INCREMENTAL", "false")
             .env("CARGO_BUILD_TARGET", actual_host),
-        120,  // 2 minutes for building
+        120, // 2 minutes for building
     )
     .expect("LUT generator build timed out or failed");
 
@@ -77,8 +87,10 @@ fn main() {
     let lut_content = String::from_utf8_lossy(&output.stdout).into_owned();
 
     if lut_content.is_empty() {
-        panic!("LUT generator produced no output! stderr: {}",
-               String::from_utf8_lossy(&output.stderr));
+        panic!(
+            "LUT generator produced no output! stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     // Validate LUT values are in valid u8 range

@@ -101,7 +101,7 @@ fn test_active_stops_when_in_corridor() {
     gps.heading_cdeg = 0;
     gps.speed_cms = 1000;
 
-    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true);
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true, 0);
     if let ProcessResult::Valid { signals, .. } = result {
         let s_cm = signals.s_cm;
         println!("Test 1: s_cm={} (before corridor)", s_cm);
@@ -123,7 +123,7 @@ fn test_active_stops_when_in_corridor() {
     // Should find the active stop
     gps.timestamp += 1;
     gps.lat = lat_from_y(start_y + 5000);
-    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false);
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false, 0);
     if let ProcessResult::Valid { signals, .. } = result {
         let s_cm = signals.s_cm;
         println!("Test 2: s_cm={} (inside corridor)", s_cm);
@@ -144,7 +144,7 @@ fn test_active_stops_when_in_corridor() {
 
     // Test Case 3: At stop (s_cm = 10000)
     gps.lat = lat_from_y(start_y + 10000);
-    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 2, false);
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 2, false, 0);
     if let ProcessResult::Valid { signals, .. } = result {
         let s_cm = signals.s_cm;
         println!("Test 3: s_cm={} (at stop)", s_cm);
@@ -164,7 +164,7 @@ fn test_active_stops_when_in_corridor() {
 
     // Test Case 4: After corridor (s_cm = 15000)
     gps.lat = lat_from_y(start_y + 15000);
-    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 3, false);
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 3, false, 0);
     if let ProcessResult::Valid { signals, .. } = result {
         let s_cm = signals.s_cm;
         println!("Test 4: s_cm={} (after corridor)", s_cm);

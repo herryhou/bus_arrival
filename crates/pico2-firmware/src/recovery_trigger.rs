@@ -15,10 +15,7 @@ use shared::DistCm;
 ///
 /// Note: Restart mismatch (> 500 m) requires stored position from Flash,
 /// which will be implemented later (H2 from code review).
-pub fn should_trigger_recovery(
-    s_cm: DistCm,
-    prev_s_cm: DistCm,
-) -> bool {
+pub fn should_trigger_recovery(s_cm: DistCm, prev_s_cm: DistCm) -> bool {
     // GPS jump > 200 m (per spec Section 15.1)
     // Triggers recovery when position jumps > 200 m between consecutive fixes
     let jump_distance = s_cm.abs_diff(prev_s_cm) as u32;

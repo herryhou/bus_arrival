@@ -81,7 +81,7 @@ fn test_off_route_confirms_after_5_ticks() {
     };
 
     // First fix initializes state (warmup)
-    let result = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true);
+    let result = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
     assert!(matches!(result, ProcessResult::Valid { .. }));
 
     // Simulate 5 GPS fixes with poor match quality (> 50m from route)
@@ -97,7 +97,7 @@ fn test_off_route_confirms_after_5_ticks() {
             has_fix: true,
         };
 
-        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false);
+        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
 
         match i {
             1..=4 => {
@@ -107,10 +107,10 @@ fn test_off_route_confirms_after_5_ticks() {
                     "Tick {} should NOT trigger OffRoute yet",
                     i
                 );
-                // During suspect state, should return DrOutage with frozen position
+                // M1: During suspect state, should return SuspectOffRoute with frozen position
                 assert!(
-                    matches!(result, ProcessResult::DrOutage { .. }),
-                    "Tick {} should return DrOutage (suspect state)",
+                    matches!(result, ProcessResult::SuspectOffRoute { .. }),
+                    "Tick {} should return SuspectOffRoute (suspect state)",
                     i
                 );
                 // Verify suspect counter is incrementing
@@ -126,7 +126,7 @@ fn test_off_route_confirms_after_5_ticks() {
                     matches!(result, ProcessResult::OffRoute { .. }),
                     "Tick 5 SHOULD trigger OffRoute"
                 );
-                if let ProcessResult::OffRoute { last_valid_s, last_valid_v } = result {
+                if let ProcessResult::OffRoute { last_valid_s, last_valid_v, freeze_time: _ } = result {
                     // Should return last valid position (frozen)
                     assert_eq!(last_valid_s, state.s_cm);
                     assert_eq!(last_valid_v, state.v_cms);
@@ -204,7 +204,7 @@ fn test_off_route_disabled_during_warmup() {
             has_fix: true,
         };
 
-        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, true);
+        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true, 0);
 
         // During warmup, OffRoute should NEVER trigger
         assert!(
@@ -293,7 +293,7 @@ fn test_off_route_clears_after_2_good_ticks() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true);
+    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
 
     // Build up suspect ticks (3 ticks)
     for i in 1..=3 {
@@ -306,7 +306,7 @@ fn test_off_route_clears_after_2_good_ticks() {
             hdop_x10: 10,
             has_fix: true,
         };
-        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false);
+        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
     }
     assert_eq!(state.off_route_suspect_ticks, 3, "Should have 3 suspect ticks");
 
@@ -321,13 +321,26 @@ fn test_off_route_clears_after_2_good_ticks() {
             hdop_x10: 10,
             has_fix: true,
         };
-        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false);
+        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
 
-        assert!(
-            matches!(result, ProcessResult::Valid { .. }),
-            "Tick {} with good GPS should return Valid",
-            i
-        );
+        match i {
+            4 => {
+                // First good tick: still in suspect state (clear_ticks = 1 < 2)
+                // M1: Should return SuspectOffRoute (was DrOutage before M1)
+                assert!(
+                    matches!(result, ProcessResult::SuspectOffRoute { .. }),
+                    "Tick 4 should return SuspectOffRoute (still suspect, clear_ticks=1)"
+                );
+            }
+            5 => {
+                // Second good tick: cleared (clear_ticks = 2)
+                assert!(
+                    matches!(result, ProcessResult::Valid { .. }),
+                    "Tick 5 with good GPS should return Valid (cleared)"
+                );
+            }
+            _ => unreachable!(),
+        }
     }
 
     // After 2 good ticks, suspect counter should be cleared
@@ -399,7 +412,7 @@ fn test_off_route_hysteresis_partial_clear() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true);
+    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
 
     // Build up suspect ticks (4 ticks)
     for i in 1..=4 {
@@ -412,7 +425,7 @@ fn test_off_route_hysteresis_partial_clear() {
             hdop_x10: 10,
             has_fix: true,
         };
-        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false);
+        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
     }
     assert_eq!(state.off_route_suspect_ticks, 4, "Should have 4 suspect ticks");
 
@@ -426,7 +439,7 @@ fn test_off_route_hysteresis_partial_clear() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1005, false);
+    let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1005, false, 0);
 
     // Suspect counter should NOT be cleared yet (need 2 good ticks)
     assert_eq!(state.off_route_suspect_ticks, 4, "Suspect ticks should remain at 4 after only 1 good tick");
@@ -442,7 +455,7 @@ fn test_off_route_hysteresis_partial_clear() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1006, false);
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1006, false, 0);
     assert!(matches!(result, ProcessResult::OffRoute { .. }), "Should trigger OffRoute after 5th bad tick");
 }
 
@@ -510,7 +523,7 @@ fn test_off_route_counter_resets_on_outage() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true);
+    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
 
     // Build up suspect count
     for i in 1..=3 {
@@ -523,7 +536,7 @@ fn test_off_route_counter_resets_on_outage() {
             hdop_x10: 10,
             has_fix: true,
         };
-        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false);
+        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
     }
 
     assert_eq!(state.off_route_suspect_ticks, 3, "Should have 3 suspect ticks");
@@ -538,7 +551,7 @@ fn test_off_route_counter_resets_on_outage() {
         hdop_x10: 10,
         has_fix: false,  // NO FIX
     };
-    let _ = process_gps_update(&mut state, &mut dr, &outage_gps, &route_data, 1004, false);
+    let _ = process_gps_update(&mut state, &mut dr, &outage_gps, &route_data, 1004, false, 0);
 
     // Counters should be reset
     assert_eq!(state.off_route_suspect_ticks, 0, "Suspect ticks should be reset after outage");

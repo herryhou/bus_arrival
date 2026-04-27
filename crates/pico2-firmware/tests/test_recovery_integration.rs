@@ -1,16 +1,19 @@
 //! Test recovery module integration with state machine
 //! Run with: cargo test -p pico2-firmware test_recovery_integration --features dev
 
-use std::path::Path;
 use pico2_firmware::state::State;
 use shared::{binfile::RouteData, GpsPoint};
+use std::path::Path;
 
 #[test]
 fn test_full_recovery_flow() {
     // Load actual route data for realistic testing
     let test_data_path = Path::new("../../tools/data/ty225_normal.bin");
     if !test_data_path.exists() {
-        println!("Skipping test - route data not found at {:?}", test_data_path);
+        println!(
+            "Skipping test - route data not found at {:?}",
+            test_data_path
+        );
         return;
     }
 
@@ -45,7 +48,7 @@ fn test_full_recovery_flow() {
     // 2. Simulate GPS jump of 250 m (should trigger recovery)
     // Position significantly north to cause large route progress change
     let gps_jump = GpsPoint {
-        lat: 22.525,  // ~2.8 km north (roughly 280000 cm)
+        lat: 22.525, // ~2.8 km north (roughly 280000 cm)
         lon: 114.0,
         timestamp: base_timestamp + 4,
         speed_cms: 556,
@@ -64,11 +67,22 @@ fn test_full_recovery_flow() {
     // After a large GPS jump, recovery should update last_known_stop_index
     // (It may change to a different stop index, or stay the same if recovery found nearest stop)
     println!("GPS jump result: {:?}", result);
-    println!("Stop index before: {}, after: {}", prev_idx, state.last_known_stop_index());
-    println!("Position before: {}, after: {}", prev_s_cm, state.last_valid_s_cm());
+    println!(
+        "Stop index before: {}, after: {}",
+        prev_idx,
+        state.last_known_stop_index()
+    );
+    println!(
+        "Position before: {}, after: {}",
+        prev_s_cm,
+        state.last_valid_s_cm()
+    );
 
     // The key assertion: code runs without panic and state is updated
-    assert!(true, "Recovery flow test completed - GPS jump processed without panic");
+    assert!(
+        true,
+        "Recovery flow test completed - GPS jump processed without panic"
+    );
 }
 
 #[test]
@@ -109,7 +123,7 @@ fn test_no_recovery_for_small_movement() {
 
     // Small GPS movement (10 m) - should NOT trigger recovery
     let gps_small = GpsPoint {
-        lat: 22.5001,  // ~11 m north
+        lat: 22.5001, // ~11 m north
         lon: 114.0,
         timestamp: base_timestamp + 4,
         speed_cms: 556,
@@ -124,6 +138,9 @@ fn test_no_recovery_for_small_movement() {
     state.process_gps(&gps_small);
 
     // Verify recovery was NOT triggered (stop index unchanged)
-    assert_eq!(state.last_known_stop_index(), prev_idx,
-        "Small GPS movement should not trigger recovery");
+    assert_eq!(
+        state.last_known_stop_index(),
+        prev_idx,
+        "Small GPS movement should not trigger recovery"
+    );
 }

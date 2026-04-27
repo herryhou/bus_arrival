@@ -10,3 +10,5 @@ mod gps_anomalies;
 mod signal_loss;
 mod route_edge_cases;
 mod edge_cases;
+mod detour_reentry_integration;
+mod normal_trace_validation;

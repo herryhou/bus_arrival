@@ -208,6 +208,7 @@ impl<'a> LocalizationState<'a> {
             route_data,
             gps.timestamp,
             self.is_first_fix,
+            0, // current_stop_idx - TODO: track in PipelineState if needed
         );
 
         self.is_first_fix = false;
@@ -242,7 +243,7 @@ impl<'a> LocalizationState<'a> {
                     gps.lon,
                     s_cm,
                     v_cms,
-                    None,
+                    Some(gps.heading_cdeg),  // CRITICAL: Preserve heading even in DR mode
                     "dr_outage",
                 ).with_diagnostics(
                     None,
@@ -254,7 +255,7 @@ impl<'a> LocalizationState<'a> {
                     0,
                 ))
             }
-            gps_processor::kalman::ProcessResult::OffRoute { last_valid_s, last_valid_v } => {
+            gps_processor::kalman::ProcessResult::OffRoute { last_valid_s, last_valid_v, freeze_time: _ } => {
                 Some(gps::GpsRecord::new(
                     gps.timestamp,
                     gps.lat,
@@ -273,6 +274,7 @@ impl<'a> LocalizationState<'a> {
                     0,
                 ))
             }
+            gps_processor::kalman::ProcessResult::SuspectOffRoute { .. } => None,
             gps_processor::kalman::ProcessResult::Rejected(_) => None,
             gps_processor::kalman::ProcessResult::Outage => None,
         }
