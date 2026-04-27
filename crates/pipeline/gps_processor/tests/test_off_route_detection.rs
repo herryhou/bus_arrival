@@ -81,7 +81,7 @@ fn test_off_route_confirms_after_5_ticks() {
     };
 
     // First fix initializes state (warmup)
-    let result = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true, 0);
+    let result = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
     assert!(matches!(result, ProcessResult::Valid { .. }));
 
     // Simulate 5 GPS fixes with poor match quality (> 50m from route)
@@ -97,7 +97,7 @@ fn test_off_route_confirms_after_5_ticks() {
             has_fix: true,
         };
 
-        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false, 0);
+        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
 
         match i {
             1..=4 => {
@@ -107,10 +107,10 @@ fn test_off_route_confirms_after_5_ticks() {
                     "Tick {} should NOT trigger OffRoute yet",
                     i
                 );
-                // During suspect state, should return DrOutage with frozen position
+                // M1: During suspect state, should return SuspectOffRoute with frozen position
                 assert!(
-                    matches!(result, ProcessResult::DrOutage { .. }),
-                    "Tick {} should return DrOutage (suspect state)",
+                    matches!(result, ProcessResult::SuspectOffRoute { .. }),
+                    "Tick {} should return SuspectOffRoute (suspect state)",
                     i
                 );
                 // Verify suspect counter is incrementing
@@ -204,7 +204,7 @@ fn test_off_route_disabled_during_warmup() {
             has_fix: true,
         };
 
-        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, true, 0);
+        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true, 0);
 
         // During warmup, OffRoute should NEVER trigger
         assert!(
@@ -293,7 +293,7 @@ fn test_off_route_clears_after_2_good_ticks() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true, 0);
+    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
 
     // Build up suspect ticks (3 ticks)
     for i in 1..=3 {
@@ -306,7 +306,7 @@ fn test_off_route_clears_after_2_good_ticks() {
             hdop_x10: 10,
             has_fix: true,
         };
-        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false, 0);
+        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
     }
     assert_eq!(state.off_route_suspect_ticks, 3, "Should have 3 suspect ticks");
 
@@ -321,14 +321,15 @@ fn test_off_route_clears_after_2_good_ticks() {
             hdop_x10: 10,
             has_fix: true,
         };
-        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false, 0);
+        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
 
         match i {
             4 => {
                 // First good tick: still in suspect state (clear_ticks = 1 < 2)
+                // M1: Should return SuspectOffRoute (was DrOutage before M1)
                 assert!(
-                    matches!(result, ProcessResult::DrOutage { .. }),
-                    "Tick 4 should return DrOutage (still suspect, clear_ticks=1)"
+                    matches!(result, ProcessResult::SuspectOffRoute { .. }),
+                    "Tick 4 should return SuspectOffRoute (still suspect, clear_ticks=1)"
                 );
             }
             5 => {
@@ -411,7 +412,7 @@ fn test_off_route_hysteresis_partial_clear() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true, 0);
+    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
 
     // Build up suspect ticks (4 ticks)
     for i in 1..=4 {
@@ -424,7 +425,7 @@ fn test_off_route_hysteresis_partial_clear() {
             hdop_x10: 10,
             has_fix: true,
         };
-        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false, 0);
+        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
     }
     assert_eq!(state.off_route_suspect_ticks, 4, "Should have 4 suspect ticks");
 
@@ -522,7 +523,7 @@ fn test_off_route_counter_resets_on_outage() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true, 0);
+    let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
 
     // Build up suspect count
     for i in 1..=3 {
@@ -535,7 +536,7 @@ fn test_off_route_counter_resets_on_outage() {
             hdop_x10: 10,
             has_fix: true,
         };
-        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false, 0);
+        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
     }
 
     assert_eq!(state.off_route_suspect_ticks, 3, "Should have 3 suspect ticks");
