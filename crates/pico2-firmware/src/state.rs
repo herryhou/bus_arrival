@@ -207,7 +207,7 @@ impl<'a> State<'a> {
 
                     if let Some(recovered_idx) = detection::recovery::find_stop_index(
                         s_cm,
-                        v_cms,
+                        self.dr.filtered_v,  // Use EMA-smoothed velocity for stable constraints
                         dt_since_last_fix,
                         &stops_vec,
                         self.last_known_stop_index,
@@ -339,7 +339,7 @@ impl<'a> State<'a> {
 
                     if let Some(recovered_idx) = detection::recovery::find_stop_index(
                         s_cm,
-                        v_cms,
+                        self.dr.filtered_v,  // Use EMA-smoothed velocity for stable constraints
                         elapsed_seconds,
                         &stops_vec,
                         self.last_known_stop_index,

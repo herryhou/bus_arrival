@@ -3,11 +3,27 @@
 use shared::{DistCm, SpeedCms, Stop, FreezeContext};
 
 /// Trigger conditions
-const GPS_JUMP_THRESHOLD: DistCm = 20000;  // 200 m
+const GPS_JUMP_THRESHOLD: DistCm = 30000;  // 300 m (increased for velocity constraint compatibility)
+
+/// Maximum backward recovery distance (100 m)
+/// Prevents pathological backward jumps while allowing legitimate re-selection
+const MAX_BACKWARD_RECOVERY_CM: i64 = 100_00;
 
 /// Maximum bus speed for city bus operations: 60 km/h = 1667 cm/s
 /// Per spec Section 9.1: urban transit routes, not highway speeds
 const V_MAX_CMS: u32 = 1667;
+
+/// Minimum recovery rate (2 m/s = 200 cm/s)
+/// Added as uncertainty buffer to velocity-derived reachable distance
+const MIN_RECOVERY_RATE_CMS: i64 = 200;
+
+/// Maximum base uncertainty term (200 m)
+/// Caps the uncertainty buffer for very long outages to prevent it dominating velocity
+const MAX_BASE_DISTANCE_CM: i64 = 200_00;
+
+/// Maximum recovery distance cap (500 m)
+/// Tuned for urban routes with ~100-200m stop spacing. Prevents search explosion.
+const MAX_RECOVERY_DISTANCE_CM: i64 = 500_00;
 
 /// Find correct stop after GPS jump
 ///
@@ -19,14 +35,15 @@ const V_MAX_CMS: u32 = 1667;
 ///
 /// # Parameters
 /// - `s_cm`: Current GPS position (cm)
-/// - `v_filtered`: Filtered speed estimate (cm/s) - reserved for future use
+/// - `v_filtered`: EMA-smoothed speed estimate (cm/s) from dr.filtered_v
+///   This is the "clean" velocity signal without snap/re-entry artifacts
 /// - `dt_since_last_fix`: Seconds elapsed since last valid GPS fix
 /// - `stops`: Array of all stops on route
 /// - `last_index`: Last known stop index before GPS anomaly
 /// - `freeze_ctx`: Optional context from off-route freeze (C3 fix)
 pub fn find_stop_index(
     s_cm: DistCm,
-    _v_filtered: SpeedCms,  // Reserved for future use
+    v_filtered: SpeedCms,
     dt_since_last_fix: u64,  // Seconds since last valid fix
     stops: &[Stop],
     last_index: u8,
@@ -58,7 +75,7 @@ pub fn find_stop_index(
     for (i, stop) in stops.iter().enumerate() {
         let d = (s_cm - stop.progress_cm).abs();
 
-        // Filter: within ±200m and >= last_index - 1
+        // Filter: within ±300m and >= last_index - 1
         if d >= GPS_JUMP_THRESHOLD || (i as u8) < last_index.saturating_sub(1) {
             continue;
         }
@@ -66,25 +83,46 @@ pub fn find_stop_index(
         let dist = (s_cm - stop.progress_cm).abs();
         let index_penalty = 5000 * (last_index as i32 - i as i32).max(0);
 
-        // C3: Add spatial anchor penalty
-        let index_penalty = index_penalty + spatial_anchor_penalty;
-
-        // Velocity penalty: hard exclusion if reaching this stop requires
-        // exceeding V_MAX_CMS given the elapsed time since last valid fix
-        // Only applies to stops ahead of the bus
-        let dist_to_stop = if stop.progress_cm > s_cm {
-            (stop.progress_cm - s_cm) as u64
+        // Backward constraint: prevent pathological far-backward jumps
+        let backward_dist = if stop.progress_cm < s_cm {
+            (s_cm - stop.progress_cm) as i64
         } else {
             0
         };
-        // Use actual filtered speed when available, otherwise worst-case (M4 fix)
-        let effective_v = if _v_filtered > 0 { _v_filtered as u64 } else { V_MAX_CMS as u64 };
-        let max_reachable = effective_v * dt_since_last_fix;
+        if backward_dist > MAX_BACKWARD_RECOVERY_CM {
+            continue;
+        }
+
+        // Velocity constraint: forward stops must be reachable
+        let dist_to_stop = if stop.progress_cm > s_cm {
+            (stop.progress_cm - s_cm) as i64
+        } else {
+            0
+        };
+
+        // Guard against dt=0 (GPS fixes within same second)
+        let dt = dt_since_last_fix.max(1) as i64;
+
+        // Cap velocity at V_MAX to prevent over-permissive search during GPS spikes
+        let v_capped = (v_filtered as i64).min(V_MAX_CMS as i64);
+
+        // Compute reachable distance as: velocity-derived + uncertainty buffer
+        // - Dynamic component: actual motion (v_capped * dt)
+        // - Base component: minimum uncertainty (2 m/s equivalent * dt), capped separately
+        // This preserves velocity discrimination while ensuring a floor for low speeds
+        let base = (MIN_RECOVERY_RATE_CMS * dt).min(MAX_BASE_DISTANCE_CM);
+        let dynamic = v_capped * dt;
+
+        // Global cap prevents search explosion after very long outages
+        let max_reachable = (dynamic + base).min(MAX_RECOVERY_DISTANCE_CM);
+
         if dist_to_stop > max_reachable {
             continue;  // Hard exclusion
         }
 
-        let score = dist.saturating_add(index_penalty);
+        // Score combines: distance + index penalty + spatial anchor penalty
+        // NOTE: All terms scaled to ~[0, 10k] range for balance
+        let score = dist.saturating_add(index_penalty).saturating_add(spatial_anchor_penalty);
 
         if score < best_score {
             best_score = score;
