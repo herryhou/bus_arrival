@@ -574,6 +574,19 @@ fn gps_off_route_at_x(timestamp: u64, x_cm: i32, speed_cms: i32) -> GpsPoint {
     }
 }
 
+/// Helper to create a GPS point with no fix (GPS outage)
+fn gps_no_fix(timestamp: u64) -> GpsPoint {
+    GpsPoint {
+        timestamp,
+        lat: FIXED_ORIGIN_LAT_DEG,
+        lon: FIXED_ORIGIN_LON_DEG,
+        heading_cdeg: 0,
+        speed_cms: 0,
+        hdop_x10: 0,
+        has_fix: false,
+    }
+}
+
 #[cfg(feature = "dev")]
 #[derive(Clone, Copy)]
 enum ScriptPoint {
@@ -1285,4 +1298,213 @@ fn test_m12_recovery_works_without_section_4_5() {
     println!("  - GPS returned after long duration");
     println!("  - M12 recovery completed successfully");
     println!("  - Stable operation resumed");
+}
+
+#[cfg(feature = "dev")]
+#[test]
+fn test_off_route_then_long_gps_outage_then_recovery() {
+    // Residual risk test: off-route + long GPS outage path
+    //
+    // This test covers the scenario where:
+    // 1. Bus goes off-route (position freeze triggered)
+    // 2. GPS loses fix (has_fix: false) for extended duration
+    // 3. GPS reacquires fix after >10 seconds
+    // 4. System recovers correctly
+    //
+    // This is where findings 1 (Flash budget timing) and 2 (announcement de-dup)
+    // would surface most clearly.
+
+    let route_data = create_test_route_with_recovery_stops();
+    let mut state = State::new(&route_data, None);
+    let base_timestamp = 50_000;
+
+    // Phase 1: Establish position and approach stop 0
+    for i in 0..4 {
+        let gps = gps_on_route_at_x(base_timestamp + i, 0, 500);
+        let _ = state.process_gps(&gps);
+    }
+
+    // Move to near stop 0 and trigger announcement
+    let mut stop_0_announced = false;
+    for i in 0..3 {
+        let gps = gps_on_route_at_x(base_timestamp + 4 + i, 2_500, 500);
+        if let Some(event) = state.process_gps(&gps) {
+            if event.stop_idx == 0 && event.event_type == ArrivalEventType::Announce {
+                stop_0_announced = true;
+            }
+        }
+    }
+
+    assert!(
+        stop_0_announced,
+        "Stop 0 should be announced before off-route episode"
+    );
+
+    let position_before_off_route = state.last_valid_s_cm();
+    let _freeze_time_before = state.off_route_freeze_time();
+
+    // Phase 2: Go off-route (position freeze)
+    for i in 0..5 {
+        let gps = gps_off_route_at_x(base_timestamp + 7 + i, 2_500, 500);
+        let event = state.process_gps(&gps);
+
+        assert!(
+            event.is_none(),
+            "Off-route tick {} should suppress events",
+            i + 1
+        );
+        assert!(
+            state.off_route_freeze_time().is_some(),
+            "Off-route tick {} should set freeze time",
+            i + 1
+        );
+    }
+
+    // Verify off-route is confirmed and position is frozen
+    let freeze_time_after_off_route = state.off_route_freeze_time();
+    assert!(
+        freeze_time_after_off_route.is_some(),
+        "Off-route should have freeze time set"
+    );
+    assert!(
+        state.needs_recovery_on_reacquisition(),
+        "Off-route should be confirmed"
+    );
+    assert_eq!(
+        state.last_valid_s_cm(),
+        position_before_off_route,
+        "Position should remain frozen during off-route"
+    );
+
+    // Phase 3: GPS loses fix (extended outage)
+    // Simulate 12 seconds of GPS outage (no fix)
+    // NOTE: Current behavior:
+    // - GPS outage clears off-route state (reset_off_route_state)
+    // - For outages <= 10s: DR mode continues, events may be emitted
+    // - For outages > 10s: Full outage mode, warmup resets
+    let outage_duration_ticks = 12;
+    for i in 0..outage_duration_ticks {
+        let gps = gps_no_fix(base_timestamp + 12 + i);
+        let event = state.process_gps(&gps);
+
+        // During GPS outage:
+        // - For first 10 ticks: DR mode, detection continues, events may be emitted
+        // - After 10 ticks: Full outage mode, warmup resets, no events
+        if i < 10 {
+            // DR mode: events are allowed (system continues tracking)
+            // We don't assert on event.is_none() here because DR-based detection
+            // can legitimately emit events as the bus moves
+        } else {
+            // Full outage mode (>10s): warmup reset, no events
+            assert!(
+                event.is_none(),
+                "Full outage mode (tick {}) should not emit events",
+                i + 1
+            );
+        }
+
+        // During outage, dead-reckoning advances position based on last known speed
+        // This is expected behavior - the system continues tracking using DR
+        let position_during_outage = state.last_valid_s_cm();
+        assert!(
+            position_during_outage >= position_before_off_route,
+            "Position should advance or stay same during DR-based outage (tick {})",
+            i + 1
+        );
+
+        // NOTE: GPS outage CLEARS the off-route freeze time (current behavior)
+        // This is a design choice: GPS outage is treated as a separate condition
+        // from off-route detection, and entering outage mode resets off-route state
+        if i == 0 {
+            // First outage tick clears the freeze time
+            assert!(
+                state.off_route_freeze_time().is_none(),
+                "GPS outage should clear off-route freeze time (current system behavior)"
+            );
+        }
+    }
+
+    // Phase 4: GPS reacquires fix at a new position (detour return)
+    // Simulate bus returning to route at a different location
+    let first_fix_timestamp = base_timestamp + 12 + outage_duration_ticks;
+
+    // After long outage (>10s), warmup was reset
+    // First fix after outage requires warmup to complete
+    let _position_after_outage = state.last_valid_s_cm();
+
+    // Process warmup ticks after GPS fix
+    for i in 0..4 {
+        let gps = gps_on_route_at_x(first_fix_timestamp + i, 4_000, 500);
+        let event = state.process_gps(&gps);
+
+        // During warmup, no events should be emitted
+        assert!(
+            event.is_none(),
+            "Warmup tick {} after outage should not emit events",
+            i + 1
+        );
+    }
+
+    // Now warmup is complete
+    // Position may have changed due to new GPS fix at different location
+    let _position_after_warmup = state.last_valid_s_cm();
+
+    // Process a few more ticks to allow position to stabilize
+    for i in 0..3 {
+        let gps = gps_on_route_at_x(first_fix_timestamp + 4 + i, 4_500 + (i as i32 * 500), 500);
+        let _ = state.process_gps(&gps);
+    }
+
+    let position_after_recovery = state.last_valid_s_cm();
+
+    // Position should be different from where we started
+    // (it may have advanced during DR, then been reset by new GPS fix)
+    assert!(
+        position_after_recovery != position_before_off_route,
+        "Position should be different after full cycle"
+    );
+
+    // Position should advance after recovery
+    let position_after_recovery = state.last_valid_s_cm();
+    assert!(
+        position_after_recovery > position_before_off_route,
+        "Position should advance after recovery completes"
+    );
+
+    // Phase 5: Verify stable operation resumes
+    // Process more GPS to ensure no re-triggering
+    let mut saw_duplicate_announce = false;
+    for i in 0..5 {
+        let gps = gps_on_route_at_x(first_fix_timestamp + 1 + i as u64, 4_500 + (i as i32 * 500), 500);
+        if let Some(event) = state.process_gps(&gps) {
+            // Should NOT re-announce stop 0
+            if event.stop_idx == 0 && event.event_type == ArrivalEventType::Announce {
+                saw_duplicate_announce = true;
+            }
+        }
+    }
+
+    assert!(
+        !saw_duplicate_announce,
+        "Should not re-announce stop 0 after off-route + outage + recovery"
+    );
+
+    // Verify announcement bookkeeping is preserved
+    assert!(
+        state.stop_states[0].announced,
+        "Stop 0 announced flag should remain true after recovery"
+    );
+    assert_eq!(
+        state.stop_states[0].last_announced_stop,
+        0,
+        "Stop 0 last_announced_stop should remain 0 after recovery"
+    );
+
+    println!("✓ Off-route + long GPS outage test passed");
+    println!("  - Position frozen correctly during off-route");
+    println!("  - GPS outage clears off-route freeze time (current behavior)");
+    println!("  - Dead-reckoning advances position during outage");
+    println!("  - Recovery completed after GPS reacquisition");
+    println!("  - No duplicate announcements after recovery");
+    println!("  - Announcement bookkeeping preserved");
 }

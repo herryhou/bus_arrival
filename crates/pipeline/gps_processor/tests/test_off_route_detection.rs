@@ -81,7 +81,7 @@ fn test_off_route_confirms_after_5_ticks() {
     };
 
     // First fix initializes state (warmup)
-    let result = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true);
+    let result = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 1000, true, 0);
     assert!(matches!(result, ProcessResult::Valid { .. }));
 
     // Simulate 5 GPS fixes with poor match quality (> 50m from route)
@@ -97,7 +97,7 @@ fn test_off_route_confirms_after_5_ticks() {
             has_fix: true,
         };
 
-        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false);
+        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false, 0);
 
         match i {
             1..=4 => {
@@ -204,7 +204,7 @@ fn test_off_route_disabled_during_warmup() {
             has_fix: true,
         };
 
-        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, true);
+        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, true, 0);
 
         // During warmup, OffRoute should NEVER trigger
         assert!(
@@ -306,7 +306,7 @@ fn test_off_route_clears_after_2_good_ticks() {
             hdop_x10: 10,
             has_fix: true,
         };
-        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false);
+        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false, 0);
     }
     assert_eq!(state.off_route_suspect_ticks, 3, "Should have 3 suspect ticks");
 
@@ -321,7 +321,7 @@ fn test_off_route_clears_after_2_good_ticks() {
             hdop_x10: 10,
             has_fix: true,
         };
-        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false);
+        let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false, 0);
 
         match i {
             4 => {
@@ -424,7 +424,7 @@ fn test_off_route_hysteresis_partial_clear() {
             hdop_x10: 10,
             has_fix: true,
         };
-        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false);
+        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false, 0);
     }
     assert_eq!(state.off_route_suspect_ticks, 4, "Should have 4 suspect ticks");
 
@@ -438,7 +438,7 @@ fn test_off_route_hysteresis_partial_clear() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1005, false);
+    let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1005, false, 0));
 
     // Suspect counter should NOT be cleared yet (need 2 good ticks)
     assert_eq!(state.off_route_suspect_ticks, 4, "Suspect ticks should remain at 4 after only 1 good tick");
@@ -454,7 +454,7 @@ fn test_off_route_hysteresis_partial_clear() {
         hdop_x10: 10,
         has_fix: true,
     };
-    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1006, false);
+    let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1006, false, 0));
     assert!(matches!(result, ProcessResult::OffRoute { .. }), "Should trigger OffRoute after 5th bad tick");
 }
 
@@ -535,7 +535,7 @@ fn test_off_route_counter_resets_on_outage() {
             hdop_x10: 10,
             has_fix: true,
         };
-        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false);
+        let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1000 + i, false, 0);
     }
 
     assert_eq!(state.off_route_suspect_ticks, 3, "Should have 3 suspect ticks");
@@ -550,7 +550,7 @@ fn test_off_route_counter_resets_on_outage() {
         hdop_x10: 10,
         has_fix: false,  // NO FIX
     };
-    let _ = process_gps_update(&mut state, &mut dr, &outage_gps, &route_data, 1004, false);
+    let _ = process_gps_update(&mut state, &mut dr, &outage_gps, &route_data, 1004, false, 0));
 
     // Counters should be reset
     assert_eq!(state.off_route_suspect_ticks, 0, "Suspect ticks should be reset after outage");

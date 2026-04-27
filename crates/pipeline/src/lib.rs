@@ -208,6 +208,7 @@ impl<'a> LocalizationState<'a> {
             route_data,
             gps.timestamp,
             self.is_first_fix,
+            0, // current_stop_idx - TODO: track in PipelineState if needed
         );
 
         self.is_first_fix = false;

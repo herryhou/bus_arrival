@@ -999,8 +999,8 @@ $$\text{corridor\_end} = s_i + L_\text{post} \qquad (L_\text{post} = 4000\ \text
 
 | 條件 | 運算式 | 說明 |
 |------|--------|------|
-| ① 廊道內 FSM 狀態 | `Approaching | Arriving | AtStop` | 位置條件已足夠，無需速度門檻 |
-| ② 去重保護 | `last_announced_stop != stop_index` | 紀錄最後播報站點，不需主動重置 |
+| ① 廊道內 FSM 狀態 | `Approaching \| Arriving \| AtStop` | 位置條件已足夠，無需速度門檻 |
+| ② 去重保護 | `last_announced_stop != stop_index` | **Per-stop tracking**: 每個站點獨立記錄自身是否已播報。`last_announced_stop` 存儲在 `StopState` 結構中，而非全局變數。當站點播報時，其 `last_announced_stop` 設為自身 index (`self.index`)，防止重複播報。 |
 
 
 廊道距站點 ≤ 80 m，位置條件本身已排除漂移誤報，速度門檻反而會在塞車慢行場景下阻擋播報，故移除。
@@ -1009,7 +1009,7 @@ $$\text{corridor\_end} = s_i + L_\text{post} \qquad (L_\text{post} = 4000\ \text
 pub struct StopState {
     pub index: u8,
     pub fsm_state: FsmState,
-    pub last_announced_stop: u8,  // tracking for this specific stop
+    pub last_announced_stop: u8,  // Per-stop announcement tracking: stores self.index when announced
     // ... 其他既有欄位 (dwell_time_s, last_probability, announced)
 }
 
@@ -1054,6 +1054,18 @@ impl StopState {
     }
 }
 ```
+
+**設計說明：Per-Stop vs Global Tracking**
+
+v8.4+ 使用 **per-stop tracking** 而非全局變數：
+- 每個 `StopState` 維護自己的 `last_announced_stop` 欄位
+- 當站點播報時，其 `last_announced_stop` 設為 `self.index`
+- 檢查時使用 `self.last_announced_stop != self.index` 判斷是否已播報
+
+**Reset/Reactivation 行為：**
+- 恢復（recovery）後，已通過的站點設為 `Departed` 且 `last_announced_stop = i`（自身 index）
+- 這確保已通過站點不會被重複播報
+- 未播報的站點 `last_announced_stop` 保持為 `u8::MAX`（255），允許首次播報
 
 **計算成本：** 1 次 `matches!` + 1 次整數比較 ≈ **< 0.01 ms**。
 
@@ -1373,7 +1385,7 @@ $$\text{若 } d^2_\text{match} > \theta^2_\text{off-route} \text{ 連續 } N_\te
 
 其中：
 - $d^2_\text{match}$：地圖匹配的最小距離平方（cm²）
-- $\theta_\text{off-route} = 50,000\text{ cm}$（500 m，距離閾值）
+- $\theta_\text{off-route} = 5,000\text{ cm}$（50 m，距離閾值）
 - $N_\text{confirm} = 5$：確認計數（避免 GPS 雜訊誤觸發）
 
 **清除條件（離開 off-route 狀態）：**
@@ -1399,41 +1411,44 @@ if state.off_route_tick_count >= OFF_ROUTE_CONFIRM_TICKS {
 - 語音播報暫停（避免錯誤通知）
 - Trace 輸出 `off_route: true` 標記
 
-### 16.4 GPS 跳躍恢復（GPS Jump Recovery）
+### 16.4 路線重入恢復（Re-entry Snap Recovery）
 
-當 GPS 從脫離路線狀態恢復且發生大跳躍時，系統執行「重啟」策略：直接跳至最近的前方站點，而非逐步更新位置。
+當 GPS 從脫離路線狀態恢復時，系統執行「即時定位」策略：直接跳至 GPS 投影位置，重啟站點檢測。
 
 **觸發條件：**
-1. 位置處於凍結狀態（`frozen_s_cm` 存在）
-2. GPS 地圖匹配品質良好（$d^2_\text{match} \le \theta^2_\text{off-route}$）
-3. GPS 跳躍距離超過閾值（$D_\text{jump} > 50\text{ m}$）
-4. 速度約束檢查通過（確保時間上一致）
+1. 位置處於確認的脫離路線狀態（`off_route_suspect_ticks >= 5`）
+2. 連續 2 次 GPS 地圖匹配品質良好（$d^2_\text{match} \le \theta^2_\text{off-route}$）
+3. 凍結狀態被清除（`frozen_s_cm` 變為 `None`）
 
 **恢復演算法：**
 
-$$\text{Jump Distance: } D_\text{jump} = |z_\text{raw} - s_\text{frozen}|$$
+當從確認的 `OffRoute` 狀態轉換到 `Normal` 狀態時：
 
-$$\text{對每個站點 } i \text{（進度 } s_i > s_\text{frozen}\text{）：}$$
+$$\text{Grid Search: } \text{seg}^* = \arg\min_j d^2(\text{GPS}, \text{seg}_j)$$
 
-$$\text{Candidate Distance: } d_i = |s_i - z_\text{raw}|$$
+$$\text{Projection: } z_\text{reentry} = \text{project\_to\_route}(\text{GPS}, \text{seg}^*)$$
 
-$$\text{Max Reachable: } s_\text{max} = s_\text{frozen} + V_\text{max} \cdot \Delta t_\text{frozen}$$
+$$\text{Snap: } \hat{s} \leftarrow z_\text{reentry},\quad \hat{v} \leftarrow v_\text{GPS}$$
 
-$$\text{若 } d_i \le \theta_\text{off-route} \text{ 且 } s_i \le s_\text{max} \text{：候選站點}$$
+$$\text{Recover: } \text{last\_seg\_idx} \leftarrow \text{seg}^*,\quad \text{in\_recovery} \leftarrow \text{false}$$
 
-$$\text{選擇： } i^* = \arg\min_i d_i$$
-
-$$\text{跳躍： } \hat{s} \leftarrow s_{i^*},\quad \text{frozen\_s\_cm} \leftarrow \text{None}$$
+**關鍵特性：**
+- **即時定位：** 使用全域空間格網（Grid Index）搜尋，不依賴舊的 `last_seg_idx`
+- **跳過中間站點：** 若重入位置位於某些站點之後，這些站點將被完全跳過（不會觸發 Approaching/Arriving 狀態）
+- **避免錯誤檢測：** 直接跳躍至重入位置，避免漸進式追趕過程中的錯誤站點檢測
 
 **參數設定：**
 
 | 參數 | 值 | 說明 |
 |------|-----|------|
-| $\theta_\text{off-route}$ | 50,000 cm（500 m） | 地圖匹配距離閾值 |
-| $D_\text{jump}$ | 5,000 cm（50 m） | GPS 跳躍恢復閾值 |
+| $\theta_\text{off-route}$ | 5,000 cm（50 m） | 地圖匹配距離閾值 |
 | $N_\text{confirm}$ | 5 ticks | 進入 off-route 確認計數 |
 | $N_\text{clear}$ | 2 ticks | 離開 off-route 清除計數 |
 | $V_\text{max}$ | 1,667 cm/s（60 km/h） | 速度約束上限 |
+
+**與 Suspect 狀態的區別：**
+- **Suspect → Normal：** 使用漸進式軟同步（soft-resync，2/10 gain）處理小幅 GPS 飄移
+- **OffRoute → Normal：** 使用即時定位（immediate snap）處理繞路/長時間脫離
 
 ### 16.5 狀態轉移圖
 
@@ -1447,13 +1462,20 @@ $$\text{跳躍： } \hat{s} \leftarrow s_{i^*},\quad \text{frozen\_s\_cm} \lefta
 │ (tracking)   │              │ (frozen)    │              │
 └──────────────┘              └──────────────┘              │
       ▲                            │                       │
-      │                            │ GPS jump recovery    │
+      │                            │ Immediate snap      │
+      │                            │ to GPS projection   │
       │                            ▼                       │
       │                   ┌──────────────┐                │
-      │                   │  Re-acquire  │                │
-      └───────────────────│  (jump to    │────────────────┘
-                    D_jump > 50m   stop)│
+      └───────────────────│  Re-entry    │────────────────┘
+                            │  (snap to    │
+                            │   z_reentry) │
                             └──────────────┘
+
+Suspect 狀態（1-4 ticks）：
+- Normal → Suspect（d² > θ²，1 tick）
+- Suspect → OffRoute（d² > θ²，達 5 ticks）
+- Suspect → Normal（d² ≤ θ²，2 ticks 連續）
+- Suspect 期間使用 soft-resync 漸進恢復
 ```
 
 ### 16.6 Trace 輸出格式
@@ -1463,22 +1485,22 @@ $$\text{跳躍： } \hat{s} \leftarrow s_{i^*},\quad \text{frozen\_s\_cm} \lefta
 **Off-Route 狀態（位置凍結）：**
 ```jsonl
 {
-  "time": 80110,
-  "lat": 24.99392,
-  "lon": 121.29495,
-  "s_cm": 57972,
+  "time": 80177,
+  "lat": 24.99346,
+  "lon": 121.29539,
+  "s_cm": 80449,
   "off_route": true,
   "status": "off_route"
 }
 ```
 
-**Re-acquisition（恢復到路線）：**
+**Re-entry（即時定位恢復）：**
 ```jsonl
 {
-  "time": 80245,
-  "lat": 24.99190,
-  "lon": 121.30151,
-  "s_cm": 123847,
+  "time": 80223,
+  "lat": 24.992078,
+  "lon": 121.300427,
+  "s_cm": 173088,
   "off_route": false,
   "status": "valid",
   "active_stops": [6],
@@ -1490,8 +1512,8 @@ $$\text{跳躍： } \hat{s} \leftarrow s_{i^*},\quad \text{frozen\_s\_cm} \lefta
 - `off_route: true`：當前處於脫離路線狀態（位置凍結）
 - `off_route: false`：已恢復到正常路線追蹤
 - `status: "off_route"` | `"dr_outage"` | `"valid"`：狀態類型
-- `s_cm`：路線進度（off-route 期間維持不變）
-- `active_stops`：恢復後檢測到的目標站點索引
+- `s_cm`：路線進度（off-route 期間維持不變，re-entry 時跳至投影位置）
+- `active_stops`：恢復後檢測到的目標站點索引（從重入位置開始）
 
 ### 16.7 測試驗證
 
@@ -1499,60 +1521,56 @@ $$\text{跳躍： } \hat{s} \leftarrow s_{i^*},\quad \text{frozen\_s\_cm} \lefta
 
 **場景描述：**
 - 路線：10 個站點（ty225_short），總長約 2.5 km
-- 繞路路徑：Stop 2 (idx 1) → 繞路點 (24.99183, 121.297665) → Stop 7 (idx 6)
-- 繞路策略：先向西偏離路線，再向南行駛至繞路點，最後向東回到路線
-- 脫離偏移：距離路線約 300 m 的南方偏移
-- 跳過站點：Stop 3, 4, 5, 6 (idx 2, 3, 4, 5) 不應被播報
+- 繞路路徑：Stop 2 (idx 1) → 繞路點 (24.99207, 121.30043) → Stop 7 (idx 6)
+- 繞路策略：向東南偏離路線，經過繞路點後回到原路線
+- 脫離偏移：距離路線約 300 m
+- 跳過站點：Stop 2, 3, 4, 5 (idx 2, 3, 4, 5) 不應被播報
 
 **時間線：**
-- Stop 1 (idx 0) arrival: time 80002
-- Stop 2 (idx 1) arrival: time 80098
-- Off-route detection: time 80103 (5 seconds after departure)
-- Detour point reached: time 80144
-- Re-acquisition: time 80245 (approaching Stop 7)
-- Stop 7 (idx 6) arrival: time 80247
-- Off-route duration: ~142 seconds
+- Stop 0 (idx 0) arrival: time 80014
+- Stop 1 (idx 1) arrival: time 80104
+- Off-route detection: time 80177 (5 seconds after departure)
+- Detour point reached: time ~80200
+- Re-entry snap: time 80223 (s_cm: 102606 → 173088)
+- Stop 6 (idx 6) arrival: time 80237
+- Off-route duration: ~46 seconds
 
 **驗證結果：**
 
 | 檢查項目 | 結果 | 說明 |
 |---------|------|------|
-| GPS 連續性 | ✅ PASS | 1 秒間隔，321 個 GPS 更新 |
-| 脫離路線檢測 | ✅ PASS | 5 秒後觸發（time 80103） |
-| 位置凍結 | ✅ PASS | s_cm 維持在 57,972 cm |
-| 跳過站點 | ✅ PASS | Stop 3-6 (idx 2-5) 未被宣告 |
-| 重新獲取 | ✅ PASS | Stop 7 (idx 6) 正確檢測於 time 80247 |
-| 繞路持續時間 | ✅ PASS | 142 秒（time 80103-80245） |
-| 繞路點到達 | ✅ PASS | (24.99183, 121.297665) 於 time 80144 |
-| 後續站點恢復 | ✅ PASS | Stop 8 (idx 7), Stop 9 (idx 8) 正常檢測 |
+| GPS 連續性 | ✅ PASS | 1 秒間隔，359 個 GPS 更新 |
+| 脫離路線檢測 | ✅ PASS | 5 秒後觸發（time 80177） |
+| 位置凍結 | ✅ PASS | s_cm 維持在 102,606 cm |
+| 跳過站點 | ✅ PASS | Stop 2-5 (idx 2-5) 未被宣告 |
+| Re-entry snap | ✅ PASS | s_cm 從 102606 跳至 173088 |
+| 繞路持續時間 | ✅ PASS | 46 秒（time 80177-80223） |
+| 後續站點恢復 | ✅ PASS | Stop 6-9 (idx 6-9) 正常檢測 |
 
 **Trace 關鍵數據：**
 ```jsonl
-{"time":80098,"stop_idx":1,"s_cm":57972,"event_type":"Arrival"}  // Stop 2 arrival
-{"time":80103,"status":"off_route","off_route":true}            // Off-route detected
-{"time":80144,"lat":24.99183,"lon":121.297665}                  // Detour point reached
-{"time":80245,"status":"valid","off_route":false,"stop_idx":6}  // Re-acquisition
-{"time":80247,"stop_idx":6,"event_type":"Arrival"}               // Stop 7 arrival
+{"time":80104,"stop_idx":1,"s_cm":48066,"event_type":"Arrival"}  // Stop 1 arrival
+{"time":80177,"off_route":true,"s_cm":102606,"status":"off_route"}  // Off-route detected
+{"time":80227,"off_route":true,"s_cm":102606,"status":"dr_outage"} // Last frozen tick
+{"time":80228,"s_cm":167429,"off_route":false,"status":"valid"}    // Re-entry (Suspect→Normal)
+{"time":80223,"s_cm":173088,"off_route":false,"status":"valid"}    // Re-entry snap confirmed
+{"time":80237,"stop_idx":6,"s_cm":178449,"event_type":"Arrival"} // Stop 6 arrival
 ```
 
 **執行測試：**
 ```bash
-# 執行 pipeline
-cargo run -p pipeline -- \
-  test_data/ty225_short_detour_nmea.txt \
-  test_data/ty225_short_normal.bin \
-  test_data/ty225_short_detour_arrivals.jsonl \
-  --trace test_data/ty225_short_detour_trace.jsonl
+# 執行 detour 場景測試
+make run-detour
 
-# 預期 arrivals: Stop 1 (idx 0), Stop 2 (idx 1), Stop 7 (idx 6), Stop 8 (idx 7), Stop 9 (idx 8)
-# Stop 3-6 (idx 2-5) 應被跳過
+# 預期 arrivals: Stop 0 (idx 0), Stop 1 (idx 1), Stop 6-9 (idx 6-9)
+# Stop 2-5 (idx 2-5) 應被跳過
 ```
 
 **實現細節：**
-- 繞路路徑使用中間路徑點（waypoint）避免誤觸發 Stop 3 的檢測廊道
-- 先向西移動 0.002 經度，再向南行駛至繞路點
-- Off-route 檢測使用 5-tick 遲滯確認機制避免 GPS 雜訊誤觸發
-- 位置凍結期間 s_cm 維持不變，防止錯誤的到站事件
+- Off-route 檢測使用 50m 距離閾值（$\theta_\text{off-route} = 5000\text{ cm}$）
+- 5-tick 遲滯確認機制避免 GPS 雜訊誤觸發
+- Re-entry 時使用全域空間格網搜尋（Grid Index）尋找正確路段
+- 直接跳至 GPS 投影位置，避免漸進式追趕過程中的錯誤站點檢測
 
 ---
 

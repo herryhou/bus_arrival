@@ -127,15 +127,17 @@ File: ./crates/pico2-firmware/src/detection.rs
 
 use crate::lut::{GAUSSIAN_LUT, LOGISTIC_LUT};
 use shared::{
-    binfile::RouteData, probability_constants::*,
-    PositionSignals, Prob8, SpeedCms, Stop,
+    binfile::RouteData, probability_constants::*, PositionSignals, Prob8, SpeedCms, Stop,
 };
 
 // ===== Stop Corridor Filter =====
 
 /// Find stops whose corridor contains the current route progress
 /// no_std version - returns indices of active stops
-pub fn find_active_stops(signals: PositionSignals, route_data: &RouteData) -> heapless::Vec<usize, 16> {
+pub fn find_active_stops(
+    signals: PositionSignals,
+    route_data: &RouteData,
+) -> heapless::Vec<usize, 16> {
     let s_cm = signals.s_cm;
     let mut active = heapless::Vec::new();
     for i in 0..route_data.stop_count {
@@ -154,11 +156,38 @@ pub fn find_active_stops(signals: PositionSignals, route_data: &RouteData) -> he
 
 // ===== Arrival Probability Computation =====
 
+/// GPS processing status for phantom arrival detection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpsStatus {
+    /// GPS is being processed normally
+    Valid,
+    /// GPS is being rejected (dr_outage)
+    DrOutage,
+    /// GPS is off-route (position frozen)
+    OffRoute,
+}
+
 /// Shared feature computation for arrival probability
-fn compute_features(signals: PositionSignals, v_cms: SpeedCms, stop: &Stop, dwell_time_s: u16) -> (u32, u32, u32, u32) {
+fn compute_features(
+    signals: PositionSignals,
+    v_cms: SpeedCms,
+    stop: &Stop,
+    dwell_time_s: u16,
+    gps_status: GpsStatus,
+) -> (u32, u32, u32, u32) {
     // Feature 1: Distance likelihood (sigma_d = 2750 cm) - uses raw GPS
-    let d_cm = (signals.z_gps_cm - stop.progress_cm).abs();
-    let idx1 = ((d_cm as i64 * 64) / SIGMA_D_CM as i64).min(255) as usize;
+    // Defensive: blend z_gps_cm and s_cm based on divergence to handle
+    // cases where map matcher produces poor projections during normal operation
+    let divergence = signals.divergence_cm();
+    let (d1_cm, use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
+        // When z_gps_cm and s_cm diverge significantly, use s_cm for p1
+        // This prevents poor map matching from dragging down probability
+        ((signals.s_cm - stop.progress_cm).abs(), true)
+    } else {
+        // Normal case: use z_gps_cm as per spec
+        ((signals.z_gps_cm - stop.progress_cm).abs(), false)
+    };
+    let idx1 = ((d1_cm as i64 * 64) / SIGMA_D_CM as i64).min(255) as usize;
     let p1 = GAUSSIAN_LUT[idx1] as u32;
 
     // Feature 2: Speed likelihood (near 0 -> higher, v_stop = 200 cm/s)
@@ -166,9 +195,14 @@ fn compute_features(signals: PositionSignals, v_cms: SpeedCms, stop: &Stop, dwel
     let p2 = LOGISTIC_LUT[idx2] as u32;
 
     // Feature 3: Progress difference likelihood (sigma_p = 2000 cm) - uses Kalman output
-    let d_cm = (signals.s_cm - stop.progress_cm).abs();
-    let idx3 = ((d_cm as i64 * 64) / SIGMA_P_CM as i64).min(255) as usize;
-    let p3 = GAUSSIAN_LUT[idx3] as u32;
+    // Neutralize to 128 during dr_outage or off_route when s_cm may be phantom
+    let p3 = if gps_status != GpsStatus::Valid && divergence > PHANTOM_DIVERGENCE_CM {
+        128 // neutral: neither confirms nor denies arrival
+    } else {
+        let d_cm = (signals.s_cm - stop.progress_cm).abs();
+        let idx3 = ((d_cm as i64 * 64) / SIGMA_P_CM as i64).min(255) as usize;
+        GAUSSIAN_LUT[idx3] as u32
+    };
 
     // Feature 4: Dwell time likelihood (T_ref = 10s)
     let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
@@ -182,8 +216,9 @@ pub fn compute_arrival_probability(
     v_cms: SpeedCms,
     stop: &Stop,
     dwell_time_s: u16,
+    gps_status: GpsStatus,
 ) -> Prob8 {
-    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s);
+    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status);
     ((13 * p1 + 6 * p2 + 10 * p3 + 3 * p4) / 32) as u8
 }
 
@@ -196,9 +231,10 @@ pub fn compute_arrival_probability_adaptive(
     v_cms: SpeedCms,
     stop: &Stop,
     dwell_time_s: u16,
+    gps_status: GpsStatus,
     next_stop: Option<&Stop>,
 ) -> Prob8 {
-    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s);
+    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status);
 
     // Adaptive weights based on next stop distance
     let (w1, w2, w3, w4) = if let Some(next) = next_stop {
@@ -257,20 +293,34 @@ mod tests {
     #[test]
     fn lut_spot_check() {
         // Check boundary values
-        assert_eq!(GAUSSIAN_LUT[0], 255, "LUT[0] should be 255 (max probability)");
+        assert_eq!(
+            GAUSSIAN_LUT[0], 255,
+            "LUT[0] should be 255 (max probability)"
+        );
 
         // Check middle values with tolerance (updated for current LUT generation)
-        assert!((GAUSSIAN_LUT[64] as i32 - 155).abs() < 5, "LUT[64] should be ~155");
-        assert!((GAUSSIAN_LUT[128] as i32 - 33).abs() < 5, "LUT[128] should be ~33");
+        assert!(
+            (GAUSSIAN_LUT[64] as i32 - 155).abs() < 5,
+            "LUT[64] should be ~155"
+        );
+        assert!(
+            (GAUSSIAN_LUT[128] as i32 - 33).abs() < 5,
+            "LUT[128] should be ~33"
+        );
 
         // Check near-zero value
         assert!(GAUSSIAN_LUT[255] < 10, "LUT[255] should be near 0");
 
         // Verify monotonic decreasing property
         for i in 1..GAUSSIAN_LUT.len() {
-            assert!(GAUSSIAN_LUT[i] <= GAUSSIAN_LUT[i - 1],
+            assert!(
+                GAUSSIAN_LUT[i] <= GAUSSIAN_LUT[i - 1],
                 "LUT should be monotonically decreasing: LUT[{}] = {} > LUT[{}] = {}",
-                i, GAUSSIAN_LUT[i], i - 1, GAUSSIAN_LUT[i - 1]);
+                i,
+                GAUSSIAN_LUT[i],
+                i - 1,
+                GAUSSIAN_LUT[i - 1]
+            );
         }
     }
 }
@@ -292,19 +342,18 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 
 // HAL imports
-use embassy_rp::uart::{BufferedInterruptHandler, BufferedUart, Config as UartConfig};
 use embassy_rp::bind_interrupts;
 use embassy_rp::block::ImageDef;
 use embassy_rp::flash::Flash;
+use embassy_rp::uart::{BufferedInterruptHandler, BufferedUart, Config as UartConfig};
 
 // Module declarations
-mod lut;
-mod uart;
 mod detection;
+mod lut;
+mod persist;
 mod recovery_trigger;
 mod state;
-mod persist;
-
+mod uart;
 
 // Note: embassy-rp doesn't require external bootloader
 // The RP2350 has built-in boot ROM
@@ -335,7 +384,8 @@ async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
     // Initialize flash driver for state persistence
-    let mut flash = Flash::<_, embassy_rp::flash::Async, { 2 * 1024 * 1024 }>::new(p.FLASH, p.DMA_CH0, Irqs);
+    let mut flash =
+        Flash::<_, embassy_rp::flash::Async, { 2 * 1024 * 1024 }>::new(p.FLASH, p.DMA_CH0, Irqs);
 
     // Initialize UART for GPS NMEA input and arrival event output
     // Using buffered UART (interrupt-based) for true async I/O without DMA requirement
@@ -361,8 +411,8 @@ async fn main(_spawner: Spawner) {
     };
 
     // Initialize route data from flash
-    let route_data = shared::binfile::RouteData::load(ROUTE_DATA)
-        .expect("Failed to load route data");
+    let route_data =
+        shared::binfile::RouteData::load(ROUTE_DATA).expect("Failed to load route data");
 
     info!(
         "Route data loaded: {} nodes, {} stops",
@@ -396,10 +446,7 @@ async fn main(_spawner: Spawner) {
 
                     // Parse NMEA sentence
                     if let Some(gps) = state.nmea.parse_sentence(sentence) {
-                        debug!(
-                            "GPS: lat={}, lon={}, fix={}",
-                            gps.lat, gps.lon, gps.has_fix
-                        );
+                        debug!("GPS: lat={}, lon={}, fix={}", gps.lat, gps.lon, gps.has_fix);
 
                         // Process GPS through full pipeline
                         if let Some(arrival) = state.process_gps(&gps) {
@@ -440,7 +487,10 @@ async fn main(_spawner: Spawner) {
                 let ps = shared::PersistedState::new(state.kalman.s_cm, current_stop);
                 match persist::save(&mut flash, &ps).await {
                     Ok(()) => {
-                        info!("Persisted state: stop={}, progress={}cm", current_stop, state.kalman.s_cm);
+                        info!(
+                            "Persisted state: stop={}, progress={}cm",
+                            current_stop, state.kalman.s_cm
+                        );
                         state.mark_persisted(current_stop);
                     }
                     Err(()) => {
@@ -504,7 +554,9 @@ const FLASH_SIZE: usize = 2 * 1024 * 1024;
 /// - Flash is entirely erased (all 0xFF bytes)
 /// - CRC32 checksum does not match
 /// - Read operation fails
-pub async fn load(flash: &mut Flash<'_, FLASH, embassy_rp::flash::Async, FLASH_SIZE>) -> Option<PersistedState> {
+pub async fn load(
+    flash: &mut Flash<'_, FLASH, embassy_rp::flash::Async, FLASH_SIZE>,
+) -> Option<PersistedState> {
     let mut buf = [0u8; core::mem::size_of::<PersistedState>()];
 
     // Read the persisted state from flash
@@ -542,7 +594,10 @@ pub async fn save(
 ) -> Result<(), ()> {
     // Erase the sector first (required before write on NOR flash)
     flash
-        .erase(PERSIST_FLASH_OFFSET, PERSIST_FLASH_OFFSET + ERASE_SIZE as u32)
+        .erase(
+            PERSIST_FLASH_OFFSET,
+            PERSIST_FLASH_OFFSET + ERASE_SIZE as u32,
+        )
         .await
         .map_err(|_| ())?;
 
@@ -585,10 +640,7 @@ use shared::DistCm;
 ///
 /// Note: Restart mismatch (> 500 m) requires stored position from Flash,
 /// which will be implemented later (H2 from code review).
-pub fn should_trigger_recovery(
-    s_cm: DistCm,
-    prev_s_cm: DistCm,
-) -> bool {
+pub fn should_trigger_recovery(s_cm: DistCm, prev_s_cm: DistCm) -> bool {
     // GPS jump > 200 m (per spec Section 15.1)
     // Triggers recovery when position jumps > 200 m between consecutive fixes
     let jump_distance = s_cm.abs_diff(prev_s_cm) as u32;
@@ -638,8 +690,10 @@ File: ./crates/pico2-firmware/src/state.rs
 use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
 use crate::recovery_trigger::should_trigger_recovery;
 use gps_processor::kalman::{process_gps_update, ProcessResult};
-use shared::{binfile::RouteData, ArrivalEvent, DistCm, DrState, GpsPoint, KalmanState, PositionSignals, Stop};
 use shared::FsmState;
+use shared::{
+    binfile::RouteData, ArrivalEvent, DistCm, DrState, GpsPoint, KalmanState, PositionSignals, Stop,
+};
 
 // ===== Constants =====
 
@@ -715,6 +769,8 @@ pub struct State<'a> {
     last_persisted_stop: u8,
     /// Ticks since last persist operation (for rate limiting)
     pub ticks_since_persist: u16,
+    /// Flag indicating recovery should run on next valid GPS after off-route
+    needs_recovery_on_reacquisition: bool,
 }
 
 impl<'a> State<'a> {
@@ -746,8 +802,13 @@ impl<'a> State<'a> {
             last_valid_s_cm: 0,
             last_gps_timestamp: 0,
             pending_persisted: persisted,
-            last_persisted_stop: if let Some(ps) = persisted { ps.last_stop_index } else { 0 },
+            last_persisted_stop: if let Some(ps) = persisted {
+                ps.last_stop_index
+            } else {
+                0
+            },
             ticks_since_persist: 0,
+            needs_recovery_on_reacquisition: false,
         }
     }
 
@@ -760,26 +821,41 @@ impl<'a> State<'a> {
         // Module ⑥: Speed constraint filter
         // Module ⑦: Kalman filter
         // Module ⑧: Dead-reckoning
+        // Disable heading filter during warmup (GPS heading may be unreliable after
+        // long outages). The filter is disabled when:
+        // 1. First fix ever (self.first_fix = true)
+        // 2. During warmup (warmup_valid_ticks < WARMUP_TICKS_REQUIRED)
+        let in_warmup = self.warmup_valid_ticks < WARMUP_TICKS_REQUIRED;
+        let disable_heading_filter = self.first_fix || in_warmup;
         let result = process_gps_update(
             &mut self.kalman,
             &mut self.dr,
             gps,
             self.route_data,
             gps.timestamp,
-            self.first_fix,
+            disable_heading_filter,
         );
 
-        let (s_cm, v_cms, signals) = match result {
-            ProcessResult::Valid { signals, v_cms, seg_idx: _ } => {
+        let (s_cm, v_cms, signals, gps_status) = match result {
+            ProcessResult::Valid {
+                signals,
+                v_cms,
+                seg_idx: _,
+            } => {
+                use crate::detection::GpsStatus;
                 let PositionSignals { z_gps_cm: _, s_cm } = signals;
+                let gps_status = GpsStatus::Valid;
 
                 // Check for GPS jump requiring recovery (H1)
                 let prev_s_cm = self.last_valid_s_cm;
                 // Skip recovery on first fix - last_valid_s_cm is still 0 (initial value)
                 if !self.first_fix && should_trigger_recovery(s_cm, prev_s_cm) {
                     #[cfg(feature = "firmware")]
-                    defmt::warn!("GPS jump detected: s={}→{}, triggering recovery",
-                        prev_s_cm, s_cm);
+                    defmt::warn!(
+                        "GPS jump detected: s={}→{}, triggering recovery",
+                        prev_s_cm,
+                        s_cm
+                    );
 
                     // Call recovery module
                     // Calculate time delta since last GPS fix (in seconds)
@@ -889,8 +965,46 @@ impl<'a> State<'a> {
                 // Update timestamp for next iteration
                 self.last_gps_timestamp = gps.timestamp;
 
-                // Return s_cm, v_cms, and signals for detection
-                (s_cm, v_cms, signals)
+                // Check for re-acquisition recovery
+                if self.needs_recovery_on_reacquisition {
+                    self.needs_recovery_on_reacquisition = false;
+
+                    // Calculate elapsed time since freeze (from KalmanState)
+                    let elapsed_seconds =
+                        if let Some(freeze_time) = self.kalman.off_route_freeze_time {
+                            gps.timestamp.saturating_sub(freeze_time)
+                        } else {
+                            1 // Default if not set
+                        };
+
+                    // Clear freeze time in KalmanState
+                    self.kalman.off_route_freeze_time = None;
+
+                    // Run recovery to find correct stop index
+                    let mut stops_vec = heapless::Vec::<Stop, 256>::new();
+                    for i in 0..self.route_data.stop_count {
+                        if let Some(stop) = self.route_data.get_stop(i) {
+                            let _ = stops_vec.push(stop);
+                        }
+                    }
+
+                    if let Some(recovered_idx) = detection::recovery::find_stop_index(
+                        s_cm,
+                        v_cms,
+                        elapsed_seconds,
+                        &stops_vec,
+                        self.last_known_stop_index,
+                    ) {
+                        #[cfg(feature = "firmware")]
+                        defmt::info!("Re-acquisition recovered stop index: {}", recovered_idx);
+                        self.last_known_stop_index = recovered_idx as u8;
+                        self.reset_stop_states_after_recovery(recovered_idx);
+                    }
+                    // If recovery returns None, continue with existing states
+                }
+
+                // Return s_cm, v_cms, signals, and gps_status for detection
+                (s_cm, v_cms, signals, gps_status)
             }
             ProcessResult::Rejected(reason) => {
                 #[cfg(feature = "firmware")]
@@ -904,7 +1018,7 @@ impl<'a> State<'a> {
                     self.warmup_total_ticks = self.warmup_total_ticks.saturating_add(1);
                 }
 
-                return None;  // Still block detection
+                return None; // Still block detection
             }
             ProcessResult::Outage => {
                 #[cfg(feature = "firmware")]
@@ -953,8 +1067,33 @@ impl<'a> State<'a> {
                 }
 
                 // Timeout expired: detection enabled, proceed with DR estimates
-                let signals = PositionSignals { z_gps_cm: s_cm, s_cm };
-                (s_cm, v_cms, signals)
+                use crate::detection::GpsStatus;
+                let signals = PositionSignals {
+                    z_gps_cm: s_cm,
+                    s_cm,
+                };
+                (s_cm, v_cms, signals, GpsStatus::DrOutage)
+            }
+            ProcessResult::OffRoute {
+                last_valid_s: _,
+                last_valid_v: _,
+                freeze_time: _,
+            } => {
+                // Set flag for recovery on re-acquisition
+                self.needs_recovery_on_reacquisition = true;
+
+                // Note: freeze_time is already set in KalmanState by update_off_route_hysteresis
+                // Bug 5 fix: This is now accurate (set when position first freezes, not when OffRoute confirmed)
+
+                #[cfg(feature = "firmware")]
+                defmt::warn!(
+                    "Off-route detected: GPS > 50m from route for 5s. Freezing at s={}cm.",
+                    self.kalman.frozen_s_cm.unwrap_or(self.kalman.s_cm)
+                );
+
+                // Position is frozen - do NOT update last_valid_s_cm
+                // Suspend arrival detection by returning None
+                return None;
             }
         };
 
@@ -984,6 +1123,7 @@ impl<'a> State<'a> {
                 v_cms,
                 &stop,
                 stop_state.dwell_time_s,
+                gps_status,
                 next_stop,
             );
 
@@ -1072,17 +1212,36 @@ impl<'a> State<'a> {
     fn reset_stop_states_after_recovery(&mut self, recovered_idx: usize) {
         use detection::state_machine::StopState;
 
+        let recovered_was_announced = self
+            .stop_states
+            .get(recovered_idx)
+            .map(|state| state.announced || state.last_announced_stop == recovered_idx as u8)
+            .unwrap_or(false);
+
         // Reset all stop states by recreating them
         for i in 0..self.stop_states.len() {
             self.stop_states[i] = StopState::new(i as u8);
         }
 
+        // Stops before the recovered stop are treated as already passed.
+        // Preserve their announcement bookkeeping so recovery cannot re-announce them.
+        for i in 0..recovered_idx.min(self.stop_states.len()) {
+            self.stop_states[i].fsm_state = FsmState::Departed;
+            self.stop_states[i].announced = true;
+            self.stop_states[i].last_announced_stop = i as u8;
+        }
+
         // Mark recovered stop as Approaching if within corridor
         if let Some(stop) = self.route_data.get_stop(recovered_idx) {
-            if self.last_valid_s_cm >= stop.corridor_start_cm
-                && self.last_valid_s_cm <= stop.corridor_end_cm
-            {
-                if let Some(state) = self.stop_states.get_mut(recovered_idx) {
+            if let Some(state) = self.stop_states.get_mut(recovered_idx) {
+                if recovered_was_announced {
+                    state.announced = true;
+                    state.last_announced_stop = recovered_idx as u8;
+                }
+
+                if self.last_valid_s_cm >= stop.corridor_start_cm
+                    && self.last_valid_s_cm <= stop.corridor_end_cm
+                {
                     state.fsm_state = FsmState::Approaching;
                 }
             }
@@ -1130,6 +1289,16 @@ impl<'a> State<'a> {
         } else {
             Some(self.last_known_stop_index)
         }
+    }
+
+    /// Get the recovery flag state (for testing)
+    pub fn needs_recovery_on_reacquisition(&self) -> bool {
+        self.needs_recovery_on_reacquisition
+    }
+
+    /// Get the freeze time (for testing)
+    pub fn off_route_freeze_time(&self) -> Option<u64> {
+        self.kalman.off_route_freeze_time
     }
 
     /// Apply persisted stop index by marking all prior stops as Departed.
@@ -1402,7 +1571,10 @@ pub async fn write_arrival_event_async(
     append!(b"cm/s");
 
     // Only append probability for Arrival and Departure events
-    if matches!(event.event_type, shared::ArrivalEventType::Arrival | shared::ArrivalEventType::Departure) {
+    if matches!(
+        event.event_type,
+        shared::ArrivalEventType::Arrival | shared::ArrivalEventType::Departure
+    ) {
         append!(b", p=");
         append_u64(&mut msg_buf, &mut pos, event.probability as u64)?;
     }
@@ -1471,12 +1643,22 @@ fn main() {
     // First, build the gen_luts binary for the ACTUAL host architecture
     let build_output = run_with_timeout(
         Command::new(&cargo)
-            .args(["build", "--package", "detection", "--bin", "gen_luts", "--features", "std", "--target", actual_host])
+            .args([
+                "build",
+                "--package",
+                "detection",
+                "--bin",
+                "gen_luts",
+                "--features",
+                "std",
+                "--target",
+                actual_host,
+            ])
             .current_dir("..")
             .env("CARGO_TARGET_DIR", &target_dir)
             .env("CARGO_BUILD_INCREMENTAL", "false")
             .env("CARGO_BUILD_TARGET", actual_host),
-        120,  // 2 minutes for building
+        120, // 2 minutes for building
     )
     .expect("LUT generator build timed out or failed");
 
@@ -1500,8 +1682,10 @@ fn main() {
     let lut_content = String::from_utf8_lossy(&output.stdout).into_owned();
 
     if lut_content.is_empty() {
-        panic!("LUT generator produced no output! stderr: {}",
-               String::from_utf8_lossy(&output.stderr));
+        panic!(
+            "LUT generator produced no output! stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     // Validate LUT values are in valid u8 range
@@ -1801,12 +1985,23 @@ fn compute_features(
     v_cms: SpeedCms,
     stop: &Stop,
     dwell_time_s: u16,
+    gps_status: GpsStatus,
     gaussian_lut: &[u8; 256],
     logistic_lut: &[u8; 128],
 ) -> (u32, u32, u32, u32) {
     // Feature 1: Distance likelihood (sigma_d = 2750 cm)
     // Uses RAW GPS projection z_gps_cm per spec Section 13.2
-    let d1_cm = (signals.z_gps_cm - stop.progress_cm).abs();
+    // Defensive: blend z_gps_cm and s_cm based on divergence to handle
+    // cases where map matcher produces poor projections during normal operation
+    let divergence = signals.divergence_cm();
+    let (d1_cm, use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
+        // When z_gps_cm and s_cm diverge significantly, use s_cm for p1
+        // This prevents poor map matching from dragging down probability
+        ((signals.s_cm - stop.progress_cm).abs(), true)
+    } else {
+        // Normal case: use z_gps_cm as per spec
+        ((signals.z_gps_cm - stop.progress_cm).abs(), false)
+    };
     let idx1 = ((d1_cm as i64 * 64) / SIGMA_D_CM as i64).min(255) as usize;
     let p1 = gaussian_lut[idx1] as u32;
 
@@ -1816,14 +2011,30 @@ fn compute_features(
 
     // Feature 3: Progress difference likelihood (sigma_p = 2000 cm)
     // Uses KALMAN-FILTERED position s_cm per spec Section 13.2
-    let d3_cm = (signals.s_cm - stop.progress_cm).abs();
-    let idx3 = ((d3_cm as i64 * 64) / SIGMA_P_CM as i64).min(255) as usize;
-    let p3 = gaussian_lut[idx3] as u32;
+    // Neutralize to 128 during dr_outage or off_route when s_cm may be phantom
+    let p3 = if gps_status != GpsStatus::Valid && divergence > PHANTOM_DIVERGENCE_CM {
+        128 // neutral: neither confirms nor denies arrival
+    } else {
+        let d3_cm = (signals.s_cm - stop.progress_cm).abs();
+        let idx3 = ((d3_cm as i64 * 64) / SIGMA_P_CM as i64).min(255) as usize;
+        gaussian_lut[idx3] as u32
+    };
 
     // Feature 4: Dwell time likelihood (T_ref = 10s)
     let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
 
     (p1, p2, p3, p4)
+}
+
+/// GPS processing status for phantom arrival detection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpsStatus {
+    /// GPS is being processed normally
+    Valid,
+    /// GPS is being rejected (dr_outage)
+    DrOutage,
+    /// GPS is off-route (position frozen)
+    OffRoute,
 }
 
 /// Arrival threshold: 75% probability
@@ -1836,10 +2047,11 @@ pub fn compute_arrival_probability(
     v_cms: SpeedCms,
     stop: &Stop,
     dwell_time_s: u16,
+    gps_status: GpsStatus,
     gaussian_lut: &[u8; 256],
     logistic_lut: &[u8; 128],
 ) -> Prob8 {
-    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gaussian_lut, logistic_lut);
+    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status, gaussian_lut, logistic_lut);
     ((13 * p1 + 6 * p2 + 10 * p3 + 3 * p4) / 32) as u8
 }
 
@@ -1852,11 +2064,12 @@ pub fn compute_arrival_probability_adaptive(
     v_cms: SpeedCms,
     stop: &Stop,
     dwell_time_s: u16,
+    gps_status: GpsStatus,
     gaussian_lut: &[u8; 256],
     logistic_lut: &[u8; 128],
     next_stop: Option<&Stop>,
 ) -> Prob8 {
-    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gaussian_lut, logistic_lut);
+    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status, gaussian_lut, logistic_lut);
 
     // Adaptive weights based on next stop distance
     let (w1, w2, w3, w4) = if let Some(next) = next_stop {
@@ -1888,9 +2101,9 @@ pub fn arrival_probability(
     gaussian_lut: &[u8; 256],
     logistic_lut: &[u8; 128],
 ) -> Prob8 {
-    // For backward compatibility, use s_cm for both signals
+    // For backward compatibility, use s_cm for both signals and Valid status
     let signals = PositionSignals::new(s_cm, s_cm);
-    compute_arrival_probability(signals, v_cms, stop, dwell_time_s, gaussian_lut, logistic_lut)
+    compute_arrival_probability(signals, v_cms, stop, dwell_time_s, GpsStatus::Valid, gaussian_lut, logistic_lut)
 }
 
 /// Compute arrival probability with adaptive weights for close stops.
@@ -1912,9 +2125,9 @@ pub fn arrival_probability_adaptive(
     logistic_lut: &[u8; 128],
     next_stop: Option<&shared::Stop>,
 ) -> Prob8 {
-    // For backward compatibility, use s_cm for both signals
+    // For backward compatibility, use s_cm for both signals and Valid status
     let signals = PositionSignals::new(s_cm, s_cm);
-    compute_arrival_probability_adaptive(signals, v_cms, stop, dwell_time_s, gaussian_lut, logistic_lut, next_stop)
+    compute_arrival_probability_adaptive(signals, v_cms, stop, dwell_time_s, GpsStatus::Valid, gaussian_lut, logistic_lut, next_stop)
 }
 
 /// Compute individual feature scores for trace output
@@ -1928,7 +2141,7 @@ pub fn compute_feature_scores(
     gaussian_lut: &[u8; 256],
     logistic_lut: &[u8; 128],
 ) -> FeatureScores {
-    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gaussian_lut, logistic_lut);
+    let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, GpsStatus::Valid, gaussian_lut, logistic_lut);
     FeatureScores { p1: p1 as u8, p2: p2 as u8, p3: p3 as u8, p4: p4 as u8 }
 }
 
@@ -1949,7 +2162,7 @@ pub fn compute_probability(
 
 /// Get or build the Gaussian LUT (cached in std environments)
 #[cfg(feature = "std")]
-fn gaussian_lut() -> &'static [u8; 256] {
+pub fn gaussian_lut() -> &'static [u8; 256] {
     use std::sync::OnceLock;
     static GAUSSIAN_LUT: OnceLock<[u8; 256]> = OnceLock::new();
     GAUSSIAN_LUT.get_or_init(build_gaussian_lut)
@@ -1957,7 +2170,7 @@ fn gaussian_lut() -> &'static [u8; 256] {
 
 /// Get or build the logistic LUT (cached in std environments)
 #[cfg(feature = "std")]
-fn logistic_lut() -> &'static [u8; 128] {
+pub fn logistic_lut() -> &'static [u8; 128] {
     use std::sync::OnceLock;
     static LOGISTIC_LUT: OnceLock<[u8; 128]> = OnceLock::new();
     LOGISTIC_LUT.get_or_init(build_logistic_lut)
@@ -2117,6 +2330,7 @@ mod tests {
     #[test]
     fn test_position_signals_f1_uses_z_gps() {
         // Test that F1 (distance likelihood) uses raw GPS projection z_gps_cm
+        // when divergence is below fallback threshold (< 2000 cm)
         let g_lut = super::build_gaussian_lut();
         let l_lut = super::build_logistic_lut();
         let stop = Stop { progress_cm: 10000, corridor_start_cm: 2000, corridor_end_cm: 14000 };
@@ -2124,14 +2338,15 @@ mod tests {
         // Case 1: Both signals aligned at stop
         let signals_aligned = PositionSignals::new(10000, 10000);
         let prob_aligned = super::compute_arrival_probability(
-            signals_aligned, 0, &stop, 10, &g_lut, &l_lut
+            signals_aligned, 0, &stop, 10, super::GpsStatus::Valid, &g_lut, &l_lut
         );
 
         // Case 2: Raw GPS far from stop, Kalman at stop (GPS noise scenario)
+        // Use 1500 cm deviation (< 2000 cm threshold) to avoid fallback logic
         // F1 should drop because z_gps_cm is far, F3 should stay high because s_cm is at stop
-        let signals_divergent = PositionSignals::new(20000, 10000); // z_gps_cm=20m, s_cm=10m
+        let signals_divergent = PositionSignals::new(11500, 10000); // z_gps_cm=11.5m, s_cm=10m, divergence=1500cm
         let prob_divergent = super::compute_arrival_probability(
-            signals_divergent, 0, &stop, 10, &g_lut, &l_lut
+            signals_divergent, 0, &stop, 10, super::GpsStatus::Valid, &g_lut, &l_lut
         );
 
         // Divergent signals should produce lower probability than aligned
@@ -2139,10 +2354,11 @@ mod tests {
             "Divergent signals (z_gps_cm far, s_cm at stop) should have lower probability than aligned signals");
 
         // Case 3: Raw GPS at stop, Kalman far from stop (Kalman lag scenario)
+        // Use 1500 cm deviation (< 2000 cm threshold) to avoid fallback logic
         // F1 should stay high because z_gps_cm is at stop, F3 should drop because s_cm is far
-        let signals_lag = PositionSignals::new(10000, 20000); // z_gps_cm=10m, s_cm=20m
+        let signals_lag = PositionSignals::new(10000, 11500); // z_gps_cm=10m, s_cm=11.5m, divergence=1500cm
         let prob_lag = super::compute_arrival_probability(
-            signals_lag, 0, &stop, 10, &g_lut, &l_lut
+            signals_lag, 0, &stop, 10, super::GpsStatus::Valid, &g_lut, &l_lut
         );
 
         // Lag scenario should also produce lower probability than aligned
@@ -2152,7 +2368,7 @@ mod tests {
 
     #[test]
     fn test_position_signals_independence() {
-        // Test that F1 and F3 are computed independently
+        // Test that F1 and F3 are computed independently (when divergence < fallback threshold)
         let g_lut = super::build_gaussian_lut();
         let l_lut = super::build_logistic_lut();
         let stop = Stop { progress_cm: 10000, corridor_start_cm: 2000, corridor_end_cm: 14000 };
@@ -2160,7 +2376,8 @@ mod tests {
         // Test with different sigma values
         // F1 uses sigma_d=2750cm, F3 uses sigma_p=2000cm
         // Same distance deviation should affect F3 more than F1 (smaller sigma = steeper drop)
-        let distance_deviation = 3000; // 30m deviation
+        // Use 1500 cm deviation (< 2000 cm threshold) to avoid fallback logic
+        let distance_deviation = 1500; // 15m deviation
 
         // Case 1: Only z_gps_cm deviates (affects F1)
         let signals_f1_deviation = PositionSignals::new(
@@ -2168,7 +2385,7 @@ mod tests {
             10000                       // s_cm at stop
         );
         let (p1_only, _, p3_only, _) = super::compute_features(
-            signals_f1_deviation, 0, &stop, 10, &g_lut, &l_lut
+            signals_f1_deviation, 0, &stop, 10, super::GpsStatus::Valid, &g_lut, &l_lut
         );
 
         // Case 2: Only s_cm deviates (affects F3)
@@ -2177,7 +2394,7 @@ mod tests {
             10000 + distance_deviation // s_cm deviates
         );
         let (p1_alt, _, p3_alt, _) = super::compute_features(
-            signals_f3_deviation, 0, &stop, 10, &g_lut, &l_lut
+            signals_f3_deviation, 0, &stop, 10, super::GpsStatus::Valid, &g_lut, &l_lut
         );
 
         // When only s_cm deviates, F1 should be high (255) and F3 should be lower
@@ -2218,12 +2435,12 @@ mod tests {
 
         // Close stop: should use (14, 7, 11, 0) weights
         let prob_close = super::compute_arrival_probability_adaptive(
-            signals, 0, &stop_current, 5, &g_lut, &l_lut, Some(&stop_next_close)
+            signals, 0, &stop_current, 5, super::GpsStatus::Valid, &g_lut, &l_lut, Some(&stop_next_close)
         );
 
         // Far stop: should use (13, 6, 10, 3) weights
         let prob_far = super::compute_arrival_probability_adaptive(
-            signals, 0, &stop_current, 5, &g_lut, &l_lut, Some(&stop_next_far)
+            signals, 0, &stop_current, 5, super::GpsStatus::Valid, &g_lut, &l_lut, Some(&stop_next_far)
         );
 
         // Close stop should have higher probability (no p4 penalty)
@@ -2243,7 +2460,7 @@ mod tests {
 
         // New API: compute_arrival_probability with PositionSignals
         let signals = PositionSignals::new(10000, 10000);
-        let prob_new = super::compute_arrival_probability(signals, 0, &stop, 10, &g_lut, &l_lut);
+        let prob_new = super::compute_arrival_probability(signals, 0, &stop, 10, super::GpsStatus::Valid, &g_lut, &l_lut);
 
         // Should produce identical results when signals are aligned
         assert_eq!(prob_old, prob_new,
@@ -2254,7 +2471,7 @@ mod tests {
             10000, 0, &stop, 5, &g_lut, &l_lut, None
         );
         let prob_new_adaptive = super::compute_arrival_probability_adaptive(
-            signals, 0, &stop, 5, &g_lut, &l_lut, None
+            signals, 0, &stop, 5, super::GpsStatus::Valid, &g_lut, &l_lut, None
         );
 
         assert_eq!(prob_old_adaptive, prob_new_adaptive,
@@ -2316,8 +2533,9 @@ mod tests {
         let signals_normal = PositionSignals { z_gps_cm: 10_100, s_cm: 10_050 };
         let scores_normal = super::compute_feature_scores(signals_normal, 0, &stop, 5, &g_lut, &l_lut);
 
-        // GPS noise event: raw GPS jumps 30m, Kalman filters to 5m
-        let signals_noise = PositionSignals { z_gps_cm: 13_000, s_cm: 10_500 };
+        // GPS noise event: raw GPS jumps 20m, Kalman filters to 5m
+        // Use divergence < 2000 cm to avoid fallback logic (13000 - 10500 = 2500 would trigger fallback)
+        let signals_noise = PositionSignals { z_gps_cm: 12_000, s_cm: 10_500 };
         let scores_noise = super::compute_feature_scores(signals_noise, 0, &stop, 6, &g_lut, &l_lut);
 
         // F1 should drop significantly (raw GPS noise)
@@ -2575,6 +2793,8 @@ pub struct StopState {
     /// Whether this stop has been announced in this trip (v8.6: one-time announcement)
     /// Once true, this stop can never be announced again in the same trip
     pub announced: bool,
+    /// Previous distance to stop (for re-acquisition detection)
+    pub previous_distance_cm: Option<i32>,
 }
 
 impl StopState {
@@ -2586,6 +2806,7 @@ impl StopState {
             last_probability: 0,
             last_announced_stop: u8::MAX,
             announced: false,
+            previous_distance_cm: None,
         }
     }
 
@@ -2613,6 +2834,10 @@ impl StopState {
         probability: Prob8,
     ) -> StopEvent {
         let d_to_stop = (s_cm - stop_progress).abs();
+
+        // Track previous distance for re-acquisition detection
+        let current_distance = (stop_progress as i32) - (s_cm as i32);
+        self.previous_distance_cm = Some(current_distance);
 
         match self.fsm_state {
             FsmState::Idle => {
@@ -3029,9 +3254,20 @@ File: ./crates/pipeline/detection/src/trace.rs
 ================
 //! Trace record emission for debugging visualization
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use shared::{DistCm, SpeedCms, Prob8, FsmState, HeadCdeg};
 use std::io::{BufWriter, Write};
+
+/// Serialize f64 with at most 6 decimal places
+fn serialize_f64_6dec<S>(value: &f64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let formatted = format!("{:.6}", value);
+    // Parse back to f64 to avoid serializing as string
+    let parsed: f64 = formatted.parse().unwrap_or(*value);
+    serializer.serialize_f64(parsed)
+}
 
 /// Trace record for debugging visualization
 #[derive(Serialize, Deserialize)]
@@ -3040,9 +3276,11 @@ pub struct TraceRecord {
     pub time: u64,
 
     /// Input: Latitude
+    #[serde(serialize_with = "serialize_f64_6dec")]
     pub lat: f64,
 
     /// Input: Longitude
+    #[serde(serialize_with = "serialize_f64_6dec")]
     pub lon: f64,
 
     /// Input: Route progress (cm)
@@ -3066,14 +3304,58 @@ pub struct TraceRecord {
 
     /// Recovery: new stop index if jumped
     pub recovery_idx: Option<u8>,
+
+    // === New: Map matching ===
+    /// Which route segment we're matched to (None if off-route)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segment_idx: Option<u16>,
+
+    /// Did the heading constraint pass? (±90° rule)
+    pub heading_constraint_met: bool,
+
+    // === New: Divergence ===
+    /// Raw GPS projection - Kalman filtered position (cm)
+    /// Positive = GPS ahead of filter, Negative = GPS behind
+    pub divergence_cm: i32,
+
+    // === New: GPS quality ===
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hdop: Option<f32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_sats: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix_type: Option<String>,
+
+    // === New: Kalman state ===
+    /// Position variance (cm²), represents filter uncertainty
+    pub variance_cm2: i32,
+
+    // === New: Corridor info ===
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub corridor_start_cm: Option<i32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub corridor_end_cm: Option<i32>,
+
+    // === New: Next stop (outside corridor) ===
+    /// Next stop index and probability (even if not in corridor)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_stop: Option<(u8, Prob8)>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct StopTraceState {
     pub stop_idx: u8,
 
-    /// Distance to stop (cm)
-    pub distance_cm: DistCm,
+    /// GPS distance to stop (cm) - based on raw GPS projection (z_gps_cm)
+    /// Used for p1 (Feature 1: distance likelihood)
+    pub gps_distance_cm: DistCm,
+
+    /// Progress distance to stop (cm) - based on Kalman-filtered position (s_cm)
+    /// Used for p3 (Feature 3: progress difference likelihood)
+    pub progress_distance_cm: DistCm,
 
     /// FSM state - using FsmState directly lets serde handle serialization
     pub fsm_state: FsmState,
@@ -3136,6 +3418,25 @@ File: ./crates/pipeline/gps_processor/src/kalman.rs
 ================
 //! Kalman filter and GPS processing pipeline
 
+/// Off-Route Detection Notes:
+///
+/// This module implements off-route detection to handle sustained GPS drift where
+/// positions consistently don't fit route geometry (distance > 50m for 5+ seconds).
+///
+/// This feature detects:
+/// - Urban canyon multipath causing GPS drift away from road
+/// - Physical deviations (detour, depot, wrong route loaded)
+///
+/// LIMITATION: Cannot detect "along-route drift" where GPS stays on the road
+/// but advances faster than the bus. This requires external ground truth and
+/// is not detectable with a single GPS sensor.
+///
+/// The detection uses hysteresis (5 ticks to confirm, 2 to clear) to avoid
+/// false positives from transient multipath. Position is frozen during off-route
+/// episodes, and recovery re-synchronizes stop indices when GPS returns to route.
+///
+/// See: docs/superpowers/specs/2026-04-14-off-route-detection-design.md
+
 use core::cmp::Ord;
 
 use crate::route_data::RouteData;
@@ -3149,19 +3450,95 @@ pub const V_MAX_CMS: SpeedCms = 1667;
 /// Per spec Section 9.1: accommodates multipath errors
 pub const SIGMA_GPS_CM: DistCm = 2000;
 
+/// Off-route distance threshold (cm²) — 50m² = 25,000,000 cm²
+pub const OFF_ROUTE_D2_THRESHOLD: i64 = 25_000_000;
+
+/// Ticks to confirm off-route (avoid false positives from multipath)
+pub const OFF_ROUTE_CONFIRM_TICKS: u8 = 5;
+
+/// Ticks to clear off-route (fast re-acquisition)
+pub const OFF_ROUTE_CLEAR_TICKS: u8 = 2;
+
+/// Result of off-route hysteresis update
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OffRouteStatus {
+    /// Normal operation - GPS is on route
+    Normal,
+    /// Suspect state - position frozen, awaiting confirmation
+    Suspect,
+    /// Confirmed off-route - position frozen, recovery needed
+    OffRoute,
+}
+
+/// Update off-route hysteresis state based on GPS match quality
+///
+/// Returns the new off-route status after updating the state.
+/// Position is frozen immediately on first suspect tick.
+pub fn update_off_route_hysteresis(
+    state: &mut KalmanState,
+    match_d2: i64,
+    gps_timestamp: u64,
+) -> OffRouteStatus {
+    if match_d2 > OFF_ROUTE_D2_THRESHOLD {
+        // Poor GPS match: increment suspect counter
+        if state.off_route_suspect_ticks == 0 {
+            // First tick of off-route suspect: freeze position immediately
+            state.frozen_s_cm = Some(state.s_cm);
+            // Record freeze time at the same time position is frozen (Bug 5 fix)
+            state.off_route_freeze_time = Some(gps_timestamp);
+        }
+        state.off_route_suspect_ticks = state.off_route_suspect_ticks.saturating_add(1);
+        state.off_route_clear_ticks = 0;
+
+        if state.off_route_suspect_ticks >= OFF_ROUTE_CONFIRM_TICKS {
+            OffRouteStatus::OffRoute
+        } else {
+            OffRouteStatus::Suspect
+        }
+    } else {
+        // Good GPS match: increment clear counter
+        state.off_route_clear_ticks = state.off_route_clear_ticks.saturating_add(1);
+
+        // Only return Suspect if we're actually in a suspect state
+        // (i.e., we had prior suspect ticks or position is frozen)
+        let is_actually_suspect = state.off_route_suspect_ticks > 0 || state.frozen_s_cm.is_some();
+
+        // After 2 consecutive good matches, reset suspect counter and unfreeze
+        if state.off_route_clear_ticks >= OFF_ROUTE_CLEAR_TICKS {
+            state.off_route_suspect_ticks = 0;
+            state.frozen_s_cm = None;
+            state.off_route_freeze_time = None; // Clear freeze time when unfreezing
+            OffRouteStatus::Normal
+        } else if is_actually_suspect {
+            // Still in suspect state (need more good ticks to clear)
+            OffRouteStatus::Suspect
+        } else {
+            // Never been in suspect state, this is normal operation
+            OffRouteStatus::Normal
+        }
+    }
+}
+
+/// Reset off-route counters (called on GPS outage)
+pub fn reset_off_route_state(state: &mut KalmanState) {
+    state.off_route_suspect_ticks = 0;
+    state.off_route_clear_ticks = 0;
+    state.off_route_freeze_time = None;
+}
+
 /// DR decay factors: (9/10)^dt * 10000 for integer arithmetic
 const DR_DECAY_NUMERATOR: [u32; 11] = [
-    10000,  // dt=0: 1.0
-    9000,   // dt=1: 0.9
-    8100,   // dt=2: 0.81
-    7290,   // dt=3: 0.729
-    6561,   // dt=4: 0.6561
-    5905,   // dt=5: 0.5905
-    5314,   // dt=6: 0.5314
-    4783,   // dt=7: 0.4783
-    4305,   // dt=8: 0.4305
-    3874,   // dt=9: 0.3874
-    3487,   // dt=10: 0.3487
+    10000, // dt=0: 1.0
+    9000,  // dt=1: 0.9
+    8100,  // dt=2: 0.81
+    7290,  // dt=3: 0.729
+    6561,  // dt=4: 0.6561
+    5905,  // dt=5: 0.5905
+    5314,  // dt=6: 0.5314
+    4783,  // dt=7: 0.4783
+    4305,  // dt=8: 0.4305
+    3874,  // dt=9: 0.3874
+    3487,  // dt=10: 0.3487
 ];
 
 /// ProcessResult from GPS update
@@ -3176,6 +3553,12 @@ pub enum ProcessResult {
     DrOutage {
         s_cm: DistCm,
         v_cms: SpeedCms,
+    },
+    /// GPS is off-route — position frozen, awaiting re-acquisition
+    OffRoute {
+        last_valid_s: DistCm,
+        last_valid_v: SpeedCms,
+        freeze_time: u64,
     },
 }
 
@@ -3208,20 +3591,98 @@ pub fn process_gps_update(
     );
 
     // 3. Map matching
-    let seg_idx = crate::map_match::find_best_segment_restricted(
+    // Use relaxed heading threshold during recovery (first fix OR post-outage recovery)
+    // This improves segment matching when GPS heading is unreliable after signal loss
+    let use_relaxed_heading = is_first_fix || dr.in_recovery;
+
+    // CRITICAL: Track frozen position BEFORE hysteresis update
+    // This is used to detect the transition from OffRoute/Suspect to Normal for re-entry snap
+    let had_frozen_position = state.frozen_s_cm.is_some();
+
+    let (seg_idx, match_d2) = crate::map_match::find_best_segment_restricted(
         gps_x,
         gps_y,
         gps.heading_cdeg,
         gps.speed_cms,
         route_data,
         state.last_seg_idx,
+        use_relaxed_heading,
     );
+
+    // Off-route detection (only when not in warmup)
+    // CRITICAL: Check BEFORE projection to prevent s_cm from advancing during detour
+    if !is_first_fix {
+        let off_route_status = update_off_route_hysteresis(state, match_d2, gps.timestamp);
+
+        match off_route_status {
+            OffRouteStatus::OffRoute => {
+                // Confirmed off-route: return with frozen position
+                let frozen_s = state.frozen_s_cm.unwrap_or(state.s_cm);
+                let freeze_time = state.off_route_freeze_time.unwrap_or(gps.timestamp);
+                return ProcessResult::OffRoute {
+                    last_valid_s: frozen_s,
+                    last_valid_v: state.v_cms,
+                    freeze_time,
+                };
+            }
+            OffRouteStatus::Suspect => {
+                // During off-route suspicion, skip projection and filters to prevent s_cm advance
+                // Return DrOutage with frozen position immediately
+                dr.last_gps_time = Some(gps.timestamp);
+                return ProcessResult::DrOutage {
+                    s_cm: state.frozen_s_cm.unwrap_or(state.s_cm),
+                    v_cms: state.v_cms,
+                };
+            }
+            OffRouteStatus::Normal => {
+                // CRITICAL: Check if we just transitioned from OffRoute/Suspect to Normal
+                // If so, snap to re-entry position immediately to avoid detecting stops during catch-up
+                if had_frozen_position && state.frozen_s_cm.is_none() {
+                    // Just transitioned from OffRoute/Suspect to Normal
+                    // Use grid-only search to find correct segment immediately
+                    let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only(
+                        gps_x,
+                        gps_y,
+                        gps.heading_cdeg,
+                        gps.speed_cms,
+                        route_data,
+                        use_relaxed_heading,
+                    );
+
+                    // Project to route and snap immediately
+                    let z_reentry = crate::map_match::project_to_route(gps_x, gps_y, new_seg_idx, route_data);
+                    state.s_cm = z_reentry;
+                    state.v_cms = gps.speed_cms;
+                    state.last_seg_idx = new_seg_idx;
+                    dr.last_gps_time = Some(gps.timestamp);
+                    dr.last_valid_s = state.s_cm;
+                    dr.filtered_v = state.v_cms;
+                    dr.in_recovery = false; // Clear recovery flag - we've snapped
+
+                    let signals = PositionSignals {
+                        z_gps_cm: z_reentry,
+                        s_cm: state.s_cm,
+                    };
+                    return ProcessResult::Valid {
+                        signals,
+                        v_cms: state.v_cms,
+                        seg_idx: new_seg_idx,
+                    };
+                }
+                // Continue normal processing
+            }
+        }
+    }
 
     // 4. Projection
     let z_raw = crate::map_match::project_to_route(gps_x, gps_y, seg_idx, route_data);
 
-    if is_first_fix {
+    // NOTE: §4.5 (GPS Jump Recovery) removed per Bug 2 fix
+    // M12 recovery in state.rs handles all post-off-route recovery scenarios
+    // The hysteresis logic (lines 149-156) handles the off-route → normal transition
+    // M12 uses 4-feature scoring and receives clean input (z_raw, not pre-snapped)
 
+    if is_first_fix {
         state.s_cm = z_raw;
 
         state.v_cms = gps.speed_cms;
@@ -3244,26 +3705,49 @@ pub fn process_gps_update(
     }
 
     // 5. Speed constraint filter
-    if !check_speed_constraint(z_raw, state.s_cm, dt) {
+    // Use frozen position if off-route is suspected (immediate position freezing)
+    let current_s = state.frozen_s_cm.unwrap_or(state.s_cm);
+    if !check_speed_constraint(z_raw, current_s, dt) {
         // Per spec Section 9.2: "拒絕後的行為：跳過 Kalman 更新步驟，僅執行 predict step（ŝ += v̂），等效於短暫 Dead-Reckoning"
         // Do prediction step (DR mode) instead of returning Rejected with zero position
-        state.s_cm += state.v_cms * (dt as DistCm);
-        dr.last_gps_time = Some(gps.timestamp);
-        return ProcessResult::DrOutage {
-            s_cm: state.s_cm,
-            v_cms: state.v_cms,
-        };
+        // If off-route is suspected, keep position frozen instead of advancing
+        if state.frozen_s_cm.is_some() {
+            // Keep frozen position, don't advance
+            dr.last_gps_time = Some(gps.timestamp);
+            return ProcessResult::DrOutage {
+                s_cm: state.frozen_s_cm.unwrap(),
+                v_cms: state.v_cms,
+            };
+        } else {
+            state.s_cm += state.v_cms * (dt as DistCm);
+            dr.last_gps_time = Some(gps.timestamp);
+            return ProcessResult::DrOutage {
+                s_cm: state.s_cm,
+                v_cms: state.v_cms,
+            };
+        }
     }
 
     // 6. Monotonicity filter
-    if !check_monotonic(z_raw, state.s_cm) {
+    // Use frozen position if off-route is suspected
+    if !check_monotonic(z_raw, current_s) {
         // Per spec Section 9.2: same behavior as speed constraint rejection
-        state.s_cm += state.v_cms * (dt as DistCm);
-        dr.last_gps_time = Some(gps.timestamp);
-        return ProcessResult::DrOutage {
-            s_cm: state.s_cm,
-            v_cms: state.v_cms,
-        };
+        // If off-route is suspected, keep position frozen instead of advancing
+        if state.frozen_s_cm.is_some() {
+            // Keep frozen position, don't advance
+            dr.last_gps_time = Some(gps.timestamp);
+            return ProcessResult::DrOutage {
+                s_cm: state.frozen_s_cm.unwrap(),
+                v_cms: state.v_cms,
+            };
+        } else {
+            state.s_cm += state.v_cms * (dt as DistCm);
+            dr.last_gps_time = Some(gps.timestamp);
+            return ProcessResult::DrOutage {
+                s_cm: state.s_cm,
+                v_cms: state.v_cms,
+            };
+        }
     }
 
     // 7. Kalman update (HDOP-adaptive) with soft-resync for GPS recovery
@@ -3273,12 +3757,12 @@ pub fn process_gps_update(
     if dr.in_recovery {
         // Soft resync for position: ŝ_resync = ŝ_DR + (2/10)*(z_gps - ŝ_DR)
         state.s_cm = state.s_cm + 2 * (z_raw - state.s_cm) / 10;
-        
+
         // Soft resync for velocity: v_resync = v_DR + (2/10)*(v_gps - v_DR)
         // Using same conservative 2/10 gain for velocity during recovery
         state.v_cms = state.v_cms + 2 * (gps.speed_cms - state.v_cms) / 10;
         state.v_cms = state.v_cms.max(0);
-        
+
         // Clear recovery flag after applying soft-resync
         dr.in_recovery = false;
     } else {
@@ -3289,8 +3773,8 @@ pub fn process_gps_update(
 
     // Construct position signals with raw GPS and Kalman output
     let signals = PositionSignals {
-        z_gps_cm: z_raw,   // Raw projection before Kalman
-        s_cm: state.s_cm,  // Kalman-filtered output
+        z_gps_cm: z_raw,  // Raw projection before Kalman
+        s_cm: state.s_cm, // Kalman-filtered output
     };
 
     // 8. Update DR state
@@ -3322,7 +3806,7 @@ pub fn check_speed_constraint(z_new: DistCm, z_prev: DistCm, dt: i32) -> bool {
 /// - Catches legitimate anomalies (route reversals, GPS glitches)
 /// - Middle ground between spec (-10m) and previous (-500m)
 fn check_monotonic(z_new: DistCm, z_prev: DistCm) -> bool {
-    z_new >= z_prev - 5000  // CHANGED from 50000
+    z_new >= z_prev - 5000 // CHANGED from 50000
 }
 
 /// EMA velocity filter update per spec Section 11.1
@@ -3340,6 +3824,10 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
     };
 
     if dt > 10 {
+        // Set recovery flag even for long outages to allow relaxed heading filter
+        // on first GPS fix after recovery. This improves map matching when GPS
+        // heading is unreliable after extended signal loss.
+        dr.in_recovery = true;
         return ProcessResult::Outage;
     }
 
@@ -3353,6 +3841,9 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
     let dt_idx = dt.min(10) as usize;
     let decay_factor = DR_DECAY_NUMERATOR[dt_idx];
     dr.filtered_v = (dr.filtered_v as u32 * decay_factor / 10000) as SpeedCms;
+
+    // Reset off-route counters on outage
+    reset_off_route_state(state);
 
     ProcessResult::DrOutage {
         s_cm: state.s_cm,
@@ -3368,23 +3859,26 @@ mod tests {
     fn test_dr_decay_normalization() {
         // DR decay factors: (9/10)^dt * 10000 for integer arithmetic
         let expected_factors = [
-            10000,  // dt=0: 1.0
-            9000,   // dt=1: 0.9
-            8100,   // dt=2: 0.81
-            7290,   // dt=3: 0.729
-            6561,   // dt=4: 0.6561
-            5905,   // dt=5: 0.5905
-            5314,   // dt=6: 0.5314
-            4783,   // dt=7: 0.4783
-            4305,   // dt=8: 0.4305
-            3874,   // dt=9: 0.3874
-            3487,   // dt=10: 0.3487
+            10000, // dt=0: 1.0
+            9000,  // dt=1: 0.9
+            8100,  // dt=2: 0.81
+            7290,  // dt=3: 0.729
+            6561,  // dt=4: 0.6561
+            5905,  // dt=5: 0.5905
+            5314,  // dt=6: 0.5314
+            4783,  // dt=7: 0.4783
+            4305,  // dt=8: 0.4305
+            3874,  // dt=9: 0.3874
+            3487,  // dt=10: 0.3487
         ];
 
         // Verify LUT values match expected decay factors
         for (i, &expected) in expected_factors.iter().enumerate() {
-            assert_eq!(DR_DECAY_NUMERATOR[i], expected,
-                "DR decay factor for dt={} should be {}", i, expected);
+            assert_eq!(
+                DR_DECAY_NUMERATOR[i], expected,
+                "DR decay factor for dt={} should be {}",
+                i, expected
+            );
         }
 
         // Verify decay is normalized by dt (not constant)
@@ -3403,8 +3897,10 @@ mod tests {
         assert_eq!(v_dt5, 590);
 
         // Decay should be monotonic decreasing with dt
-        assert!(v_dt1 > v_dt2 && v_dt2 > v_dt5,
-            "DR decay should decrease monotonically with dt");
+        assert!(
+            v_dt1 > v_dt2 && v_dt2 > v_dt5,
+            "DR decay should decrease monotonically with dt"
+        );
     }
 
     #[test]
@@ -3432,64 +3928,64 @@ mod tests {
     }
 
     // ===== H4: EMA Velocity Filter Tests =====
-    
+
     /// EMA coefficient α = 3/10 = 0.3
     /// Formula: v_filtered(t) = v_filtered(t-1) + 3*(v_gps - v_filtered(t-1))/10
-    
+
     #[test]
     fn test_ema_velocity_filter_initial_value() {
         // First GPS update should initialize filtered_v to v_gps
         let v_gps = 500; // 5 m/s
         let v_filtered_initial = 0;
-        
+
         // EMA update: v = 0 + 3*(500 - 0)/10 = 150
         let expected = v_filtered_initial + 3 * (v_gps - v_filtered_initial) / 10;
         assert_eq!(expected, 150);
     }
-    
+
     #[test]
     fn test_ema_velocity_filter_convergence() {
         // EMA should converge toward the GPS speed over time
         let v_filtered = 300;
         let v_gps = 500;
-        
+
         // EMA update: v = 300 + 3*(500 - 300)/10 = 300 + 60 = 360
         let expected = v_filtered + 3 * (v_gps - v_filtered) / 10;
         assert_eq!(expected, 360);
-        
+
         // Next update: v = 360 + 3*(500 - 360)/10 = 360 + 42 = 402
         let v_filtered = expected;
         let expected = v_filtered + 3 * (v_gps - v_filtered) / 10;
         assert_eq!(expected, 402);
     }
-    
+
     #[test]
     fn test_ema_velocity_filter_smoothing() {
         // EMA should smooth out GPS speed noise
         let v_filtered = 400;
         let v_gps_noisy = 700; // Sudden jump
-        
+
         // EMA update: v = 400 + 3*(700 - 400)/10 = 400 + 90 = 490
         // The filtered value changes only 30% toward the noisy GPS value
         let expected = v_filtered + 3 * (v_gps_noisy - v_filtered) / 10;
         assert_eq!(expected, 490);
         assert!(expected < v_gps_noisy, "EMA should smooth out sudden jumps");
     }
-    
+
     #[test]
     fn test_ema_velocity_filter_integer_arithmetic() {
         // Verify integer arithmetic doesn't accumulate excessive error
         // Formula: v += 3*(v_gps - v)/10
         // Using integer division, we lose some precision but should be close
-        
+
         let v_filtered = 433; // Odd number to test rounding
         let v_gps = 567;
-        
+
         // EMA update with integer arithmetic
         let delta = v_gps - v_filtered;
         let adjustment = (3 * delta) / 10; // Integer division
         let expected = v_filtered + adjustment;
-        
+
         // Verify the adjustment is approximately 30% of the delta
         // 3 * 134 / 10 = 402 / 10 = 40 (integer division)
         assert_eq!(adjustment, 40);
@@ -3505,18 +4001,17 @@ File: ./crates/pipeline/gps_processor/src/lib.rs
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-
-pub mod route_data;
-pub mod nmea;
-pub mod map_match;
 pub mod kalman;
+pub mod map_match;
+pub mod nmea;
+pub mod route_data;
 
 #[cfg(feature = "std")]
 pub mod output;
 
 // Re-export commonly used types
+pub use kalman::{process_gps_update, ProcessResult, SIGMA_GPS_CM, V_MAX_CMS};
 pub use nmea::NmeaState;
-pub use kalman::{ProcessResult, process_gps_update, V_MAX_CMS, SIGMA_GPS_CM};
 
 ================
 File: ./crates/pipeline/gps_processor/src/map_match.rs
@@ -3527,6 +4022,115 @@ use shared::binfile::RouteData;
 use shared::{Dist2, DistCm, HeadCdeg, RouteNode, SpeedCms};
 
 use crate::SIGMA_GPS_CM;
+
+/// Hard heading gate at full speed (w = 256, ≥ 3 km/h).
+/// A bus in motion cannot be heading >90° from the segment direction.
+/// This is the single tunable heading parameter; its units (centidegrees) are
+/// directly interpretable — no hidden scale factors.
+const MAX_HEADING_DIFF_CDEG: u32 = 9_000; // 90°
+
+/// Heading filter threshold for a given speed weight.
+///
+/// Returns `u32::MAX` (gate disabled) when w = 0 — at a standstill GPS heading
+/// is unreliable; don't reject any segment.
+/// Returns `MAX_HEADING_DIFF_CDEG` (90°) at w = 256.
+/// Linearly interpolates between the two, giving a progressively tighter gate
+/// as the bus picks up speed.
+///
+/// At w = 128 (≈1.5 km/h):  threshold ≈ 22 500 cdeg (225°, nearly open)
+/// At w = 256 (≥3 km/h):    threshold =  9 000 cdeg (90°, meaningful gate)
+fn heading_threshold_cdeg(w: i32) -> u32 {
+    if w == 0 {
+        return u32::MAX;
+    }
+    // threshold = 36000 - (36000 - MAX_HEADING_DIFF_CDEG) × w / 256
+    let range = 36_000u32 - MAX_HEADING_DIFF_CDEG; // 27 000
+    36_000 - range * w as u32 / 256
+}
+
+/// Returns true if this segment is a plausible direction of travel given the
+/// current GPS heading.
+///
+/// Heading filter strictness depends on mode:
+///   - First fix/recovery (is_first_fix = true): 180° relaxed threshold
+///   - Sentinel heading (i16::MIN): always eligible (GGA-only mode)
+///   - Stopped (w = 0): always eligible (heading unreliable)
+///   - Moving: eligible iff heading_diff ≤ threshold(speed)
+///
+/// Note: this is a hard gate, not a blended penalty.  A segment is either
+/// physically plausible or it isn't; partial credit produces commensuration
+/// problems (adding cm² to cdeg²).
+fn heading_eligible(gps_heading: HeadCdeg, gps_speed: SpeedCms, seg_heading: HeadCdeg, is_first_fix: bool) -> bool {
+    if gps_heading == i16::MIN {
+        return true; // GGA-only: preserve existing sentinel behaviour
+    }
+    let w = heading_weight(gps_speed);
+    let threshold = if is_first_fix {
+        // Relaxed threshold for post-outage recovery: 180°
+        // This allows maximum flexibility while still providing some constraint
+        18_000
+    } else {
+        heading_threshold_cdeg(w)
+    };
+    let diff = heading_diff_cdeg(gps_heading, seg_heading) as u32;
+    diff <= threshold
+}
+
+/// Scan a range of segment indices, returning the best eligible and best any.
+///
+/// When `is_first_fix` is true, the heading filter is disabled - all segments
+/// are eligible based on pure distance only.
+///
+/// Returns:
+/// - (best_eligible_idx, best_eligible_dist2, eligible_found,
+///    best_any_idx, best_any_dist2)
+///
+/// "Best" = minimum dist2. If no segment passes the heading filter,
+/// best_eligible_dist2 = Dist2::MAX and eligible_found = false.
+fn best_eligible(
+    gps_x: DistCm,
+    gps_y: DistCm,
+    gps_heading: HeadCdeg,
+    gps_speed: SpeedCms,
+    route_data: &RouteData,
+    range: impl Iterator<Item = usize>,
+    is_first_fix: bool,
+) -> (usize, Dist2, bool, usize, Dist2) {
+    let mut best_eligible_idx: Option<usize> = None;
+    let mut best_eligible_dist2 = Dist2::MAX;
+    let mut best_any_idx: Option<usize> = None;
+    let mut best_any_dist2 = Dist2::MAX;
+
+    for idx in range {
+        if let Some(seg) = route_data.get_node(idx) {
+            let d2 = segment_score(gps_x, gps_y, &seg);
+
+            if d2 < best_any_dist2 {
+                best_any_dist2 = d2;
+                best_any_idx = Some(idx);
+            }
+
+            if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix)
+                && d2 < best_eligible_dist2
+            {
+                best_eligible_dist2 = d2;
+                best_eligible_idx = Some(idx);
+            }
+        }
+    }
+
+    let eligible_found = best_eligible_idx.is_some();
+    let eligible_idx = best_eligible_idx.unwrap_or(0);
+    let any_idx = best_any_idx.unwrap_or(0);
+
+    (
+        eligible_idx,
+        best_eligible_dist2,
+        eligible_found,
+        any_idx,
+        best_any_dist2,
+    )
+}
 
 // Import libm functions for no_std
 #[cfg(not(feature = "std"))]
@@ -3548,6 +4152,14 @@ fn to_radians_compat(degrees: f64) -> f64 {
 }
 
 /// Find best route segment for GPS point with preference for segments near last_idx
+///
+/// Returns (segment_index, distance_squared) where:
+/// - segment_index: the best matching segment index
+/// - distance_squared: the distance² from GPS point to that segment (in cm²)
+///
+/// The `is_first_fix` parameter controls the heading filter strictness:
+/// - true: Use relaxed 180° threshold for post-outage recovery
+/// - false: Use normal 90° threshold for steady-state operation
 pub fn find_best_segment_restricted(
     gps_x: DistCm,
     gps_y: DistCm,
@@ -3555,93 +4167,197 @@ pub fn find_best_segment_restricted(
     gps_speed: SpeedCms,
     route_data: &RouteData,
     last_idx: usize,
-) -> usize {
-    // 1. First, search in a small window ahead of last_idx
-    // Window: [last_idx - 2, last_idx + 10]
-    const WINDOW_BACK: usize = 2; // GPS 雜訊造成的最大表觀後退路段數
-    const WINDOW_FWD: usize = 10; // V_MAX(3000 cm/s) × 最大路段長(~30m) 的 10× 緩衝
+    is_first_fix: bool,
+) -> (usize, i64) {
+    // Early-exit threshold: if the best eligible segment in the window is
+    // within SIGMA_GPS_CM (20 m), skip the expensive grid search.
+    // Now that scores are pure dist2, this comparison is physically meaningful.
+    const MAX_DIST2_EARLY_EXIT: Dist2 = SIGMA_GPS_CM as i64 * SIGMA_GPS_CM as i64; // 4 000 000 cm²
+
+    const WINDOW_BACK: usize = 2;
+    const WINDOW_FWD: usize = 10;
 
     let start = last_idx.saturating_sub(WINDOW_BACK);
     let end = (last_idx + WINDOW_FWD).min(route_data.node_count.saturating_sub(1));
 
-    let mut best_idx = last_idx;
-    let mut best_score = i64::MAX;
-    let mut found_in_window = false;
+    // PHASE 1: Window search
+    let (
+        window_best_eligible,
+        window_eligible_dist2,
+        window_eligible_found,
+        window_best_any,
+        window_any_dist2,
+    ) = best_eligible(
+        gps_x,
+        gps_y,
+        gps_heading,
+        gps_speed,
+        route_data,
+        start..=end,
+        is_first_fix,
+    );
 
-    for idx in start..=end {
-        if let Some(seg) = route_data.get_node(idx) {
-            let score = segment_score(gps_x, gps_y, gps_heading, gps_speed, &seg);
-            if score < best_score {
-                best_score = score;
-                best_idx = idx;
-                found_in_window = true;
-            }
-        }
+    // Early exit if eligible segment found within threshold
+    if window_eligible_found && window_eligible_dist2 < MAX_DIST2_EARLY_EXIT {
+        return (window_best_eligible, window_eligible_dist2);
     }
 
-    // 2. If window score is acceptable, use it (e.g. distance < 50m)
-    // 50m squared = 5000^2 = 25,000,000
-    const MAX_DIST_SQRT: i64 = SIGMA_GPS_CM as i64 * SIGMA_GPS_CM as i64;
-    if found_in_window && best_score < MAX_DIST_SQRT {
-        return best_idx;
-    }
-
-    // 3. Fallback: Full grid query
-    // Guard against GPS outside bounding box (cold start, GPS jump)
+    // Fallback: full grid search.
     if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
-        return last_idx;  // Conservative fallback
+        return (window_best_any, window_any_dist2); // Outside bounding box — keep window result
     }
 
     let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
     let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
 
-    // Search 3x3 grid neighborhood
-    for dy in 0..=2 {
-        for dx in 0..=2 {
-            let ny = gy as i32 + dy as i32 - 1;
-            let nx = gx as i32 + dx as i32 - 1;
+    // PHASE 2: Grid search
+    // Carry over the window winner as the seed — grid search only improves on it.
+    let mut best_eligible_idx = if window_eligible_found {
+        window_best_eligible
+    } else {
+        // Safe default; will be overwritten by first eligible grid segment
+        last_idx
+    };
+    let mut best_eligible_dist2 = if window_eligible_found {
+        window_eligible_dist2
+    } else {
+        Dist2::MAX
+    };
+    let mut best_any_idx = window_best_any;
+    let mut best_any_dist2 = window_any_dist2;
+    let mut eligible_found = window_eligible_found;
+
+    for dy in 0..=2i32 {
+        for dx in 0..=2i32 {
+            let ny = gy as i32 + dy - 1;
+            let nx = gx as i32 + dx - 1;
             if ny < 0 || nx < 0 {
                 continue;
             }
+            let _ = route_data
+                .grid
+                .visit_cell(nx as u32, ny as u32, |idx: u16| {
+                    if let Some(seg) = route_data.get_node(idx as usize) {
+                        let d2 = segment_score(gps_x, gps_y, &seg);
 
-            // Visit cell indices using visitor pattern (no allocation)
-            let cell_handler = |idx: u16| {
-                if let Some(seg) = route_data.get_node(idx as usize) {
-                    let score = segment_score(gps_x, gps_y, gps_heading, gps_speed, &seg);
-                    if score < best_score {
-                        best_score = score;
-                        best_idx = idx as usize;
+                        // Update best_any tracker
+                        if d2 < best_any_dist2 {
+                            best_any_dist2 = d2;
+                            best_any_idx = idx as usize;
+                        }
+
+                        // Update best_eligible tracker if heading matches
+                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix) {
+                            if d2 < best_eligible_dist2 {
+                                best_eligible_dist2 = d2;
+                                best_eligible_idx = idx as usize;
+                                eligible_found = true;
+                            }
+                        }
                     }
-                }
-            };
-            let _ = route_data.grid.visit_cell(nx as u32, ny as u32, cell_handler);
+                });
         }
     }
 
-    best_idx
+    // If no segment in window or grid passed the heading filter, fall back to
+    // pure distance over the window. This is an explicit, logged degradation —
+    // not a silent wrong answer.
+    if !eligible_found {
+        #[cfg(feature = "firmware")]
+        defmt::warn!(
+            "heading filter: no eligible segments at speed={} cdeg heading={}, \
+             falling back to pure-distance selection",
+            gps_speed,
+            gps_heading
+        );
+        return (best_any_idx, best_any_dist2);
+    }
+
+    (best_eligible_idx, best_eligible_dist2)
 }
 
-/// Heading-weighted segment score
-pub fn segment_score(
+/// Find best segment using grid search only (no window search around last_idx).
+///
+/// This is used for off-route re-entry where the bus might be at a completely
+/// different part of the route than where it left off.
+///
+/// The `is_first_fix` parameter controls the heading filter strictness:
+/// - true: Use relaxed 180° threshold for post-outage recovery
+/// - false: Use normal 90° threshold for steady-state operation
+pub fn find_best_segment_grid_only(
     gps_x: DistCm,
     gps_y: DistCm,
     gps_heading: HeadCdeg,
     gps_speed: SpeedCms,
-    seg: &RouteNode,
-) -> i64 {
-    // Distance squared to segment
-    let dist2 = distance_to_segment_squared(gps_x, gps_y, seg);
+    route_data: &RouteData,
+    is_first_fix: bool,
+) -> (usize, i64) {
+    // Check bounding box first
+    if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
+        // Outside bounding box - return segment 0 as fallback
+        return (0, i64::MAX);
+    }
 
-    // Heading penalty - skip when heading unavailable (GGA-only mode)
-    let heading_penalty = if gps_heading != i16::MIN {
-        let heading_diff = heading_diff_cdeg(gps_heading, seg.heading_cdeg);
-        let w = heading_weight(gps_speed);
-        ((heading_diff as i64).pow(2) * w as i64) >> 8
-    } else {
-        0  // No heading penalty when unavailable
-    };
+    let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
+    let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
 
-    dist2 + heading_penalty
+    // Grid search over 3x3 cells
+    let mut best_eligible_idx = 0;
+    let mut best_eligible_dist2 = Dist2::MAX;
+    let mut best_any_idx = 0;
+    let mut best_any_dist2 = Dist2::MAX;
+    let mut eligible_found = false;
+
+    for dy in 0..=2i32 {
+        for dx in 0..=2i32 {
+            let ny = gy as i32 + dy - 1;
+            let nx = gx as i32 + dx - 1;
+            if ny < 0 || nx < 0 {
+                continue;
+            }
+            let _ = route_data
+                .grid
+                .visit_cell(nx as u32, ny as u32, |idx: u16| {
+                    if let Some(seg) = route_data.get_node(idx as usize) {
+                        let d2 = segment_score(gps_x, gps_y, &seg);
+
+                        // Update best_any tracker
+                        if d2 < best_any_dist2 {
+                            best_any_dist2 = d2;
+                            best_any_idx = idx as usize;
+                        }
+
+                        // Update best_eligible tracker if heading matches
+                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix) {
+                            if d2 < best_eligible_dist2 {
+                                best_eligible_dist2 = d2;
+                                best_eligible_idx = idx as usize;
+                                eligible_found = true;
+                            }
+                        }
+                    }
+                });
+        }
+    }
+
+    // If no segment passed the heading filter, fall back to pure distance
+    if !eligible_found {
+        return (best_any_idx, best_any_dist2);
+    }
+
+    (best_eligible_idx, best_eligible_dist2)
+}
+
+/// Distance-squared from GPS point to segment (clamped projection).
+///
+/// Heading is intentionally absent.  Heading belongs in the eligibility
+/// filter (`heading_eligible`), not in the ranking score.  Mixing cm² and
+/// cdeg² into one scalar requires an arbitrary scale factor that cannot be
+/// derived from first principles.
+///
+/// The return type is `Dist2` (i64 cm²).
+pub fn segment_score(gps_x: DistCm, gps_y: DistCm, seg: &RouteNode) -> Dist2 {
+    distance_to_segment_squared(gps_x, gps_y, seg)
 }
 
 /// Heading weight: 0 at v=0, 256 at v≥83 cm/s (3 km/h)
@@ -3761,57 +4477,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_segment_score_heading_sentinel() {
-        // When heading is i16::MIN (GGA-only mode), heading penalty should be 0
+    fn test_segment_score_is_pure_distance() {
         let seg = RouteNode {
             x_cm: 100000,
             y_cm: 100000,
             cum_dist_cm: 0,
-            heading_cdeg: 9000, // 90 degrees
-            seg_len_mm: 10000,
-            dx_cm: 100,
+            heading_cdeg: 9000,
+            seg_len_mm: 20000, // 200cm long, enough for our test
+            dx_cm: 200,
             dy_cm: 0,
             _pad: 0,
         };
 
-        // With valid heading
-        let score_with_heading = segment_score(
-            100000, 100000,  // GPS position at segment
-            9000,             // Same heading
-            100,              // Low speed
-            &seg,
-        );
+        // Same position: score should be 0 regardless of any external heading
+        let score = segment_score(100000, 100000, &seg);
+        assert_eq!(score, 0);
 
-        // With sentinel heading (i16::MIN) - should have no heading penalty
-        let score_sentinel = segment_score(
-            100000, 100000,
-            i16::MIN,         // Sentinel value
-            100,
-            &seg,
-        );
+        // Different position: score is pure distance squared
+        let score_far = segment_score(100500, 100000, &seg); // 500 cm away from segment start
+        assert_eq!(score_far, 245_025); // Actual distance squared to segment
+    }
 
-        // With sentinel, heading penalty is 0, so score should be <= score with heading
-        assert!(score_sentinel <= score_with_heading,
-            "Sentinel heading should not add penalty");
+    #[test]
+    fn test_heading_eligible_sentinel() {
+        let seg_heading: HeadCdeg = 9000; // 90°
 
-        // At high speed, valid heading should have significant penalty if mismatched
-        let score_mismatch = segment_score(
-            100000, 100000,
-            0,                // Opposite heading
-            500,              // High speed
-            &seg,
-        );
+        // Sentinel: always eligible regardless of segment heading or speed
+        assert!(heading_eligible(i16::MIN, 500, seg_heading, false));
+        assert!(heading_eligible(i16::MIN, 0, seg_heading, false));
+    }
 
-        let score_sentinel_high_speed = segment_score(
-            100000, 100000,
-            i16::MIN,
-            500,
-            &seg,
-        );
+    #[test]
+    fn test_heading_eligible_stopped() {
+        // Stopped (w=0): always eligible — heading is unreliable
+        assert!(heading_eligible(0, 0, 9000, false)); // facing opposite direction
+        assert!(heading_eligible(0, 0, 18000, false)); // 180° misaligned
+    }
 
-        // Sentinel should have lower score than mismatched heading at high speed
-        assert!(score_sentinel_high_speed < score_mismatch,
-            "Sentinel should avoid heading penalty entirely");
+    #[test]
+    fn test_heading_eligible_moving() {
+        let speed: SpeedCms = 500; // well above 83 cm/s → w=256 → threshold=9000
+
+        // Same heading: eligible
+        assert!(heading_eligible(9000, speed, 9000, false));
+
+        // 89° off: eligible (just under 90° gate)
+        assert!(heading_eligible(0, speed, 8999, false));
+
+        // 91° off: not eligible
+        assert!(!heading_eligible(0, speed, 9001, false));
+
+        // 180° (opposite direction): not eligible at speed
+        assert!(!heading_eligible(0, speed, 18000, false));
     }
 }
 
@@ -3820,7 +4537,7 @@ File: ./crates/pipeline/gps_processor/src/nmea.rs
 ================
 //! NMEA sentence parser
 
-use shared::{GpsPoint, SpeedCms, HeadCdeg};
+use shared::{GpsPoint, HeadCdeg, SpeedCms};
 
 // Import libm functions for no_std
 #[cfg(not(feature = "std"))]
@@ -3828,9 +4545,13 @@ use libm::{round as f64_round, trunc as f64_trunc};
 
 // Helper functions for floating-point operations
 #[cfg(feature = "std")]
-fn f64_round(x: f64) -> f64 { x.round() }
+fn f64_round(x: f64) -> f64 {
+    x.round()
+}
 #[cfg(feature = "std")]
-fn f64_trunc(x: f64) -> f64 { x.trunc() }
+fn f64_trunc(x: f64) -> f64 {
+    x.trunc()
+}
 
 // NMEA sentences typically have < 20 fields (only used in no_std builds)
 #[cfg_attr(feature = "std", allow(dead_code))]
@@ -4021,12 +4742,16 @@ mod tests {
 
     #[test]
     fn verify_checksum_valid() {
-        assert!(verify_checksum("$GPRMC,123519,V,0000.0000,N,00000.0000,E,000.0,000.0,030311,,,A*6A"));
+        assert!(verify_checksum(
+            "$GPRMC,123519,V,0000.0000,N,00000.0000,E,000.0,000.0,030311,,,A*6A"
+        ));
     }
 
     #[test]
     fn verify_checksum_invalid() {
-        assert!(!verify_checksum("$GPRMC,123519,V,0000.0000,N,00000.0000,E,000.0,000.0,030311,,,A*00"));
+        assert!(!verify_checksum(
+            "$GPRMC,123519,V,0000.0000,N,00000.0000,E,000.0,000.0,030311,,,A*00"
+        ));
     }
 
     #[test]
@@ -4059,7 +4784,8 @@ mod tests {
     #[test]
     fn parse_rmc_valid() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*2E");
+        let result =
+            state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*2E");
         assert!(result.is_none()); // RMC alone doesn't complete the point
         assert!(state.point.has_fix);
         assert!((state.point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
@@ -4072,7 +4798,8 @@ mod tests {
     #[test]
     fn parse_rmc_invalid_status() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GPRMC,221320,V,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*39");
+        let result =
+            state.parse_sentence("$GPRMC,221320,V,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*39");
         assert!(result.is_none());
         assert!(!state.point.has_fix);
     }
@@ -4080,7 +4807,8 @@ mod tests {
     #[test]
     fn parse_gga_valid() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GPGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*4B");
+        let result = state
+            .parse_sentence("$GPGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*4B");
         assert!(result.is_some()); // GGA alone completes the point
         let point = result.unwrap();
         assert!(point.has_fix);
@@ -4094,7 +4822,8 @@ mod tests {
     #[test]
     fn parse_gga_invalid_fix() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GPGGA,221320,2500.2582,N,12117.1898,E,0,08,3.5,10.0,M,0.0,M,,*4A");
+        let result = state
+            .parse_sentence("$GPGGA,221320,2500.2582,N,12117.1898,E,0,08,3.5,10.0,M,0.0,M,,*4A");
         assert!(result.is_none());
         assert!(!state.point.has_fix);
     }
@@ -4107,7 +4836,8 @@ mod tests {
         // Then GSA should complete the point
         // $GNGSA,A,3,04,05,09,12,14,15,16,21,22,24,25,26,1.5,1.2,3.0
         // HDOP is at index 15 (value 1.2)
-        let result = state.parse_sentence("$GNGSA,A,3,04,05,09,12,14,15,16,21,22,24,25,26,1.5,1.2,3.0*23");
+        let result =
+            state.parse_sentence("$GNGSA,A,3,04,05,09,12,14,15,16,21,22,24,25,26,1.5,1.2,3.0*23");
         assert!(result.is_some());
         let point = result.unwrap();
         assert!(point.has_fix);
@@ -4127,14 +4857,16 @@ mod tests {
     #[test]
     fn parse_sentence_invalid_checksum() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,350.5,141123,,*00");
+        let result =
+            state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,350.5,141123,,*00");
         assert!(result.is_none());
     }
 
     #[test]
     fn parse_gnrmc_valid() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GNRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*30");
+        let result =
+            state.parse_sentence("$GNRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*30");
         assert!(result.is_none()); // RMC alone doesn't complete the point
         assert!(state.point.has_fix);
         assert!((state.point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
@@ -4144,7 +4876,8 @@ mod tests {
     #[test]
     fn parse_gngga_valid() {
         let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GNGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*55");
+        let result = state
+            .parse_sentence("$GNGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*55");
         assert!(result.is_some()); // GNGGA completes the point
         let point = result.unwrap();
         assert!(point.has_fix);
@@ -4161,9 +4894,9 @@ File: ./crates/pipeline/gps_processor/src/output.rs
 //! JSON output for localization results
 
 use serde::Serialize;
-use std::io::{self, Write};
-use shared::{Stop, DistCm, HeadCdeg};
 use shared::binfile::RouteData;
+use shared::{DistCm, HeadCdeg, Stop};
+use std::io::{self, Write};
 
 #[derive(Serialize)]
 struct OutputRecord {
@@ -4221,6 +4954,7 @@ pub fn write_output<W: Write>(
     let s_cm_for_active = match result {
         super::kalman::ProcessResult::Valid { signals, .. } => Some(signals.s_cm),
         super::kalman::ProcessResult::DrOutage { s_cm, .. } => Some(*s_cm),
+        super::kalman::ProcessResult::OffRoute { last_valid_s, .. } => Some(*last_valid_s),
         _ => None,
     };
 
@@ -4234,7 +4968,11 @@ pub fn write_output<W: Write>(
         .unwrap_or_default();
 
     let record = match result {
-        super::kalman::ProcessResult::Valid { signals, v_cms, seg_idx } => OutputRecord {
+        super::kalman::ProcessResult::Valid {
+            signals,
+            v_cms,
+            seg_idx,
+        } => OutputRecord {
             time,
             lat,
             lon,
@@ -4290,6 +5028,24 @@ pub fn write_output<W: Write>(
             gps_jump: false,
             recovery_idx: None,
         },
+        super::kalman::ProcessResult::OffRoute {
+            last_valid_s,
+            last_valid_v,
+            freeze_time: _,
+        } => OutputRecord {
+            time,
+            lat,
+            lon,
+            s_cm: *last_valid_s as i64,
+            v_cms: *last_valid_v as i32,
+            heading_cdeg: None,
+            status: "off_route".to_string(),
+            seg_idx: None,
+            active_stops,
+            stop_states,
+            gps_jump: false,
+            recovery_idx: None,
+        },
     };
 
     writeln!(output, "{}", serde_json::to_string(&record).unwrap())
@@ -4320,12 +5076,12 @@ pub fn format_arrival_event(event: &shared::ArrivalEvent) -> String {
 File: ./crates/pipeline/gps_processor/src/route_data.rs
 ================
 //! Binary route data reader using shared zero-copy implementation.
-//! 
+//!
 //! This module provides an interface to the route data stored in Flash memory,
-//! utilizing the shared `binfile` implementation for CRC32 verification and 
+//! utilizing the shared `binfile` implementation for CRC32 verification and
 //! zero-copy access to nodes, stops, and the spatial grid.
 
-pub use shared::binfile::{RouteData, MAGIC, VERSION, BusError};
+pub use shared::binfile::{BusError, RouteData, MAGIC, VERSION};
 
 ================
 File: ./crates/preprocessor/dp_mapper/src/candidate/generator.rs
@@ -6352,6 +7108,7 @@ pub fn project_stops_validated(
     let mut final_stops: Vec<Stop> = Vec::with_capacity(progress_values.len());
 
     for progress_cm in progress_values.iter() {
+        // Standard corridor bounds (80m before, 40m after)
         let mut corridor_start_cm = progress_cm - 8000;
         let corridor_end_cm = progress_cm + 4000;
 
@@ -7250,11 +8007,27 @@ pub struct KalmanState {
     pub s_cm: DistCm,
     pub v_cms: SpeedCms,
     pub last_seg_idx: usize,
+    /// Consecutive ticks with poor GPS match (off-route suspect counter)
+    pub off_route_suspect_ticks: u8,
+    /// Consecutive ticks with good GPS match (off-route clear counter)
+    pub off_route_clear_ticks: u8,
+    /// Frozen position when off-route is first suspected (for immediate position freezing)
+    pub frozen_s_cm: Option<DistCm>,
+    /// Timestamp when position was frozen (for accurate recovery elapsed time calculation)
+    pub off_route_freeze_time: Option<u64>,
 }
 
 impl KalmanState {
     pub fn new() -> Self {
-        KalmanState { s_cm: 0, v_cms: 0, last_seg_idx: 0 }
+        KalmanState {
+            s_cm: 0,
+            v_cms: 0,
+            last_seg_idx: 0,
+            off_route_suspect_ticks: 0,
+            off_route_clear_ticks: 0,
+            frozen_s_cm: None,
+            off_route_freeze_time: None,
+        }
     }
 
     /// Cold start initialization from first valid GPS fix.
@@ -7264,6 +8037,10 @@ impl KalmanState {
             s_cm: z_cm,
             v_cms: v_gps_cms,
             last_seg_idx: seg_idx,
+            off_route_suspect_ticks: 0,
+            off_route_clear_ticks: 0,
+            frozen_s_cm: None,
+            off_route_freeze_time: None,
         }
     }
 
@@ -7651,6 +8428,12 @@ pub const SPEED_LUT_MAX_IDX: usize = 127;
 /// Gaussian LUT resolution: 0-255 index -> 0-255 probability
 pub const GAUSSIAN_LUT_SIZE: usize = 256;
 
+/// Divergence threshold above which s_cm is considered phantom (50 m).
+/// When z_gps_cm and s_cm diverge by more than this, the Kalman state
+/// has likely drifted from actual bus position (detour / DR drift).
+/// Per spec: 2×SIGMA_D_CM ≈ 55 m, rounded to 50 m for clean threshold.
+pub const PHANTOM_DIVERGENCE_CM: i32 = 5_000;
+
 ================
 File: ./Makefile
 ================
@@ -7688,6 +8471,14 @@ FIRMWARE_ELF := target/thumbv8m.main-none-eabi/release/pico2-firmware
 # Route configuration (can be overridden)
 ROUTE_NAME ?= ty225
 SCENARIO ?= normal
+SHORTCUT_FROM_STOP ?= 1
+SHORTCUT_TO_STOP ?= 5
+# For detour scenario (stop 6 in re-indexed, which is stop 11 in original)
+DETOUR_FROM_STOP ?= 1  # For detour scenario (stop 6 in re-indexed)
+DETOUR_TO_STOP ?= 6    # For detour scenario (stop 11 in re-indexed)
+DETOUR_WAYPOINT_LAT ?= 24.99207
+DETOUR_WAYPOINT_LON ?= 121.29562
+DETOUR_DURATION_S ?= 60
 
 # Input files
 ROUTE_JSON := $(DATA_DIR)/$(ROUTE_NAME)_route.json
@@ -7696,6 +8487,7 @@ STOPS_JSON := $(DATA_DIR)/$(ROUTE_NAME)_stops.json
 # Output files (named by route and scenario)
 NMEA_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_nmea.txt
 ROUTE_DATA_BIN := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO).bin
+GROUND_TRUTH_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_gt.json
 # SIMULATOR_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_sim.json  # Deprecated
 DETECTOR_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_arrivals.json
 TRACE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_trace.jsonl
@@ -7704,7 +8496,7 @@ ANNOUNCE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_announce.jsonl
 # Node.js executable
 NODE := node
 
-.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware
+.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour
 
 # Default target
 all: run
@@ -7720,6 +8512,11 @@ run: build gen_nmea preprocess pipeline
 	@echo "Output: $(DETECTOR_OUT)"
 	@echo "Trace output: $(TRACE_OUT)"
 	@echo "Announce output: $(ANNOUNCE_OUT)"
+
+# Run detour scenario (ty225_short route)
+run-detour:
+	@echo "=== Running detour scenario (ty225_short) ==="
+	$(MAKE) run ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.99207 DETOUR_WAYPOINT_LON=121.29562 DETOUR_DURATION_S=60
 
 # Legacy two-step workflow (deprecated - use 'make run' instead)
 run-legacy: build gen_nmea preprocess simulate detect
@@ -7779,8 +8576,12 @@ gen_nmea:
 		--route $(ROUTE_JSON) \
 		--stops $(STOPS_JSON) \
 		--scenario $(SCENARIO) \
-		--out_nmea $(NMEA_OUT)
+		--out_nmea $(NMEA_OUT) \
+		--out_gt $(GROUND_TRUTH_OUT) \
+		$(if $(filter shortcut,$(SCENARIO)),--shortcut-from-stop $(SHORTCUT_FROM_STOP) --shortcut-to-stop $(SHORTCUT_TO_STOP)) \
+		$(if $(filter detour,$(SCENARIO)),--detour-from-stop $(DETOUR_FROM_STOP) --detour-to-stop $(DETOUR_TO_STOP) --detour-waypoint-lat $(DETOUR_WAYPOINT_LAT) --detour-waypoint-lon $(DETOUR_WAYPOINT_LON) --detour-duration-s $(DETOUR_DURATION_S))
 	@echo "Generated: $(NMEA_OUT)"
+	@echo "Generated: $(GROUND_TRUTH_OUT)"
 
 # Preprocess route and stops into binary route data
 preprocess:
@@ -7829,6 +8630,7 @@ help:
 	@echo "Pipeline Usage:"
 	@echo "  make run ROUTE_NAME=<route> SCENARIO=<name>     Run full unified pipeline"
 	@echo "                                                    (default: ROUTE_NAME=ty225 SCENARIO=normal)"
+	@echo "  make run-detour                                  Run detour scenario (ty225_short)"
 	@echo "  make pipeline ROUTE_NAME=<route> SCENARIO=<name> Run unified pipeline (same as 'run')"
 	@echo "  make gen_nmea ROUTE_NAME=<route> SCENARIO=<name> Generate NMEA test data"
 	@echo "  make preprocess ROUTE_NAME=<route>               Generate route_data.bin"
@@ -7847,7 +8649,7 @@ help:
 	@echo "  ROUTE_NAME    Route identifier (default: ty225)"
 	@echo "                Expects files: test_data/<ROUTE_NAME>_route.json"
 	@echo "                           and test_data/<ROUTE_NAME>_stops.json"
-	@echo "  SCENARIO      Test scenario: normal, drift, jump, outage (default: normal)"
+	@echo "  SCENARIO      Test scenario: normal, drift, jump, outage, shortcut, detour (default: normal)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make run ROUTE_NAME=ty225 SCENARIO=normal"
