@@ -10,7 +10,7 @@
 
 #![allow(dead_code)]
 
-use gps_processor::kalman::{process_gps_update, ProcessResult, OFF_ROUTE_CONFIRM_TICKS, OFF_ROUTE_CLEAR_TICKS};
+use gps_processor::kalman::{process_gps_update, ProcessResult};
 use shared::{DrState, GpsPoint, KalmanState, RouteNode, SpatialGrid, Stop};
 
 /// Helper to create test route with multiple stops
@@ -148,7 +148,7 @@ fn test_snap_prevents_h1_recovery() {
     assert!(matches!(result, ProcessResult::Valid { .. }));
 
     // Move to 100m (second node)
-    let gps = GpsPoint {
+    let _gps = GpsPoint {
         timestamp: 1001,
         lat: 20.0,  // Still at origin lat/lon - map matching will project to route
         lon: 120.0,
