@@ -94,6 +94,8 @@ pub struct SystemState<'a> {
     pub route_data: &'a RouteData<'a>,
     pub stop_states: heapless::Vec<StopState, 256>,
     pub pending_persisted: Option<PersistedState>,
+    pub recovering_since: Option<u64>,  // When Recovering mode entered
+    pub recovery_failed: bool,           // Recovery timeout flag
 }
 ```
 
@@ -356,7 +358,7 @@ pub struct RecoveryInput<'a> {
     pub stops: heapless::Vec<Stop, 256>,
     pub hint_idx: u8,              // From control layer
     pub frozen_s_cm: Option<DistCm>,  // From control layer
-    pub search_window: u8,          // NEW: ±N stops from hint_idx (default 10)
+    pub search_window: u8,          // ±N stops from hint_idx (default 10)
 }
 ```
 
@@ -538,23 +540,23 @@ return TransitionAction::ToNormal;  // Priority 2 (only if above didn't trigger)
 
 ## Section 6: High-Impact Recommendations
 
-### 1. Recovery Timeout (Avoid Stuck State)
+### 1. Recovery Timeout and Fallback Strategy
 
-**Problem:** Recovering mode can get stuck if recovery repeatedly fails.
+**Problem:** Recovering mode can get stuck if recovery repeatedly fails, and falling back to existing `last_stop_index` may be wrong.
 
-**Solution:** Add timeout with fallback to Normal.
+**Solution:** Add timeout with explicit fallback strategy.
 
 ```rust
 pub struct SystemState<'a> {
     // ... existing fields ...
     pub recovering_since: Option<u64>,  // When Recovering mode entered
-    pub recovering_timeout_ticks: u16,   // Timeout counter
+    pub recovery_failed: bool,           // NEW: recovery timeout flag
 }
 
 const RECOVERING_TIMEOUT_SECONDS: u64 = 30;  // 30 seconds max
 
 impl<'a> SystemState<'a> {
-    fn check_recovering_timeout(&mut self, now: u64) -> bool {
+    fn check_recovering_timeout(&mut self, now: u64, est: &EstimationOutput) -> bool {
         if self.mode != SystemMode::Recovering {
             return false;
         }
@@ -564,15 +566,76 @@ impl<'a> SystemState<'a> {
             .unwrap_or(0);
         
         if elapsed > RECOVERING_TIMEOUT_SECONDS {
-            // Timeout: give up on recovery, return to Normal
-            self.mode = SystemMode::Normal;
-            self.frozen_s_cm = None;
-            self.recovering_since = None;
-            // Keep last_stop_index as-is (best effort)
-            return true;
+            // Timeout: explicit fallback strategy
+            return self.recovery_timeout_fallback(est);
         }
         
         false
+    }
+    
+    fn recovery_timeout_fallback(&mut self, est: &EstimationOutput) -> bool {
+        // FALLBACK STRATEGY: Recompute best stop from scratch
+        // No hint_idx, no frozen_s_cm — pure geometric search
+        
+        let best_idx = self.find_closest_stop_index(est.s_cm);
+        
+        // Mark as failed recovery (affects behavior)
+        self.recovery_failed = true;
+        
+        // Transition to Normal with recomputed stop index
+        self.mode = SystemMode::Normal;
+        self.last_stop_index = best_idx;
+        self.frozen_s_cm = None;
+        self.recovering_since = None;
+        
+        // Reset stop states with new index
+        self.reset_stop_states_after_recovery(best_idx as usize, est.s_cm);
+        
+        true
+    }
+}
+```
+
+**Fallback Strategy Options:**
+
+| Strategy | Description | Trade-off |
+|----------|-------------|-----------|
+| **Geometric (Default)** | Find closest stop to `est.s_cm` from scratch | Simple, deterministic; may pick wrong stop if GPS is noisy |
+| **Corridor-based** | Find stop whose corridor contains `est.s_cm` | More robust; requires corridor computation |
+| **Low-confidence mode** | Resume Normal but flag `recovery_failed=true` to suppress announcements | Safe; detection suppressed until confidence restored |
+
+**Recommended:** Geometric fallback with `recovery_failed` flag.
+
+**Geometric fallback implementation:**
+```rust
+fn find_closest_stop_index(&self, s_cm: DistCm) -> u8 {
+    let mut closest_idx = 0;
+    let mut closest_dist = i32::MAX;
+    
+    for i in 0..self.route_data.stop_count {
+        if let Some(stop) = self.route_data.get_stop(i) {
+            let dist = (s_cm - stop.progress_cm).abs();
+            if dist < closest_dist {
+                closest_dist = dist;
+                closest_idx = i as u8;
+            }
+        }
+    }
+    
+    closest_idx
+}
+```
+
+**Recovery failure flag usage:**
+```rust
+// In detection layer — suppress announcements after failed recovery
+if state.recovery_failed {
+    // Don't announce until we've confirmed position
+    // Reset flag after successful arrival/departure
+    if let Some(event) = stop_state.update(...) {
+        if matches!(event, StopEvent::Departed) {
+            state.recovery_failed = false;  // Reset after confirmed departure
+        }
     }
 }
 ```
@@ -580,7 +643,8 @@ impl<'a> SystemState<'a> {
 **Rationale:**
 - 30 seconds is long enough for most recovery scenarios
 - Prevents infinite stuck state
-- Falls back to existing stop index (better than never resuming detection)
+- Geometric fallback is deterministic and simple
+- `recovery_failed` flag prevents false announcements from wrong stop index
 
 ---
 
