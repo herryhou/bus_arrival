@@ -267,20 +267,9 @@ enum TransitionAction {
 
 ### Benefits of Unified Triggers
 
-**Before (Flawed):**
-```
-Normal → OffRoute:   divergence_d2 > 25M
-OffRoute → Recov:   |z_gps - frozen| > 5000  ❌ Different signal
-```
-
-**After (Unified):**
-```
-Normal → OffRoute:   divergence_d2 > 25M for 5 ticks
-OffRoute → Normal:  divergence_d2 ≤ 25M for 2 ticks AND displacement ≤ 50m
-OffRoute → Recov:   divergence_d2 ≤ 25M for 2 ticks AND displacement > 50m
-```
-
 **All transitions use the SAME signal set from `EstimationOutput`:**
+- `divergence_d2`: GPS distance from route
+- `displacement`: |z_gps_cm - frozen_s_cm|
 - No separate "GPS jump" heuristic
 - Consistent criteria across all transitions
 - No edge case gaps
@@ -346,30 +335,51 @@ pub fn estimate(
 
 ---
 
-## Section 4: Pure Recovery Function
+## Section 4: Recovery Function
 
 ```rust
 pub fn recover(input: RecoveryInput) -> Option<u8> {
     // Scoring: distance + index penalty + spatial anchor penalty
     // Uses input.hint_idx for index penalty
     // Uses input.frozen_s_cm for spatial anchoring (if Some)
+    // Searches limited window around hint_idx for performance
 }
 ```
 
-### Key Changes
+### RecoveryInput Structure
 
-**Before (Coupled):**
 ```rust
-find_stop_index(..., &kalman.freeze_ctx)  // ❌ Depends on Kalman
+pub struct RecoveryInput<'a> {
+    pub s_cm: DistCm,
+    pub v_cms: SpeedCms,
+    pub dt_seconds: u64,
+    pub stops: heapless::Vec<Stop, 256>,
+    pub hint_idx: u8,              // From control layer
+    pub frozen_s_cm: Option<DistCm>,  // From control layer
+    pub search_window: u8,          // NEW: ±N stops from hint_idx (default 10)
+}
 ```
 
-**After (Decoupled):**
+### Search Window Limitation
+
+**Performance optimization:** Recovery only searches `hint_idx ± search_window` instead of all stops.
+
 ```rust
-recover(RecoveryInput {
-    hint_idx: state.last_stop_index,  // ✅ From control layer
-    frozen_s_cm: state.frozen_s_cm,    // ✅ From control layer
-})
+pub fn recover(input: RecoveryInput) -> Option<u8> {
+    let min_idx = input.hint_idx.saturating_sub(input.search_window);
+    let max_idx = (input.hint_idx + input.search_window).min(input.stops.len() as u8);
+    
+    for i in min_idx..max_idx {
+        // Score stops within window only
+    }
+    // ...
+}
 ```
+
+**Rationale:**
+- Dense urban routes: ~100-200m stop spacing, ±10 stops = ~1-2km search range
+- Velocity constraint already limits physically reachable stops
+- Prevents O(N) search on long routes
 
 ---
 
@@ -450,19 +460,48 @@ impl SystemState {
 }
 ```
 
-### Critical Invariants
+### Critical Invariants (Enforced as Assertions)
 
 **1. Recovery ONLY runs in `Recovering` mode:**
 
 ```rust
-match state.mode {
-    SystemMode::Normal => { /* 🚫 NO recovery */ }
-    SystemMode::OffRoute => { /* 🚫 NO recovery */ }
-    SystemMode::Recovering => { /* ✅ Recovery ONLY here */ }
+// In tick() — assertion for debug builds
+#[cfg(debug_assertions)]
+if self.mode == SystemMode::Recovering {
+    // ✅ Recovery code here
+} else {
+    debug_assert!(!self.attempt_recovery_called, "Recovery called outside Recovering mode");
 }
 ```
 
-**2. Unified triggers — ALL use estimation signals:**
+**2. Only ONE transition executes per tick:**
+
+```rust
+// In handle_offroute_mode() — assertion after transition
+#[cfg(debug_assertions)]
+match action {
+    TransitionAction::ToNormal | TransitionAction::ToRecovering => {
+        debug_assert!(self.mode == old_mode, "Only one transition per tick");
+    }
+    TransitionAction::Stay => {
+        debug_assert!(self.mode == SystemMode::OffRoute, "Stay means mode unchanged");
+    }
+}
+```
+
+**3. frozen_s_cm ONLY accessed in OffRoute/Recovering:**
+
+```rust
+fn current_position(state: &SystemState, est: &EstimationOutput) -> DistCm {
+    match state.mode {
+        SystemMode::Normal => est.s_cm,
+        SystemMode::OffRoute => state.frozen_s_cm.expect("Invariant: frozen_s_cm set in OffRoute"),
+        SystemMode::Recovering => est.z_gps_cm,
+    }
+}
+```
+
+**4. Unified triggers — ALL use estimation signals:**
 
 ```rust
 // All transitions derive from EstimationOutput:
@@ -472,54 +511,306 @@ let displacement = |est.z_gps_cm - frozen|; // Along-route displacement
 // No separate "GPS jump" heuristic — everything is unified
 ```
 
-**3. OffRoute → Normal/Recovering are mutually exclusive:**
+---
 
+### Transition Priority Rationale
+
+**Why Recovering > Normal in OffRoute mode?**
+
+When GPS returns to route after being off-route:
+1. **Safety first:** Large displacement (>50m) indicates GPS jumped significantly
+   - If we go directly to Normal, we might use wrong stop index
+   - Recovery ensures we find correct stop before resuming detection
+2. **No harm:** Small displacement (≤50m) goes directly to Normal
+   - If GPS is near frozen position, no recovery needed
+3. **Deterministic:** Single path eliminates race conditions
+
+**Priority is encoded in the transition logic:**
 ```rust
-// In OffRoute mode, only ONE transition executes:
-if divergence_resolved_for_2_ticks {
-    if displacement > 50m {
-        transition_to_recovering();  // Only this
-    } else {
-        transition_offroute_to_normal();  // Only this
-    }
+// Check Recovering BEFORE Normal
+if displacement > 50m {
+    return TransitionAction::ToRecovering;  // Priority 1
 }
-// Can't execute both — prevents C3 overlap
+return TransitionAction::ToNormal;  // Priority 2 (only if above didn't trigger)
 ```
 
 ---
 
-## Section 6: Module Structure
+## Section 6: High-Impact Recommendations
 
-### Before (Current)
+### 1. Recovery Timeout (Avoid Stuck State)
 
+**Problem:** Recovering mode can get stuck if recovery repeatedly fails.
+
+**Solution:** Add timeout with fallback to Normal.
+
+```rust
+pub struct SystemState<'a> {
+    // ... existing fields ...
+    pub recovering_since: Option<u64>,  // When Recovering mode entered
+    pub recovering_timeout_ticks: u16,   // Timeout counter
+}
+
+const RECOVERING_TIMEOUT_SECONDS: u64 = 30;  // 30 seconds max
+
+impl<'a> SystemState<'a> {
+    fn check_recovering_timeout(&mut self, now: u64) -> bool {
+        if self.mode != SystemMode::Recovering {
+            return false;
+        }
+        
+        let elapsed = self.recovering_since
+            .map(|t| now.saturating_sub(t))
+            .unwrap_or(0);
+        
+        if elapsed > RECOVERING_TIMEOUT_SECONDS {
+            // Timeout: give up on recovery, return to Normal
+            self.mode = SystemMode::Normal;
+            self.frozen_s_cm = None;
+            self.recovering_since = None;
+            // Keep last_stop_index as-is (best effort)
+            return true;
+        }
+        
+        false
+    }
+}
 ```
-crates/pico2-firmware/src/
-├── state.rs              ❌ 730 lines — everything mixed
-├── recovery_trigger.rs   ❌ GPS jump detection
-└── detection/recovery.rs ❌ Depends on Kalman::freeze_ctx
+
+**Rationale:**
+- 30 seconds is long enough for most recovery scenarios
+- Prevents infinite stuck state
+- Falls back to existing stop index (better than never resuming detection)
+
+---
+
+### 2. Confidence Signal from Estimation
+
+**Problem:** Control layer doesn't know estimation quality (e.g., HDOP, outage status).
+
+**Solution:** Add `confidence` field to `EstimationOutput`.
+
+```rust
+pub struct EstimationOutput {
+    pub z_gps_cm: DistCm,
+    pub s_cm: DistCm,
+    pub v_cms: SpeedCms,
+    pub divergence_d2: Dist2,
+    pub has_fix: bool,
+    pub confidence: u8,  // NEW: 0-255 quality signal
+}
 ```
 
-### After (New)
+**Confidence calculation:**
+```rust
+pub fn calculate_confidence(
+    hdop_x10: u16,
+    is_in_outage: bool,
+    divergence_d2: Dist2,
+) -> u8 {
+    if is_in_outage {
+        return 0;  // Lowest confidence during outage
+    }
+    
+    // HDOP contribution: 1.0 (good) to 0.0 (bad)
+    let hdop_factor = if hdop_x10 < 20 {
+        255
+    } else if hdop_x10 > 100 {
+        0
+    } else {
+        255 - (hdop_x10 - 20) * 255 / 80
+    };
+    
+    // Divergence contribution: penalize high divergence
+    let div_factor = if divergence_d2 < 10_000_000 {
+        255  // Good match
+    } else if divergence_d2 > 100_000_000 {
+        0    // Very bad match
+    } else {
+        255 - (divergence_d2 - 10_000_000) / 360_000
+    };
+    
+    // Combined: minimum of both factors
+    hdop_factor.min(div_factor)
+}
+```
+
+**Control layer usage:**
+```rust
+// Use confidence to weight decisions
+if est.confidence < 50 {
+    // Low confidence: be conservative
+    // Don't trigger recovery, stay in current mode
+    return None;
+}
+```
+
+---
+
+### 3. Assertions for Invariants
+
+**Problem:** Invariants are documented but not enforced.
+
+**Solution:** Add debug_assert! for critical invariants.
+
+```rust
+impl<'a> SystemState<'a> {
+    pub fn tick(&mut self, gps: &GpsPoint, est_state: &mut EstimationState) -> Option<ArrivalEvent> {
+        let est = estimate(...);
+        
+        // INVARIANT: Only one transition per tick
+        let old_mode = self.mode;
+        
+        match self.mode {
+            SystemMode::OffRoute => {
+                // Transition logic...
+            }
+            // ...
+        }
+        
+        // INVARIANT CHECK (debug builds only)
+        #[cfg(debug_assertions)]
+        {
+            if old_mode != self.mode {
+                // Mode changed — ensure it happened exactly once
+                debug_assert!(
+                    self.transition_count == 1,
+                    "Invariant violated: {} transitions in single tick",
+                    self.transition_count
+                );
+            }
+        }
+        
+        // INVARIANT: frozen_s_cm consistency
+        #[cfg(debug_assertions)]
+        {
+            match self.mode {
+                SystemMode::Normal => {
+                    debug_assert!(
+                        self.frozen_s_cm.is_none(),
+                        "Invariant violated: frozen_s_cm set in Normal mode"
+                    );
+                }
+                SystemMode::OffRoute | SystemMode::Recovering => {
+                    debug_assert!(
+                        self.frozen_s_cm.is_some(),
+                        "Invariant violated: frozen_s_cm not set in OffRoute/Recovering"
+                    );
+                }
+            }
+        }
+        
+        // ... rest of tick()
+    }
+}
+```
+
+---
+
+### 4. Search Window Limitation in Recovery
+
+**Problem:** Recovery searches all stops (O(N)) — expensive on long routes.
+
+**Solution:** Limit search to `hint_idx ± window_size`.
+
+```rust
+pub struct RecoveryInput<'a> {
+    // ... existing fields ...
+    pub search_window: u8,  // ±N stops from hint_idx (default 10)
+}
+
+pub fn recover(input: RecoveryInput) -> Option<u8> {
+    let min_idx = input.hint_idx.saturating_sub(input.search_window);
+    let max_idx = (input.hint_idx + input.search_window).min(input.stops.len() as u8);
+    
+    // Only search within window
+    for i in min_idx..max_idx {
+        let stop = &input.stops[i as usize];
+        // Score this stop...
+    }
+    // ...
+}
+```
+
+**Rationale:**
+- Dense urban routes: ~100-200m stop spacing, ±10 stops = ~1-2km range
+- Velocity constraint (V_MAX × dt) already limits physically reachable stops
+- Prevents O(N) search on routes with 100+ stops
+- Window size configurable for different route densities
+
+---
+
+### 5. Documentation for Priority Rationale
+
+**Why is Recovering > Normal?**
+
+Document directly in code:
+
+```rust
+/// OffRoute mode transition handler
+///
+/// # Priority Rationale
+///
+/// When GPS returns to route (divergence ≤ 50m for 2 ticks), we check
+/// displacement to decide between direct Normal vs. Recovering:
+///
+/// - **Priority 1: Recovering** (displacement > 50m)
+///   - Large jump indicates GPS position changed significantly
+///   - Recovery finds correct stop index before resuming detection
+///   - Safety: prevents wrong stop announcements
+///
+/// - **Priority 2: Normal** (displacement ≤ 50m)
+///   - GPS near frozen position, no significant movement
+///   - Safe to resume detection immediately
+///   - Avoids unnecessary recovery overhead
+///
+/// # Mutual Exclusion
+///
+/// Only ONE transition executes per tick. The if/else structure
+/// ensures Recovering and Normal paths are mutually exclusive.
+fn handle_offroute_mode(...) -> TransitionAction {
+    // ...
+}
+```
+
+---
+
+## Section 7: Module Structure
+
+### Target Structure
 
 ```
 crates/pico2-firmware/src/
 ├── control/              ✅ NEW: Control layer
-│   ├── mod.rs            → SystemState, tick()
-│   ├── mode.rs           → SystemMode + transitions
-│   └── state_machine.rs  → Transition logic
+│   ├── mod.rs            → SystemState, tick(), invariants
+│   ├── mode.rs           → SystemMode + transitions with assertions
+│   └── timeout.rs        → Recovery timeout logic
 ├── estimation/           ✅ NEW: Estimation layer
 │   ├── mod.rs            → estimate(), EstimationState
-│   ├── kalman.rs         → Pure Kalman (no control state)
-│   └── dr.rs             → Pure DR (no control state)
+│   ├── kalman.rs         → Kalman filter (no control state)
+│   └── dr.rs             → DR/EMA (no control state)
 ├── recovery/             ✅ NEW: Pure recovery
-│   └── mod.rs            → recover() function
+│   ├── mod.rs            → recover() function
+│   └── search.rs         → Search window logic
 ├── detection/            ✅ Unchanged (pure)
-└── state.rs              ❌ DELETE (split into control/estimation)
+│   ├── state_machine.rs  → Stop FSM
+│   ├── probability.rs    → Arrival probability
+│   └── corridors.rs      → Stop corridor filter
+└── lib.rs                → Main entry point
+```
+
+### Files to Remove
+
+```
+crates/pico2-firmware/src/
+├── state.rs              ❌ DELETE (split into control/estimation)
+├── recovery_trigger.rs   ❌ DELETE (logic moved to control/mode.rs)
+└── detection/recovery.rs ❌ DELETE (moved to recovery/ module)
 ```
 
 ---
 
-## Section 7: Single Source of Truth
+## Section 8: Single Source of Truth
 
 ### Per-Mode Position Selection
 
@@ -548,31 +839,44 @@ let input = RecoveryInput {
 
 ---
 
-## Section 8: Migration Strategy
+## Section 9: Migration Strategy
 
 ### Phase 1: Create New Structure (Non-Breaking)
 - Add `control/`, `estimation/`, `recovery/` modules
 - Add feature flag `decoupled_architecture` (disabled by default)
+- Implement confidence calculation in estimation layer
 
-### Phase 2: Implement Pure Functions
-- Implement `estimate()` and `recover()`
-- Add unit tests for pure functions
+### Phase 2: Implement Isolated Functions
+- Implement `estimate()` with confidence output
+- Implement `recover()` with search window
+- Add unit tests for isolated functions
+- Add debug_assert! invariants
 
 ### Phase 3: Implement Control Layer
-- Implement `SystemState` and `tick()`
-- Add integration tests
+- Implement `SystemState` with timeout fields
+- Implement `tick()` with unified triggers
+- Add assertions for invariants (debug builds)
+- Add integration tests for transitions
 
-### Phase 4: Parallel Testing
+### Phase 4: Implement Timeout
+- Add `recovering_since` and timeout logic
+- Test timeout behavior (30 second fallback)
+- Document timeout rationale in code
+
+### Phase 5: Parallel Testing
 - Run both old and new implementations
 - Compare outputs, log discrepancies
+- Test all edge cases (timeout, confidence, search window)
 
-### Phase 5: Switch Over
+### Phase 6: Switch Over
 - Enable feature flag by default
+- Run full test suite
 - Remove old code
 
-### Phase 6: Clean Up
+### Phase 7: Clean Up
 - Remove parallel testing code
-- Update documentation
+- Update all documentation
+- Add inline documentation for priority rationale
 
 ---
 
@@ -614,19 +918,28 @@ let input = RecoveryInput {
 ## Testing
 
 ### Unit Tests
-- `control/mode`: Transition conditions
-- `estimation`: Pure function determinism
-- `recovery`: Scoring with hint_idx, spatial anchor
+- `control/mode`: Transition conditions, priority enforcement
+- `estimation`: Isolation contract, confidence calculation
+- `recovery`: Search window, hint_idx usage, spatial anchor
+- `control/timeout`: Recovery timeout behavior
 
 ### Integration Tests
 - Normal operation
 - Off-route detection and recovery
-- GPS jump recovery
+- GPS jump recovery with displacement check
 - GPS outage handling
+- Recovery timeout (30 second fallback)
+- Confidence threshold gating
 
 ### Regression Tests
 - All existing integration tests must pass
 - Scenario tests: normal, drift, outage, jump, off_route
+
+### Invariant Testing (Debug Builds)
+- Run tests with debug_assertions enabled
+- Verify frozen_s_cm consistency across modes
+- Verify single-transition-per-tick invariant
+- Verify recovery-only-in-Recovering-mode invariant
 
 ---
 
@@ -637,4 +950,5 @@ let input = RecoveryInput {
 | 1.0 | 2026-04-28 | Initial design for C1/C3 fix |
 | 1.1 | 2026-04-28 | Fix 1: Add transition priority (Recovering > Normal) to prevent C3 overlap |
 | 1.1 | 2026-04-28 | Fix 2: Rename "pure" → "isolated" for accuracy (Kalman has internal state) |
-| 1.2 | 2026-04-28 | Fix 3: Unified trigger system — ALL transitions use estimation signals only (no separate "jump" heuristic) |
+| 1.2 | 2026-04-28 | Fix 3: Unified trigger system — ALL transitions use estimation signals only |
+| 1.3 | 2026-04-28 | Add high-impact recommendations: invariants as assertions, recovery timeout, confidence signal, priority rationale documentation, search window limitation |
