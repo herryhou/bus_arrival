@@ -112,6 +112,11 @@ pub fn compute_arrival_probability_adaptive(
     gps_status: GpsStatus,
     next_stop: Option<&Stop>,
 ) -> Prob8 {
+    // Full suppression during off-route - probability is meaningless when not on route
+    if gps_status == GpsStatus::OffRoute {
+        return 0;
+    }
+
     let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status);
 
     // Adaptive weights based on next stop distance

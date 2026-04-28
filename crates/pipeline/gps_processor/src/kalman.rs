@@ -32,7 +32,7 @@ pub const V_MAX_CMS: SpeedCms = 1667;
 /// Per spec Section 9.1: accommodates multipath errors
 pub const SIGMA_GPS_CM: DistCm = 2000;
 
-/// Off-route distance threshold (cm²) — 50m² = 25,000,000 cm²
+/// Off-route distance threshold: d=50m → d²=2,500 m² = 25,000,000 cm²
 pub const OFF_ROUTE_D2_THRESHOLD: i64 = 25_000_000;
 
 /// Ticks to confirm off-route (avoid false positives from multipath)
