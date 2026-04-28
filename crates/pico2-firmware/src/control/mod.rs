@@ -6,9 +6,9 @@
 pub mod mode;
 pub mod timeout;
 
+use shared::{DistCm, binfile::RouteData, GpsPoint, ArrivalEvent};
 use crate::estimation::EstimationOutput;
-use detection::StopState;
-use shared::{DistCm, binfile::RouteData};
+use crate::estimation::EstimationInput;
 
 pub use mode::{SystemMode, TransitionAction};
 pub use timeout::{check_recovering_timeout, find_closest_stop_index};
@@ -33,8 +33,6 @@ pub struct SystemState<'a> {
     pub recovery_failed: bool,
     /// Route data reference (immutable, XIP-friendly)
     pub route_data: &'a RouteData<'a>,
-    /// Stop FSM states (detection layer)
-    pub stop_states: heapless::Vec<StopState, 256>,
     /// Pending persisted state from flash
     pub pending_persisted: Option<shared::PersistedState>,
     /// Last stop index that was persisted to flash
@@ -45,12 +43,6 @@ pub struct SystemState<'a> {
 
 impl<'a> SystemState<'a> {
     pub fn new(route_data: &'a RouteData<'a>, persisted: Option<shared::PersistedState>) -> Self {
-        let stop_count = route_data.stop_count;
-        let mut stop_states = heapless::Vec::new();
-        for i in 0..stop_count {
-            let _ = stop_states.push(StopState::new(i as u8));
-        }
-
         Self {
             mode: SystemMode::Normal,
             last_stop_index: 0,
@@ -61,7 +53,6 @@ impl<'a> SystemState<'a> {
             recovering_since: None,
             recovery_failed: false,
             route_data,
-            stop_states,
             pending_persisted: persisted,
             last_persisted_stop: persisted.map(|p| p.last_stop_index).unwrap_or(0),
             ticks_since_persist: 0,
@@ -108,33 +99,7 @@ impl<'a> SystemState<'a> {
         self.recovering_since = None;
         self.recovery_failed = false;
 
-        // Reset stop states with new index
-        self.reset_stop_states_after_recovery(recovered_idx, s_cm);
-    }
-
-    /// Reset stop states after recovery
-    fn reset_stop_states_after_recovery(&mut self, recovered_idx: usize, current_s_cm: DistCm) {
-        use shared::FsmState;
-
-        // Reset all stop states
-        for i in 0..self.stop_states.len() {
-            self.stop_states[i] = detection::StopState::new(i as u8);
-        }
-
-        // Stops before recovered stop are already passed
-        for i in 0..recovered_idx.min(self.stop_states.len()) {
-            self.stop_states[i].fsm_state = FsmState::Departed;
-            self.stop_states[i].announced = true;
-        }
-
-        // Recovered stop is Approaching if within corridor
-        if let Some(stop) = self.route_data.get_stop(recovered_idx) {
-            if let Some(state) = self.stop_states.get_mut(recovered_idx) {
-                if current_s_cm >= stop.corridor_start_cm && current_s_cm <= stop.corridor_end_cm {
-                    state.fsm_state = FsmState::Approaching;
-                }
-            }
-        }
+        // TODO: Reset stop states when detection layer is integrated
     }
 
     /// Find closest stop index (for recovery timeout fallback)
@@ -179,7 +144,7 @@ impl<'a> SystemState<'a> {
             self.frozen_s_cm = None;
             self.recovering_since = None;
 
-            self.reset_stop_states_after_recovery(best_idx as usize, est.s_cm);
+            // TODO: Reset stop states when detection layer is integrated
 
             return Some(best_idx as usize);
         }
@@ -201,5 +166,144 @@ impl<'a> SystemState<'a> {
 
         // Call pure recovery function
         crate::recovery::recover(input).map(|idx| idx as usize)
+    }
+
+    /// Main tick function — control layer orchestrator
+    ///
+    /// # Responsibilities
+    /// 1. Call isolated estimation layer
+    /// 2. Execute state machine transitions
+    /// 3. Run detection (only in Normal mode)
+    /// 4. Emit events
+    ///
+    /// # Invariants
+    /// - Recovery ONLY runs in Recovering mode
+    /// - frozen_s_cm only accessed in OffRoute/Recovering modes
+    /// - Only ONE transition executes per tick
+    pub fn tick(&mut self, gps: &GpsPoint, est_state: &mut crate::estimation::EstimationState) -> Option<ArrivalEvent> {
+        // STEP 1: Isolated estimation
+        let input = EstimationInput {
+            gps: gps.clone(),
+            route_data: self.route_data,
+            is_first_fix: false,  // TODO: track first fix
+        };
+        let est = crate::estimation::estimate(input, est_state);
+
+        // Handle GPS outage
+        if !est.has_fix {
+            // TODO: handle outage
+            return None;
+        }
+
+        // STEP 2: State machine transitions (unified triggers)
+        let old_mode = self.mode;
+
+        match self.mode {
+            SystemMode::Normal => {
+                // Check: divergence > 50m for 5 ticks
+                if mode::check_normal_to_offroute(est.divergence_d2, &mut self.off_route_suspect_ticks) {
+                    self.transition_to_offroute(&est, gps.timestamp);
+                    return None;  // Suppress detection during transition
+                }
+            }
+            SystemMode::OffRoute => {
+                // Priority: Check Recovering (large displacement) BEFORE Normal
+                let action = mode::check_offroute_transition(
+                    est.divergence_d2,
+                    &mut self.off_route_clear_ticks,
+                    self.frozen_s_cm,
+                    est.z_gps_cm,
+                );
+
+                match action {
+                    TransitionAction::ToRecovering => {
+                        self.transition_to_recovering(gps.timestamp);
+                        // Fall through to recovery handling
+                    }
+                    TransitionAction::ToNormal => {
+                        self.transition_offroute_to_normal();
+                        return None;  // Will resume detection next tick
+                    }
+                    TransitionAction::Stay => {
+                        // Stay in OffRoute
+                        return None;
+                    }
+                }
+            }
+            SystemMode::Recovering => {
+                // Recovery handling below
+            }
+        }
+
+        // INVARIANT CHECK (debug builds only)
+        #[cfg(debug_assertions)]
+        {
+            if old_mode != self.mode {
+                // Mode changed — should be exactly one transition
+                debug_assert!(
+                    self.mode != SystemMode::Recovering || old_mode == SystemMode::OffRoute,
+                    "Invariant violated: unexpected mode transition"
+                );
+            }
+
+            // INVARIANT: frozen_s_cm consistency
+            match self.mode {
+                SystemMode::Normal => {
+                    debug_assert!(
+                        self.frozen_s_cm.is_none(),
+                        "Invariant violated: frozen_s_cm set in Normal mode"
+                    );
+                }
+                SystemMode::OffRoute | SystemMode::Recovering => {
+                    debug_assert!(
+                        self.frozen_s_cm.is_some(),
+                        "Invariant violated: frozen_s_cm not set in OffRoute/Recovering"
+                    );
+                }
+            }
+        }
+
+        // STEP 3: Recovery (ONLY in Recovering mode)
+        if self.mode == SystemMode::Recovering {
+            if let Some(idx) = self.attempt_recovery(&est, gps.timestamp) {
+                self.recovery_success(idx, est.s_cm);
+                // Continue to detection
+            } else {
+                return None;  // Recovery failed, stay in Recovering
+            }
+        }
+
+        // STEP 4: Detection (ONLY in Normal mode)
+        if self.mode == SystemMode::Normal {
+            return self.run_detection(&est, gps.timestamp);
+        }
+
+        None
+    }
+
+    /// Run arrival detection (Normal mode only)
+    fn run_detection(&mut self, est: &EstimationOutput, timestamp: u64) -> Option<ArrivalEvent> {
+        use crate::detection;
+        use shared::PositionSignals;
+
+        // Get current position
+        let s_cm = self.current_position(est);
+
+        // Create position signals for detection
+        let signals = PositionSignals {
+            z_gps_cm: est.z_gps_cm,
+            s_cm: est.s_cm,
+        };
+
+        // Find active stops (corridor filter)
+        let active_indices = detection::find_active_stops(signals, self.route_data);
+
+        // TODO: Implement detection FSM when stop_states are integrated
+        // For now, return None to indicate no events
+        let _ = active_indices;
+        let _ = s_cm;
+        let _ = timestamp;
+
+        None
     }
 }
