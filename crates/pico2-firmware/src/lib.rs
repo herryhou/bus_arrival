@@ -4,6 +4,7 @@
 
 #![cfg_attr(not(feature = "dev"), no_std)]
 
+pub mod control;
 pub mod detection;
 pub mod lut;
 pub mod recovery_trigger;
