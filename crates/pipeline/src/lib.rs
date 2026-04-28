@@ -214,7 +214,7 @@ impl<'a> LocalizationState<'a> {
         self.is_first_fix = false;
 
         match result {
-            gps_processor::kalman::ProcessResult::Valid { signals, v_cms, seg_idx } => {
+            gps_processor::kalman::ProcessResult::Valid { signals, v_cms, seg_idx, snapped: _ } => {
                 let shared::PositionSignals { z_gps_cm, s_cm } = signals;
                 let divergence_cm = z_gps_cm as i32 - s_cm as i32;
                 let hdop = if gps.hdop_x10 > 0 { Some(gps.hdop_x10 as f32 / 10.0) } else { None };

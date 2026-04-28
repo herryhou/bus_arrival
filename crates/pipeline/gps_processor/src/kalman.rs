@@ -32,7 +32,7 @@ pub const V_MAX_CMS: SpeedCms = 1667;
 /// Per spec Section 9.1: accommodates multipath errors
 pub const SIGMA_GPS_CM: DistCm = 2000;
 
-/// Off-route distance threshold (cm²) — 50m² = 25,000,000 cm²
+/// Off-route distance threshold: d=50m → d²=2,500 m² = 25,000,000 cm²
 pub const OFF_ROUTE_D2_THRESHOLD: i64 = 25_000_000;
 
 /// Ticks to confirm off-route (avoid false positives from multipath)
@@ -108,7 +108,8 @@ pub fn update_off_route_hysteresis(
     }
 }
 
-/// Reset off-route counters (called on GPS outage)
+/// Reset all off-route state including suspect/clear ticks, freeze time, and frozen position
+/// (called on GPS outage)
 pub fn reset_off_route_state(state: &mut KalmanState) {
     state.off_route_suspect_ticks = 0;
     state.off_route_clear_ticks = 0;
@@ -137,6 +138,7 @@ pub enum ProcessResult {
         signals: PositionSignals,
         v_cms: SpeedCms,
         seg_idx: usize,
+        snapped: bool,  // NEW: true if this Valid result is from off-route snap
     },
     Rejected(&'static str),
     Outage,
@@ -271,6 +273,7 @@ pub fn process_gps_update(
                         signals,
                         v_cms: state.v_cms,
                         seg_idx: new_seg_idx,
+                        snapped: true,  // NEW: this is a snap operation
                     };
                 }
                 // Continue normal processing
@@ -307,6 +310,7 @@ pub fn process_gps_update(
             signals,
             v_cms: state.v_cms,
             seg_idx,
+            snapped: false,  // NEW: first fix is not a snap
         };
     }
 
@@ -394,6 +398,7 @@ pub fn process_gps_update(
         signals,
         v_cms: state.v_cms,
         seg_idx,
+        snapped: false,  // NEW: normal GPS processing is not a snap
     }
 }
 

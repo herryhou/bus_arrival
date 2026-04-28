@@ -31,18 +31,19 @@ fn main() {
     // Use a SEPARATE target directory to avoid circular build locks
     let target_dir = out_dir.join("lut-gen-target");
 
-    // Detect the actual host architecture using uname
+    // Detect the actual host target triple using rustc (cargo-idiomatic approach)
     let actual_host = {
-        let output = std::process::Command::new("uname")
-            .args(["-m"])
+        let output = Command::new("rustc")
+            .args(["-vV"])
             .output()
-            .expect("Failed to run uname");
-        let machine = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        match machine.as_str() {
-            "x86_64" => "x86_64-apple-darwin",
-            "arm64" => "aarch64-apple-darwin",
-            _ => panic!("Unknown machine architecture: {}", machine),
-        }
+            .expect("Failed to run rustc");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout
+            .lines()
+            .find(|line| line.starts_with("host:"))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .expect("Failed to parse host triple from rustc -vV")
+            .to_string()
     };
 
     // First, build the gen_luts binary for the ACTUAL host architecture
@@ -57,12 +58,12 @@ fn main() {
                 "--features",
                 "std",
                 "--target",
-                actual_host,
+                &actual_host,
             ])
             .current_dir("..")
             .env("CARGO_TARGET_DIR", &target_dir)
             .env("CARGO_BUILD_INCREMENTAL", "false")
-            .env("CARGO_BUILD_TARGET", actual_host),
+            .env("CARGO_BUILD_TARGET", &actual_host),
         120, // 2 minutes for building
     )
     .expect("LUT generator build timed out or failed");

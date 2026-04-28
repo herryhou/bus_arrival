@@ -834,6 +834,7 @@ impl<'a> State<'a> {
             self.route_data,
             gps.timestamp,
             disable_heading_filter,
+            self.last_known_stop_index,  // C3: pass current stop index
         );
 
         let (s_cm, v_cms, signals, gps_status) = match result {
@@ -883,6 +884,7 @@ impl<'a> State<'a> {
                         dt_since_last_fix,
                         &stops_vec,
                         self.last_known_stop_index,
+                        &self.kalman.freeze_ctx,  // C3: pass freeze context
                     ) {
                         #[cfg(feature = "firmware")]
                         defmt::info!("Recovery found stop index: {}", recovered_idx);
@@ -892,6 +894,9 @@ impl<'a> State<'a> {
                         #[cfg(feature = "firmware")]
                         defmt::warn!("Recovery failed: no valid stop found");
                     }
+
+                    // C1: Clear freeze time after H1 recovery completes
+                    self.kalman.off_route_freeze_time = None;
                 }
 
                 if self.first_fix {
@@ -977,9 +982,6 @@ impl<'a> State<'a> {
                             1 // Default if not set
                         };
 
-                    // Clear freeze time in KalmanState
-                    self.kalman.off_route_freeze_time = None;
-
                     // Run recovery to find correct stop index
                     let mut stops_vec = heapless::Vec::<Stop, 256>::new();
                     for i in 0..self.route_data.stop_count {
@@ -994,6 +996,7 @@ impl<'a> State<'a> {
                         elapsed_seconds,
                         &stops_vec,
                         self.last_known_stop_index,
+                        &self.kalman.freeze_ctx,  // C3: pass freeze context
                     ) {
                         #[cfg(feature = "firmware")]
                         defmt::info!("Re-acquisition recovered stop index: {}", recovered_idx);
@@ -1001,6 +1004,9 @@ impl<'a> State<'a> {
                         self.reset_stop_states_after_recovery(recovered_idx);
                     }
                     // If recovery returns None, continue with existing states
+
+                    // C1: Clear freeze time after re-acquisition recovery completes
+                    self.kalman.off_route_freeze_time = None;
                 }
 
                 // Return s_cm, v_cms, signals, and gps_status for detection
@@ -1093,6 +1099,12 @@ impl<'a> State<'a> {
 
                 // Position is frozen - do NOT update last_valid_s_cm
                 // Suspend arrival detection by returning None
+                return None;
+            }
+            ProcessResult::SuspectOffRoute { s_cm: _, v_cms: _ } => {
+                // M1: Suspect off-route - suppress detection, don't increment warmup
+                // Mark for recovery when we return to Normal
+                self.needs_recovery_on_reacquisition = true;
                 return None;
             }
         };
@@ -1262,6 +1274,16 @@ impl<'a> State<'a> {
     /// Writes when stop index changes, but no more than once per 60 seconds.
     /// This rate limiting prevents excessive flash wear (~100k erase cycles).
     pub fn should_persist(&self, current_stop: u8) -> bool {
+        // M5: Gate persistence during off-route/suspect states
+        // Don't persist if position is frozen (off-route or suspect)
+        if self.kalman.freeze_ctx.is_some() {
+            return false;
+        }
+        // Don't persist if in suspect state (may be about to go off-route)
+        if self.kalman.off_route_suspect_ticks > 0 {
+            return false;
+        }
+
         // Only persist when stop index actually changes
         if current_stop == self.last_persisted_stop {
             return false;
@@ -2051,6 +2073,10 @@ pub fn compute_arrival_probability(
     gaussian_lut: &[u8; 256],
     logistic_lut: &[u8; 128],
 ) -> Prob8 {
+    // M2: Full suppression during off-route - probability is meaningless when not on route
+    if gps_status == GpsStatus::OffRoute {
+        return 0;
+    }
     let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status, gaussian_lut, logistic_lut);
     ((13 * p1 + 6 * p2 + 10 * p3 + 3 * p4) / 32) as u8
 }
@@ -2069,6 +2095,10 @@ pub fn compute_arrival_probability_adaptive(
     logistic_lut: &[u8; 128],
     next_stop: Option<&Stop>,
 ) -> Prob8 {
+    // M2: Full suppression during off-route - probability is meaningless when not on route
+    if gps_status == GpsStatus::OffRoute {
+        return 0;
+    }
     let (p1, p2, p3, p4) = compute_features(signals, v_cms, stop, dwell_time_s, gps_status, gaussian_lut, logistic_lut);
 
     // Adaptive weights based on next stop distance
@@ -2551,7 +2581,7 @@ File: ./crates/pipeline/detection/src/recovery.rs
 ================
 //! Stop index recovery for GPS jump handling
 
-use shared::{DistCm, SpeedCms, Stop};
+use shared::{DistCm, SpeedCms, Stop, FreezeContext};
 
 /// Trigger conditions
 const GPS_JUMP_THRESHOLD: DistCm = 20000;  // 200 m
@@ -2574,15 +2604,29 @@ const V_MAX_CMS: u32 = 1667;
 /// - `dt_since_last_fix`: Seconds elapsed since last valid GPS fix
 /// - `stops`: Array of all stops on route
 /// - `last_index`: Last known stop index before GPS anomaly
+/// - `freeze_ctx`: Optional context from off-route freeze (C3 fix)
 pub fn find_stop_index(
     s_cm: DistCm,
     _v_filtered: SpeedCms,  // Reserved for future use
     dt_since_last_fix: u64,  // Seconds since last valid fix
     stops: &[Stop],
     last_index: u8,
+    freeze_ctx: &Option<FreezeContext>,  // C3: NEW PARAMETER
 ) -> Option<usize> {
     let mut best_idx: Option<usize> = None;
     let mut best_score = i32::MAX;
+
+    // C3: Spatial anchor penalty - prefer stops at or after frozen position
+    let spatial_anchor_penalty = if let Some(ctx) = freeze_ctx {
+        // If bus is behind freeze point, heavily penalize stops behind frozen_stop_idx
+        if s_cm < ctx.frozen_s_cm.saturating_sub(5000) {
+            10000  // Large penalty for backward jumps
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
     for (i, stop) in stops.iter().enumerate() {
         let d = (s_cm - stop.progress_cm).abs();
@@ -2595,6 +2639,9 @@ pub fn find_stop_index(
         let dist = (s_cm - stop.progress_cm).abs();
         let index_penalty = 5000 * (last_index as i32 - i as i32).max(0);
 
+        // C3: Add spatial anchor penalty
+        let index_penalty = index_penalty + spatial_anchor_penalty;
+
         // Velocity penalty: hard exclusion if reaching this stop requires
         // exceeding V_MAX_CMS given the elapsed time since last valid fix
         // Only applies to stops ahead of the bus
@@ -2603,8 +2650,9 @@ pub fn find_stop_index(
         } else {
             0
         };
-        // Maximum physically reachable distance = V_MAX_CMS * dt
-        let max_reachable = V_MAX_CMS as u64 * dt_since_last_fix;
+        // Use actual filtered speed when available, otherwise worst-case (M4 fix)
+        let effective_v = if _v_filtered > 0 { _v_filtered as u64 } else { V_MAX_CMS as u64 };
+        let max_reachable = effective_v * dt_since_last_fix;
         if dist_to_stop > max_reachable {
             continue;  // Hard exclusion
         }
@@ -2636,7 +2684,7 @@ mod tests {
         // Stop 1: dist 100, penalty 0 -> score 100
         // Stop 0: dist 4100, penalty 0 -> score 4100 (wait, i >= 0-1=0, so stop 0 is candidate)
         // Stop 2: dist 3900, penalty 0 -> score 3900
-        assert_eq!(find_stop_index(5100, 1000, 1, &stops, 0), Some(1));
+        assert_eq!(find_stop_index(5100, 1000, 1, &stops, 0, &None), Some(1));
 
         // Jump back from idx 2 to near stop 1
         // Point s = 1100. last_index = 2.
@@ -2644,21 +2692,21 @@ mod tests {
         // Stop 1 (5000): dist 3900, penalty 5000, vel_penalty (dist 3900 > 1667*1) -> excluded
         // Stop 2 (9000): dist 7900, penalty 0, vel_penalty (dist 7900 > 1667*1) -> excluded
         // Both stops excluded by velocity constraint (physically impossible to reach in 1s)
-        assert_eq!(find_stop_index(1100, 1000, 1, &stops, 2), None);
+        assert_eq!(find_stop_index(1100, 1000, 1, &stops, 2, &None), None);
 
         // Jump back from idx 2 to stop 1, but much closer to 1
         // Point s = 4500.
         // Stop 1 (5000): dist 500, penalty 5000, vel_penalty 0 (dist 500 < 1667) -> score 5500
         // Stop 2 (9000): dist 4500, penalty 0, vel_penalty (dist 4500 > 1667) -> excluded
         // Stop 1 wins because stop 2 is excluded by velocity constraint.
-        assert_eq!(find_stop_index(4500, 1000, 1, &stops, 2), Some(1));
+        assert_eq!(find_stop_index(4500, 1000, 1, &stops, 2, &None), Some(1));
 
         // Jump back from idx 1 to stop 0
         // Point s = 1000. last_index = 1.
         // Stop 0 (1000): dist 0, penalty 5000, vel_penalty 0 (stop is behind) -> score 5000
         // Stop 1 (5000): dist 4000, penalty 0, vel_penalty (dist 4000 > 1667) -> excluded
         // Stop 0 wins because stop 1 is excluded by velocity constraint.
-        assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1), Some(0));
+        assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1, &None), Some(0));
 
         // Point s = -2000. last_index = 1.
         // Stop 0 (1000): dist 3000, penalty 5000 -> score 8000
@@ -2694,7 +2742,7 @@ mod tests {
         // Stop 0 (1000): dist 0, penalty 5000 -> score 5000
         // Stop 1 (9000): dist 8000, penalty 0 -> score 8000
         // Stop 0 wins!
-        assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1), Some(0));
+        assert_eq!(find_stop_index(1000, 1000, 1, &stops, 1, &None), Some(0));
     }
 
     #[test]
@@ -2708,35 +2756,30 @@ mod tests {
         // GPS recovery scenario: 5 seconds elapsed since last valid fix
         // Bus is now at s=2000, last known index was 1 (bus was near stop 1)
         //
-        // Before fix: vel_penalty compared dist directly against V_MAX_CMS (3000 cm)
-        //   Stop 1 (5000): dist 3000 <= 3000 -> vel_penalty 0 -> score = 3000 + 0 = 3000
-        //   Stop 2 (9000): dist 7000 > 3000 -> vel_penalty i32::MAX -> excluded
-        //   Result: Some(1) (stop 2 incorrectly excluded)
-        //
-        // After fix: vel_penalty uses max_reachable = V_MAX_CMS * dt
-        //   max_reachable = 3000 * 5 = 15000 cm
+        // M4 fix: uses actual filtered speed (1000) instead of V_MAX_CMS (3000)
+        //   max_reachable = 1000 * 5 = 5000 cm
         //   Stop 1 (5000): dist 3000, vel_penalty 0 -> score = 3000
-        //   Stop 2 (9000): dist 7000 < 15000 -> vel_penalty 0 -> score = 7000
-        //   Result: Some(1) (stop 1 still wins due to lower score, but stop 2 is now correctly NOT excluded)
-        assert_eq!(find_stop_index(2000, 1000, 5, &stops, 1), Some(1));
+        //   Stop 2 (9000): dist 7000 > 5000 -> EXCLUDED by velocity penalty
+        //   Result: Some(1) (stop 1 wins, stop 2 correctly excluded as beyond physical reach)
+        assert_eq!(find_stop_index(2000, 1000, 5, &stops, 1, &None), Some(1));
 
         // GPS recovery: 10 seconds elapsed, bus has jumped forward
         // Bus at s=3000, last_index=0 (was at stop 0)
-        // max_reachable = 3000 * 10 = 30000 cm (300m - bus can travel far in 10s)
+        // M4: max_reachable = 1000 * 10 = 10000 cm (100m at 10m/s for 10s)
         // Stop 0 (1000): dist 2000, vel_penalty 0 (behind) -> score = 2000
-        // Stop 1 (5000): dist 2000 < 30000 -> vel_penalty 0 -> score = 2000
-        // Stop 2 (9000): dist 6000 < 30000 -> vel_penalty 0 -> score = 6000
+        // Stop 1 (5000): dist 2000 < 10000 -> vel_penalty 0 -> score = 2000
+        // Stop 2 (9000): dist 6000 < 10000 -> vel_penalty 0 -> score = 6000
         // Result: Some(0) or Some(1) - both have same score, first wins
-        assert_eq!(find_stop_index(3000, 1000, 10, &stops, 0), Some(0));
+        assert_eq!(find_stop_index(3000, 1000, 10, &stops, 0, &None), Some(0));
 
         // GPS recovery: 10 seconds elapsed, bus has jumped further forward
         // Bus at s=6000, last_index=0
-        // max_reachable = 3000 * 10 = 30000 cm
+        // M4: max_reachable = 1000 * 10 = 10000 cm
         // Stop 0 (1000): dist 5000, vel_penalty 0 (behind) -> score = 5000
-        // Stop 1 (5000): dist 1000 < 30000 -> vel_penalty 0 -> score = 1000
-        // Stop 2 (9000): dist 3000 < 30000 -> vel_penalty 0 -> score = 3000
-        // Result: Some(1) (closest stop ahead wins)
-        assert_eq!(find_stop_index(6000, 1000, 10, &stops, 0), Some(1));
+        // Stop 1 (5000): dist 1000 < 10000 -> vel_penalty 0 -> score = 1000
+        // Stop 2 (9000): dist 3000 < 10000 -> vel_penalty 0 -> score = 3000
+        // Result: Some(1) (closest behind wins)
+        assert_eq!(find_stop_index(6000, 1000, 10, &stops, 0, &None), Some(1));
 
         // Edge case: dt=0 (GPS fix received within same second)
         // max_reachable = 0, so any forward distance should be excluded
@@ -2745,17 +2788,16 @@ mod tests {
         // Stop 1 (5000): dist 3000 > 0 -> vel_penalty i32::MAX -> excluded
         // Stop 2 (9000): dist 7000 > 0 -> vel_penalty i32::MAX -> excluded
         // Result: Some(0) (only stop 0 is viable - stops ahead are excluded)
-        assert_eq!(find_stop_index(2000, 1000, 0, &stops, 0), Some(0));
+        assert_eq!(find_stop_index(2000, 1000, 0, &stops, 0, &None), Some(0));
 
-        // The key demonstration: with realistic dt (5s), stops > 30m away are NOT excluded
-        // Bus at s=1100, last_index=2 (was at stop 2), dt=5
-        // Before fix: both stop 1 (3900cm > 3000) and stop 2 (7900cm > 3000) would be excluded
-        // After fix:
-        //   max_reachable = 3000 * 5 = 15000 cm
-        //   Stop 1: dist 3900 < 15000 -> NOT excluded, score = 3900 + 5000 = 8900
-        //   Stop 2: dist 7900 < 15000 -> NOT excluded, score = 7900
-        // Result: Some(2) (stop 2 wins with lower score)
-        assert_eq!(find_stop_index(1100, 1000, 5, &stops, 2), Some(2));
+        // The key demonstration: with realistic dt (5s), stops beyond physical reach ARE excluded
+        // Bus at s=1100, last_index=2 (was at stop 2), dt=5, v_filtered=1000
+        // M4 fix: uses actual filtered speed (1000) instead of V_MAX_CMS (3000)
+        //   max_reachable = 1000 * 5 = 5000 cm
+        //   Stop 1: dist 3900 < 5000 -> NOT excluded, score = 3900 + 5000 = 8900
+        //   Stop 2: dist 7900 > 5000 -> EXCLUDED (beyond physical reach in 5s at 10m/s)
+        // Result: Some(1) (stop 1 wins - stop 2 correctly excluded by velocity constraint)
+        assert_eq!(find_stop_index(1100, 1000, 5, &stops, 2, &None), Some(1));
     }
 }
 
@@ -3478,6 +3520,7 @@ pub fn update_off_route_hysteresis(
     state: &mut KalmanState,
     match_d2: i64,
     gps_timestamp: u64,
+    current_stop_idx: u8,  // C3: for freeze context
 ) -> OffRouteStatus {
     if match_d2 > OFF_ROUTE_D2_THRESHOLD {
         // Poor GPS match: increment suspect counter
@@ -3486,6 +3529,11 @@ pub fn update_off_route_hysteresis(
             state.frozen_s_cm = Some(state.s_cm);
             // Record freeze time at the same time position is frozen (Bug 5 fix)
             state.off_route_freeze_time = Some(gps_timestamp);
+            // C3: Store freeze context for spatial anchoring
+            state.freeze_ctx = Some(shared::FreezeContext {
+                frozen_s_cm: state.s_cm,
+                frozen_stop_idx: current_stop_idx,
+            });
         }
         state.off_route_suspect_ticks = state.off_route_suspect_ticks.saturating_add(1);
         state.off_route_clear_ticks = 0;
@@ -3507,7 +3555,8 @@ pub fn update_off_route_hysteresis(
         if state.off_route_clear_ticks >= OFF_ROUTE_CLEAR_TICKS {
             state.off_route_suspect_ticks = 0;
             state.frozen_s_cm = None;
-            state.off_route_freeze_time = None; // Clear freeze time when unfreezing
+            // C1: Don't clear off_route_freeze_time here - state.rs needs it for recovery dt calculation
+            // It will be cleared after recovery completes in state.rs
             OffRouteStatus::Normal
         } else if is_actually_suspect {
             // Still in suspect state (need more good ticks to clear)
@@ -3519,11 +3568,13 @@ pub fn update_off_route_hysteresis(
     }
 }
 
-/// Reset off-route counters (called on GPS outage)
+/// Reset all off-route state including suspect/clear ticks, freeze time, and frozen position
+/// (called on GPS outage)
 pub fn reset_off_route_state(state: &mut KalmanState) {
     state.off_route_suspect_ticks = 0;
     state.off_route_clear_ticks = 0;
     state.off_route_freeze_time = None;
+    state.frozen_s_cm = None;  // C2 fix: clear frozen position
 }
 
 /// DR decay factors: (9/10)^dt * 10000 for integer arithmetic
@@ -3560,6 +3611,12 @@ pub enum ProcessResult {
         last_valid_v: SpeedCms,
         freeze_time: u64,
     },
+    /// GPS is suspect off-route — position frozen, awaiting confirmation
+    /// M1: Separate from DrOutage to prevent warmup timeout exploitation
+    SuspectOffRoute {
+        s_cm: DistCm,
+        v_cms: SpeedCms,
+    },
 }
 
 /// Main processing pipeline for each GPS update
@@ -3570,6 +3627,7 @@ pub fn process_gps_update(
     route_data: &RouteData,
     _current_time: u64,
     is_first_fix: bool,
+    current_stop_idx: u8,  // C3: for freeze context
 ) -> ProcessResult {
     // 1. Check for GPS outage
     if !gps.has_fix {
@@ -3612,7 +3670,12 @@ pub fn process_gps_update(
     // Off-route detection (only when not in warmup)
     // CRITICAL: Check BEFORE projection to prevent s_cm from advancing during detour
     if !is_first_fix {
-        let off_route_status = update_off_route_hysteresis(state, match_d2, gps.timestamp);
+        let off_route_status = update_off_route_hysteresis(
+            state,
+            match_d2,
+            gps.timestamp,
+            current_stop_idx,  // C3: use passed value
+        );
 
         match off_route_status {
             OffRouteStatus::OffRoute => {
@@ -3627,9 +3690,9 @@ pub fn process_gps_update(
             }
             OffRouteStatus::Suspect => {
                 // During off-route suspicion, skip projection and filters to prevent s_cm advance
-                // Return DrOutage with frozen position immediately
+                // M1: Return SuspectOffRoute instead of DrOutage to distinguish from genuine GPS loss
                 dr.last_gps_time = Some(gps.timestamp);
-                return ProcessResult::DrOutage {
+                return ProcessResult::SuspectOffRoute {
                     s_cm: state.frozen_s_cm.unwrap_or(state.s_cm),
                     v_cms: state.v_cms,
                 };
@@ -3652,7 +3715,9 @@ pub fn process_gps_update(
                     // Project to route and snap immediately
                     let z_reentry = crate::map_match::project_to_route(gps_x, gps_y, new_seg_idx, route_data);
                     state.s_cm = z_reentry;
-                    state.v_cms = gps.speed_cms;
+                    // Blend v_cms using EMA instead of hard assignment (M3 fix)
+                    let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+                    state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
                     state.last_seg_idx = new_seg_idx;
                     dr.last_gps_time = Some(gps.timestamp);
                     dr.last_valid_s = state.s_cm;
@@ -3685,7 +3750,9 @@ pub fn process_gps_update(
     if is_first_fix {
         state.s_cm = z_raw;
 
-        state.v_cms = gps.speed_cms;
+        // Blend v_cms using EMA instead of hard assignment (M3 fix)
+        let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+        state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
         state.last_seg_idx = seg_idx;
         dr.last_gps_time = Some(gps.timestamp);
         dr.last_valid_s = state.s_cm;
@@ -4955,6 +5022,7 @@ pub fn write_output<W: Write>(
         super::kalman::ProcessResult::Valid { signals, .. } => Some(signals.s_cm),
         super::kalman::ProcessResult::DrOutage { s_cm, .. } => Some(*s_cm),
         super::kalman::ProcessResult::OffRoute { last_valid_s, .. } => Some(*last_valid_s),
+        super::kalman::ProcessResult::SuspectOffRoute { s_cm, .. } => Some(*s_cm),
         _ => None,
     };
 
@@ -5040,6 +5108,20 @@ pub fn write_output<W: Write>(
             v_cms: *last_valid_v as i32,
             heading_cdeg: None,
             status: "off_route".to_string(),
+            seg_idx: None,
+            active_stops,
+            stop_states,
+            gps_jump: false,
+            recovery_idx: None,
+        },
+        super::kalman::ProcessResult::SuspectOffRoute { s_cm, v_cms } => OutputRecord {
+            time,
+            lat,
+            lon,
+            s_cm: *s_cm as i64,
+            v_cms: *v_cms as i32,
+            heading_cdeg: None,
+            status: "suspect_off_route".to_string(),
             seg_idx: None,
             active_stops,
             stop_states,
@@ -8000,6 +8082,19 @@ impl GpsPoint {
     }
 }
 
+/// Context captured at position freeze time for recovery spatial anchoring
+///
+/// When GPS goes off-route, we capture the position and stop index.
+/// Recovery uses this to avoid selecting stops that are spatially
+/// inconsistent with the pre-freeze trajectory (e.g., on routes with loops).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FreezeContext {
+    /// Position (cm along route) when freeze occurred
+    pub frozen_s_cm: DistCm,
+    /// Stop index when freeze occurred
+    pub frozen_stop_idx: u8,
+}
+
 /// 1D Kalman filter state for route progress estimation.
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -8015,6 +8110,8 @@ pub struct KalmanState {
     pub frozen_s_cm: Option<DistCm>,
     /// Timestamp when position was frozen (for accurate recovery elapsed time calculation)
     pub off_route_freeze_time: Option<u64>,
+    /// Off-route freeze context for spatial anchoring during recovery
+    pub freeze_ctx: Option<FreezeContext>,
 }
 
 impl KalmanState {
@@ -8027,6 +8124,7 @@ impl KalmanState {
             off_route_clear_ticks: 0,
             frozen_s_cm: None,
             off_route_freeze_time: None,
+            freeze_ctx: None,
         }
     }
 
@@ -8041,6 +8139,7 @@ impl KalmanState {
             off_route_clear_ticks: 0,
             frozen_s_cm: None,
             off_route_freeze_time: None,
+            freeze_ctx: None,
         }
     }
 

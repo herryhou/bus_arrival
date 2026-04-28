@@ -88,6 +88,8 @@ pub struct State<'a> {
     pub ticks_since_persist: u16,
     /// Flag indicating recovery should run on next valid GPS after off-route
     needs_recovery_on_reacquisition: bool,
+    /// NEW: Ticks remaining in snap cooldown period (prevents recovery interference)
+    just_snapped_ticks: u8,
 }
 
 impl<'a> State<'a> {
@@ -126,6 +128,7 @@ impl<'a> State<'a> {
             },
             ticks_since_persist: 0,
             needs_recovery_on_reacquisition: false,
+            just_snapped_ticks: 0,  // NEW: initialize to 0 (not in cooldown)
         }
     }
 
@@ -159,15 +162,22 @@ impl<'a> State<'a> {
                 signals,
                 v_cms,
                 seg_idx: _,
+                snapped,
             } => {
                 use crate::detection::GpsStatus;
                 let PositionSignals { z_gps_cm: _, s_cm } = signals;
                 let gps_status = GpsStatus::Valid;
 
+                // Handle cooldown decrement
+                if self.just_snapped_ticks > 0 {
+                    self.just_snapped_ticks = self.just_snapped_ticks.saturating_sub(1);
+                }
+                let in_snap_cooldown = self.just_snapped_ticks > 0;
+
                 // Check for GPS jump requiring recovery (H1)
                 let prev_s_cm = self.last_valid_s_cm;
                 // Skip recovery on first fix - last_valid_s_cm is still 0 (initial value)
-                if !self.first_fix && should_trigger_recovery(s_cm, prev_s_cm) {
+                if !snapped && !in_snap_cooldown && !self.first_fix && should_trigger_recovery(s_cm, prev_s_cm) {
                     #[cfg(feature = "firmware")]
                     defmt::warn!(
                         "GPS jump detected: s={}→{}, triggering recovery",
@@ -197,7 +207,7 @@ impl<'a> State<'a> {
 
                     if let Some(recovered_idx) = detection::recovery::find_stop_index(
                         s_cm,
-                        v_cms,
+                        self.dr.filtered_v,  // Use EMA-smoothed velocity for stable constraints
                         dt_since_last_fix,
                         &stops_vec,
                         self.last_known_stop_index,
@@ -206,7 +216,7 @@ impl<'a> State<'a> {
                         #[cfg(feature = "firmware")]
                         defmt::info!("Recovery found stop index: {}", recovered_idx);
                         self.last_known_stop_index = recovered_idx as u8;
-                        self.reset_stop_states_after_recovery(recovered_idx);
+                        self.reset_stop_states_after_recovery(recovered_idx, s_cm);  // C2: pass current position
                     } else {
                         #[cfg(feature = "firmware")]
                         defmt::warn!("Recovery failed: no valid stop found");
@@ -221,6 +231,7 @@ impl<'a> State<'a> {
                     // First fix initializes Kalman but doesn't run update_adaptive
                     // Counts toward timeout but NOT convergence
                     self.warmup_total_ticks = 1;
+                    self.last_valid_s_cm = s_cm;  // C1 fix: initialize to prevent false jump detection on tick 2
 
                     // Apply persisted state if valid and within 500m threshold
                     if let Some(ps) = self.pending_persisted.take() {
@@ -281,6 +292,27 @@ impl<'a> State<'a> {
                     }
                 }
 
+                // Handle snap from off-route re-entry
+                if snapped {
+                    // 1. Find forward closest stop (prevents backward selection)
+                    let new_idx = self.find_forward_closest_stop_index(s_cm, self.last_known_stop_index);
+                    self.last_known_stop_index = new_idx;
+
+                    // 2. Reset stop states using same logic as recovery (all to Idle, then set appropriate states)
+                    self.reset_stop_states_after_recovery(new_idx as usize, s_cm);  // C2: pass current position
+
+                    // 3. Clear all recovery triggers
+                    self.needs_recovery_on_reacquisition = false;
+                    self.kalman.freeze_ctx = None;
+                    self.kalman.off_route_freeze_time = None;  // Clear freeze time on snap
+                    self.last_valid_s_cm = s_cm;  // Update immediately to prevent false jump detection
+                    self.last_gps_timestamp = gps.timestamp;  // S3: Update timestamp to prevent stale dt calculation
+
+                    // 4. Set 2-second cooldown
+                    self.just_snapped_ticks = 2;
+
+                    // Skip normal recovery and proceed to detection
+                } else {
                 // Update recovery tracking
                 self.last_known_stop_index = self.find_closest_stop_index(s_cm);
                 self.last_valid_s_cm = s_cm;
@@ -288,7 +320,7 @@ impl<'a> State<'a> {
                 self.last_gps_timestamp = gps.timestamp;
 
                 // Check for re-acquisition recovery
-                if self.needs_recovery_on_reacquisition {
+                if !snapped && !in_snap_cooldown && self.needs_recovery_on_reacquisition {
                     self.needs_recovery_on_reacquisition = false;
 
                     // Calculate elapsed time since freeze (from KalmanState)
@@ -309,7 +341,7 @@ impl<'a> State<'a> {
 
                     if let Some(recovered_idx) = detection::recovery::find_stop_index(
                         s_cm,
-                        v_cms,
+                        self.dr.filtered_v,  // Use EMA-smoothed velocity for stable constraints
                         elapsed_seconds,
                         &stops_vec,
                         self.last_known_stop_index,
@@ -318,12 +350,14 @@ impl<'a> State<'a> {
                         #[cfg(feature = "firmware")]
                         defmt::info!("Re-acquisition recovered stop index: {}", recovered_idx);
                         self.last_known_stop_index = recovered_idx as u8;
-                        self.reset_stop_states_after_recovery(recovered_idx);
+                        self.reset_stop_states_after_recovery(recovered_idx, s_cm);  // C2: pass current position
                     }
                     // If recovery returns None, continue with existing states
 
-                    // C1: Clear freeze time after re-acquisition recovery completes
+                    // C1: Clear freeze time and context after re-acquisition recovery completes
                     self.kalman.off_route_freeze_time = None;
+                    self.kalman.freeze_ctx = None;
+                }
                 }
 
                 // Return s_cm, v_cms, signals, and gps_status for detection
@@ -511,6 +545,14 @@ impl<'a> State<'a> {
                         s_cm,
                         v_cms
                     );
+                    return Some(ArrivalEvent {
+                        time: gps.timestamp,
+                        stop_idx: stop_idx as u8,
+                        s_cm,
+                        v_cms,
+                        probability,
+                        event_type: shared::ArrivalEventType::Departure,
+                    });
                 }
                 StopEvent::None => {}
             }
@@ -520,7 +562,7 @@ impl<'a> State<'a> {
     }
 
     /// Find closest stop index to current position
-    fn find_closest_stop_index(&self, s_cm: DistCm) -> u8 {
+    pub fn find_closest_stop_index(&self, s_cm: DistCm) -> u8 {
         let mut closest_idx = 0;
         let mut closest_dist = i32::MAX;
 
@@ -537,8 +579,38 @@ impl<'a> State<'a> {
         closest_idx
     }
 
+    /// Find closest stop index in forward direction only
+    ///
+    /// Searches from last_idx to end of route only. This prevents
+    /// selecting stops behind the current position, which is important
+    /// after off-route snap re-entry.
+    ///
+    /// # Arguments
+    /// * `s_cm` - Current position along route (cm)
+    /// * `last_idx` - Starting index for search (inclusive)
+    ///
+    /// # Returns
+    /// Index of closest stop at or after last_idx
+    pub fn find_forward_closest_stop_index(&self, s_cm: DistCm, last_idx: u8) -> u8 {
+        let mut best_idx = last_idx;
+        let mut best_dist = i32::MAX;
+
+        // Only search forward: from last_idx to end of route
+        for i in last_idx as usize..self.route_data.stop_count {
+            if let Some(stop) = self.route_data.get_stop(i) {
+                let dist = (s_cm - stop.progress_cm).abs();
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_idx = i as u8;
+                }
+            }
+        }
+
+        best_idx
+    }
+
     /// Reset all stop states to Idle after recovery
-    fn reset_stop_states_after_recovery(&mut self, recovered_idx: usize) {
+    fn reset_stop_states_after_recovery(&mut self, recovered_idx: usize, current_s_cm: DistCm) {
         use detection::state_machine::StopState;
 
         let recovered_was_announced = self
@@ -568,8 +640,8 @@ impl<'a> State<'a> {
                     state.last_announced_stop = recovered_idx as u8;
                 }
 
-                if self.last_valid_s_cm >= stop.corridor_start_cm
-                    && self.last_valid_s_cm <= stop.corridor_end_cm
+                if current_s_cm >= stop.corridor_start_cm
+                    && current_s_cm <= stop.corridor_end_cm
                 {
                     state.fsm_state = FsmState::Approaching;
                 }
@@ -652,5 +724,6 @@ impl<'a> State<'a> {
             self.stop_states[i].fsm_state = FsmState::Departed;
             self.stop_states[i].announced = true;
         }
+        self.last_known_stop_index = stop_index;  // C3 fix: update tracking to persisted value
     }
 }

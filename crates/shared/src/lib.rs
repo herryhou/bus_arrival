@@ -323,11 +323,11 @@ impl SpatialGrid {
         // 3×3 neighborhood
         for dy in 0..=2 {
             for dx in 0..=2 {
-                let ny = (gy as i32 + dy as i32 - 1) as usize;
-                let nx = (gx as i32 + dx as i32 - 1) as usize;
+                let ny = gy as i32 + dy as i32 - 1;
+                let nx = gx as i32 + dx as i32 - 1;
 
-                if ny < self.rows as usize && nx < self.cols as usize {
-                    let idx = ny * (self.cols as usize) + nx;
+                if ny >= 0 && nx >= 0 && ny < self.rows as i32 && nx < self.cols as i32 {
+                    let idx = ny as usize * (self.cols as usize) + nx as usize;
                     candidates.extend_from_slice(&self.cells[idx]);
                 }
             }

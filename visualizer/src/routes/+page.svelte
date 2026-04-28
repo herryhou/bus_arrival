@@ -1,16 +1,16 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import MapView from '$lib/components/MapView.svelte';
-	import FsmInspector from '$lib/components/FsmInspector.svelte';
-	import ProbabilityScope from '$lib/components/ProbabilityScope.svelte';
-	import BusDiagnostic from '$lib/components/BusDiagnostic.svelte';
-	import CompactSidebar from '$lib/components/CompactSidebar.svelte';
-	import LinearRouteWidget from '$lib/components/LinearRouteWidget.svelte';
-	import Timeline from '$lib/components/Timeline.svelte';
-	import UploadScreen from '$lib/components/UploadScreen.svelte';
-	import type { RouteData, TraceData, FsmState } from '$lib/types';
-	import { getInterpolatedBusState } from '$lib/parsers/routeData';
-	import { getTraceTimeRange } from '$lib/parsers/trace';
+	import { onMount } from "svelte";
+	import MapView from "$lib/components/MapView.svelte";
+	import FsmInspector from "$lib/components/FsmInspector.svelte";
+	import ProbabilityScope from "$lib/components/ProbabilityScope.svelte";
+	import BusDiagnostic from "$lib/components/BusDiagnostic.svelte";
+	import CompactSidebar from "$lib/components/CompactSidebar.svelte";
+	import LinearRouteWidget from "$lib/components/LinearRouteWidget.svelte";
+	import Timeline from "$lib/components/Timeline.svelte";
+	import UploadScreen from "$lib/components/UploadScreen.svelte";
+	import type { RouteData, TraceData, FsmState } from "$lib/types";
+	import { getInterpolatedBusState } from "$lib/parsers/routeData";
+	import { getTraceTimeRange } from "$lib/parsers/trace";
 
 	let routeData = $state<RouteData | null>(null);
 	let traceData = $state<TraceData | null>(null);
@@ -37,7 +37,7 @@
 	let showUpload = $state(true);
 
 	// Lab panel tab: 'stop' | 'bus'
-	let labTab = $state<'stop' | 'bus'>('stop');
+	let labTab = $state<"stop" | "bus">("stop");
 
 	// Playback timer
 	onMount(() => {
@@ -52,14 +52,18 @@
 				} else {
 					currentTime = nextTime;
 				}
-				currentTimePercent = ((currentTime - timeMin) / (timeMax - timeMin)) * 100;
+				currentTimePercent =
+					((currentTime - timeMin) / (timeMax - timeMin)) * 100;
 			}
 		}, 100);
 
 		return () => clearInterval(interval);
 	});
 
-	function handleDataLoad(data: { routeData: RouteData; traceData: TraceData }) {
+	function handleDataLoad(data: {
+		routeData: RouteData;
+		traceData: TraceData;
+	}) {
 		routeData = data.routeData;
 		traceData = data.traceData;
 		[timeMin, timeMax] = getTraceTimeRange(traceData);
@@ -83,30 +87,42 @@
 	}
 
 	function formatTime(seconds: number): string {
-		return new Date(seconds * 1000).toLocaleTimeString([], { hour12: false });
+		return new Date(seconds * 1000).toLocaleTimeString([], {
+			hour12: false,
+		});
 	}
 
 	const currentRecord = $derived.by(() => {
 		if (!traceData || traceData.length === 0) return null;
 		// Binary search or closest record for better performance
 		return traceData.reduce((prev, curr) =>
-			Math.abs(curr.time - currentTime) < Math.abs(prev.time - currentTime) ? curr : prev
+			Math.abs(curr.time - currentTime) <
+			Math.abs(prev.time - currentTime)
+				? curr
+				: prev,
 		);
 	});
 
 	const busPosition = $derived.by(() => {
 		if (!currentRecord || !routeData) return null;
-		const interpolated = getInterpolatedBusState(currentRecord.s_cm, routeData);
+		const interpolated = getInterpolatedBusState(
+			currentRecord.s_cm,
+			routeData,
+		);
 		return {
 			lat: currentRecord.lat,
 			lon: currentRecord.lon,
-			heading: interpolated.heading_cdeg / 100 // Convert to degrees
+			heading: interpolated.heading_cdeg / 100, // Convert to degrees
 		};
 	});
 
 	const activeStopState = $derived.by(() => {
 		if (!currentRecord || selectedStop === null) return null;
-		return currentRecord.stop_states.find(s => s.stop_idx === selectedStop) || null;
+		return (
+			currentRecord.stop_states.find(
+				(s) => s.stop_idx === selectedStop,
+			) || null
+		);
 	});
 
 	function resetUpload() {
@@ -117,12 +133,16 @@
 		showUpload = true;
 	}
 
-	function handleEventClick(info: { time: number; stopIdx?: number; state?: FsmState }) {
+	function handleEventClick(info: {
+		time: number;
+		stopIdx?: number;
+		state?: FsmState;
+	}) {
 		if (info.stopIdx !== undefined && info.state) {
 			highlightedEvent = {
 				stopIdx: info.stopIdx,
 				time: info.time,
-				state: info.state
+				state: info.state,
 			};
 			mapViewRef?.panToStop(info.stopIdx);
 		}
@@ -142,10 +162,16 @@
 			<header class="dashboard-header">
 				<div class="brand">
 					<span class="logo">🚌</span>
-					<h1>Bus Arrival Lab <span class="version">v2.0</span>{#if routeFileName} <span class="route-file">{routeFileName}</span>{/if}</h1>
+					<h1>
+						Bus Arrival Lab <span class="version">v2.0</span
+						>{#if routeFileName}
+							<span class="route-file">{routeFileName}</span>{/if}
+					</h1>
 				</div>
 				<div class="controls">
-					<button onclick={resetUpload} class="btn-outline">New Session</button>
+					<button onclick={resetUpload} class="btn-outline"
+						>New Session</button
+					>
 				</div>
 			</header>
 
@@ -159,7 +185,7 @@
 							{busPosition}
 							{selectedStop}
 							{highlightedEvent}
-							onStopClick={(idx: number) => selectedStop = idx}
+							onStopClick={(idx: number) => (selectedStop = idx)}
 							onClearHighlight={clearHighlight}
 							bind:this={mapViewRef}
 						/>
@@ -172,15 +198,15 @@
 					<div class="lab-tabs">
 						<button
 							class="tab-btn"
-							class:active={labTab === 'stop'}
-							onclick={() => labTab = 'stop'}
+							class:active={labTab === "stop"}
+							onclick={() => (labTab = "stop")}
 						>
 							Stop Analysis
 						</button>
 						<button
 							class="tab-btn"
-							class:active={labTab === 'bus'}
-							onclick={() => labTab = 'bus'}
+							class:active={labTab === "bus"}
+							onclick={() => (labTab = "bus")}
 						>
 							Bus Diagnostic
 						</button>
@@ -188,17 +214,27 @@
 
 					<!-- Tab content -->
 					<div class="lab-scroll">
-						{#if labTab === 'stop'}
+						{#if labTab === "stop"}
 							{#if activeStopState && currentRecord && traceData}
 								<!-- Detailed view for selected stop -->
-								<ProbabilityScope stopState={activeStopState} v_cms={currentRecord.v_cms} />
+								<ProbabilityScope
+									stopState={activeStopState}
+									v_cms={currentRecord.v_cms}
+								/>
 								<div class="spacer"></div>
-								<FsmInspector {traceData} {selectedStop} {currentTime} />
+								<FsmInspector
+									{traceData}
+									{selectedStop}
+									{currentTime}
+								/>
 							{:else}
 								<!-- Empty state when no stop selected -->
 								<div class="empty-lab">
 									<div class="lab-icon">🔬</div>
-									<p>Select a stop from the sidebar to see detailed analysis</p>
+									<p>
+										Select a stop from the sidebar to see
+										detailed analysis
+									</p>
 								</div>
 							{/if}
 						{:else}
@@ -217,26 +253,26 @@
 							v_cms={currentRecord?.v_cms ?? 0}
 							{selectedStop}
 							onSeek={handleSeek}
-							onStopSelect={(idx) => selectedStop = idx}
+							onStopSelect={(idx) => (selectedStop = idx)}
 							onEventClick={handleEventClick}
 						/>
 					{/if}
 				</section>
 
-					<!-- Linear Route Panel -->
-					<section class="panel linear-route-panel">
-						{#if routeData && currentRecord}
-							<LinearRouteWidget
-								{routeData}
-								busProgress={currentRecord.s_cm}
-								busSpeed={currentRecord.v_cms}
-								{highlightedEvent}
-								{traceData}
-								{currentTime}
-								onStopClick={(idx: number) => selectedStop = idx}
-							/>
-						{/if}
-					</section>
+				<!-- Linear Route Panel -->
+				<section class="panel linear-route-panel">
+					{#if routeData && currentRecord}
+						<LinearRouteWidget
+							{routeData}
+							busProgress={currentRecord.s_cm}
+							busSpeed={currentRecord.v_cms}
+							{highlightedEvent}
+							{traceData}
+							{currentTime}
+							onStopClick={(idx: number) => (selectedStop = idx)}
+						/>
+					{/if}
+				</section>
 			</main>
 
 			<!-- Bottom: Timeline & Playback -->
@@ -246,10 +282,10 @@
 						{traceData}
 						{currentTime}
 						{isPlaying}
-						playbackSpeed={playbackSpeed}
+						{playbackSpeed}
 						onTimeChange={handleSeek}
-						onTogglePlay={() => isPlaying = !isPlaying}
-						onSpeedChange={(speed) => playbackSpeed = speed}
+						onTogglePlay={() => (isPlaying = !isPlaying)}
+						onSpeedChange={(speed) => (playbackSpeed = speed)}
 					/>
 				{/if}
 			</footer>
@@ -271,7 +307,7 @@
 		height: 100vh;
 		display: flex;
 		flex-direction: column;
-		font-family: 'JetBrains Mono', 'Monaco', monospace;
+		font-family: "JetBrains Mono", "Monaco", monospace;
 	}
 
 	/* Dashboard Layout */
@@ -291,10 +327,26 @@
 		padding: 0 1rem;
 	}
 
-	.brand { display: flex; align-items: center; gap: 0.75rem; }
-	.brand h1 { font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.1em; margin: 0; }
-	.brand .version { color: #444; font-size: 0.6rem; }
-	.brand .route-file { color: #3b82f6; font-size: 0.7rem; margin-left: 0.5rem; }
+	.brand {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+	.brand h1 {
+		font-size: 0.875rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		margin: 0;
+	}
+	.brand .version {
+		color: #444;
+		font-size: 0.6rem;
+	}
+	.brand .route-file {
+		color: #3b82f6;
+		font-size: 0.7rem;
+		margin-left: 0.5rem;
+	}
 
 	.btn-outline {
 		background: none;
@@ -306,12 +358,15 @@
 		cursor: pointer;
 	}
 
-	.btn-outline:hover { border-color: #666; color: #fff; }
+	.btn-outline:hover {
+		border-color: #666;
+		color: #fff;
+	}
 
 	.dashboard-grid {
 		flex: 1;
 		display: grid;
-		grid-template-columns: 2.5fr 1.5fr 1fr;  /* CHANGED from 1.5fr 1.5fr 1fr */
+		grid-template-columns: 2.5fr 1.5fr 1fr; /* CHANGED from 1.5fr 1.5fr 1fr */
 		grid-template-rows: 1fr auto;
 		gap: 1px;
 		background-color: #333;
@@ -319,12 +374,17 @@
 		overflow: hidden;
 	}
 
-	.panel { background-color: #0a0a0a; overflow: hidden; position: relative; min-height: 0; }
+	.panel {
+		background-color: #0a0a0a;
+		overflow: hidden;
+		position: relative;
+		min-height: 0;
+	}
 
 	.linear-route-panel {
 		grid-column: 1 / -1;
-		height: 200px;
-		min-height: 200px;
+		height: 100%;
+		min-height: 120px;
 	}
 
 	.sidebar-panel {
@@ -349,12 +409,14 @@
 		background-color: #1a1a1a;
 		border: none;
 		color: #888;
-		font-family: 'JetBrains Mono', monospace;
+		font-family: "JetBrains Mono", monospace;
 		font-size: 10px;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		cursor: pointer;
-		transition: background-color 0.15s, color 0.15s;
+		transition:
+			background-color 0.15s,
+			color 0.15s;
 	}
 
 	.tab-btn:hover {
@@ -377,7 +439,9 @@
 		gap: 1rem;
 	}
 
-	.spacer { height: 1rem; }
+	.spacer {
+		height: 1rem;
+	}
 
 	.empty-lab {
 		height: 100%;
@@ -402,7 +466,7 @@
 	}
 
 	.dashboard-footer {
-		height: 80px;
+		height: 50px;
 		background-color: #0a0a0a;
 		border-top: 1px solid #333;
 		display: flex;
