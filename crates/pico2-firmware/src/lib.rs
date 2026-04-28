@@ -12,6 +12,9 @@ pub mod recovery;
 pub mod recovery_trigger;
 pub mod state;
 
+// Re-export key types for external use
+pub use control::{SystemMode, SystemState};
+
 // uart module depends on Embassy and is only available for firmware builds
 #[cfg(feature = "firmware")]
 pub mod uart;
