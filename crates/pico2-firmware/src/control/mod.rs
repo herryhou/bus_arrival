@@ -59,6 +59,14 @@ impl<'a> SystemState<'a> {
         }
     }
 
+    /// Returns the single authoritative position for the current mode.
+    ///
+    /// # Spatial Contract
+    /// - Normal: Kalman-filtered position (`est.s_cm`)
+    /// - OffRoute: Frozen position from entry (`self.frozen_s_cm`)
+    /// - Recovering: Raw GPS projection (`est.z_gps_cm`)
+    ///
+    /// This is the ONLY function that should be used to query "where are we?"
     pub fn current_position(&self, est: &EstimationOutput) -> DistCm {
         match self.mode {
             SystemMode::Normal => est.s_cm,

@@ -4,7 +4,7 @@
 
 **目標受眾：** Embedded Rust 開發團隊  
 **硬體平台：** Raspberry Pi Pico 2（RP2350）  
-**文件版本：** v8.9（脫離路線檢測與 GPS 跳躍恢復）
+**文件版本：** v9.0（二層架構重構：控制/估計分離）
 
 ### 版本更新記錄（Changelog）
 
@@ -17,6 +17,28 @@
 - 支援繞路後的正確站點重新獲取
 
 詳見 [Section 16](#16-脫離路線檢測與恢復模組---v89-新增) 完整說明。
+
+---
+
+#### v9.0（2026-04-28）- 二層架構重構：控制/估計分離
+
+**架構重構：** 將嵌入式韌體重構為二層架構，實現關注點分離與單一職責原則
+- **控制層（Control Layer）**：系統狀態機、模式轉換、偵測協調
+- **估計層（Estimation Layer）**：隔離的 GPS → 位置管線（Kalman + DR）
+- **恢復模組（Recovery Module）**：純函數恢復邏輯，明確輸入/輸出
+
+**核心設計原則：**
+- 隔離性：估計層僅維護內部狀態，無控制層存取權
+- 統一觸發：所有模式轉換僅使用估計信號（`divergence_d2`、`z_gps_cm`）
+- 單一轉換：每個 tick 最多一次模式轉換（防止競爭條件）
+- 一等公民恢復：恢復是系統模式，非內聯邏輯
+
+**空間契約（Spatial Contract）明確化：**
+- F1（距離似然度）：使用 `z_gps_cm`（原始 GPS 投影空間）
+- F3（進度似然度）：使用 `s_cm`（濾波路線空間）
+- 此雙空間方法為有意設計，非歧義行為
+
+詳見 [Section 22](#22-二層架構設計v90-新增) 完整說明。
 
 ---
 
@@ -98,7 +120,8 @@
 19. [效能摘要與資源評估](#19-效能摘要與資源評估)
 20. [Embedded Rust 實作注意事項](#20-embedded-rust-實作注意事項)
 21. [完整 Pipeline 總結](#21-完整-pipeline-總結)
-22. [測試案例與驗證](#22-測試案例與驗證)
+22. [二層架構設計（v9.0 新增）](#22-二層架構設計v90-新增)
+23. [測試案例與驗證](#23-測試案例與驗證)
 - [附錄 A：參數快速參考](#附錄參數快速參考)
 - [附錄 B：到站概率模型權重離線調校流程](#附錄-b到站概率模型權重離線調校流程)
 
@@ -1811,9 +1834,336 @@ static GLOBAL_STOP_INDEX: AtomicU32 = AtomicU32::new(0);
 
 ---
 
-## 22. 測試案例與驗證
+## 22. 二層架構設計（v9.0 新增）
 
-### 22.1 正常營運測試（ty225_normal）
+### 22.1 設計動機
+
+v9.0 版本將嵌入式韌體重構為明確的二層架構，解決以下問題：
+
+1. **關注點混合**：原架構中，GPS 處理、狀態管理、恢復邏輯混雜在同一模組
+2. **測試困難**：無法獨立測試估計邏輯（需同時測試狀態機）
+3. **觸發不一致**：部分模式轉換使用內部狀態，部分使用估計信號
+4. **恢復邏輯隱式**：恢復作為內聯邏輯散佈於各處，難以驗證
+
+**重構目標：**
+- 估計層：純函數，相同 GPS → 相同輸出
+- 控制層：狀態機，統一觸發源
+- 恢復模組：純函數，明確輸入/輸出
+
+---
+
+### 22.2 架構總覽
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Control Layer                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │ SystemState  │  │ SystemMode   │  │   tick()     │     │
+│  │              │  │  (Normal/    │  │ orchestrator │     │
+│  │ - mode       │  │   OffRoute/  │  │              │     │
+│  │ - frozen_s_cm│  │   Recovering)│  │ 1. estimate()│     │
+│  │ - last_stop  │  └──────────────┘  │ 2. transitions│     │
+│  └──────────────┘                    │ 3. recover()  │     │
+│         ▲                             │ 4. detection()│     │
+│         │                             └──────────────┘     │
+│         │                                    │              │
+└─────────┼────────────────────────────────────┼──────────────┘
+          │                                    │
+          │ EstimationOutput                   │ EstimationInput
+          │ (z_gps_cm, s_cm,                   │ (gps, route_data)
+          │  v_cms, divergence_d2)             │
+          │                                    │
+┌─────────┴────────────────────────────────────┴──────────────┐
+│                  Estimation Layer                           │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │ KalmanState  │  │   DrState    │  │  estimate()  │     │
+│  │              │  │              │  │              │     │
+│  │ - s_cm       │  │ - filtered_v │  │ • Map match  │     │
+│  │ - v_cms      │  │ - last_gps   │  │ • Kalman     │     │
+│  │ - last_seg   │  │ - in_recovery│  │ • DR         │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘     │
+└─────────────────────────────────────────────────────────────┘
+          │
+          │ RecoveryInput
+          │ (s_cm, v_cms, dt, stops, hint, frozen, window)
+          │
+┌─────────┴──────────────────────────────────────────────────┐
+│                  Recovery Module                           │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │  recover() : pure function                           │ │
+│  │  • Search: hint_idx ± 10 stops (O(20))              │ │
+│  │  • Spatial anchor penalty (off-route recovery)      │ │
+│  │  • Velocity constraint (no impossible jumps)        │ │
+│  └──────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 22.3 控制層（Control Layer）
+
+#### 22.3.1 SystemState 結構
+
+```rust
+pub struct SystemState<'a> {
+    /// Current operational mode
+    pub mode: SystemMode,
+    /// Last confirmed stop index (for recovery hint)
+    pub last_stop_index: u8,
+    /// Frozen position during OffRoute/Recovering (None in Normal mode)
+    pub frozen_s_cm: Option<DistCm>,
+    /// Hysteresis counter for OffRoute → Normal transition
+    pub off_route_clear_ticks: u8,
+    /// Hysteresis counter for Normal → OffRoute transition
+    pub off_route_suspect_ticks: u8,
+    /// Timestamp when OffRoute was entered
+    pub off_route_since: Option<u64>,
+    /// Timestamp when Recovering was entered
+    pub recovering_since: Option<u64>,
+    /// Recovery failed flag
+    pub recovery_failed: bool,
+    /// Route data reference (immutable, XIP-friendly)
+    pub route_data: &'a RouteData<'a>,
+}
+```
+
+#### 22.3.2 SystemMode 枚舉
+
+```rust
+pub enum SystemMode {
+    /// Normal operation: GPS on-route, detection active
+    Normal,
+    /// Off-route detected: position frozen, detection suppressed
+    OffRoute,
+    /// Recovery in progress: searching for correct stop
+    Recovering,
+}
+```
+
+#### 22.3.3 統一觸發系統
+
+所有模式轉換僅使用估計信號：
+
+| 轉換 | 觸發條件 | 遲滯 |
+|------|----------|------|
+| Normal → OffRoute | `divergence_d2 > 25_000_000` (500 m²) | 5 ticks |
+| OffRoute → Normal | `divergence_d2 ≤ 25_000_000` | 2 ticks |
+| OffRoute → Recovering | `\|z_gps_cm - frozen_s_cm\| > 5_000` (50 m) | Immediate |
+| Recovering → Normal | Recovery success or timeout | - |
+
+**關鍵不變量：**
+- 每個 tick 最多一次模式轉換
+- `frozen_s_cm` 僅在 OffRoute/Recovering 模式存在
+- 恢復僅在 Recovering 模式執行
+- 偵測僅在 Normal 模式執行
+
+#### 22.3.4 tick() 協調器
+
+```rust
+pub fn tick(&mut self, gps: &GpsPoint, est_state: &mut EstimationState) -> Option<ArrivalEvent> {
+    // STEP 1: Isolated estimation
+    let est = estimate(input, est_state);
+
+    // STEP 2: State machine transitions (unified triggers)
+    // ... single transition per tick ...
+
+    // STEP 3: Recovery (ONLY in Recovering mode)
+    if self.mode == SystemMode::Recovering {
+        // ... attempt recovery ...
+    }
+
+    // STEP 4: Detection (ONLY in Normal mode)
+    if self.mode == SystemMode::Normal {
+        return self.run_detection(&est, gps.timestamp);
+    }
+
+    None
+}
+```
+
+---
+
+### 22.4 估計層（Estimation Layer）
+
+#### 22.4.1 隔離契約
+
+估計層遵守嚴格的隔離契約：
+
+**不存取：**
+- `mode`（控制層狀態）
+- `last_stop_index`（控制層狀態）
+- `frozen_s_cm`（控制層狀態）
+
+**不觸發：**
+- 模式轉換
+- 恢復邏輯
+- 任何控制層行為
+
+#### 22.4.2 EstimationOutput
+
+```rust
+pub struct EstimationOutput {
+    /// Raw GPS projection onto route (for F1 probability)
+    pub z_gps_cm: DistCm,
+    /// Kalman-filtered position (primary position in Normal mode)
+    pub s_cm: DistCm,
+    /// Filtered velocity (cm/s)
+    pub v_cms: SpeedCms,
+    /// Divergence from route (squared distance from map matching)
+    pub divergence_d2: Dist2,
+    /// Confidence signal (0-255, higher is better)
+    pub confidence: u8,
+    /// Whether GPS has valid fix
+    pub has_fix: bool,
+}
+```
+
+#### 22.4.3 確定性保證
+
+相同 GPS 輸入 → 相同 `EstimationOutput`（無副作用）
+
+```
+GPS(t) + route_data + EstimationState(t)
+    ↓ estimate()
+EstimationOutput(t)
+```
+
+此保證使估計層可獨立測試、模擬、驗證。
+
+---
+
+### 22.5 恢復模組（Recovery Module）
+
+#### 22.5.1 純函數設計
+
+```rust
+pub fn recover(input: RecoveryInput) -> Option<usize>
+```
+
+**輸入：**
+```rust
+pub struct RecoveryInput<'a> {
+    pub s_cm: DistCm,           // Current GPS position
+    pub v_cms: SpeedCms,        // Current velocity
+    pub dt_seconds: u64,        // Time since off-route
+    pub stops: StopsSlice<'a>,  // All stops
+    pub hint_idx: u8,           // Last confirmed stop
+    pub frozen_s_cm: Option<DistCm>,  // Frozen position
+    pub search_window: usize,   // ±N stops to search
+}
+```
+
+**輸出：**
+- `Some(idx)`：恢復成功，返回站點索引
+- `None`：恢復失敗，繼續搜尋
+
+#### 22.5.2 搜尋策略
+
+**空間錨點懲罰：**
+```
+score(i) = d_gps_to_stop(i)² + λ * d_frozen_to_stop(i)²
+```
+
+- `d_gps_to_stop(i)`：GPS 到站點 i 的距離
+- `d_frozen_to_stop(i)`：凍結位置到站點 i 的距離
+- `λ`：懲罰權重（防止跳回舊站點）
+
+**速度約束：**
+```
+v_max = d(stop_i, stop_hint) / dt
+if v_cms > v_max * 1.5:
+    reject(stop_i)  # Physically impossible
+```
+
+#### 22.5.3 逾時回退
+
+30 秒逾時後，使用幾何搜尋：
+
+```rust
+fn find_closest_stop_index(s_cm: DistCm) -> u8 {
+    // Find stop with minimum |s_cm - stop.progress_cm|
+    // No velocity constraint (fallback strategy)
+}
+```
+
+---
+
+### 22.6 空間契約（Spatial Contract）
+
+#### 22.6.1 雙空間設計
+
+到站概率模型有意使用兩個空間座標：
+
+| 特徵 | 空間 | 變數 | 目的 |
+|------|------|------|------|
+| F1（距離） | 原始 GPS 空間 | `z_gps_cm` | 測量「GPS 距離站點多近？」 |
+| F3（進度） | 濾波路線空間 | `s_cm` | 測量「沿路線走了多遠？」 |
+
+#### 22.6.2 受控混合策略
+
+當 `divergence > 2000 cm` 時，F1 從 `z_gps_cm` 切換至 `s_cm`：
+
+```rust
+let (d1_cm, use_fallback) = if divergence > 2000 {
+    ((signals.s_cm - stop.progress_cm).abs(), true)
+} else {
+    ((signals.z_gps_cm - stop.progress_cm).abs(), false)
+};
+```
+
+**此為受控防禦策略，非歧義行為：**
+- 確定性規則：基於 divergence 閾值
+- 防止不良地圖匹配拖累概率
+- 閾值 (2000 cm = 20 m) 經實驗驗證
+
+#### 22.6.3 文檔契約
+
+`current_position()` 函數定義單一權威位置：
+
+```rust
+pub fn current_position(&self, est: &EstimationOutput) -> DistCm {
+    match self.mode {
+        SystemMode::Normal => est.s_cm,
+        SystemMode::OffRoute => self.frozen_s_cm,
+        SystemMode::Recovering => est.z_gps_cm,
+    }
+}
+```
+
+**契約：**
+- Normal：Kalman 濾波位置（最佳估計）
+- OffRoute：凍結位置（等待恢復）
+- Recovering：原始 GPS 投影（搜尋模式）
+
+---
+
+### 22.7 測試與驗證
+
+#### 22.7.1 單元測試
+
+**估計層：**
+- `test_estimate_first_fix()`：首次 GPS 定位
+- `test_estimate_kalman_update()`：Kalman 濾波更新
+- `test_estimate_outage()`：GPS 斷訊處理
+
+**恢復模組：**
+- `test_recovery_success()`：正常恢復
+- `test_recovery_velocity_constraint()`：速度約束拒絕
+- `test_recovery_timeout()`：逾時回退
+
+#### 22.7.2 整合測試
+
+**狀態機：**
+- `test_normal_to_offroute()`：正常 → 脫離路線
+- `test_offroute_to_recovering()`：脫離路線 → 恢復中
+- `test_recovering_to_normal()`：恢復中 → 正常
+- `test_single_transition_per_tick()`：單一轉換不變量
+
+---
+
+## 23. 測試案例與驗證
+
+### 23.1 正常營運測試（ty225_normal）
 
 **目的：** 驗證系統在正常路線營運情況下的到站檢測準確性。
 
@@ -1839,7 +2189,7 @@ make run ROUTE_NAME=ty225 SCENARIO=normal
 - `test_data/ty225_normal_trace.jsonl` - 追蹤記錄
 - `test_data/ty225_normal_announce.jsonl` - 宣告事件
 
-### 22.2 捷徑測試（ty225_shortcut）
+### 23.2 捷徑測試（ty225_shortcut）
 
 **目的：** 驗證系統在公車捷徑行駛時的到站檢測行為。
 
@@ -1866,7 +2216,7 @@ make run ROUTE_NAME=ty225 SCENARIO=shortcut
 - `test_data/ty225_shortcut_trace.jsonl` - 追蹤記錄
 - `test_data/ty225_shortcut_announce.jsonl` - 宣告事件
 
-### 22.3 繞路測試（ty225_short_detour）
+### 23.3 繞路測試（ty225_short_detour）
 
 **位置：** `test_data/ty225_short_detour_*`
 
@@ -2257,8 +2607,87 @@ Off-Route → Re-acquire（GPS 跳躍恢復）
 #### 文件更新
 
 - **Section 16：** 新增脫離路線檢測與恢復完整說明
-- **Section 22.3：** 更新繞路測試結果（所有檢查通過）
+- **Section 23.3：** 更新繞路測試結果（所有檢查通過）
 - **參數快速參考：** 新增 off-route 相關參數
+
+---
+
+### v9.0 (2026-04-28) - 二層架構重構：控制/估計分離
+
+#### 架構重構
+
+本版本將嵌入式韌體重構為明確的二層架構，實現關注點分離與單一職責原則。
+
+**二層架構設計：**
+
+**控制層（Control Layer）：**
+- 管理系統模式（Normal/OffRoute/Recovering）
+- `tick()` 協調器：每個 tick 執行估計 → 狀態轉換 → 恢復 → 偵測
+- 模式轉換基於統一觸發（`divergence_d2`、`z_gps_cm`）
+- 每個 tick 最多一次模式轉換（防止競爭條件）
+
+**估計層（Estimation Layer）：**
+- 隔離的 GPS → 位置管線（純函數）
+- Kalman 狀態 + DR 狀態（內部，控制層不可見）
+- 輸出 `EstimationOutput` 包含所有位置信號
+- 不觸發：恢復、模式變更、任何控制層行為
+
+**恢復模組（Recovery Module）：**
+- 純函數 `recover()` 與明確的 `RecoveryInput`
+- 搜尋視窗：hint_idx ± 10 站點（O(20) 效能）
+- 空間錨點懲罰（off-route 恢復）
+- 速度約束防止物理不可能跳躍
+
+#### 關鍵不變量（Invariants）
+
+1. **估計層隔離**：不存取 `mode`、`last_stop_index`、`frozen_s_cm`
+2. **統一觸發**：所有模式轉換僅使用估計信號
+3. **單一轉換**：每個 tick 最多一次模式轉換
+4. **凍結位置一致性**：`frozen_s_cm` 僅在 OffRoute/Recovering 模式存在
+
+#### 空間契約（Spatial Contract）
+
+本版本明確化到站概率模型的雙空間設計：
+
+**F1（距離似然度）- 原始 GPS 空間：**
+- 使用 `z_gps_cm`（GPS 投影至路線的原始位置）
+- 目的：測量「GPS 距離站點多近？」
+- 捕捉 GPS 不確定性
+
+**F3（進度似然度）- 濾波路線空間：**
+- 使用 `s_cm`（Kalman 濾波後的路線位置）
+- 目的：測量「我們沿路線走了多遠？」
+- 平滑 GPS 雜訊以保持一致性
+
+**受控混合策略：**
+- 當 divergence > 2000 cm 時，F1 從 `z_gps_cm` 切換至 `s_cm`
+- 此為受控防禦策略，處理不良地圖匹配
+- 非歧義行為：基於 divergence 閾值的確定性規則
+
+#### 測試結果
+
+**狀態機整合測試：**
+- ✅ Normal → OffRoute 轉換（5-tick 遲滯）
+- ✅ OffRoute → Recovering 轉換（大位移）
+- ✅ Recovering → Normal 轉換（恢復成功）
+- ✅ 恢復逾時回退（幾何搜尋）
+- ✅ 單一轉換不變量（每 tick 最多一次模式變更）
+
+#### 檔案變更
+
+**新增模組：**
+- `crates/pico2-firmware/src/control/` - 控制層（狀態機、轉換邏輯）
+- `crates/pico2-firmware/src/estimation/` - 估計層（Kalman + DR）
+- `crates/pico2-firmware/src/recovery.rs` - 恢復純函數
+
+**測試新增：**
+- `crates/pico2-firmware/tests/state_machine_test.rs` - 狀態機整合測試
+
+#### 文件更新
+
+- **Section 22：** 新增二層架構設計完整說明
+- **Section 13.1：** 新增空間契約文檔（F1/F3 雙空間設計）
+- **CLAUDE.md：** 新增架構章節說明二層設計
 
 ---
 

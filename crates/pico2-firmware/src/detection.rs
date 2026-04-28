@@ -1,6 +1,23 @@
 //! Arrival detection logic
 //!
 //! Provides stop corridor filtering and arrival probability computation.
+//!
+//! # Spatial Contract (F1 vs F3)
+//!
+//! This module intentionally uses **two spatial coordinate systems** for different features:
+//!
+//! - **F1 (distance likelihood)**: Uses `z_gps_cm` (raw GPS projection onto route)
+//!   - Rationale: Measures "how close is the raw GPS fix to the stop?"
+//!   - Captures GPS uncertainty directly
+//!
+//! - **F3 (progress likelihood)**: Uses `s_cm` (Kalman-filtered route position)
+//!   - Rationale: Measures "how far along the route are we?"
+//!   - Smooths out GPS noise for consistency
+//!
+//! This mixing is **intentional and bounded**: F1 and F3 capture complementary information
+//! about arrival probability. The fallback logic (divergence > 2000cm) switches F1 from
+//! `z_gps_cm` to `s_cm` to handle poor map matching — this is a controlled defensive
+//! strategy, not ambiguous behavior.
 #![allow(dead_code)]
 
 use crate::lut::{GAUSSIAN_LUT, LOGISTIC_LUT};
@@ -46,6 +63,12 @@ pub enum GpsStatus {
 }
 
 /// Shared feature computation for arrival probability
+///
+/// # Spatial Contract
+/// - F1 (p1): Uses `z_gps_cm` (raw GPS space) with fallback to `s_cm`
+/// - F3 (p3): Uses `s_cm` (filtered route space)
+///
+/// This dual-space approach is intentional — see module-level docs.
 fn compute_features(
     signals: PositionSignals,
     v_cms: SpeedCms,
