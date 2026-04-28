@@ -100,7 +100,7 @@ async fn read_byte_with_timeout(
 /// Read NMEA sentence with timeout (async version)
 ///
 /// This function reads bytes from UART until a complete NMEA sentence
-/// is received (terminated by \r\n) or a 5-second timeout occurs.
+/// is received (terminated by \r\n) or a 150ms timeout occurs.
 ///
 /// Returns:
 /// - Ok(Some(sentence)) - Complete NMEA sentence received
@@ -111,7 +111,9 @@ pub async fn read_nmea_sentence_async<'buf>(
     uart: &mut BufferedUart,
     line_buf: &'buf mut UartLineBuffer,
 ) -> Result<Option<&'buf str>, UartError> {
-    let timeout = Duration::from_secs(5);
+    // Short timeout for burst detection: GPS sends RMC+GSA+GGA in ~200ms bursts
+    // A 150ms timeout is sufficient to detect "no more bytes in this burst"
+    let timeout = Duration::from_millis(150);
 
     loop {
         match read_byte_with_timeout(uart, timeout).await {
