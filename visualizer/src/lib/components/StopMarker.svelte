@@ -19,6 +19,7 @@
   const color = $derived(getProbabilityColor(probability));
   const stateColor = $derived(fsmState ? FSM_STATE_COLORS[fsmState] : '#666');
   const stateAbbrev = $derived(fsmState ? FSM_STATE_ABBREVS[fsmState] : '');
+  const isOdd = $derived(stopIndex % 2 === 0); // 0-indexed, so index 0 = stop #1 (odd)
 
   function dispatchClick() {
     const event = new CustomEvent('stopclick', {
@@ -52,6 +53,8 @@
   class="stop-marker"
   class:selected={isSelected}
   class:hovered={isHovered}
+  class:odd={isOdd}
+  class:even={!isOdd}
   onmouseenter={dispatchHover}
   onmouseleave={dispatchHoverEnd}
   onclick={dispatchClick}
@@ -65,28 +68,43 @@
   tabindex="0"
 >
   <span class="stop-number">{stopIndex + 1}</span>
-  <span class="probability-value" style="color: {color}">{probability}</span>
-  {#if fsmState && stateAbbrev}
-    <span class="state-badge" style="background-color: {stateColor}">{stateAbbrev}</span>
-  {/if}
 </div>
 
 <style>
   .stop-marker {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 2px;
+    justify-content: center;
     cursor: pointer;
-    padding: 4px;
+    padding: 2px 6px;
     border-radius: 4px;
-    transition: background-color 0.15s ease;
-    min-width: 40px;
+    transition: all 0.15s ease;
+    min-width: 20px;
   }
-  .stop-marker:hover { background-color: rgba(255, 255, 255, 0.1); }
+  .stop-marker:hover { background-color: rgba(255, 255, 255, 0.1); transform: scale(1.1); }
   .stop-marker.selected { background-color: rgba(255, 255, 255, 0.15); }
   .stop-marker.selected .stop-number { font-weight: bold; color: #f59e0b; }
-  .stop-number { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: #ffffff; }
-  .probability-value { font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: bold; }
-  .state-badge { font-size: 8px; font-family: 'JetBrains Mono', monospace; padding: 1px 4px; border-radius: 2px; color: #000; font-weight: 500; text-transform: uppercase; }
+
+  .stop-number {
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+  }
+
+  /* Odd stops (1, 3, 5, ...) - cyan/blue */
+  .stop-marker:where(.odd) .stop-number {
+    color: #22d3ee; /* cyan-400 */
+    text-shadow: 0 0 4px rgba(34, 211, 238, 0.5);
+  }
+
+  /* Even stops (2, 4, 6, ...) - orange/amber */
+  .stop-marker:where(.even) .stop-number {
+    color: #fbbf24; /* amber-400 */
+    text-shadow: 0 0 4px rgba(251, 191, 36, 0.5);
+  }
+
+  /* Default color fallback */
+  .stop-marker:not(.odd):not(.even) .stop-number {
+    color: #ffffff;
+  }
 </style>
