@@ -306,6 +306,7 @@ impl<'a> State<'a> {
                     self.kalman.freeze_ctx = None;
                     self.kalman.off_route_freeze_time = None;  // Clear freeze time on snap
                     self.last_valid_s_cm = s_cm;  // Update immediately to prevent false jump detection
+                    self.last_gps_timestamp = gps.timestamp;  // S3: Update timestamp to prevent stale dt calculation
 
                     // 4. Set 2-second cooldown
                     self.just_snapped_ticks = 2;
@@ -544,6 +545,14 @@ impl<'a> State<'a> {
                         s_cm,
                         v_cms
                     );
+                    return Some(ArrivalEvent {
+                        time: gps.timestamp,
+                        stop_idx: stop_idx as u8,
+                        s_cm,
+                        v_cms,
+                        probability,
+                        event_type: shared::ArrivalEventType::Departure,
+                    });
                 }
                 StopEvent::None => {}
             }
