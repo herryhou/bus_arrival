@@ -32,14 +32,6 @@
 </script>
 
 <div class="bus-diagnostic">
-  <div class="diagnostic-header">
-    <span class="title">BUS DIAGNOSTIC</span>
-    {#if record}
-      <span class="timestamp">
-        {new Date((record.time ?? 0) * 1000).toLocaleTimeString()}
-      </span>
-    {/if}
-  </div>
   <pre class="json-content">{@html jsonDisplay}</pre>
 </div>
 
@@ -49,15 +41,6 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-  }
-
-  .diagnostic-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid #333;
-    background-color: #0f0f0f;
   }
 
   .title {

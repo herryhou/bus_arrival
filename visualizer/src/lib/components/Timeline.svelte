@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import type { TraceData } from '$lib/types';
+	import { onMount } from "svelte";
+	import type { TraceData } from "$lib/types";
 
 	interface Props {
 		traceData: TraceData;
@@ -19,20 +19,28 @@
 		playbackSpeed,
 		onTimeChange = () => {},
 		onTogglePlay = () => {},
-		onSpeedChange = () => {}
+		onSpeedChange = () => {},
 	}: Props = $props();
 
 	// Get time range
-	let timeMin = $derived.by(() => traceData.length > 0 ? traceData[0].time : 0);
-	let timeMax = $derived.by(() => traceData.length > 0 ? traceData[traceData.length - 1].time : 0);
+	let timeMin = $derived.by(() =>
+		traceData.length > 0 ? traceData[0].time : 0,
+	);
+	let timeMax = $derived.by(() =>
+		traceData.length > 0 ? traceData[traceData.length - 1].time : 0,
+	);
 	let currentTimePercent = $derived.by(() =>
-		timeMax > timeMin ? ((currentTime - timeMin) / (timeMax - timeMin)) * 100 : 0
+		timeMax > timeMin
+			? ((currentTime - timeMin) / (timeMax - timeMin)) * 100
+			: 0,
 	);
 	let timeOffset = $derived.by(() => Math.round(currentTime - timeMin));
 
 	// Format time for display
 	function formatTime(seconds: number): string {
-		return new Date(seconds * 1000).toLocaleTimeString([], { hour12: false });
+		return new Date(seconds * 1000).toLocaleTimeString([], {
+			hour12: false,
+		});
 	}
 
 	// Handle slider change
@@ -57,44 +65,53 @@
 			if (e.target instanceof HTMLInputElement) return;
 
 			switch (e.key) {
-				case ' ':
+				case " ":
 					e.preventDefault();
 					e.stopPropagation();
 					// Toggle play/pause - call parent's callback
 					onTogglePlay();
 					break;
-				case 'ArrowLeft':
+				case "ArrowLeft":
 					e.preventDefault();
 					e.stopPropagation();
 					handleSeek(Math.max(timeMin, currentTime - SEEK_AMOUNT));
 					break;
-				case 'ArrowRight':
+				case "ArrowRight":
 					e.preventDefault();
 					e.stopPropagation();
 					handleSeek(Math.min(timeMax, currentTime + SEEK_AMOUNT));
 					break;
-				case '?':
+				case "?":
 					e.preventDefault();
 					// Help modal - optional, can be added later
-					console.log('Keyboard shortcuts: Space=play/pause, Arrows=seek±5s');
+					console.log(
+						"Keyboard shortcuts: Space=play/pause, Arrows=seek±5s",
+					);
 					break;
 			}
 		};
 
-		document.addEventListener('keydown', handleKeyDown);
-		return () => document.removeEventListener('keydown', handleKeyDown);
+		document.addEventListener("keydown", handleKeyDown);
+		return () => document.removeEventListener("keydown", handleKeyDown);
 	});
 </script>
 
 <div class="timeline-container">
 	<div class="playback-bar">
 		<div class="playback-controls">
-			<button class="play-pause" onclick={onTogglePlay} title="Space: Play/Pause">
-				{isPlaying ? '⏸' : '▶'}
+			<button
+				class="play-pause"
+				onclick={onTogglePlay}
+				title="Space: Play/Pause"
+			>
+				{isPlaying ? "⏸" : "▶"}
 			</button>
 			<select
 				bind:value={playbackSpeed}
-				onchange={(e) => onSpeedChange(Number((e.target as HTMLSelectElement).value))}
+				onchange={(e) =>
+					onSpeedChange(
+						Number((e.target as HTMLSelectElement).value),
+					)}
 				class="speed-select"
 				title="Playback speed"
 			>
@@ -112,7 +129,8 @@
 		</div>
 
 		<div class="time-info">
-			<span class="current">{formatTime(currentTime)} ({timeOffset})</span>
+			<span class="current">{formatTime(currentTime)} ({timeOffset})</span
+			>
 			<span class="sep">/</span>
 			<span class="total">{formatTime(timeMax)}</span>
 		</div>
@@ -142,7 +160,7 @@
 	}
 
 	.playback-bar {
-		padding: 0.5rem 1rem;
+		padding: 0.2rem 0.3rem;
 		display: flex;
 		align-items: center;
 		gap: 1rem;
@@ -229,6 +247,7 @@
 		border-radius: 2px;
 		appearance: none;
 		outline: none;
+		vertical-align: middle;
 	}
 
 	.time-slider::-webkit-slider-thumb {
