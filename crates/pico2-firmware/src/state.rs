@@ -216,7 +216,7 @@ impl<'a> State<'a> {
                         #[cfg(feature = "firmware")]
                         defmt::info!("Recovery found stop index: {}", recovered_idx);
                         self.last_known_stop_index = recovered_idx as u8;
-                        self.reset_stop_states_after_recovery(recovered_idx);
+                        self.reset_stop_states_after_recovery(recovered_idx, s_cm);  // C2: pass current position
                     } else {
                         #[cfg(feature = "firmware")]
                         defmt::warn!("Recovery failed: no valid stop found");
@@ -231,6 +231,7 @@ impl<'a> State<'a> {
                     // First fix initializes Kalman but doesn't run update_adaptive
                     // Counts toward timeout but NOT convergence
                     self.warmup_total_ticks = 1;
+                    self.last_valid_s_cm = s_cm;  // C1 fix: initialize to prevent false jump detection on tick 2
 
                     // Apply persisted state if valid and within 500m threshold
                     if let Some(ps) = self.pending_persisted.take() {
@@ -298,7 +299,7 @@ impl<'a> State<'a> {
                     self.last_known_stop_index = new_idx;
 
                     // 2. Reset stop states using same logic as recovery (all to Idle, then set appropriate states)
-                    self.reset_stop_states_after_recovery(new_idx as usize);
+                    self.reset_stop_states_after_recovery(new_idx as usize, s_cm);  // C2: pass current position
 
                     // 3. Clear all recovery triggers
                     self.needs_recovery_on_reacquisition = false;
@@ -348,7 +349,7 @@ impl<'a> State<'a> {
                         #[cfg(feature = "firmware")]
                         defmt::info!("Re-acquisition recovered stop index: {}", recovered_idx);
                         self.last_known_stop_index = recovered_idx as u8;
-                        self.reset_stop_states_after_recovery(recovered_idx);
+                        self.reset_stop_states_after_recovery(recovered_idx, s_cm);  // C2: pass current position
                     }
                     // If recovery returns None, continue with existing states
 
@@ -600,7 +601,7 @@ impl<'a> State<'a> {
     }
 
     /// Reset all stop states to Idle after recovery
-    fn reset_stop_states_after_recovery(&mut self, recovered_idx: usize) {
+    fn reset_stop_states_after_recovery(&mut self, recovered_idx: usize, current_s_cm: DistCm) {
         use detection::state_machine::StopState;
 
         let recovered_was_announced = self
@@ -630,8 +631,8 @@ impl<'a> State<'a> {
                     state.last_announced_stop = recovered_idx as u8;
                 }
 
-                if self.last_valid_s_cm >= stop.corridor_start_cm
-                    && self.last_valid_s_cm <= stop.corridor_end_cm
+                if current_s_cm >= stop.corridor_start_cm
+                    && current_s_cm <= stop.corridor_end_cm
                 {
                     state.fsm_state = FsmState::Approaching;
                 }
@@ -714,5 +715,6 @@ impl<'a> State<'a> {
             self.stop_states[i].fsm_state = FsmState::Departed;
             self.stop_states[i].announced = true;
         }
+        self.last_known_stop_index = stop_index;  // C3 fix: update tracking to persisted value
     }
 }
