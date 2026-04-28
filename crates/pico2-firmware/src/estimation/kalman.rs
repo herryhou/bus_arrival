@@ -19,4 +19,25 @@ impl KalmanState {
             last_seg_idx: 0,
         }
     }
+
+    /// HDOP-adaptive Kalman update
+    pub fn update_adaptive(&mut self, z_raw: DistCm, v_gps: SpeedCms, hdop_x10: u16) {
+        // HDOP-adaptive gain
+        let k_pos = if hdop_x10 <= 20 {
+            77
+        } else if hdop_x10 <= 30 {
+            51
+        } else if hdop_x10 <= 50 {
+            26
+        } else {
+            13
+        };
+
+        // Position update
+        self.s_cm = self.s_cm + k_pos * (z_raw - self.s_cm) / 256;
+
+        // Velocity update (fixed gain)
+        self.v_cms = self.v_cms + 77 * (v_gps - self.v_cms) / 256;
+        self.v_cms = self.v_cms.max(0);
+    }
 }

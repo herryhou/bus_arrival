@@ -6,6 +6,7 @@ pub struct DrState {
     pub filtered_v: SpeedCms,
     pub last_gps_time: Option<u64>,
     pub in_recovery: bool,
+    pub last_valid_s: Option<shared::DistCm>,
 }
 
 impl DrState {
@@ -14,6 +15,7 @@ impl DrState {
             filtered_v: 0,
             last_gps_time: None,
             in_recovery: false,
+            last_valid_s: None,
         }
     }
 }
