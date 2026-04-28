@@ -1016,3 +1016,4 @@ let input = RecoveryInput {
 | 1.1 | 2026-04-28 | Fix 2: Rename "pure" → "isolated" for accuracy (Kalman has internal state) |
 | 1.2 | 2026-04-28 | Fix 3: Unified trigger system — ALL transitions use estimation signals only |
 | 1.3 | 2026-04-28 | Add high-impact recommendations: invariants as assertions, recovery timeout, confidence signal, priority rationale documentation, search window limitation |
+| 2.0 | 2026-04-28 | Implementation complete — 2-layer architecture with unified state machine |

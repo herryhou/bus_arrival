@@ -72,6 +72,35 @@ crates/
 └── pico2-firmware/   # Embedded firmware (RP2350, no_std, embassy-rp)
 ```
 
+## Firmware Architecture (2-Layer Design)
+
+The pico2-firmware crate implements a 2-layer architecture for embedded deployment:
+
+**Control Layer** (`crates/pico2-firmware/src/control/`):
+- `SystemState` — state machine managing Normal/OffRoute/Recovering modes
+- `SystemMode` — mode enum with transition functions
+- Unified triggers based on `divergence_d2` and `displacement`
+- Recovery timeout (30s) with geometric fallback
+- `tick()` orchestrator — coordinates estimation and detection
+
+**Estimation Layer** (`crates/pico2-firmware/src/estimation/`):
+- `estimate()` — isolated GPS → position pipeline
+- `KalmanState` — Kalman filter (no control state)
+- `DrState` — DR/EMA state (no control state)
+- Returns `EstimationOutput` with confidence signal
+
+**Recovery Module** (`crates/pico2-firmware/src/recovery/`):
+- `recover()` — pure function with explicit `RecoveryInput`
+- Search window: hint_idx ± 10 stops (O(20) performance)
+- Spatial anchor penalty for off-route recovery
+- Velocity constraint prevents physically impossible jumps
+
+**Key Design Principles:**
+- **Isolation:** Estimation layer has bounded internal state, no access to control layer
+- **Unified triggers:** All mode transitions use estimation signals only
+- **Single transition:** Only ONE mode change per tick (prevents race conditions)
+- **First-class recovery:** Recovery is a system mode, not inline logic
+
 ## Testing
 
 ```bash
