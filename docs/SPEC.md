@@ -54,7 +54,7 @@
   - Approach corridor vs. at-stop corridor
   - Stop eligibility criteria
 
-- **`specs/05-arrival_probability.md`** - Bayesian arrival model
+- **`specs/05-arrival_probability.md`** - weighted feature arrival model
   - 4-feature probability model
   - Feature distributions (P(d|A), P(v|A), etc.)
   - Threshold tuning

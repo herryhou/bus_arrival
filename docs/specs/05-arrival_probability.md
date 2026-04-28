@@ -1,7 +1,7 @@
 # Arrival Probability Model Specification
 
 ## Overview
-4-feature Bayesian model for arrival probability. Uses LUT-based Gaussian and logistic functions for no_std compatibility.
+4-feature weighted feature model for arrival probability. Uses LUT-based Gaussian and logistic functions for no_std compatibility.
 
 ## Features
 

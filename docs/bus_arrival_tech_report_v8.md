@@ -204,7 +204,7 @@
   │ ŝ(t), v̂(t)                                                        │
   │    → ⑨ Stop Corridor Filter (80m pre/40m post)                   │
   │         └─ 廊道入口（corridor_start）觸發語音播報（首 tick 立即觸發）   │
-  │    → ⑩ Stop Probability Model (4-feature Bayesian fusion)        │
+  │    → ⑩ Stop Probability Model (4-feature weighted feature fusion)        │
   │    → ⑪ Stop State Machine (Approaching→Arriving→AtStop→Departed)  │
   │    → ⑫ Stop Index Recovery (post-outage resync)                  │
   │                   ↓                         ↓                     │

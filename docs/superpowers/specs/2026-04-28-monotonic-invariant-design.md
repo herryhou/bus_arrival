@@ -23,6 +23,12 @@ GPS → estimate() → EstimationOutput → enforce_monotonic() → Detection
 2. Control layer adds hard 0m invariant at system boundary
 3. Two-tier defense: kalman handles GPS noise, control guarantees strict monotonic
 4. Mode-aware enforcement differs by system state
+5. **Critical:** Monotonic is enforced on `current_position()` output (mode-specific signal), not raw `est.s_cm`
+
+**Spatial Contract consistency:**
+- The design leverages `current_position()` which already implements the mode-specific position selection
+- This ensures monotonic enforcement works on the same signal that detection sees
+- Maintains the "single source of truth per mode" invariant (C2)
 
 ## Components
 
@@ -129,20 +135,22 @@ pub fn new(route_data: &'a RouteData<'a>, persisted: Option<shared::PersistedSta
 
 ```
 1. In Recovering mode, GPS re-acquires with new position
-2. estimate() returns EstimationOutput { s_cm: 9500, ... }
-3. enforce_monotonic(9500, 10500, Recovering) → (9500, false)
-4. last_s_cm = 9500 (backward allowed)
-5. Recovery continues with new position
+2. estimate() returns EstimationOutput { s_cm: 9500, z_gps_cm: 9500, ... }
+3. current_position() returns z_gps_cm = 9500 (mode-specific)
+4. enforce_monotonic(9500, 10500, Recovering) → (9500, false)
+5. last_s_cm = 9500 (backward allowed)
+6. Recovery continues with new position
 ```
 
 ### OffRoute Mode (Frozen)
 
 ```
-1. In OffRoute mode, position is frozen
-2. estimate() returns EstimationOutput { s_cm: 11000, ... }
-3. enforce_monotonic(11000, 10000, OffRoute) → (10000, false)
-4. last_s_cm = 10000 (unchanged, frozen)
-5. Detection is suppressed in OffRoute anyway
+1. In OffRoute mode, position is frozen at entry
+2. estimate() returns EstimationOutput { s_cm: 11000, z_gps_cm: 11000, ... }
+3. current_position() returns frozen_s_cm = 10000 (mode-specific)
+4. enforce_monotonic(10000, 10000, OffRoute) → (10000, false)
+5. last_s_cm = 10000 (unchanged, frozen)
+6. Detection is suppressed in OffRoute anyway
 ```
 
 ## Integration in tick()
@@ -160,11 +168,14 @@ pub fn tick(&mut self, gps: &GpsPoint, est_state: &mut EstimationState) -> Optio
     }
 
     // STEP 1.5: Enforce monotonic invariant
+    // CRITICAL: Use current_position() to get mode-specific position
+    // Normal → est.s_cm, Recovering → est.z_gps_cm, OffRoute → frozen_s_cm
+    let s_raw = self.current_position(&est);
     let (s_cm_for_detection, did_jump) = if self.last_s_cm == 0 {
         // First fix: skip check, initialize directly
-        (est.s_cm, false)
+        (s_raw, false)
     } else {
-        enforce_monotonic(est.s_cm, self.last_s_cm, self.mode)
+        enforce_monotonic(s_raw, self.last_s_cm, self.mode)
     };
     if did_jump {
         self.backward_jump_count += 1;
