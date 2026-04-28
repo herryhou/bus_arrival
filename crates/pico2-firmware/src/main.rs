@@ -165,6 +165,8 @@ async fn main(_spawner: Spawner) {
                     }
                     Err(()) => {
                         defmt::warn!("Failed to persist state to flash");
+                        // S4 fix: increment on failure to prevent retry loop
+                        state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
                     }
                 }
             } else {
