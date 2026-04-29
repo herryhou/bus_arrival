@@ -274,6 +274,12 @@ impl<'a> SystemState<'a> {
     /// - frozen_s_cm only accessed in OffRoute/Recovering modes
     /// - Only ONE transition executes per tick
     pub fn tick(&mut self, gps: &GpsPoint, est_state: &mut crate::estimation::EstimationState) -> Option<ArrivalEvent> {
+        // Handle snap cooldown decrement (must be before estimation)
+        if self.just_snapped_ticks > 0 {
+            self.just_snapped_ticks = self.just_snapped_ticks.saturating_sub(1);
+        }
+        let in_snap_cooldown = self.just_snapped_ticks > 0;
+
         // STEP 1: Isolated estimation
         let input = EstimationInput {
             gps: gps.clone(),
@@ -281,6 +287,28 @@ impl<'a> SystemState<'a> {
             is_first_fix: self.first_fix,
         };
         let est = crate::estimation::estimate(input, est_state);
+
+        // Handle snap from off-route re-entry
+        if est.snapped && !in_snap_cooldown {
+            // Find forward closest stop (prevents backward selection)
+            let new_idx = self.find_forward_closest_stop_index(est.s_cm, self.last_stop_index);
+            self.last_stop_index = new_idx;
+
+            // Reset stop states using recovery logic
+            self.reset_stop_states_after_recovery(new_idx as usize, est.s_cm);
+
+            // Clear all recovery triggers
+            self.frozen_s_cm = None;  // Clear freeze context
+            self.last_s_cm = est.s_cm;  // Update immediately to prevent false jump detection
+
+            // Set 2-second cooldown
+            self.just_snapped_ticks = 2;
+
+            #[cfg(feature = "firmware")]
+            defmt::info!("Snap re-entry at s={}cm, recovered stop={}", est.s_cm, new_idx);
+
+            // Continue to detection below
+        }
 
         // Handle GPS outage
         if !est.has_fix {
