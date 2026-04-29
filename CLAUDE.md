@@ -72,7 +72,7 @@ crates/
 └── pico2-firmware/   # Embedded firmware (RP2350, no_std, embassy-rp)
 ```
 
-## Firmware Architecture (2-Layer Design)
+## Firmware Architecture (2-Layer Design) - ACTIVE
 
 The pico2-firmware crate implements a 2-layer architecture for embedded deployment:
 
@@ -100,6 +100,14 @@ The pico2-firmware crate implements a 2-layer architecture for embedded deployme
 - **Unified triggers:** All mode transitions use estimation signals only
 - **Single transition:** Only ONE mode change per tick (prevents race conditions)
 - **First-class recovery:** Recovery is a system mode, not inline logic
+
+## Migration Notes
+
+**v9.0 Architecture Migration (2026-04-29):**
+- Migrated from monolithic `state::State` to two-layer architecture
+- Old `state.rs` marked as deprecated
+- Bug fixes applied: C2 (Kalman predict), I1 (first fix), I3 (announcement guards)
+- See: `docs/superpowers/specs/2026-04-29-two-layer-activation-design.md`
 
 ## Testing
 
