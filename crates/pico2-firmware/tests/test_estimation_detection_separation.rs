@@ -309,3 +309,56 @@ fn test_rejected_gps_increments_totals_only() {
     // Actual rejection is triggered by GPS quality issues internally
     assert!(true, "Rejection behavior documented");
 }
+
+#[test]
+fn test_outage_resets_all_counters() {
+    let route_bytes =
+        fs::read("../../test_data/ty225_normal.bin").expect("Failed to load ty225_normal.bin");
+    let route_data =
+        shared::binfile::RouteData::load(&route_bytes).expect("Failed to parse ty225_normal.bin");
+
+    let mut state = State::new(&route_data, None);
+
+    // First fix + 2 valid GPS
+    let gps1 = shared::GpsPoint {
+        lat: 0.0,
+        lon: 0.0,
+        heading_cdeg: i16::MIN,
+        speed_cms: 500,
+        timestamp: 1000,
+        has_fix: true,
+        hdop_x10: 10,
+    };
+    state.process_gps(&gps1);
+
+    let gps2 = shared::GpsPoint {
+        timestamp: 2000,
+        ..gps1
+    };
+    state.process_gps(&gps2);
+
+    let gps3 = shared::GpsPoint {
+        timestamp: 3000,
+        ..gps1
+    };
+    state.process_gps(&gps3);
+
+    // Verify we have some counts
+    assert!(state.estimation_ready_ticks > 0 || state.detection_enabled_ticks > 0,
+            "Should have some valid ticks before outage");
+
+    // Simulate outage (> 10 seconds)
+    let gps_outage = shared::GpsPoint {
+        timestamp: 15000,
+        has_fix: false,
+        ..gps1
+    };
+    state.process_gps(&gps_outage);
+
+    // All counters should be reset
+    assert_eq!(state.estimation_ready_ticks, 0, "Estimation valid should reset to 0");
+    assert_eq!(state.estimation_total_ticks, 0, "Estimation total should reset to 0");
+    assert_eq!(state.detection_enabled_ticks, 0, "Detection valid should reset to 0");
+    assert_eq!(state.detection_total_ticks, 0, "Detection total should reset to 0");
+    assert!(state.just_reset, "just_reset flag should be set");
+}
