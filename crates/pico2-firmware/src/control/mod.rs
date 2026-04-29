@@ -148,7 +148,49 @@ impl<'a> SystemState<'a> {
         self.recovery_failed = false;
         self.last_s_cm = s_cm;
 
-        // TODO: Reset stop states when detection layer is integrated
+        // Reset stop states after recovery
+        self.reset_stop_states_after_recovery(recovered_idx, s_cm);
+    }
+
+    /// Reset all stop states to Idle after recovery
+    fn reset_stop_states_after_recovery(&mut self, recovered_idx: usize, current_s_cm: DistCm) {
+        use shared::FsmState;
+
+        let recovered_was_announced = self
+            .stop_states
+            .get(recovered_idx)
+            .map(|state| state.announced || state.last_announced_stop == recovered_idx as u8)
+            .unwrap_or(false);
+
+        // Reset all stop states by recreating them
+        for i in 0..self.stop_states.len() {
+            self.stop_states[i] = detection::state_machine::StopState::new(i as u8);
+        }
+
+        // Stops before the recovered stop are treated as already passed.
+        // Preserve their announcement bookkeeping so recovery cannot re-announce them.
+        // I3 FIX: Set BOTH announced AND last_announced_stop
+        for i in 0..recovered_idx.min(self.stop_states.len()) {
+            self.stop_states[i].fsm_state = FsmState::Departed;
+            self.stop_states[i].announced = true;
+            self.stop_states[i].last_announced_stop = i as u8;  // I3: was missing
+        }
+
+        // Mark recovered stop as Approaching if within corridor
+        if let Some(stop) = self.route_data.get_stop(recovered_idx) {
+            if let Some(state) = self.stop_states.get_mut(recovered_idx) {
+                if recovered_was_announced {
+                    state.announced = true;
+                    state.last_announced_stop = recovered_idx as u8;
+                }
+
+                if current_s_cm >= stop.corridor_start_cm
+                    && current_s_cm <= stop.corridor_end_cm
+                {
+                    state.fsm_state = FsmState::Approaching;
+                }
+            }
+        }
     }
 
     /// Find closest stop index (for recovery timeout fallback)
@@ -193,7 +235,8 @@ impl<'a> SystemState<'a> {
             self.frozen_s_cm = None;
             self.recovering_since = None;
 
-            // TODO: Reset stop states when detection layer is integrated
+            // Reset stop states after recovery
+            self.reset_stop_states_after_recovery(best_idx as usize, est.s_cm);
 
             return Some(best_idx as usize);
         }
