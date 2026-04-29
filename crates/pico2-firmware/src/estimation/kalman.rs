@@ -33,8 +33,14 @@ impl KalmanState {
             13
         };
 
-        // Position update
-        self.s_cm = self.s_cm + k_pos * (z_raw - self.s_cm) / 256;
+        // Predict step: propagate velocity into position
+        let s_pred = self.s_cm + self.v_cms;
+
+        // Innovation term uses predicted position
+        let innovation = z_raw - s_pred;
+
+        // Update step with innovation
+        self.s_cm = s_pred + k_pos * innovation / 256;
 
         // Velocity update (fixed gain)
         self.v_cms = self.v_cms + 77 * (v_gps - self.v_cms) / 256;
