@@ -43,10 +43,34 @@ pub struct SystemState<'a> {
     pub last_s_cm: DistCm,
     /// Counter for backward jump events (GPS health monitoring)
     pub backward_jump_count: u32,
+    /// Per-stop FSM states for arrival detection
+    pub stop_states: heapless::Vec<detection::state_machine::StopState, 256>,
+    /// First fix flag - true until first GPS fix is received
+    pub first_fix: bool,
+    /// Warmup: valid GPS ticks where estimation ran
+    pub estimation_ready_ticks: u8,
+    /// Warmup: total ticks since first fix (timeout safety valve)
+    pub estimation_total_ticks: u8,
+    /// Detection gating: valid ticks since estimation ready
+    pub detection_enabled_ticks: u8,
+    /// Detection gating: total ticks for timeout
+    pub detection_total_ticks: u8,
+    /// Flag indicating state was just reset (e.g., after GPS outage)
+    pub just_reset: bool,
+    /// Ticks remaining in snap cooldown period (prevents recovery interference)
+    pub just_snapped_ticks: u8,
+    /// Last valid GPS timestamp for recovery dt calculation
+    pub last_gps_timestamp: u64,
 }
 
 impl<'a> SystemState<'a> {
     pub fn new(route_data: &'a RouteData<'a>, persisted: Option<shared::PersistedState>) -> Self {
+        // Initialize stop_states
+        let mut stop_states = heapless::Vec::new();
+        for i in 0..route_data.stop_count {
+            let _ = stop_states.push(detection::state_machine::StopState::new(i as u8));
+        }
+
         Self {
             mode: SystemMode::Normal,
             last_stop_index: 0,
@@ -62,6 +86,16 @@ impl<'a> SystemState<'a> {
             ticks_since_persist: 0,
             last_s_cm: 0,
             backward_jump_count: 0,
+            // NEW FIELDS
+            stop_states,
+            first_fix: true,
+            estimation_ready_ticks: 0,
+            estimation_total_ticks: 0,
+            detection_enabled_ticks: 0,
+            detection_total_ticks: 0,
+            just_reset: false,
+            just_snapped_ticks: 0,
+            last_gps_timestamp: 0,
         }
     }
 
