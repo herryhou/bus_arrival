@@ -173,3 +173,104 @@ fn test_just_reset_initializes_both_total_counters() {
     assert_eq!(state.estimation_ready_ticks, 0, "Valid ticks should be 0");
     assert_eq!(state.detection_enabled_ticks, 0, "Detection valid should be 0");
 }
+
+#[test]
+fn test_valid_gps_increments_both_counters_independently() {
+    let route_bytes =
+        fs::read("../../test_data/ty225_normal.bin").expect("Failed to load ty225_normal.bin");
+    let route_data =
+        shared::binfile::RouteData::load(&route_bytes).expect("Failed to parse ty225_normal.bin");
+
+    let mut state = State::new(&route_data, None);
+
+    // First fix
+    let gps1 = shared::GpsPoint {
+        lat: 0.0,
+        lon: 0.0,
+        heading_cdeg: i16::MIN,
+        speed_cms: 500,
+        timestamp: 1000,
+        has_fix: true,
+        hdop_x10: 10,
+    };
+    state.process_gps(&gps1);
+
+    // Valid GPS #1
+    let gps2 = shared::GpsPoint {
+        timestamp: 2000,
+        ..gps1
+    };
+    state.process_gps(&gps2);
+
+    // Both totals incremented, both valids incremented
+    assert_eq!(state.estimation_total_ticks, 2, "Estimation total should be 2");
+    assert_eq!(state.detection_total_ticks, 2, "Detection total should be 2");
+    assert_eq!(state.estimation_ready_ticks, 1, "Estimation valid should be 1");
+    assert_eq!(state.detection_enabled_ticks, 1, "Detection valid should be 1");
+
+    // Valid GPS #2
+    let gps3 = shared::GpsPoint {
+        timestamp: 3000,
+        ..gps1
+    };
+    state.process_gps(&gps3);
+
+    assert_eq!(state.estimation_total_ticks, 3, "Estimation total should be 3");
+    assert_eq!(state.detection_total_ticks, 3, "Detection total should be 3");
+    assert_eq!(state.estimation_ready_ticks, 2, "Estimation valid should be 2");
+    assert_eq!(state.detection_enabled_ticks, 2, "Detection valid should be 2");
+
+    // Valid GPS #3 - both become ready
+    let gps4 = shared::GpsPoint {
+        timestamp: 4000,
+        ..gps1
+    };
+    state.process_gps(&gps4);
+
+    assert_eq!(state.estimation_total_ticks, 4, "Estimation total should be 4");
+    assert_eq!(state.detection_total_ticks, 4, "Detection total should be 4");
+    assert_eq!(state.estimation_ready_ticks, 3, "Estimation valid should be 3");
+    assert_eq!(state.detection_enabled_ticks, 3, "Detection valid should be 3");
+    assert!(state.estimation_ready(), "Estimation should be ready");
+    assert!(state.detection_ready(), "Detection should be ready");
+}
+
+#[test]
+fn test_detection_blocked_until_ready() {
+    let route_bytes =
+        fs::read("../../test_data/ty225_normal.bin").expect("Failed to load ty225_normal.bin");
+    let route_data =
+        shared::binfile::RouteData::load(&route_bytes).expect("Failed to parse ty225_normal.bin");
+
+    let mut state = State::new(&route_data, None);
+
+    // First fix
+    let gps1 = shared::GpsPoint {
+        lat: 0.0,
+        lon: 0.0,
+        heading_cdeg: i16::MIN,
+        speed_cms: 500,
+        timestamp: 1000,
+        has_fix: true,
+        hdop_x10: 10,
+    };
+    state.process_gps(&gps1);
+
+    // During warmup, detection should be blocked
+    for i in 1..=2 {
+        let gps = shared::GpsPoint {
+            timestamp: 1000 + (i as u64) * 1000,
+            ..gps1
+        };
+        let result = state.process_gps(&gps);
+        assert!(result.is_none(), "Detection should be blocked during warmup");
+    }
+
+    // After 3 valid ticks, detection should be enabled
+    let gps4 = shared::GpsPoint {
+        timestamp: 4000,
+        ..gps1
+    };
+    let _result = state.process_gps(&gps4);
+    assert!(state.detection_ready(), "Detection should be ready after 3 ticks");
+}

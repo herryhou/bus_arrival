@@ -300,25 +300,23 @@ impl<'a> State<'a> {
                     return None;
                 }
 
-                // Increment total time counter
+                // Increment total time counters
                 self.estimation_total_ticks = self.estimation_total_ticks.saturating_add(1);
+                self.detection_total_ticks = self.detection_total_ticks.saturating_add(1);
 
-                // Check convergence requirement
-                if self.estimation_ready_ticks < WARMUP_TICKS_REQUIRED {
+                // Update estimation readiness (until ready)
+                if !self.estimation_ready() {
                     self.estimation_ready_ticks += 1;
+                }
 
-                    // Block detection unless timeout expired
-                    if self.estimation_total_ticks < WARMUP_TIMEOUT_TICKS {
-                        #[cfg(feature = "firmware")]
-                        defmt::debug!(
-                            "Warmup: {}/{} valid, {}/{} total",
-                            self.estimation_ready_ticks,
-                            WARMUP_TICKS_REQUIRED,
-                            self.estimation_total_ticks,
-                            WARMUP_TIMEOUT_TICKS
-                        );
-                        return None;
-                    }
+                // Update detection readiness (until ready, independent of estimation)
+                if !self.detection_ready() {
+                    self.detection_enabled_ticks += 1;
+                }
+
+                // Block detection unless ready
+                if !self.detection_ready() {
+                    return None;
                 }
 
                 // Handle snap from off-route re-entry
@@ -413,6 +411,7 @@ impl<'a> State<'a> {
                 if !self.first_fix {
                     self.estimation_ready_ticks = 0;
                     self.estimation_total_ticks = 0;
+                    self.detection_enabled_ticks = 0;
                     self.detection_total_ticks = 0;
                     self.just_reset = true;
                     #[cfg(feature = "firmware")]
