@@ -15,7 +15,7 @@
 **Scope:**
 - Refactor warmup state management in `state.rs`
 - Add separate counters for estimation and detection readiness
-- Maintain explicit dependency where detection requires estimation readiness
+- Estimation and detection operate independently (no hard dependency)
 - Preserve all existing behavior (no functional changes)
 
 **Problem Statement:**
@@ -175,11 +175,8 @@ impl<'a> State<'a> {
             || self.estimation_total_ticks >= ESTIMATION_TIMEOUT_TICKS
     }
 
-    /// Check if detection is enabled (requires estimation ready first)
+    /// Check if detection is enabled (independent of estimation)
     fn detection_ready(&self) -> bool {
-        if !self.estimation_ready() {
-            return false;
-        }
         self.detection_enabled_ticks >= DETECTION_WARMUP_TICKS
             || self.detection_total_ticks >= DETECTION_TIMEOUT_TICKS
     }
@@ -216,13 +213,13 @@ ProcessResult::Valid { .. } => {
     self.estimation_total_ticks = self.estimation_total_ticks.saturating_add(1);
     self.detection_total_ticks = self.detection_total_ticks.saturating_add(1);
 
-    // Update estimation readiness
+    // Update estimation readiness (until ready)
     if !self.estimation_ready() {
         self.estimation_ready_ticks += 1;
     }
 
-    // Update detection readiness (only if estimation is ready)
-    if self.estimation_ready() && !self.detection_ready() {
+    // Update detection readiness (until ready, independent of estimation)
+    if !self.detection_ready() {
         self.detection_enabled_ticks += 1;
     }
 
@@ -298,17 +295,16 @@ estimation_total=1, detection_total=1
     ↓
 estimation_total++, detection_total++
     ↓
-estimation_ready? (estimation_ready >= 3 OR estimation_total >= 10)
-    ↓
-    ├─ NO → estimation_ready_ticks++ → block detection
+    ├─ estimation_ready? (estimation_ready >= 3 OR estimation_total >= 10)
+    │   ├─ NO → estimation_ready_ticks++
+    │   └─ YES → estimation ready (heading filter enabled)
     │
-    └─ YES → detection_enabled_ticks++
-             ↓
-             detection_ready? (detection_enabled >= 3 OR detection_total >= 10)
-                 ↓
-                 ├─ NO → block detection
-                 └─ YES → ENABLE DETECTION
+    └─ detection_ready? (detection_enabled >= 3 OR detection_total >= 10)
+        ├─ NO → detection_enabled_ticks++ → block detection
+        └─ YES → ENABLE DETECTION
 ```
+
+**Note:** Estimation and detection operate independently. Detection can enable via timeout even if estimation is not fully ready, preserving existing behavior.
 
 ---
 
@@ -350,8 +346,8 @@ estimation_ready? (estimation_ready >= 3 OR estimation_total >= 10)
 1. **Helper method tests**
    - `test_estimation_ready_after_3_valid()`: Estimation ready at 3 ticks
    - `test_estimation_timeout_after_10_ticks()`: Timeout path works
-   - `test_detection_requires_estimation()`: Detection false when estimation not ready
-   - `test_detection_ready_after_estimation()`: Detection becomes ready after estimation
+   - `test_detection_ready_independent()`: Detection becomes ready independently of estimation
+   - `test_detection_timeout_independent()`: Detection timeout works even when estimation not ready
    - `test_heading_filter_disabled_during_warmup()`: Filter disabled until estimation ready
 
 2. **Counter update tests**
@@ -362,9 +358,9 @@ estimation_ready? (estimation_ready >= 3 OR estimation_total >= 10)
    - `test_dr_outage_increments_totals_only()`: Valid counters unchanged
 
 3. **State transition tests**
-   - `test_normal_warmup_sequence()`: 3 valid → detection enabled
-   - `test_timeout_path()`: 10 rejected → detection enabled
-   - `test_estimation_gates_detection()`: Detection waits for estimation
+   - `test_normal_warmup_sequence()`: 3 valid → both estimation and detection ready
+   - `test_timeout_path()`: 10 rejected → detection enabled via timeout
+   - `test_estimation_detection_independent()`: Detection can timeout while estimation not ready
    - `test_mixed_valid_and_rejected()`: Handles both correctly
 
 4. **Edge case tests**
