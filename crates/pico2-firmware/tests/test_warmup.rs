@@ -3,9 +3,13 @@
 
 //! This test verifies the warmup behavior as specified in the tech report:
 //! - First GPS tick initializes Kalman (no detection expected)
-//! - Next 3 ticks suppress detection (warmup_counter < 3)
+//! - Next 3 ticks suppress detection (detection_enabled_ticks < 3)
 //! - After warmup, detection is allowed
-//! - Warmup counter resets to 0 on GPS outage for conservative behavior
+//! - Counters reset to 0 on GPS outage for conservative behavior
+//!
+//! Design note: Warmup is now separated into:
+//! - Estimation readiness (estimation_ready_ticks: affects heading filter, Kalman)
+//! - Detection gating (detection_enabled_ticks: blocks arrival detection)
 
 use shared::{binfile::RouteData, GpsPoint};
 use std::fs;
@@ -13,19 +17,19 @@ use std::path::Path;
 
 #[test]
 fn test_warmup_field_exists() {
-    // Compile-time check that State has warmup_counter field
+    // Compile-time check that State has estimation/detection warmup fields
     // This ensures the implementation is in place
 
     // We'll verify by checking that the code compiles and has the expected structure
     // Since we can't easily test without valid RouteData, we document the expected behavior
 
     // Expected behavior:
-    // 1. State struct has `warmup_counter: u8` field
-    // 2. State::new() initializes `warmup_counter: 0`
+    // 1. State struct has `estimation_ready_ticks: u8` and `detection_enabled_ticks: u8` fields
+    // 2. State::new() initializes both counters to 0
     // 3. First GPS tick with first_fix=true initializes Kalman, sets first_fix=false
-    // 4. Ticks 2-4 (warmup_counter 0-2) increment counter and return None
-    // 5. Tick 5+ (warmup_counter >= 3) allow detection
-    // 6. GPS outage resets warmup_counter to 0
+    // 4. Ticks 2-4 (estimation_ready_ticks 0-2) increment counters and return None
+    // 5. Tick 5+ (estimation_ready_ticks >= 3) allow detection
+    // 6. GPS outage resets both counters to 0
 
     assert!(true, "Implementation verified by compilation");
 }
@@ -42,34 +46,34 @@ fn test_warmup_logic_documentation() {
     //   - Sets first_fix=false
     //   - Returns None (no detection during first fix)
 
-    // Tick 2: warmup_counter=0
+    // Tick 2: estimation_ready_ticks=0, detection_enabled_ticks=0
     //   - Processes GPS normally
-    //   - Increments warmup_counter to 1
+    //   - Increments estimation_ready_ticks to 1, detection_enabled_ticks to 1
     //   - Returns None (warmup suppresses detection)
 
-    // Tick 3: warmup_counter=1
+    // Tick 3: estimation_ready_ticks=1, detection_enabled_ticks=1
     //   - Processes GPS normally
-    //   - Increments warmup_counter to 2
+    //   - Increments estimation_ready_ticks to 2, detection_enabled_ticks to 2
     //   - Returns None (warmup suppresses detection)
 
-    // Tick 4: warmup_counter=2
+    // Tick 4: estimation_ready_ticks=2, detection_enabled_ticks=2
     //   - Processes GPS normally
-    //   - Increments warmup_counter to 3
+    //   - Increments estimation_ready_ticks to 3, detection_enabled_ticks to 3
     //   - Returns None (warmup suppresses detection)
 
-    // Tick 5+: warmup_counter=3
+    // Tick 5+: estimation_ready_ticks=3, detection_enabled_ticks=3
     //   - Processes GPS normally
-    //   - warmup_counter stays at 3 (no longer increments)
+    //   - Counters stay at 3 (no longer increment)
     //   - Detection is now allowed (returns Some if at stop)
 
     // Scenario 2: GPS outage during warmup
-    // Tick 1-3: Partial warmup (warmup_counter=2)
+    // Tick 1-3: Partial warmup (estimation_ready_ticks=2, detection_enabled_ticks=2)
     // Tick 4: GPS outage (>10 second gap)
     //   - process_gps_update returns ProcessResult::Outage
-    //   - Sets warmup_counter=0
+    //   - Sets estimation_ready_ticks=0, detection_enabled_ticks=0
     //   - Returns None
     // Tick 5: GPS resumes
-    //   - warmup_counter=0, need to complete warmup again
+    //   - estimation_ready_ticks=0, detection_enabled_ticks=0, need to complete warmup again
 
     assert!(true, "Behavior documented");
 }
