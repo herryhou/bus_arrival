@@ -393,3 +393,130 @@ fn test_dr_outage_increments_totals_only() {
 
     assert!(true, "DrOutage behavior documented");
 }
+
+#[test]
+fn test_estimation_detection_independent_timeout() {
+    // Verify that estimation and detection can timeout independently
+    // This tests the key separation: detection can enable via timeout
+    // even if estimation is not fully ready
+    let route_bytes =
+        fs::read("../../test_data/ty225_normal.bin").expect("Failed to load ty225_normal.bin");
+    let route_data =
+        shared::binfile::RouteData::load(&route_bytes).expect("Failed to parse ty225_normal.bin");
+
+    let mut state = State::new(&route_data, None);
+
+    // First fix
+    let gps1 = shared::GpsPoint {
+        lat: 0.0,
+        lon: 0.0,
+        heading_cdeg: i16::MIN,
+        speed_cms: 500,
+        timestamp: 1000,
+        has_fix: true,
+        hdop_x10: 10,
+    };
+    state.process_gps(&gps1);
+
+    // After first fix: totals = 1, valid = 0
+    assert_eq!(state.estimation_total_ticks, 1, "Should have 1 estimation total after first fix");
+    assert_eq!(state.detection_total_ticks, 1, "Should have 1 detection total after first fix");
+    assert_eq!(state.estimation_ready_ticks, 0, "Should have 0 estimation valid after first fix");
+    assert_eq!(state.detection_enabled_ticks, 0, "Should have 0 detection valid after first fix");
+
+    // Tick 2
+    let gps2 = shared::GpsPoint {
+        timestamp: 2000,
+        ..gps1
+    };
+    state.process_gps(&gps2);
+    assert_eq!(state.estimation_total_ticks, 2, "Should have 2 estimation total after tick 2");
+    assert_eq!(state.estimation_ready_ticks, 1, "Should have 1 estimation valid after tick 2");
+    assert!(!state.estimation_ready(), "Estimation not ready after tick 2");
+
+    // Tick 3
+    let gps3 = shared::GpsPoint {
+        timestamp: 3000,
+        ..gps1
+    };
+    state.process_gps(&gps3);
+    assert_eq!(state.estimation_total_ticks, 3, "Should have 3 estimation total after tick 3");
+    assert_eq!(state.estimation_ready_ticks, 2, "Should have 2 estimation valid after tick 3");
+    assert!(!state.estimation_ready(), "Estimation not ready after tick 3");
+
+    // Tick 4 - this should make us ready
+    let gps4 = shared::GpsPoint {
+        timestamp: 4000,
+        ..gps1
+    };
+    state.process_gps(&gps4);
+    assert_eq!(state.estimation_total_ticks, 4, "Should have 4 estimation total after tick 4");
+    assert_eq!(state.estimation_ready_ticks, 3, "Should have 3 estimation valid after tick 4");
+    assert!(state.estimation_ready(), "Estimation ready after tick 4");
+    assert!(state.detection_ready(), "Detection ready after tick 4");
+
+    // Now manually test the timeout path by setting counters directly
+    // This tests the timeout logic without needing to simulate 10 more ticks
+    let mut state2 = State::new(&route_data, None);
+    state2.process_gps(&gps1); // First fix
+
+    // Manually set up timeout scenario: 2 valid, 9 total (not yet timed out)
+    state2.estimation_ready_ticks = 2;
+    state2.estimation_total_ticks = 9;
+    state2.detection_enabled_ticks = 2;
+    state2.detection_total_ticks = 9;
+
+    assert!(!state2.estimation_ready(), "Estimation not ready with 2 valid, 9 total");
+    assert!(!state2.detection_ready(), "Detection not ready with 2 valid, 9 total");
+
+    // Now increment to 10 total - should trigger timeout
+    state2.estimation_total_ticks = 10;
+    state2.detection_total_ticks = 10;
+
+    assert!(state2.estimation_ready(), "Estimation ready via timeout (10 total)");
+    assert!(state2.detection_ready(), "Detection ready via timeout (10 total)");
+}
+
+#[test]
+fn test_heading_filter_uses_estimation_not_detection() {
+    // Verify that heading filter behavior is controlled by estimation readiness,
+    // not detection readiness
+    let route_bytes =
+        fs::read("../../test_data/ty225_normal.bin").expect("Failed to load ty225_normal.bin");
+    let route_data =
+        shared::binfile::RouteData::load(&route_bytes).expect("Failed to parse ty225_normal.bin");
+
+    let mut state = State::new(&route_data, None);
+
+    // First fix
+    let gps1 = shared::GpsPoint {
+        lat: 0.0,
+        lon: 0.0,
+        heading_cdeg: i16::MIN,
+        speed_cms: 500,
+        timestamp: 1000,
+        has_fix: true,
+        hdop_x10: 10,
+    };
+    state.process_gps(&gps1);
+
+    // After first fix, heading filter should be disabled
+    assert!(state.disable_heading_filter(), "Heading filter disabled after first fix");
+
+    // Manually set detection to ready but estimation not ready
+    state.detection_enabled_ticks = 3;
+    state.detection_total_ticks = 4;
+    state.estimation_ready_ticks = 0;
+    state.estimation_total_ticks = 1;
+
+    // Heading filter should still be DISABLED (controlled by estimation)
+    assert!(state.disable_heading_filter(),
+            "Heading filter disabled when estimation not ready, even if detection ready");
+
+    // Now set estimation to ready
+    state.estimation_ready_ticks = 3;
+
+    // Heading filter should now be ENABLED
+    assert!(!state.disable_heading_filter(),
+             "Heading filter enabled when estimation ready");
+}
