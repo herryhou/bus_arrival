@@ -5,11 +5,15 @@
 
 use pico2_firmware::control::SystemState;
 use pico2_firmware::estimation::EstimationState;
-use shared::{binfile::RouteData, EARTH_R_CM, FIXED_ORIGIN_LAT_DEG, FIXED_ORIGIN_LON_DEG, GpsPoint, RouteNode};
+use shared::{EARTH_R_CM, FIXED_ORIGIN_LAT_DEG, FIXED_ORIGIN_LON_DEG, GpsPoint};
+
+#[cfg(feature = "dev")]
+use shared::{RouteNode, binfile::RouteData};
 
 const FIXED_ORIGIN_LAT_RAD: f64 = FIXED_ORIGIN_LAT_DEG.to_radians();
 
 /// Helper: Create a simple test route
+#[cfg(feature = "dev")]
 fn create_test_route_data() -> RouteData<'static> {
     use shared::SpatialGrid;
 
@@ -174,18 +178,28 @@ fn test_first_fix_initialization() {
     let mut state = SystemState::new(&route_data, None);
     let mut est_state = EstimationState::new();
 
-    // Initially, last_s_cm should be 0
+    // Initially, last_s_cm should be 0 and first_fix should be true
     assert_eq!(state.last_s_cm, 0, "last_s_cm starts at 0");
+    assert!(state.first_fix, "first_fix should be true initially");
 
-    // First GPS fix should initialize without clamping
-    let gps = gps_on_route_at_x(1000, 10000, 500);
-    state.tick(&gps, &mut est_state);
+    // First GPS fix: clears first_fix flag but doesn't update last_s_cm yet
+    // (returns early to allow Kalman initialization)
+    let gps1 = gps_on_route_at_x(1000, 10000, 500);
+    let event1 = state.tick(&gps1, &mut est_state);
 
-    // After first fix, last_s_cm should be set
-    assert_ne!(state.last_s_cm, 0, "last_s_cm should be initialized");
+    assert!(event1.is_none(), "No event on first fix");
+    assert!(!state.first_fix, "first_fix should be cleared");
+    assert_eq!(state.last_s_cm, 0, "last_s_cm still 0 after first tick (updated on second tick)");
+
+    // Second GPS fix: now last_s_cm is updated
+    let gps2 = gps_on_route_at_x(1001, 10500, 500);
+    let event2 = state.tick(&gps2, &mut est_state);
+
+    assert!(event2.is_none(), "No event on second tick (still in warmup)");
+    assert_ne!(state.last_s_cm, 0, "last_s_cm should be initialized after second tick");
     assert_eq!(
         state.backward_jump_count, 0,
-        "No backward jumps on first fix"
+        "No backward jumps during initialization"
     );
 }
 
@@ -243,7 +257,7 @@ fn test_recovering_mode_allows_backward() {
         state.tick(&gps, &mut est_state);
     }
 
-    let position_at_offroute_entry = state.last_s_cm;
+    let _position_at_offroute_entry = state.last_s_cm;
 
     // Trigger OffRoute (GPS far from route) - multiple ticks needed
     // Use a point far north to cause large divergence
