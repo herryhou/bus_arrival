@@ -123,3 +123,53 @@ fn test_first_fix_initializes_both_total_counters() {
     assert_eq!(state.detection_enabled_ticks, 0, "Detection valid should still be 0");
     assert_eq!(state.detection_total_ticks, 1, "Detection total should be 1");
 }
+
+#[test]
+fn test_just_reset_initializes_both_total_counters() {
+    let route_bytes =
+        fs::read("../../test_data/ty225_normal.bin").expect("Failed to load ty225_normal.bin");
+    let route_data =
+        shared::binfile::RouteData::load(&route_bytes).expect("Failed to parse ty225_normal.bin");
+
+    let mut state = State::new(&route_data, None);
+
+    // First fix
+    let gps1 = shared::GpsPoint {
+        lat: 0.0,
+        lon: 0.0,
+        heading_cdeg: i16::MIN,
+        speed_cms: 500,
+        timestamp: 1000,
+        has_fix: true,
+        hdop_x10: 10,
+    };
+    state.process_gps(&gps1);
+
+    // Simulate outage to trigger reset
+    let gps_outage = shared::GpsPoint {
+        timestamp: 12000, // 10 seconds later
+        has_fix: false,
+        ..gps1
+    };
+    state.process_gps(&gps_outage);
+
+    // Verify reset occurred
+    assert!(state.just_reset, "just_reset should be true after outage");
+    assert_eq!(state.estimation_total_ticks, 0, "Total should reset");
+    assert_eq!(state.detection_total_ticks, 0, "Detection total should reset");
+
+    // Next tick after reset
+    let gps2 = shared::GpsPoint {
+        timestamp: 13000,
+        has_fix: true,
+        ..gps1
+    };
+    state.process_gps(&gps2);
+
+    // After just_reset: total counters = 1, flag cleared
+    assert!(!state.just_reset, "just_reset should be cleared");
+    assert_eq!(state.estimation_total_ticks, 1, "Estimation total should be 1");
+    assert_eq!(state.detection_total_ticks, 1, "Detection total should be 1");
+    assert_eq!(state.estimation_ready_ticks, 0, "Valid ticks should be 0");
+    assert_eq!(state.detection_enabled_ticks, 0, "Detection valid should be 0");
+}

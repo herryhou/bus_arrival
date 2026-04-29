@@ -296,6 +296,7 @@ impl<'a> State<'a> {
                     // After warmup reset (e.g., GPS outage), first tick counts as first fix
                     self.just_reset = false;
                     self.estimation_total_ticks = 1;
+                    self.detection_total_ticks = 1;
                     return None;
                 }
 
@@ -412,6 +413,7 @@ impl<'a> State<'a> {
                 if !self.first_fix {
                     self.estimation_ready_ticks = 0;
                     self.estimation_total_ticks = 0;
+                    self.detection_total_ticks = 0;
                     self.just_reset = true;
                     #[cfg(feature = "firmware")]
                     defmt::debug!("GPS outage reset warmup counters");
@@ -429,6 +431,7 @@ impl<'a> State<'a> {
                     // After warmup reset (e.g., GPS outage), first tick counts as first fix
                     self.just_reset = false;
                     self.estimation_total_ticks = 1;
+                    self.detection_total_ticks = 1;
                     return None;
                 }
 
