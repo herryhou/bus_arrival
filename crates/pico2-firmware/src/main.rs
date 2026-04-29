@@ -18,12 +18,18 @@ use embassy_rp::flash::Flash;
 use embassy_rp::uart::{BufferedInterruptHandler, BufferedUart, Config as UartConfig};
 
 // Module declarations
+mod control;
 mod detection;
+mod estimation;
 mod lut;
 mod persist;
 mod recovery_trigger;
-mod state;
+mod state;  // Deprecated: kept for reference
 mod uart;
+
+use crate::control::SystemState;
+use crate::estimation::EstimationState;
+use gps_processor::nmea::NmeaState;
 
 // Note: embassy-rp doesn't require external bootloader
 // The RP2350 has built-in boot ROM
@@ -97,8 +103,12 @@ async fn main(_spawner: Spawner) {
         info!("No valid persisted state, cold start");
     }
 
-    // Initialize state with route data reference
-    let mut state = state::State::new(&route_data, persisted);
+    // Initialize system state with route data reference
+    let mut system_state = SystemState::new(&route_data, persisted);
+    let mut estimation_state = EstimationState::new();
+
+    // Initialize NMEA parser (standalone, separate from system state)
+    let mut nmea = NmeaState::new();
 
     // Initialize line buffer for NMEA data
     let mut line_buf = uart::UartLineBuffer::new();
@@ -115,11 +125,11 @@ async fn main(_spawner: Spawner) {
                     debug!("NMEA: {}", sentence);
 
                     // Parse NMEA sentence
-                    if let Some(gps) = state.nmea.parse_sentence(sentence) {
+                    if let Some(gps) = nmea.parse_sentence(sentence) {
                         debug!("GPS: lat={}, lon={}, fix={}", gps.lat, gps.lon, gps.has_fix);
 
                         // Process GPS through full pipeline
-                        if let Some(arrival) = state.process_gps(&gps) {
+                        if let Some(arrival) = system_state.tick(&gps, &mut estimation_state) {
                             // Emit arrival event via UART
                             match uart::write_arrival_event_async(&mut uart, &arrival).await {
                                 Ok(()) => {
@@ -152,26 +162,29 @@ async fn main(_spawner: Spawner) {
         }
 
         // Persist state if stop index changed and rate limit allows
-        if let Some(current_stop) = state.current_stop_index() {
-            if state.should_persist(current_stop) {
-                let ps = shared::PersistedState::new(state.kalman.s_cm, current_stop);
+        if let Some(current_stop) = system_state.current_stop_index() {
+            if system_state.should_persist(current_stop) {
+                let ps = shared::PersistedState::new(
+                    estimation_state.kalman.s_cm,
+                    current_stop
+                );
                 match persist::save(&mut flash, &ps).await {
                     Ok(()) => {
                         info!(
                             "Persisted state: stop={}, progress={}cm",
-                            current_stop, state.kalman.s_cm
+                            current_stop, estimation_state.kalman.s_cm
                         );
-                        state.mark_persisted(current_stop);
+                        system_state.mark_persisted(current_stop);
                     }
                     Err(()) => {
                         defmt::warn!("Failed to persist state to flash");
                         // S4 fix: increment on failure to prevent retry loop
-                        state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
+                        system_state.ticks_since_persist = system_state.ticks_since_persist.saturating_add(1);
                     }
                 }
             } else {
                 // Increment tick counter for rate limiting
-                state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
+                system_state.ticks_since_persist = system_state.ticks_since_persist.saturating_add(1);
             }
         }
 
