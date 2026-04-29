@@ -753,4 +753,21 @@ impl<'a> State<'a> {
         }
         self.last_known_stop_index = stop_index;  // C3 fix: update tracking to persisted value
     }
+
+    /// Check if estimation is ready (affects heading filter, Kalman)
+    pub fn estimation_ready(&self) -> bool {
+        self.estimation_ready_ticks >= ESTIMATION_WARMUP_TICKS
+            || self.estimation_total_ticks >= ESTIMATION_TIMEOUT_TICKS
+    }
+
+    /// Check if detection is enabled (independent of estimation)
+    pub fn detection_ready(&self) -> bool {
+        self.detection_enabled_ticks >= DETECTION_WARMUP_TICKS
+            || self.detection_total_ticks >= DETECTION_TIMEOUT_TICKS
+    }
+
+    /// Check if heading filter should be disabled
+    pub fn disable_heading_filter(&self) -> bool {
+        self.first_fix || !self.estimation_ready()
+    }
 }
