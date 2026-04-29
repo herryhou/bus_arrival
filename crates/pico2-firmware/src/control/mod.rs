@@ -368,6 +368,62 @@ impl<'a> SystemState<'a> {
 
         None
     }
+
+    /// Check if estimation is ready (affects heading filter, Kalman)
+    pub fn estimation_ready(&self) -> bool {
+        self.estimation_ready_ticks >= 3 || self.estimation_total_ticks >= 10
+    }
+
+    /// Check if detection is enabled (independent of estimation)
+    pub fn detection_ready(&self) -> bool {
+        self.detection_enabled_ticks >= 3 || self.detection_total_ticks >= 10
+    }
+
+    /// Check if heading filter should be disabled
+    pub fn disable_heading_filter(&self) -> bool {
+        self.first_fix || !self.estimation_ready()
+    }
+
+    /// Find closest stop index to current position
+    pub fn find_closest_stop_index(&self, s_cm: DistCm) -> u8 {
+        let mut closest_idx = 0;
+        let mut closest_dist = i32::MAX;
+
+        for i in 0..self.route_data.stop_count {
+            if let Some(stop) = self.route_data.get_stop(i) {
+                let dist = (s_cm - stop.progress_cm).abs();
+                if dist < closest_dist {
+                    closest_dist = dist;
+                    closest_idx = i;
+                }
+            }
+        }
+
+        closest_idx as u8
+    }
+
+    /// Find closest stop index in forward direction only
+    ///
+    /// Searches from last_idx to end of route only. This prevents
+    /// selecting stops behind the current position, which is important
+    /// after off-route snap re-entry.
+    pub fn find_forward_closest_stop_index(&self, s_cm: DistCm, last_idx: u8) -> u8 {
+        let mut best_idx = last_idx;
+        let mut best_dist = i32::MAX;
+
+        // Only search forward: from last_idx to end of route
+        for i in last_idx as usize..self.route_data.stop_count {
+            if let Some(stop) = self.route_data.get_stop(i) {
+                let dist = (s_cm - stop.progress_cm).abs();
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_idx = i as u8;
+                }
+            }
+        }
+
+        best_idx
+    }
 }
 
 /// Enforce hard monotonic invariant at system boundary.
