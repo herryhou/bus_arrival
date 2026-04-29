@@ -278,15 +278,88 @@ impl<'a> SystemState<'a> {
         let input = EstimationInput {
             gps: gps.clone(),
             route_data: self.route_data,
-            is_first_fix: false,  // TODO: track first fix
+            is_first_fix: self.first_fix,
         };
         let est = crate::estimation::estimate(input, est_state);
 
         // Handle GPS outage
         if !est.has_fix {
-            // TODO: handle outage
+            // Reset warmup on GPS loss (conservative - requires fresh warmup after outage)
+            if !self.first_fix {
+                self.estimation_ready_ticks = 0;
+                self.estimation_total_ticks = 0;
+                self.detection_enabled_ticks = 0;
+                self.detection_total_ticks = 0;
+                self.just_reset = true;
+                #[cfg(feature = "firmware")]
+                defmt::debug!("GPS outage reset warmup counters");
+            }
             return None;
         }
+
+        // Handle first fix
+        if self.first_fix {
+            self.first_fix = false;
+            // First fix initializes Kalman but doesn't run update_adaptive
+            // Counts toward timeout but NOT convergence
+            self.estimation_total_ticks = 1;
+            self.detection_total_ticks = 1;
+            self.last_gps_timestamp = gps.timestamp;
+
+            // Apply persisted state if valid and within 500m threshold
+            if let Some(ps) = self.pending_persisted.take() {
+                let delta_cm = if est.s_cm >= ps.last_progress_cm {
+                    est.s_cm - ps.last_progress_cm
+                } else {
+                    ps.last_progress_cm - est.s_cm
+                };
+
+                if delta_cm <= 50_000 {
+                    // Within 500m: trust persisted stop index
+                    self.apply_persisted_stop_index(ps.last_stop_index);
+                    #[cfg(feature = "firmware")]
+                    defmt::info!(
+                        "Applied persisted state: stop={}, delta={}cm",
+                        ps.last_stop_index,
+                        delta_cm
+                    );
+                } else {
+                    #[cfg(feature = "firmware")]
+                    defmt::warn!(
+                        "Persisted state too stale: delta={}cm > 500m, ignoring",
+                        delta_cm
+                    );
+                }
+            }
+
+            return None;
+        }
+
+        // Handle just_reset state
+        if self.just_reset {
+            // After warmup reset (e.g., GPS outage), first tick counts as first fix
+            self.just_reset = false;
+            self.estimation_total_ticks = 1;
+            self.detection_total_ticks = 1;
+            return None;
+        }
+
+        // Increment total time counters
+        self.estimation_total_ticks = self.estimation_total_ticks.saturating_add(1);
+        self.detection_total_ticks = self.detection_total_ticks.saturating_add(1);
+
+        // Update estimation readiness (until ready)
+        if !self.estimation_ready() {
+            self.estimation_ready_ticks += 1;
+        }
+
+        // Update detection readiness (until ready, independent of estimation)
+        if !self.detection_ready() {
+            self.detection_enabled_ticks += 1;
+        }
+
+        // Update last GPS timestamp for recovery dt calculation
+        self.last_gps_timestamp = gps.timestamp;
 
         // STEP 1.5: Enforce monotonic invariant
         // CRITICAL: Use current_position() to get mode-specific position
@@ -383,7 +456,10 @@ impl<'a> SystemState<'a> {
 
         // STEP 4: Detection (ONLY in Normal mode)
         if self.mode == SystemMode::Normal {
-            return self.run_detection(&est, s_cm_for_detection, gps.timestamp);
+            // Block detection unless ready
+            if self.detection_ready() {
+                return self.run_detection(&est, s_cm_for_detection, gps.timestamp);
+            }
         }
 
         None
@@ -537,6 +613,21 @@ impl<'a> SystemState<'a> {
         }
 
         closest_idx as u8
+    }
+
+    /// Apply persisted stop index by marking all prior stops as Departed.
+    ///
+    /// This prevents the corridor filter from re-triggering stops that
+    /// were already passed before the reboot.
+    fn apply_persisted_stop_index(&mut self, stop_index: u8) {
+        use shared::FsmState;
+
+        for i in 0..stop_index.min(self.stop_states.len() as u8) as usize {
+            self.stop_states[i].fsm_state = FsmState::Departed;
+            self.stop_states[i].announced = true;
+            self.stop_states[i].last_announced_stop = i as u8;  // I3 fix
+        }
+        self.last_stop_index = stop_index;
     }
 
     /// Find closest stop index in forward direction only
