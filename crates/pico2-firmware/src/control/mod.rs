@@ -680,6 +680,50 @@ impl<'a> SystemState<'a> {
 
         best_idx
     }
+
+    /// Returns true if state should be persisted this tick.
+    /// Writes when stop index changes, but no more than once per 60 seconds.
+    /// This rate limiting prevents excessive flash wear (~100k erase cycles).
+    pub fn should_persist(&self, current_stop: u8) -> bool {
+        // M5: Gate persistence during off-route/suspect states
+        // Don't persist if position is frozen (off-route or suspect)
+        if self.frozen_s_cm.is_some() {
+            return false;
+        }
+
+        // Don't persist if in suspect state
+        if self.off_route_suspect_ticks > 0 {
+            return false;
+        }
+
+        // Only persist when stop index actually changes
+        if current_stop == self.last_persisted_stop {
+            return false;
+        }
+
+        // Rate limit: no more than once per 60 seconds (60 ticks at 1Hz)
+        if self.ticks_since_persist < 60 {
+            return false;
+        }
+
+        true
+    }
+
+    /// Mark state as persisted, resetting the rate-limit counter.
+    pub fn mark_persisted(&mut self, stop_index: u8) {
+        self.last_persisted_stop = stop_index;
+        self.ticks_since_persist = 0;
+    }
+
+    /// Get the current stop index from last_stop_index.
+    /// Returns None if not yet initialized.
+    pub fn current_stop_index(&self) -> Option<u8> {
+        if self.first_fix {
+            None
+        } else {
+            Some(self.last_stop_index)
+        }
+    }
 }
 
 /// Enforce hard monotonic invariant at system boundary.
