@@ -391,23 +391,117 @@ impl<'a> SystemState<'a> {
 
     /// Run arrival detection (Normal mode only)
     fn run_detection(&mut self, est: &EstimationOutput, s_cm: DistCm, timestamp: u64) -> Option<ArrivalEvent> {
-        use crate::detection;
-        use shared::PositionSignals;
+        use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
+        use detection::state_machine::StopEvent;
 
         // Create position signals for detection
-        let signals = PositionSignals {
+        let signals = shared::PositionSignals {
             z_gps_cm: est.z_gps_cm,
             s_cm: est.s_cm,
         };
 
         // Find active stops (corridor filter)
-        let active_indices = detection::find_active_stops(signals, self.route_data);
+        let active_indices = find_active_stops(signals, self.route_data);
 
-        // TODO: Implement detection FSM when stop_states are integrated
-        // For now, return None to indicate no events
-        let _ = active_indices;
-        let _ = s_cm;
-        let _ = timestamp;
+        // Update state machine for each active stop
+        for stop_idx in active_indices {
+            if stop_idx >= self.stop_states.len() {
+                continue;
+            }
+
+            let stop = match self.route_data.get_stop(stop_idx) {
+                Some(s) => s,
+                None => continue,
+            };
+            let stop_state = &mut self.stop_states[stop_idx];
+
+            // Get next sequential stop for adaptive weights
+            let next_stop_idx = stop_idx.checked_add(1);
+            let next_stop_value = next_stop_idx.and_then(|idx| self.route_data.get_stop(idx));
+            let next_stop = next_stop_value.as_ref();
+
+            // Determine GPS status for probability computation
+            use crate::detection::GpsStatus;
+            let gps_status = GpsStatus::Valid;  // In Normal mode, GPS is valid
+
+            // Compute arrival probability with adaptive weights
+            let probability = compute_arrival_probability_adaptive(
+                signals,
+                est.v_cms,
+                &stop,
+                stop_state.dwell_time_s,
+                gps_status,
+                next_stop,
+            );
+
+            // Update state machine FIRST
+            let event = stop_state.update(
+                s_cm,
+                est.v_cms,
+                stop.progress_cm,
+                stop.corridor_start_cm,
+                probability,
+            );
+
+            // THEN check for announcement trigger
+            if stop_state.should_announce(s_cm, stop.corridor_start_cm) {
+                #[cfg(feature = "firmware")]
+                defmt::info!(
+                    "Announcement for stop {}: s={}cm, v={}cm/s",
+                    stop_idx,
+                    s_cm,
+                    est.v_cms
+                );
+                return Some(ArrivalEvent {
+                    time: timestamp,
+                    stop_idx: stop_idx as u8,
+                    s_cm,
+                    v_cms: est.v_cms,
+                    probability: 0,
+                    event_type: shared::ArrivalEventType::Announce,
+                });
+            }
+
+            // Check for arrival/departure events
+            match event {
+                StopEvent::Arrived => {
+                    #[cfg(feature = "firmware")]
+                    defmt::info!(
+                        "Arrival at stop {}: s={}cm, v={}cm/s, p={}",
+                        stop_idx,
+                        s_cm,
+                        est.v_cms,
+                        probability
+                    );
+                    return Some(ArrivalEvent {
+                        time: timestamp,
+                        stop_idx: stop_idx as u8,
+                        s_cm,
+                        v_cms: est.v_cms,
+                        probability,
+                        event_type: shared::ArrivalEventType::Arrival,
+                    });
+                }
+                StopEvent::Departed => {
+                    #[cfg(feature = "firmware")]
+                    defmt::info!(
+                        "Departure from stop {}: s={}cm, v={}cm/s",
+                        stop_idx,
+                        s_cm,
+                        est.v_cms
+                    );
+                    return Some(ArrivalEvent {
+                        time: timestamp,
+                        stop_idx: stop_idx as u8,
+                        s_cm,
+                        v_cms: est.v_cms,
+                        probability,
+                        event_type: shared::ArrivalEventType::Departure,
+                    });
+                }
+                StopEvent::None => {}
+            }
+        }
 
         None
     }
