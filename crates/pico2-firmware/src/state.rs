@@ -14,7 +14,7 @@ use shared::{
 
 // ===== Constants =====
 
-/// Number of GPS ticks required after first fix before arrival detection is enabled.
+/// Number of valid GPS ticks required after first fix before arrival detection is enabled.
 ///
 /// This warmup period allows the Kalman filter to converge to stable position and velocity
 /// estimates. The Kalman filter requires multiple measurements to initialize its covariance
@@ -23,10 +23,23 @@ use shared::{
 /// The value 3 represents approximately 3 seconds at 1 Hz GPS update rate, which empirical
 /// testing shows is sufficient for the filter to reach acceptable convergence in typical
 /// urban canyon conditions.
-const WARMUP_TICKS_REQUIRED: u8 = 3;
 
-/// Maximum warmup duration before timeout safety valve (10 seconds)
-/// Matches DR outage tolerance - both counters reset on Outage
+// ===== Estimation Readiness =====
+/// Valid GPS ticks required for estimation to be ready (affects heading filter, Kalman)
+const ESTIMATION_WARMUP_TICKS: u8 = 3;
+/// Maximum ticks before estimation timeout safety valve
+const ESTIMATION_TIMEOUT_TICKS: u8 = 10;
+
+// ===== Detection Gating =====
+/// Valid ticks required for detection to be enabled
+const DETECTION_WARMUP_TICKS: u8 = 3;
+/// Maximum ticks before detection timeout safety valve
+const DETECTION_TIMEOUT_TICKS: u8 = 10;
+
+// Legacy aliases for backward compatibility (deprecated)
+#[deprecated(note = "Use ESTIMATION_WARMUP_TICKS instead")]
+const WARMUP_TICKS_REQUIRED: u8 = 3;
+#[deprecated(note = "Use ESTIMATION_TIMEOUT_TICKS instead")]
 const WARMUP_TIMEOUT_TICKS: u8 = 10;
 
 // ===== State Struct =====
