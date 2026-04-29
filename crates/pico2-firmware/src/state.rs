@@ -435,22 +435,15 @@ impl<'a> State<'a> {
                     return None;
                 }
 
-                // Increment timeout counter but NOT valid counter (I5 fix)
+                // Increment timeout counters but NOT valid counters (I5 fix)
                 // Note: first_fix is already false after first GPS, so we don't need to check it
                 if !self.first_fix {
                     self.estimation_total_ticks = self.estimation_total_ticks.saturating_add(1);
+                    self.detection_total_ticks = self.detection_total_ticks.saturating_add(1);
                 }
 
-                // Block detection unless timeout expired
-                if self.estimation_total_ticks < WARMUP_TIMEOUT_TICKS {
-                    #[cfg(feature = "firmware")]
-                    defmt::debug!(
-                        "Warmup (DR): {}/{} valid, {}/{} total",
-                        self.estimation_ready_ticks,
-                        WARMUP_TICKS_REQUIRED,
-                        self.estimation_total_ticks,
-                        WARMUP_TIMEOUT_TICKS
-                    );
+                // Block detection unless ready
+                if !self.detection_ready() {
                     return None;
                 }
 
