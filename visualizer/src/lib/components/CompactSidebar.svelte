@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { TraceData, FsmState } from '$lib/types';
-	import { FSM_STATE_COLORS } from '$lib/constants/fsmColors';
+	import type { TraceData, FsmState } from "$lib/types";
+	import { FSM_STATE_COLORS } from "$lib/constants/fsmColors";
 
 	interface Props {
 		traceData: TraceData;
@@ -9,12 +9,24 @@
 		selectedStop: number | null;
 		onSeek: (time: number) => void;
 		onStopSelect: (idx: number) => void;
-		onEventClick?: (info: { time: number; stopIdx?: number; state?: FsmState }) => void;
+		onEventClick?: (info: {
+			time: number;
+			stopIdx?: number;
+			state?: FsmState;
+		}) => void;
 	}
 
-	let { traceData, currentTime, v_cms, selectedStop, onSeek, onStopSelect, onEventClick }: Props = $props();
+	let {
+		traceData,
+		currentTime,
+		v_cms,
+		selectedStop,
+		onSeek,
+		onStopSelect,
+		onEventClick,
+	}: Props = $props();
 
-	type EventType = 'JUMP' | 'RECOVERY' | 'TRANSITION' | 'ARRIVAL';
+	type EventType = "JUMP" | "RECOVERY" | "TRANSITION" | "ARRIVAL";
 
 	interface LogEvent {
 		time: number;
@@ -28,29 +40,37 @@
 	// Helper: Get event type label (3-char abbreviation)
 	function getEventTypeLabel(type: EventType): string {
 		switch (type) {
-			case 'ARRIVAL': return 'ARR';
-			case 'TRANSITION': return 'TRN';
-			case 'JUMP': return 'JMP';
-			case 'RECOVERY': return 'REC';
+			case "ARRIVAL":
+				return "ARR";
+			case "TRANSITION":
+				return "TRN";
+			case "JUMP":
+				return "JMP";
+			case "RECOVERY":
+				return "REC";
 		}
 	}
 
 	// Helper: Get event type color
 	function getEventTypeColor(type: EventType): string {
 		switch (type) {
-			case 'ARRIVAL': return '#22c55e';
-			case 'TRANSITION': return '#eab308';
-			case 'JUMP': return '#ef4444';
-			case 'RECOVERY': return '#f59e0b';
+			case "ARRIVAL":
+				return "#22c55e";
+			case "TRANSITION":
+				return "#eab308";
+			case "JUMP":
+				return "#ef4444";
+			case "RECOVERY":
+				return "#f59e0b";
 		}
 	}
 
 	// Helper: Format event time (locale-independent)
 	function formatEventTime(seconds: number): string {
 		const date = new Date(seconds * 1000);
-		const hh = String(date.getHours()).padStart(2, '0');
-		const mm = String(date.getMinutes()).padStart(2, '0');
-		const ss = String(date.getSeconds()).padStart(2, '0');
+		const hh = String(date.getHours()).padStart(2, "0");
+		const mm = String(date.getMinutes()).padStart(2, "0");
+		const ss = String(date.getSeconds()).padStart(2, "0");
 		return `${hh}:${mm}:${ss}`;
 	}
 
@@ -75,26 +95,27 @@
 	function handleEventRowClick(event: LogEvent) {
 		highlightedEventTime = event.time;
 		onSeek(event.time);
-		const eventState = event.state || (event.type === 'ARRIVAL' ? 'AtStop' : undefined);
+		const eventState =
+			event.state || (event.type === "ARRIVAL" ? "AtStop" : undefined);
 		if (event.stopIdx !== undefined && eventState) {
 			onEventClick?.({
 				time: event.time,
 				stopIdx: event.stopIdx,
-				state: eventState
+				state: eventState,
 			});
 		}
 	}
 
 	// Helper: Format probability value (0-255) as padded string
 	function formatProb(value: number): string {
-		return Math.round(value).toString().padStart(3, '0');
+		return Math.round(value).toString().padStart(3, "0");
 	}
 
 	// Helper: Get probability color
 	function getProbColor(prob: number): string {
-		if (prob >= PROB_HIGH_THRESHOLD) return '#22c55e';
-		if (prob >= PROB_MED_THRESHOLD) return '#f59e0b';
-		return '#ef4444';
+		if (prob >= PROB_HIGH_THRESHOLD) return "#22c55e";
+		if (prob >= PROB_MED_THRESHOLD) return "#f59e0b";
+		return "#ef4444";
 	}
 
 	// Derived: Events list
@@ -108,9 +129,9 @@
 			if (record.gps_jump) {
 				log.push({
 					time: record.time,
-					type: 'JUMP',
+					type: "JUMP",
 					message: `GPS Jump: dist > 200m`,
-					index: index++
+					index: index++,
 				});
 			}
 
@@ -118,9 +139,9 @@
 			if (record.recovery_idx !== null) {
 				log.push({
 					time: record.time,
-					type: 'RECOVERY',
+					type: "RECOVERY",
 					message: `Recovery: stop ${record.recovery_idx}`,
-					index: index++
+					index: index++,
 				});
 			}
 
@@ -134,15 +155,16 @@
 				// Only log transition if NOT redundant with arrival
 				// (TRANSITION to AtStop is redundant when ARRIVAL also occurs)
 				if (lastState && lastState !== stop.fsm_state) {
-					const isRedundant = hasArrival && stop.fsm_state === 'AtStop';
+					const isRedundant =
+						hasArrival && stop.fsm_state === "AtStop";
 					if (!isRedundant) {
 						log.push({
 							time: record.time,
-							type: 'TRANSITION',
+							type: "TRANSITION",
 							message: `Stop ${stop.stop_idx}`,
 							stopIdx: stop.stop_idx,
 							state: stop.fsm_state,
-							index: index++
+							index: index++,
 						});
 					}
 				}
@@ -151,11 +173,11 @@
 				if (stop.just_arrived) {
 					log.push({
 						time: record.time,
-						type: 'ARRIVAL',
+						type: "ARRIVAL",
 						message: `Stop ${stop.stop_idx}: ARRIVED`,
 						stopIdx: stop.stop_idx,
-						state: 'AtStop',
-						index: index++
+						state: "AtStop",
+						index: index++,
 					});
 				}
 			});
@@ -172,7 +194,10 @@
 	let currentRecord = $derived.by(() => {
 		if (traceData.length === 0) return null;
 		return traceData.reduce((prev, curr) =>
-			Math.abs(curr.time - currentTime) < Math.abs(prev.time - currentTime) ? curr : prev
+			Math.abs(curr.time - currentTime) <
+			Math.abs(prev.time - currentTime)
+				? curr
+				: prev,
 		);
 	});
 
@@ -199,15 +224,22 @@
 					onclick={() => handleEventRowClick(event)}
 					data-type={event.type}
 				>
-					<span class="event-time">{formatEventTime(event.time)}</span>
-					<span class="event-type-badge" style="color: {getEventTypeColor(event.type)};">
+					<span class="event-time">{formatEventTime(event.time)}</span
+					>
+					<span
+						class="event-type-badge"
+						style="color: {getEventTypeColor(event.type)};"
+					>
 						{getEventTypeLabel(event.type)}
 					</span>
 					{#if event.stopIdx !== undefined}
 						<span class="event-stop">#{event.stopIdx + 1}</span>
 					{/if}
 					{#if event.state}
-						<span class="event-state" style="color: {FSM_STATE_COLORS[event.state]};">
+						<span
+							class="event-state"
+							style="color: {FSM_STATE_COLORS[event.state]};"
+						>
 							{event.state}
 						</span>
 					{/if}
@@ -228,18 +260,26 @@
 			<h4>All Stops Monitor</h4>
 			<span class="stops-count">{stopCount} active</span>
 		</div>
-	<div class="section-content">
+		<div class="section-content">
 			{#each allStopStates as stopState}
 				<div
 					class="stop-card-compact"
 					class:selected={selectedStop === stopState.stop_idx}
-					style="border-left-color: {FSM_STATE_COLORS[stopState.fsm_state]};"
+					style="border-left-color: {FSM_STATE_COLORS[
+						stopState.fsm_state
+					]};"
 					onclick={() => onStopSelect(stopState.stop_idx)}
 				>
 					<!-- Header: Stop # + State -->
 					<div class="stop-card-header">
-						<span class="stop-index">#{stopState.stop_idx + 1}</span>
-						<span class="stop-state-badge" style="color: {FSM_STATE_COLORS[stopState.fsm_state]};">
+						<span class="stop-index">#{stopState.stop_idx + 1}</span
+						>
+						<span
+							class="stop-state-badge"
+							style="color: {FSM_STATE_COLORS[
+								stopState.fsm_state
+							]};"
+						>
 							{stopState.fsm_state}
 						</span>
 					</div>
@@ -250,9 +290,17 @@
 						<div class="prob-gauge-compact">
 							<div
 								class="prob-bar"
-								style="width: {(stopState.probability / 255) * 100}%; background-color: {getProbColor(stopState.probability)};"
+								style="width: {(stopState.probability / 255) *
+									100}%; background-color: {getProbColor(
+									stopState.probability,
+								)};"
 							></div>
-							<span class="prob-val" style="color: {getProbColor(stopState.probability)};">
+							<span
+								class="prob-val"
+								style="color: {getProbColor(
+									stopState.probability,
+								)};"
+							>
 								{formatProb(stopState.probability)}
 							</span>
 						</div>
@@ -260,8 +308,14 @@
 
 					<!-- Metrics row -->
 					<div class="metrics-compact">
-						<span class="metric">dist: {Math.round(stopState.progress_distance_cm / 100)}m</span>
-						<span class="metric">dwell: {stopState.dwell_time_s}s</span>
+						<span class="metric"
+							>dist: {Math.round(
+								stopState.progress_distance_cm / 100,
+							)}m</span
+						>
+						<span class="metric"
+							>dwell: {stopState.dwell_time_s}s</span
+						>
 					</div>
 
 					<!-- Features inline -->
@@ -376,7 +430,7 @@
 	}
 
 	.event-time {
-		font-family: 'JetBrains Mono', monospace;
+		font-family: "JetBrains Mono", monospace;
 		color: #888;
 		min-width: 60px;
 		flex-shrink: 0;
@@ -393,7 +447,7 @@
 	}
 
 	.event-stop {
-		color: #3b82f6;
+		color: #6cabff;
 		font-weight: bold;
 		flex-shrink: 0;
 	}
@@ -489,7 +543,9 @@
 
 	.prob-bar {
 		height: 100%;
-		transition: width 0.3s, background-color 0.3s;
+		transition:
+			width 0.3s,
+			background-color 0.3s;
 	}
 
 	.prob-val {
@@ -534,7 +590,12 @@
 	}
 
 	@keyframes pulse {
-		0%, 100% { opacity: 1; }
-		50% { opacity: 0.7; }
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.7;
+		}
 	}
 </style>
