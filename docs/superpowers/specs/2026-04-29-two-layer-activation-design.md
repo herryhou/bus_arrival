@@ -7,7 +7,14 @@ The firmware codebase contains two divergent full-pipeline implementations:
 1. **OLD (active)**: `state.rs` - Monolithic `State::process_gps()` (770 lines)
 2. **NEW (dead code)**: `control/mod.rs` + `estimation/mod.rs` - Two-layer architecture
 
-The new v9.0 architecture exists but is never invoked from `main.rs`. The `SystemState::run_detection()` method is a TODO stub that unconditionally returns `None`. This design activates the new architecture while preserving all functionality.
+The new v9.0 architecture exists but is never invoked from `main.rs`. The `SystemState::run_detection()` method is a TODO stub that unconditionally returns `None`.
+
+This design activates the new architecture while preserving all functionality AND fixing known bugs identified in the code review (see `docs/claude_review.md`):
+- **C1**: Activate two-layer architecture (this design's primary goal)
+- **C2**: Add missing Kalman predict step
+- **I1**: Fix `is_first_fix` hardcoded to `false`
+- **I3**: Fix announcement guard inconsistency in stop state reset
+- **Missing snap signal**: Add `snapped` to `EstimationOutput`
 
 ## Goal
 
@@ -130,6 +137,67 @@ pub last_gps_timestamp: u64,                      // For recovery dt
 
 ## Implementation
 
+### Phase 0: Fix Estimation Layer Bugs
+
+**Before any migration work, fix bugs in the estimation layer:**
+
+**1. Add Kalman predict step (C2 fix)**
+
+File: `crates/pico2-firmware/src/estimation/kalman.rs` or `gps_processor/src/kalman.rs`
+
+The `update_adaptive()` method must predict position before updating:
+```rust
+// BEFORE update step, add predict step:
+let s_pred = self.s_cm + self.v_cms;  // Propagate velocity into position
+// Then use s_pred instead of self.s_cm in the innovation term
+let innovation = z_raw - s_pred;
+self.s_cm = s_pred + k_pos * innovation / 256;
+```
+
+Without this, velocity is never propagated into position prediction, causing systematic lag proportional to bus speed.
+
+**2. Add snapped signal to EstimationOutput**
+
+File: `crates/pico2-firmware/src/estimation/mod.rs`
+
+Add `snapped: bool` field to `EstimationOutput`:
+```rust
+pub struct EstimationOutput {
+    pub z_gps_cm: DistCm,
+    pub s_cm: DistCm,
+    pub v_cms: SpeedCms,
+    pub divergence_d2: Dist2,
+    pub confidence: u8,
+    pub has_fix: bool,
+    pub snapped: bool,  // NEW: true if map-matching snapped from off-route
+}
+```
+
+Set `snapped = true` when `find_best_segment_restricted()` returns a match after being off-route (i.e., when `divergence_d2` was high but is now low). The old `process_gps_update()` returns this via `ProcessResult::Valid { snapped, .. }`.
+
+**3. Track first fix state**
+
+File: `crates/pico2-firmware/src/estimation/mod.rs`
+
+Add `first_fix_called: bool` to `EstimationState`:
+```rust
+pub struct EstimationState {
+    pub kalman: KalmanState,
+    pub dr: DrState,
+    first_fix_called: bool,  // Track if estimate() has ever been called with valid fix
+}
+```
+
+In `estimate()`, check `first_fix_called` and pass to output:
+```rust
+let is_first_fix = !state.first_fix_called && input.gps.has_fix;
+if input.gps.has_fix {
+    state.first_fix_called = true;
+}
+// ... rest of estimate()
+// Return EstimationOutput with is_first_fix: is_first_fix (or derive from has_fix)
+```
+
 ### Phase 1: SystemState Structure
 
 Add missing fields to `SystemState` struct in `control/mod.rs`:
@@ -155,9 +223,19 @@ Implement `run_detection()` method:
 
 Implement `reset_stop_states_after_recovery()`:
 - Reset all stops to `Idle`
-- Mark stops before recovered index as `Departed` (preserve announced flag)
+- Mark stops before recovered index as `Departed`
+- Set both `announced = true` AND `last_announced_stop = i` for passed stops (I3 fix)
 - Set recovered stop to `Approaching` if within corridor
 - Preserve `announced` flag if stop was previously announced
+
+**I3 Fix:** The old code set `announced = true` without setting `last_announced_stop = i`, causing `should_announce()` to fire anyway. Fix both fields together:
+```rust
+for i in 0..recovered_idx.min(self.stop_states.len()) {
+    self.stop_states[i].fsm_state = FsmState::Departed;
+    self.stop_states[i].announced = true;
+    self.stop_states[i].last_announced_stop = i as u8;  // I3: was missing
+}
+```
 
 ### Phase 4: Helper Methods
 
@@ -175,7 +253,30 @@ Add warmup tracking to `SystemState::tick()`:
 - Track `detection_enabled_ticks` and `detection_total_ticks`
 - Reset counters on GPS outage (> 10 seconds)
 - Block detection until ready (3 ticks or 10 tick timeout)
-- Handle `first_fix` initialization
+- Handle `first_fix` initialization (I1 fix: track state, don't hardcode)
+
+**Warmup counter behavior (matching old state.rs):**
+- `estimation_ready_ticks`: increments ONLY when `estimate()` returns valid position (has_fix=true)
+- `estimation_total_ticks`: increments on all ticks including rejected/DR-outage (I5 fix)
+- `detection_enabled_ticks`: increments ONLY after `estimation_ready()` is true
+- `detection_total_ticks`: increments on all ticks for timeout safety valve
+
+**I1 Fix:** Remove hardcoded `is_first_fix: false`. Instead:
+```rust
+let input = EstimationInput {
+    gps: gps.clone(),
+    route_data: self.route_data,
+    is_first_fix: !self.first_fix,  // Use actual state
+};
+let est = crate::estimation::estimate(input, est_state);
+
+// After first successful fix:
+if self.first_fix && est.has_fix {
+    self.first_fix = false;
+    self.estimation_total_ticks = 1;
+    self.detection_total_ticks = 1;
+}
+```
 
 ### Phase 6: Stop State Reset Calls
 
@@ -194,10 +295,27 @@ Update `main.rs` to use new architecture:
 
 ### Phase 8: Snap Cooldown
 
-Add snap cooldown logic:
-- Set `just_snapped_ticks = 2` on successful off-route snap re-entry
+Add snap cooldown logic using `est.snapped` signal from Phase 0:
+- Check `est.snapped` after estimation returns
+- Set `just_snapped_ticks = 2` when `snapped == true`
 - Decrement counter each tick when > 0
 - Pass `in_snap_cooldown` flag to recovery logic to prevent false jump detection
+
+```rust
+// In tick(), after estimation:
+if self.just_snapped_ticks > 0 {
+    self.just_snapped_ticks -= 1;
+}
+let in_snap_cooldown = self.just_snapped_ticks > 0;
+
+if est.snapped && !in_snap_cooldown {
+    self.just_snapped_ticks = 2;
+    // Handle snap: find forward closest stop, reset states, clear recovery triggers
+    let new_idx = self.find_forward_closest_stop_index(est.s_cm, self.last_stop_index);
+    self.reset_stop_states_after_recovery(new_idx as usize, est.s_cm);
+    // ... clear recovery flags
+}
+```
 
 ### Phase 9: Testing
 
@@ -210,9 +328,21 @@ Add snap cooldown logic:
 ### Phase 10: Cleanup
 
 Once migration is verified working:
+
+**Immediate (same migration commit):**
 - Mark `state.rs` as deprecated with `#[allow(dead_code)]`
+- Add comment directing to `SystemState` as replacement
 - Document migration in commit message
-- Consider removing `state.rs` in future commit
+
+**Future cleanup (separate commit after verification period):**
+- Remove `state.rs` entirely
+- Remove old recovery: `pipeline/detection/src/recovery.rs` (duplicate of `crate::recovery`)
+- Remove unused types from `shared`:
+  - `FreezeContext` (only used by old recovery)
+  - Old `ProcessResult` enum (replaced by `EstimationOutput`)
+- Update any remaining references
+
+**Note:** `state.rs` contains `detection::recovery::find_stop_index` (old recovery) which uses `FreezeContext` - a type that doesn't exist in the new architecture. If `state.rs` is left alive, those types must stay in `shared`, creating cross-contamination. The cleanup plan must explicitly remove these types when `state.rs` is removed.
 
 ## Key Design Decisions
 
@@ -221,7 +351,8 @@ Once migration is verified working:
 3. **Estimation is pure** - No access to control layer state, deterministic output
 4. **Single transition per tick** - Prevents race conditions in mode changes
 5. **Detection blocked until ready** - 3 tick warmup or 10 tick timeout safety valve
-6. **Preserve exact behavior** - Match old implementation for warmup, recovery, persistence
+6. **Fix bugs during migration** - Don't copy forward C2, I1, I3, or missing snap signal
+7. **Preserve exact behavior** - Match old implementation for warmup, recovery, persistence (except where bugs are fixed)
 
 ## Testing Strategy
 
@@ -239,13 +370,20 @@ Once migration is verified working:
 4. Trace matches old implementation (within expected variance)
 5. No dead code warnings for `SystemState` and `estimate()`
 6. Old `state.rs` marked as deprecated
+7. **Bug fixes verified:**
+   - C2: Kalman predict step present in estimation layer
+   - I1: `is_first_fix` properly tracked (not hardcoded)
+   - I3: Announcement guards consistent in stop state reset
+   - Snap signal: `est.snapped` used for cooldown logic
 
 ## Files Modified
 
-- `crates/pico2-firmware/src/control/mod.rs` - Add detection integration and missing state
-- `crates/pico2-firmware/src/estimation/mod.rs` - Already complete (no changes)
-- `crates/pico2-firmware/src/main.rs` - Switch to new architecture
-- `crates/pico2-firmware/src/state.rs` - Mark deprecated (future: remove)
+- `crates/pico2-firmware/src/estimation/mod.rs` - Add `snapped` to EstimationOutput, track `first_fix_called` (Phase 0)
+- `crates/pico2-firmware/src/estimation/kalman.rs` or `gps_processor/src/kalman.rs` - Add predict step (C2 fix, Phase 0)
+- `crates/pico2-firmware/src/control/mod.rs` - Add detection integration and missing state (Phases 1-6, 8)
+- `crates/pico2-firmware/src/main.rs` - Switch to new architecture (Phase 7)
+- `crates/pico2-firmware/src/state.rs` - Mark deprecated (Phase 10)
+- `crates/pipeline/detection/src/recovery.rs` - Remove old recovery (Phase 10, future commit)
 
 ## References
 
@@ -254,3 +392,4 @@ Once migration is verified working:
 - New estimation layer: `crates/pico2-firmware/src/estimation/mod.rs`
 - Detection module: `crates/pico2-firmware/src/detection.rs`
 - Tech documentation: `docs/bus_arrival_tech_report_v8.md`
+- QA review: `docs/claude_review.md` - Contains C1-C8 and I1-I8 issues addressed in this design
