@@ -48,6 +48,8 @@ pub struct EstimationOutput {
     pub confidence: u8,
     /// Whether GPS has valid fix
     pub has_fix: bool,
+    /// True if map-matching snapped from off-route back to route
+    pub snapped: bool,
 }
 
 /// Isolated estimation pipeline
@@ -96,6 +98,15 @@ pub fn estimate(
         gps_x, gps_y, seg_idx, input.route_data
     );
 
+    // Detect snap: was previously off-route (high divergence) but now on-route
+    let was_off_route = state.dr.in_recovery;
+    let snapped = was_off_route && match_d2 < 25_000_000;  // 50m threshold
+
+    // Clear recovery flag when snap is detected
+    if snapped {
+        state.dr.in_recovery = false;
+    }
+
     // 4. Kalman filter
     let (s_cm, v_cms) = if input.is_first_fix {
         // First fix: initialize Kalman
@@ -136,6 +147,7 @@ pub fn estimate(
         divergence_d2: match_d2,
         confidence,
         has_fix: true,
+        snapped,
     }
 }
 
@@ -152,6 +164,7 @@ fn handle_outage(state: &mut EstimationState, timestamp: u64) -> EstimationOutpu
             divergence_d2: 0,
             confidence: 0,
             has_fix: false,
+            snapped: false,
         },
     };
 
@@ -164,6 +177,7 @@ fn handle_outage(state: &mut EstimationState, timestamp: u64) -> EstimationOutpu
             divergence_d2: 0,
             confidence: 0,
             has_fix: false,
+            snapped: false,
         };
     }
 
@@ -183,6 +197,7 @@ fn handle_outage(state: &mut EstimationState, timestamp: u64) -> EstimationOutpu
         divergence_d2: 0,
         confidence: 0,
         has_fix: false,
+        snapped: false,
     }
 }
 
