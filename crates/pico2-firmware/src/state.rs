@@ -2,6 +2,7 @@
 //!
 //! Manages the main state machine for processing GPS updates through
 //! the full arrival detection pipeline.
+#![deprecated(note = "Use control::SystemState + estimation::EstimationState instead")]
 #![allow(dead_code)]
 
 use crate::detection::{compute_arrival_probability_adaptive, find_active_stops};
@@ -72,6 +73,7 @@ const WARMUP_TIMEOUT_TICKS: u8 = 10;
 ///
 /// Dead-reckoning outages ([`ProcessResult::DrOutage`]) do NOT reset counters
 /// because DR mode maintains valid state estimates.
+#[deprecated(note = "Use control::SystemState instead")]
 pub struct State<'a> {
     pub nmea: gps_processor::nmea::NmeaState,
     pub kalman: KalmanState,
