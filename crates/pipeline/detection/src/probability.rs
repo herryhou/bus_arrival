@@ -1,4 +1,8 @@
-//! 4-feature Bayesian arrival probability model
+//! 4-feature weighted arrival probability model
+//!
+//! Uses weighted linear fusion of four feature likelihoods to compute
+//! arrival probability. Each feature is normalized to [0, 255] and
+//! combined using fixed weights that sum to 32.
 
 use shared::{DistCm, SpeedCms, Prob8};
 use core::cmp::Ord;

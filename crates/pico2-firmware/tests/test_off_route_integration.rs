@@ -1435,7 +1435,9 @@ fn test_off_route_then_long_gps_outage_then_recovery() {
     let _position_after_outage = state.last_valid_s_cm();
 
     // Process warmup ticks after GPS fix
-    for i in 0..4 {
+    // With new independent counters, detection becomes ready after 3 ticks
+    // First fix (just_reset) + 2 warmup ticks = 3 total ticks, detection ready
+    for i in 0..2 {
         let gps = gps_on_route_at_x(first_fix_timestamp + i, 4_000, 500);
         let event = state.process_gps(&gps);
 
@@ -1447,7 +1449,7 @@ fn test_off_route_then_long_gps_outage_then_recovery() {
         );
     }
 
-    // Now warmup is complete
+    // Now warmup is complete (detection_ready returns true)
     // Position may have changed due to new GPS fix at different location
     let _position_after_warmup = state.last_valid_s_cm();
 

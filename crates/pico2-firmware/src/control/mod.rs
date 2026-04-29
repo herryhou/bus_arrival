@@ -39,6 +39,10 @@ pub struct SystemState<'a> {
     pub last_persisted_stop: u8,
     /// Ticks since last persist operation
     pub ticks_since_persist: u16,
+    /// Previous position for monotonic checking
+    pub last_s_cm: DistCm,
+    /// Counter for backward jump events (GPS health monitoring)
+    pub backward_jump_count: u32,
 }
 
 impl<'a> SystemState<'a> {
@@ -56,9 +60,19 @@ impl<'a> SystemState<'a> {
             pending_persisted: persisted,
             last_persisted_stop: persisted.map(|p| p.last_stop_index).unwrap_or(0),
             ticks_since_persist: 0,
+            last_s_cm: 0,
+            backward_jump_count: 0,
         }
     }
 
+    /// Returns the single authoritative position for the current mode.
+    ///
+    /// # Spatial Contract
+    /// - Normal: Kalman-filtered position (`est.s_cm`)
+    /// - OffRoute: Frozen position from entry (`self.frozen_s_cm`)
+    /// - Recovering: Raw GPS projection (`est.z_gps_cm`)
+    ///
+    /// This is the ONLY function that should be used to query "where are we?"
     pub fn current_position(&self, est: &EstimationOutput) -> DistCm {
         match self.mode {
             SystemMode::Normal => est.s_cm,
@@ -98,6 +112,7 @@ impl<'a> SystemState<'a> {
         self.frozen_s_cm = None;
         self.recovering_since = None;
         self.recovery_failed = false;
+        self.last_s_cm = s_cm;
 
         // TODO: Reset stop states when detection layer is integrated
     }
@@ -172,9 +187,10 @@ impl<'a> SystemState<'a> {
     ///
     /// # Responsibilities
     /// 1. Call isolated estimation layer
-    /// 2. Execute state machine transitions
-    /// 3. Run detection (only in Normal mode)
-    /// 4. Emit events
+    /// 2. Enforce monotonic invariant at system boundary
+    /// 3. Execute state machine transitions
+    /// 4. Run detection (only in Normal mode)
+    /// 5. Emit events
     ///
     /// # Invariants
     /// - Recovery ONLY runs in Recovering mode
@@ -194,6 +210,21 @@ impl<'a> SystemState<'a> {
             // TODO: handle outage
             return None;
         }
+
+        // STEP 1.5: Enforce monotonic invariant
+        // CRITICAL: Use current_position() to get mode-specific position
+        // Normal → est.s_cm, Recovering → est.z_gps_cm, OffRoute → frozen_s_cm
+        let s_raw = self.current_position(&est);
+        let (s_cm_for_detection, did_jump) = if self.last_s_cm == 0 {
+            // First fix: skip check, initialize directly
+            (s_raw, false)
+        } else {
+            enforce_monotonic(s_raw, self.last_s_cm, self.mode)
+        };
+        if did_jump {
+            self.backward_jump_count += 1;
+        }
+        self.last_s_cm = s_cm_for_detection;
 
         // STEP 2: State machine transitions (unified triggers)
         let old_mode = self.mode;
@@ -266,7 +297,7 @@ impl<'a> SystemState<'a> {
         // STEP 3: Recovery (ONLY in Recovering mode)
         if self.mode == SystemMode::Recovering {
             if let Some(idx) = self.attempt_recovery(&est, gps.timestamp) {
-                self.recovery_success(idx, est.s_cm);
+                self.recovery_success(idx, s_cm_for_detection);
                 // Continue to detection
             } else {
                 return None;  // Recovery failed, stay in Recovering
@@ -275,19 +306,16 @@ impl<'a> SystemState<'a> {
 
         // STEP 4: Detection (ONLY in Normal mode)
         if self.mode == SystemMode::Normal {
-            return self.run_detection(&est, gps.timestamp);
+            return self.run_detection(&est, s_cm_for_detection, gps.timestamp);
         }
 
         None
     }
 
     /// Run arrival detection (Normal mode only)
-    fn run_detection(&mut self, est: &EstimationOutput, timestamp: u64) -> Option<ArrivalEvent> {
+    fn run_detection(&mut self, est: &EstimationOutput, s_cm: DistCm, timestamp: u64) -> Option<ArrivalEvent> {
         use crate::detection;
         use shared::PositionSignals;
-
-        // Get current position
-        let s_cm = self.current_position(est);
 
         // Create position signals for detection
         let signals = PositionSignals {
@@ -305,5 +333,84 @@ impl<'a> SystemState<'a> {
         let _ = timestamp;
 
         None
+    }
+}
+
+/// Enforce hard monotonic invariant at system boundary.
+///
+/// # Returns
+/// * (s_cm, false) - position is valid, use as-is
+/// * (s_prev, true) - backward jump detected, clamped to previous
+///
+/// # Mode behavior
+/// * Normal: strict monotonic (s_new >= s_prev)
+/// * Recovering: allow backward (re-localization may need it)
+/// * OffRoute: frozen (returns s_prev, no jump counted)
+pub fn enforce_monotonic(
+    s_new: DistCm,
+    s_prev: DistCm,
+    mode: SystemMode,
+) -> (DistCm, bool) {
+    match mode {
+        SystemMode::Normal => {
+            if s_new < s_prev {
+                (s_prev, true)
+            } else {
+                (s_new, false)
+            }
+        }
+        SystemMode::Recovering => {
+            (s_new, false)
+        }
+        SystemMode::OffRoute => {
+            (s_prev, false)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_enforce_monotonic_normal_forward() {
+        let (s_cm, did_jump) = enforce_monotonic(10500, 10000, SystemMode::Normal);
+        assert_eq!(s_cm, 10500);
+        assert!(!did_jump);
+    }
+
+    #[test]
+    fn test_enforce_monotonic_normal_backward_jump() {
+        let (s_cm, did_jump) = enforce_monotonic(9800, 10500, SystemMode::Normal);
+        assert_eq!(s_cm, 10500);
+        assert!(did_jump);
+    }
+
+    #[test]
+    fn test_enforce_monotonic_normal_exact_equality() {
+        let (s_cm, did_jump) = enforce_monotonic(10000, 10000, SystemMode::Normal);
+        assert_eq!(s_cm, 10000);
+        assert!(!did_jump);
+    }
+
+    #[test]
+    fn test_enforce_monotonic_recovering_backward_allowed() {
+        let (s_cm, did_jump) = enforce_monotonic(9500, 10500, SystemMode::Recovering);
+        assert_eq!(s_cm, 9500);
+        assert!(!did_jump);
+    }
+
+    #[test]
+    fn test_enforce_monotonic_recovering_forward() {
+        let (s_cm, did_jump) = enforce_monotonic(11000, 10500, SystemMode::Recovering);
+        assert_eq!(s_cm, 11000);
+        assert!(!did_jump);
+    }
+
+    #[test]
+    fn test_enforce_monotonic_offroute_frozen() {
+        let (s_cm, did_jump) = enforce_monotonic(11000, 10000, SystemMode::OffRoute);
+        assert_eq!(s_cm, 10000);
+        assert!(!did_jump);
     }
 }

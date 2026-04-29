@@ -216,7 +216,7 @@ make clean              # Clean build artifacts
 - **Route Map** - Interactive map with route line and stop markers
 - **Timeline Charts** - Speed, probability, and distance over time
 - **FSM Inspector** - State machine details per stop
-- **Feature Breakdown** - Bayesian probability feature scores (p1-p4)
+- **Feature Breakdown** - weighted probability feature scores (p1-p4)
 
 ## Development
 
