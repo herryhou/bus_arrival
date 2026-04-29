@@ -258,6 +258,7 @@ impl<'a> State<'a> {
                     // First fix initializes Kalman but doesn't run update_adaptive
                     // Counts toward timeout but NOT convergence
                     self.estimation_total_ticks = 1;
+                    self.detection_total_ticks = 1;
                     self.last_valid_s_cm = s_cm;  // C1 fix: initialize to prevent false jump detection on tick 2
 
                     // Apply persisted state if valid and within 500m threshold

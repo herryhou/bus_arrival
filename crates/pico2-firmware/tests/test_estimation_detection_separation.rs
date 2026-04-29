@@ -87,3 +87,39 @@ fn test_disable_heading_filter_helper() {
     state.estimation_ready_ticks = 3;
     assert!(!state.disable_heading_filter(), "After estimation ready heading filter should be enabled");
 }
+
+#[test]
+fn test_first_fix_initializes_both_total_counters() {
+    let route_bytes =
+        fs::read("../../test_data/ty225_normal.bin").expect("Failed to load ty225_normal.bin");
+    let route_data =
+        shared::binfile::RouteData::load(&route_bytes).expect("Failed to parse ty225_normal.bin");
+
+    let mut state = State::new(&route_data, None);
+
+    // Initial state
+    assert!(state.first_fix);
+    assert_eq!(state.estimation_ready_ticks, 0);
+    assert_eq!(state.estimation_total_ticks, 0);
+    assert_eq!(state.detection_enabled_ticks, 0);
+    assert_eq!(state.detection_total_ticks, 0);
+
+    // First fix
+    let gps = shared::GpsPoint {
+        lat: 0.0,
+        lon: 0.0,
+        heading_cdeg: i16::MIN,
+        speed_cms: 500,
+        timestamp: 1000,
+        has_fix: true,
+        hdop_x10: 10,
+    };
+    state.process_gps(&gps);
+
+    // After first fix: total counters = 1, valid counters = 0
+    assert!(!state.first_fix, "first_fix should be false");
+    assert_eq!(state.estimation_ready_ticks, 0, "Valid ticks should still be 0");
+    assert_eq!(state.estimation_total_ticks, 1, "Total ticks should be 1");
+    assert_eq!(state.detection_enabled_ticks, 0, "Detection valid should still be 0");
+    assert_eq!(state.detection_total_ticks, 1, "Detection total should be 1");
+}
