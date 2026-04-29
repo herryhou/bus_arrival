@@ -396,10 +396,11 @@ impl<'a> State<'a> {
                 #[cfg(not(feature = "firmware"))]
                 let _ = reason; // Suppress unused warning when firmware feature is disabled
 
-                // Increment timeout counter even on rejection (I5 fix)
+                // Increment timeout counters even on rejection (I5 fix)
                 // This prevents permanent stuck state when GPS is repeatedly rejected
                 if !self.first_fix {
                     self.estimation_total_ticks = self.estimation_total_ticks.saturating_add(1);
+                    self.detection_total_ticks = self.detection_total_ticks.saturating_add(1);
                 }
 
                 return None; // Still block detection
