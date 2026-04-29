@@ -16,6 +16,7 @@ pub use dr::DrState;
 pub struct EstimationState {
     pub kalman: KalmanState,
     pub dr: DrState,
+    first_fix_called: bool,  // track if estimate() has ever been called with valid fix
 }
 
 impl EstimationState {
@@ -23,6 +24,7 @@ impl EstimationState {
         Self {
             kalman: KalmanState::new(),
             dr: DrState::new(),
+            first_fix_called: false,
         }
     }
 }
@@ -69,6 +71,12 @@ pub fn estimate(
 ) -> EstimationOutput {
     use gps_processor::map_match;
 
+    // Track first fix
+    let is_first_fix = !state.first_fix_called && input.gps.has_fix;
+    if input.gps.has_fix {
+        state.first_fix_called = true;
+    }
+
     // Check for GPS outage
     if !input.gps.has_fix {
         return handle_outage(state, input.gps.timestamp);
@@ -82,7 +90,7 @@ pub fn estimate(
     );
 
     // 2. Map matching
-    let use_relaxed_heading = input.is_first_fix || state.dr.in_recovery;
+    let use_relaxed_heading = is_first_fix || state.dr.in_recovery;
     let (seg_idx, match_d2) = map_match::find_best_segment_restricted(
         gps_x,
         gps_y,
@@ -108,7 +116,7 @@ pub fn estimate(
     }
 
     // 4. Kalman filter
-    let (s_cm, v_cms) = if input.is_first_fix {
+    let (s_cm, v_cms) = if is_first_fix {
         // First fix: initialize Kalman
         state.kalman.s_cm = z_raw;
         let v_gps = input.gps.speed_cms.max(0).min(1667);
