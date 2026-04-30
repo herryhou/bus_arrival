@@ -811,8 +811,18 @@ function simulate(route, cfg) {
           emitStatic([toLat, toLon], leg3Bearing, false);
         }
 
-        // Skip all segments until we reach detour end stop
-        // Continue will skip to next iteration, detourActive flag handles the rest
+        // Jump to the segment that leads to detour end stop
+        // Since we've already generated GPS to detourToStop's location,
+        // we need to find the segment index where stopIndexMap[si] === detourToStop
+        // and continue processing from there.
+        while (si < segs.length - 1 && stopIndexMap[si] !== detourToStop) {
+          si++;
+        }
+        // Clear detourActive flag since we've jumped to the target segment
+        detourActive = false;
+        detourCompleted = true;
+        console.log(`Detour GPS completed, jumped to segment ${si} leading to stop ${detourToStop}`);
+        // Continue processing from the segment that leads to detour end stop
         continue;
       }
     }
