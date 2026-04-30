@@ -805,8 +805,11 @@ function simulate(route, cfg) {
         console.log(`Detour duration: ${offRouteDuration}s`);
         groundTruth.push({ stop_idx: detourToStop, lat: toLat, lon: toLon, timestamp: ts, phase: 'detour_end', event: 're_acquisition', off_route_duration_s: offRouteDuration });
 
-        // Add dwell time at detour end to ensure arrival detection
+        // Add normal stop entry for detourToStop (stop 6 dwell)
+        // This ensures stop 6 gets its normal arrival/dwell processing after detour_end
         const detourEndDwell = 8;
+        const dwell = detourEndDwell; // Use fixed dwell for detour end
+        groundTruth.push({ stop_idx: detourToStop, seg_idx: si, timestamp: ts, dwell_s: dwell });
         for (let t = 0; t < detourEndDwell; t++) {
           emitStatic([toLat, toLon], leg3Bearing, false);
         }
