@@ -116,14 +116,15 @@ fn test_normal_status_transitions() {
 
     println!("Status transition validation:");
     println!("  DR outage periods: {}", dr_outage_count);
-    println!("  Expected: ~250 (M1: SuspectOffRoute affects classification)");
+    println!("  Expected: ~140-160 (genuine GPS rejections: speed/monotonic constraints)");
     println!("  Invalid transitions: {}", invalid_transitions);
     println!("  DR outages with heading_constraint_met=true: {}", dr_outage_without_heading_constraint);
 
-    // M1 fix: SuspectOffRoute variant changes status classification
-    // Allow wider tolerance for dr_outage count (should be around 250)
-    assert!(dr_outage_count > 200 && dr_outage_count < 300,
-        "DR outage count should be around 250, got {}", dr_outage_count);
+    // DrOutage count reflects genuine GPS measurement rejections (speed/monotonic constraints)
+    // SuspectOffRoute outputs None (not counted here), so this is only true DR outages
+    // Normal scenario has minimal GPS noise, expecting ~140-160 rejections
+    assert!(dr_outage_count > 100 && dr_outage_count < 200,
+        "DR outage count should be around 140-160, got {}", dr_outage_count);
     assert_eq!(invalid_transitions, 0, "Should have no invalid status transitions");
     assert_eq!(dr_outage_without_heading_constraint, 0,
         "DR outage should only occur when heading_constraint_met=false");
