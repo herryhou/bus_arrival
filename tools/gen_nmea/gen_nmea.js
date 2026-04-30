@@ -724,9 +724,10 @@ function simulate(route, cfg) {
     // after stop dwell. This prevents processing additional segments going
     // toward stop 2 before the detour starts.
     if (detour && !detourActive && !detourCompleted && prevSeg && prevSeg.stopBefore) {
-      const currentStopIdx = stopIndexMap[si];
+      // Check the previous stop (that we just finished processing), not the current one
+      const prevStopIdx = stopIndexMap[si - 1] ?? 0;
 
-      if (currentStopIdx === detourFromStop) {
+      if (prevStopIdx === detourFromStop) {
         detourActive = true;
         console.log(`Detour triggered at stop ${detourFromStop}, going via waypoint (${detourWaypointLat}, ${detourWaypointLon}) to stop ${detourToStop}`);
 
