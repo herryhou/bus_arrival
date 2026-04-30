@@ -613,12 +613,11 @@ function simulate(route, cfg) {
       // Get coordinates from route points
       // stops array contains route point indices for each stop
       const fromRoutePointIdx = stops[shortcutFromStop];
-      const toRoutePointIdx = stops[shortcutToStop];
-
       const fromLat = route_points[fromRoutePointIdx][0];
       const fromLon = route_points[fromRoutePointIdx][1];
-      const toLat = route_points[toRoutePointIdx][0];
-      const toLon = route_points[toRoutePointIdx][1];
+      // Use actual stop coordinates for shortcut end
+      const toLat = route.stopCoords[shortcutToStop][0];
+      const toLon = route.stopCoords[shortcutToStop][1];
 
       // Calculate shortcut distance and bearing
       const shortcutDist = haversine([fromLat, fromLon], [toLat, toLon]);
@@ -628,7 +627,7 @@ function simulate(route, cfg) {
 
       // Dwell at from_stop before shortcut
       emitStatic([fromLat, fromLon], shortcutBearing, false);
-      groundTruth.push({ stop_idx: stopSeqIdx, lat: fromLat, lon: fromLon, timestamp: ts - STOP_DWELL_S, phase: 'shortcut_start', event: 'departure_shortcut' });
+      groundTruth.push({ stop_idx: shortcutFromStop, lat: fromLat, lon: fromLon, timestamp: ts - STOP_DWELL_S, phase: 'shortcut_start', event: 'departure_shortcut' });
 
       // Generate GPS points along shortcut
       const shortcutStartTS = ts;
@@ -651,67 +650,104 @@ function simulate(route, cfg) {
 
       const offRouteDuration = ts - shortcutStartTS;
       console.log(`Shortcut duration: ${offRouteDuration}s`);
-      groundTruth.push({ stop_idx: stopSeqIdx, lat: toLat, lon: toLon, timestamp: ts, phase: 'shortcut_end', event: 're_acquisition', off_route_duration_s: offRouteDuration });
+      groundTruth.push({ stop_idx: shortcutToStop, lat: toLat, lon: toLon, timestamp: ts, phase: 'shortcut_end', event: 're_acquisition', off_route_duration_s: offRouteDuration });
     }
 
-    // Check for detour trigger
+    // REMOVED: Detour trigger now happens at stop level, not segment level
+    // This was causing backward GPS jumps because segments were processed
+    // after stop 1 dwell going east toward stop 2 before detour triggered.
+    // New trigger is in stop processing block after line 809.
+    /*
     if (detour && !detourActive && !detourCompleted && seg.stopBefore && stopIndexMap[si] === detourFromStop) {
       detourActive = true;
       console.log(`Detour triggered at stop ${detourFromStop}, going via waypoint (${detourWaypointLat}, ${detourWaypointLon}) to stop ${detourToStop}`);
 
-      // Get coordinates from route points
+      // Get coordinates
       const fromRoutePointIdx = stops[detourFromStop];
-      const toRoutePointIdx = stops[detourToStop];
-
       const fromLat = route_points[fromRoutePointIdx][0];
       const fromLon = route_points[fromRoutePointIdx][1];
-      const toLat = route_points[toRoutePointIdx][0];
-      const toLon = route_points[toRoutePointIdx][1];
+      const toLat = route.stopCoords[detourToStop][0];
+      const toLon = route.stopCoords[detourToStop][1];
 
-      // Calculate detour distances and bearings
-      const leg1Dist = haversine([fromLat, fromLon], [detourWaypointLat, detourWaypointLon]);
-      const leg1Bearing = bearing([fromLat, fromLon], [detourWaypointLat, detourWaypointLon]);
-      const leg2Dist = haversine([detourWaypointLat, detourWaypointLon], [toLat, toLon]);
-      const leg2Bearing = bearing([detourWaypointLat, detourWaypointLon], [toLat, toLon]);
-      const totalDetourDist = leg1Dist + leg2Dist;
+      // Create exact L-shaped detour: pass stop 1 by 10m, then south, then east to stop 6
+      // Leg 1: Continue 10m past stop 1 (eastward along route)
+      const leg1Dist = 10; // 10 meters past stop 1
+      const leg1Bearing = seg.bearing; // Use route heading (eastward)
+      const leg1EndLat = fromLat + (leg1Dist / 111320) * Math.cos(leg1Bearing * Math.PI / 180);
+      const leg1EndLon = fromLon + (leg1Dist / (111320 * Math.cos(fromLat * Math.PI / 180))) * Math.sin(leg1Bearing * Math.PI / 180);
 
-      console.log(`Detour leg1: ${leg1Dist.toFixed(0)}m, bearing ${leg1Bearing.toFixed(1)}°`);
-      console.log(`Detour leg2: ${leg2Dist.toFixed(0)}m, bearing ${leg2Bearing.toFixed(1)}°`);
-      console.log(`Total detour distance: ${totalDetourDist.toFixed(0)}m, target duration: ${detourDurationS}s`);
+      // Leg 2: Go south to waypoint (same longitude as stop 1, same latitude as waypoint)
+      const leg2Dist = haversine([leg1EndLat, leg1EndLon], [detourWaypointLat], [detourWaypointLon]);
+      const leg2Bearing = 180; // Due south
 
-      // Dwell at from_stop before detour
-      emitStatic([fromLat, fromLon], leg1Bearing, false);
-      groundTruth.push({ stop_idx: stopSeqIdx, lat: fromLat, lon: fromLon, timestamp: ts - STOP_DWELL_S, phase: 'detour_start', event: 'departure_detour' });
+      // Leg 3: Go east to stop 6
+      const leg3Dist = haversine([detourWaypointLat, detourWaypointLon], [toLat, toLon]);
+      const leg3Bearing = 90; // Due east
 
-      // Generate GPS points along detour leg 1 (from_stop -> waypoint)
+      const totalDetourDist = leg1Dist + leg2Dist + leg3Dist;
+
+      console.log(`L-shaped detour:`);
+      console.log(`  Leg 1: ${leg1Dist.toFixed(0)}m east past stop 1 (bearing ${leg1Bearing.toFixed(1)}°)`);
+      console.log(`  Leg 2: ${leg2Dist.toFixed(0)}m south to waypoint (bearing ${leg2Bearing.toFixed(1)}°)`);
+      console.log(`  Leg 3: ${leg3Dist.toFixed(0)}m east to stop 6 (bearing ${leg3Bearing.toFixed(1)}°)`);
+      console.log(`  Total: ${totalDetourDist.toFixed(0)}m, target duration: ${detourDurationS}s`);
+
+      // Add normal stop entry for detourFromStop before the detour_start event
+      const dwell = dwellSeconds();
+      groundTruth.push({ stop_idx: detourFromStop, seg_idx: si, timestamp: ts - STOP_DWELL_S - dwell, dwell_s: dwell });
+      for (let t = 0; t < dwell; t++) emitStatic([fromLat, fromLon], leg1Bearing, false);
+
+      // Add detour_start event
+      groundTruth.push({ stop_idx: detourFromStop, lat: fromLat, lon: fromLon, timestamp: ts - STOP_DWELL_S, phase: 'detour_start', event: 'departure_detour' });
+
+      // Generate GPS points along 3-legged detour path
       const detourStartTS = ts;
       const speedMs = totalDetourDist / detourDurationS; // Constant speed to match duration
-      let traveled = 0;
 
+      // Leg 1: 10m past stop 1 (eastward)
+      let traveled = 0;
       while (traveled < leg1Dist) {
         const step = Math.min(speedMs, leg1Dist - traveled);
         traveled += step;
         const frac = traveled / leg1Dist;
-        const lat = fromLat + (detourWaypointLat - fromLat) * frac;
-        const lon = fromLon + (detourWaypointLon - fromLon) * frac;
+        const lat = fromLat + (leg1EndLat - fromLat) * frac;
+        const lon = fromLon + (leg1EndLon - fromLon) * frac;
         emitGPS(lat, lon, speedMs, leg1Bearing, false);
       }
 
-      // Leg 2 (waypoint -> to_stop)
+      // Leg 2: South to waypoint
       traveled = 0;
       while (traveled < leg2Dist) {
         const step = Math.min(speedMs, leg2Dist - traveled);
         traveled += step;
         const frac = traveled / leg2Dist;
+        const lat = leg1EndLat + (detourWaypointLat - leg1EndLat) * frac;
+        const lon = leg1EndLon + (detourWaypointLon - leg1EndLon) * frac;
+        emitGPS(lat, lon, speedMs, leg2Bearing, false);
+      }
+
+      // Leg 3: East to stop 6
+      traveled = 0;
+      while (traveled < leg3Dist) {
+        const step = Math.min(speedMs, leg3Dist - traveled);
+        traveled += step;
+        const frac = traveled / leg3Dist;
         const lat = detourWaypointLat + (toLat - detourWaypointLat) * frac;
         const lon = detourWaypointLon + (toLon - detourWaypointLon) * frac;
-        emitGPS(lat, lon, speedMs, leg2Bearing, false);
+        emitGPS(lat, lon, speedMs, leg3Bearing, false);
       }
 
       const offRouteDuration = ts - detourStartTS;
       console.log(`Detour duration: ${offRouteDuration}s`);
-      groundTruth.push({ stop_idx: stopSeqIdx, lat: toLat, lon: toLon, timestamp: ts, phase: 'detour_end', event: 're_acquisition', off_route_duration_s: offRouteDuration });
+      groundTruth.push({ stop_idx: detourToStop, lat: toLat, lon: toLon, timestamp: ts, phase: 'detour_end', event: 're_acquisition', off_route_duration_s: offRouteDuration });
+
+      // Add dwell time at detour end to ensure arrival detection
+      const detourEndDwell = 8; // 8 seconds dwell at detour end
+      for (let t = 0; t < detourEndDwell; t++) {
+        emitStatic([toLat, toLon], leg3Bearing, false);
+      }
     }
+    */
 
     // Skip segments during shortcut (we've already injected GPS)
     if (shortcutActive) {
@@ -747,9 +783,29 @@ function simulate(route, cfg) {
     // ── 在本段起點處理停靠 / 紅燈 ───────────────────────────────────────────
     if (prevSeg && (prevSeg.stopBefore || prevSeg.lightBefore)) {
       if (prevSeg.stopBefore) {
-        const dwell = dwellSeconds();
-        groundTruth.push({ stop_idx: stopSeqIdx++, seg_idx: si, timestamp: ts, dwell_s: dwell });
-        for (let t = 0; t < dwell; t++) emitStatic(seg.from, seg.bearing, isOutage);
+        // Skip intermediate stops during detour (per PRD requirement)
+        // Use stopIndexMap to find which stop this segment leads to
+        const currentStopIdx = stopIndexMap[si];
+        // Check if this stop should be skipped (between detour start and end)
+        // Also skip segments that don't lead to actual stops (currentStopIdx === undefined)
+        if (currentStopIdx === undefined) {
+          console.log(`Skipping seg_idx=${si} (does not lead to a stop)`);
+        } else if (detourCompleted && currentStopIdx > detourFromStop && currentStopIdx < detourToStop) {
+          console.log(`Skipping stop ${currentStopIdx} (intermediate stop during detour, seg_idx=${si}), detourFromStop=${detourFromStop}, detourToStop=${detourToStop}`);
+          // Don't increment stopSeqIdx or add to ground truth
+        } else {
+          if (detourCompleted) {
+            console.log(`Processing stop ${currentStopIdx} at seg_idx=${si}, detourFromStop=${detourFromStop}, detourToStop=${detourToStop}`);
+          }
+          const dwell = dwellSeconds();
+          // For detour case, use actual stop index; for normal case, use sequential index
+          const gtStopIdx = detourCompleted ? currentStopIdx : stopSeqIdx;
+          groundTruth.push({ stop_idx: gtStopIdx, seg_idx: si, timestamp: ts, dwell_s: dwell });
+          if (!detourCompleted) {
+            stopSeqIdx++; // Only increment for normal stops
+          }
+          for (let t = 0; t < dwell; t++) emitStatic(seg.from, seg.bearing, isOutage);
+        }
       } else {
         // 紅燈
         const wait = 5 + Math.floor(Math.random() * SIGNAL_CYCLE);
@@ -974,6 +1030,8 @@ function cmdGenerate(args) {
     }
 
     route.stops = findStopIndices(stopsData.stops, route.route_points);
+    // Also store actual stop coordinates for detour generation
+    route.stopCoords = stopsData.stops.map(s => [s.lat, s.lon]);
     console.log(route.stops);
     if (globalFlags.verbose) logs.push(`Mapped ${stopsData.stops.length} stops to route point indices: ${route.stops.slice(0, 5).join(', ')}...`);
   }
