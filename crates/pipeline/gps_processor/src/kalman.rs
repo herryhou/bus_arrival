@@ -335,21 +335,14 @@ pub fn process_gps_update(
     }
 
     // 5. Speed constraint filter
-    // Use frozen position if off-route is suspected OR just cleared off-route (hysteresis cleared but snap hasn't succeeded yet)
-    // This prevents position advancement via DR before snap can occur
-    let current_s = state.frozen_s_cm.unwrap_or(state.s_cm);
-    if !check_speed_constraint(z_raw, current_s, dt) {
-        // Per spec Section 9.2: "拒絕後的行為：跳過 Kalman 更新步驟，僅執行 predict step（ŝ += v̂），等效於短暫 Dead-Reckoning"
-        // Do prediction step (DR mode) instead of returning Rejected with zero position
-        // If position is frozen, keep it frozen instead of advancing
-        if state.frozen_s_cm.is_some() {
-            // Keep frozen position, don't advance
-            dr.last_gps_time = Some(gps.timestamp);
-            return ProcessResult::DrOutage {
-                s_cm: current_s,
-                v_cms: state.v_cms,
-            };
-        } else {
+    // CRITICAL: Skip this check when position is frozen to allow off-route recovery
+    // The snap logic (lines 243-299) handles validation of re-entry position
+    // When frozen, we expect large position jumps (detour scenarios) and should
+    // allow the snap logic to validate, not reject here
+    if state.frozen_s_cm.is_none() {
+        if !check_speed_constraint(z_raw, state.s_cm, dt) {
+            // Per spec Section 9.2: "拒絕後的行為：跳過 Kalman 更新步驟，僅執行 predict step（ŝ += v̂），等效於短暫 Dead-Reckoning"
+            // Do prediction step (DR mode) instead of returning Rejected with zero position
             state.s_cm += state.v_cms * (dt as DistCm);
             dr.last_gps_time = Some(gps.timestamp);
             return ProcessResult::DrOutage {
@@ -360,18 +353,11 @@ pub fn process_gps_update(
     }
 
     // 6. Monotonicity filter
-    // Use frozen position if position is frozen
-    if !check_monotonic(z_raw, current_s) {
-        // Per spec Section 9.2: same behavior as speed constraint rejection
-        // If position is frozen, keep it frozen instead of advancing
-        if state.frozen_s_cm.is_some() {
-            // Keep frozen position, don't advance
-            dr.last_gps_time = Some(gps.timestamp);
-            return ProcessResult::DrOutage {
-                s_cm: current_s,
-                v_cms: state.v_cms,
-            };
-        } else {
+    // CRITICAL: Skip this check when position is frozen to allow off-route recovery
+    // The snap logic (lines 243-299) handles validation of re-entry position
+    if state.frozen_s_cm.is_none() {
+        if !check_monotonic(z_raw, state.s_cm) {
+            // Per spec Section 9.2: same behavior as speed constraint rejection
             state.s_cm += state.v_cms * (dt as DistCm);
             dr.last_gps_time = Some(gps.timestamp);
             return ProcessResult::DrOutage {
