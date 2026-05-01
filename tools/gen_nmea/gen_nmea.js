@@ -55,7 +55,7 @@ const GENERATE_SCHEMA = {
     },
     "detour_from_stop": {
       "type": "number",
-      "description": "Starting stop index for detour (0-based, only used when scenario=detour)",
+      "description": "Starting stop index for detour (0-based, only used when scenario=detour). Detour starts AFTER this stop's dwell.",
       "default": 1
     },
     "detour_to_stop": {
@@ -549,12 +549,23 @@ function simulate(route, cfg) {
   let travelledDist = 0;
   let stopSeqIdx = 0;
 
-  // Build stop index mapping for shortcut scenario
+  // Build stop index mapping for shortcut/detour scenarios
+  // Maps segment indices to the stop indices they lead to
+  // CRITICAL: The detour parameters use 1-based indexing (detourFromStop=1 means stop 2)
+  // We need to map segment indices to 1-based stop indices (1, 2, 3, ...)
   const stopIndexMap = [];
-  let stopCount = 0;
+  let sequentialStopIdx = 1; // Start from 1 (1-based indexing)
+  const usedRoutePoints = new Set();
   for (let i = 0; i < segs.length; i++) {
     if (segs[i].stopBefore) {
-      stopIndexMap[i] = stopCount++;
+      // This segment leads to a route_point that has a stop
+      const routePointIdx = i + 1;
+      // Only count this stop if we haven't seen this route_point before
+      // (handles the case where multiple stops are at the same route_point)
+      if (!usedRoutePoints.has(routePointIdx)) {
+        usedRoutePoints.add(routePointIdx);
+        stopIndexMap[i] = sequentialStopIdx++;
+      }
     }
   }
 
@@ -690,22 +701,22 @@ function simulate(route, cfg) {
     if (prevSeg && (prevSeg.stopBefore || prevSeg.lightBefore)) {
       if (prevSeg.stopBefore) {
         // Skip intermediate stops during detour (per PRD requirement)
-        // Use stopIndexMap to find which stop this segment leads to
-        const currentStopIdx = stopIndexMap[si];
+        // Use stopIndexMap to find which stop prevSeg leads to (not current segment!)
+        const prevStopIdx = stopIndexMap[si - 1];
         // Check if this stop should be skipped (between detour start and end)
-        // Also skip segments that don't lead to actual stops (currentStopIdx === undefined)
-        if (currentStopIdx === undefined) {
-          console.log(`Skipping seg_idx=${si} (does not lead to a stop)`);
-        } else if (detourCompleted && currentStopIdx > detourFromStop && currentStopIdx < detourToStop) {
-          console.log(`Skipping stop ${currentStopIdx} (intermediate stop during detour, seg_idx=${si}), detourFromStop=${detourFromStop}, detourToStop=${detourToStop}`);
+        // Also skip segments that don't lead to actual stops (prevStopIdx === undefined)
+        if (prevStopIdx === undefined) {
+          console.log(`Skipping seg_idx=${si-1} (does not lead to a stop)`);
+        } else if (detourCompleted && prevStopIdx > detourFromStop && prevStopIdx < detourToStop) {
+          console.log(`Skipping stop ${prevStopIdx} (intermediate stop during detour, seg_idx=${si-1}), detourFromStop=${detourFromStop}, detourToStop=${detourToStop}`);
           // Don't increment stopSeqIdx or add to ground truth
         } else {
           if (detourCompleted) {
-            console.log(`Processing stop ${currentStopIdx} at seg_idx=${si}, detourFromStop=${detourFromStop}, detourToStop=${detourToStop}`);
+            console.log(`Processing stop ${prevStopIdx} at seg_idx=${si-1}, detourFromStop=${detourFromStop}, detourToStop=${detourToStop}`);
           }
           const dwell = dwellSeconds();
           // For detour case, use actual stop index; for normal case, use sequential index
-          const gtStopIdx = detourCompleted ? currentStopIdx : stopSeqIdx;
+          const gtStopIdx = detourCompleted ? prevStopIdx : stopSeqIdx;
           groundTruth.push({ stop_idx: gtStopIdx, seg_idx: si, timestamp: ts, dwell_s: dwell });
           if (!detourCompleted) {
             stopSeqIdx++; // Only increment for normal stops
@@ -721,31 +732,48 @@ function simulate(route, cfg) {
 
     // ── 檢查繞道觸發（在站點停靠後立即觸發）────────────────────────────────────
     // Detour trigger at STOP level (not segment level) to fire immediately
-    // after stop dwell. This prevents processing additional segments going
-    // toward stop 2 before the detour starts.
+    // after stop dwell.
+    //
+    // Pattern: stop1 → stop2 (normal) → 10~20m RIGHT → south → east → stop6
+    //
+    // CRITICAL: Check if PREVIOUS segment had a stop (meaning we just processed a stop)
+    // This ensures we trigger AFTER processing detourFromStop's dwell
     if (detour && !detourActive && !detourCompleted && prevSeg && prevSeg.stopBefore) {
-      // Check the previous stop (that we just finished processing), not the current one
-      const prevStopIdx = stopIndexMap[si - 1] ?? 0;
+      // Check the previous segment to see which stop we just processed
+      const prevStopIdx = stopIndexMap[si - 1];
 
       if (prevStopIdx === detourFromStop) {
         detourActive = true;
         console.log(`Detour triggered at stop ${detourFromStop}, going via waypoint (${detourWaypointLat}, ${detourWaypointLon}) to stop ${detourToStop}`);
 
-        // Get coordinates
-        const fromRoutePointIdx = stops[detourFromStop];
-        const fromLat = route_points[fromRoutePointIdx][0];
-        const fromLon = route_points[fromRoutePointIdx][1];
-        const toLat = route.stopCoords[detourToStop][0];
-        const toLon = route.stopCoords[detourToStop][1];
+        // CRITICAL: We have just finished processing the stop dwell for detourFromStop (stop 2)
+        // The NEXT GPS points should be the detour path, NOT the route segments
+        // So we generate detour GPS NOW, before processing any more segments
 
-        // Create exact L-shaped detour: pass stop 1 by 10m, then south, then east to stop 6
-        // Leg 1: Continue 10m past stop 1 (eastward along route)
-        const leg1Dist = 10;
-        const leg1Bearing = prevSeg.bearing; // Use previous segment's bearing (eastward)
+        // Get coordinates
+        // Use actual stop coordinates when available (route.stopCoords), otherwise fall back to route_point
+        // This ensures the detour ends at the same location where the route continues for proper off-route recovery
+        const fromLat = route.stopCoords ? route.stopCoords[detourFromStop][0] : route_points[stops[detourFromStop]][0];
+        const fromLon = route.stopCoords ? route.stopCoords[detourFromStop][1] : route_points[stops[detourFromStop]][1];
+
+        // Use actual stop coordinates for detour end to ensure proper off-route recovery
+        const toLat = route.stopCoords ? route.stopCoords[detourToStop][0] : route_points[stops[detourToStop]][0];
+        const toLon = route.stopCoords ? route.stopCoords[detourToStop][1] : route_points[stops[detourToStop]][1];
+
+        // Create L-shaped detour from stop 2:
+        //   stop2 -> 10~20m RIGHT (perpendicular to route) -> south -> east -> stop6
+        //
+        // Leg 1: Go RIGHT (perpendicular to route bearing) from stop 2
+        // "Right" means bearing + 90° (clockwise from route direction)
+        const leg1Dist = 15; // 10~20m right from stop 2
+        // CRITICAL: Use prevSeg.bearing because we're at the END of prevSeg (where stop 2 is)
+        // NOT seg.bearing (which is the NEXT segment after stop 2)
+        const routeBearing = prevSeg.bearing;
+        const leg1Bearing = (routeBearing + 90 + 360) % 360; // Right side (clockwise 90°)
         const leg1EndLat = fromLat + (leg1Dist / 111320) * Math.cos(leg1Bearing * Math.PI / 180);
         const leg1EndLon = fromLon + (leg1Dist / (111320 * Math.cos(fromLat * Math.PI / 180))) * Math.sin(leg1Bearing * Math.PI / 180);
 
-        // Leg 2: Go south to waypoint (same longitude as stop 1, same latitude as waypoint)
+        // Leg 2: Go south to waypoint
         const leg2Dist = haversine([leg1EndLat, leg1EndLon], [detourWaypointLat, detourWaypointLon]);
         const leg2Bearing = 180; // Due south
 
@@ -755,10 +783,11 @@ function simulate(route, cfg) {
 
         const totalDetourDist = leg1Dist + leg2Dist + leg3Dist;
 
-        console.log(`L-shaped detour:`);
-        console.log(`  Leg 1: ${leg1Dist.toFixed(0)}m east past stop 1 (bearing ${leg1Bearing.toFixed(1)}°)`);
+        console.log(`L-shaped detour from stop ${detourFromStop}:`);
+        console.log(`  Route bearing: ${routeBearing.toFixed(1)}°`);
+        console.log(`  Leg 1: ${leg1Dist.toFixed(0)}m RIGHT (perpendicular, bearing ${leg1Bearing.toFixed(1)}°)`);
         console.log(`  Leg 2: ${leg2Dist.toFixed(0)}m south to waypoint (bearing ${leg2Bearing.toFixed(1)}°)`);
-        console.log(`  Leg 3: ${leg3Dist.toFixed(0)}m east to stop 6 (bearing ${leg3Bearing.toFixed(1)}°)`);
+        console.log(`  Leg 3: ${leg3Dist.toFixed(0)}m east to stop ${detourToStop} (bearing ${leg3Bearing.toFixed(1)}°)`);
         console.log(`  Total: ${totalDetourDist.toFixed(0)}m, target duration: ${detourDurationS}s`);
 
         // Add detour_start event (stop dwell was already added above)
@@ -768,7 +797,7 @@ function simulate(route, cfg) {
         const detourStartTS = ts;
         const speedMs = totalDetourDist / detourDurationS;
 
-        // Leg 1: 10m past stop 1 (eastward)
+        // Leg 1: Go RIGHT (perpendicular) from stop 2
         let traveled = 0;
         while (traveled < leg1Dist) {
           const step = Math.min(speedMs, leg1Dist - traveled);
@@ -798,7 +827,22 @@ function simulate(route, cfg) {
           const frac = traveled / leg3Dist;
           const lat = detourWaypointLat + (toLat - detourWaypointLat) * frac;
           const lon = detourWaypointLon + (toLon - detourWaypointLon) * frac;
-          emitGPS(lat, lon, speedMs, leg3Bearing, false);
+
+          // For the final GPS point at stop 6, use the route segment's bearing instead of detour bearing
+          // This ensures proper map matching and off-route recovery
+          if (traveled + step >= leg3Dist) {
+            // This is the last point - find the route bearing at stop 6
+            let detourEndSegmentBearing = leg3Bearing; // Fallback
+            for (let segIdx = 0; segIdx < segs.length; segIdx++) {
+              if (stopIndexMap[segIdx] === detourToStop) {
+                detourEndSegmentBearing = segs[segIdx].bearing;
+                break;
+              }
+            }
+            emitGPS(lat, lon, speedMs, detourEndSegmentBearing, false);
+          } else {
+            emitGPS(lat, lon, speedMs, leg3Bearing, false);
+          }
         }
 
         const offRouteDuration = ts - detourStartTS;
@@ -807,25 +851,49 @@ function simulate(route, cfg) {
 
         // Add normal stop entry for detourToStop (stop 6 dwell)
         // This ensures stop 6 gets its normal arrival/dwell processing after detour_end
+        // CRITICAL FIX: Use the route segment's bearing at detour end, not the detour leg bearing
+        // This ensures the GPS heading matches the route geometry for proper map matching and off-route recovery
         const detourEndDwell = 8;
         const dwell = detourEndDwell; // Use fixed dwell for detour end
+
+        // Find the segment that leads TO detourToStop
+        // The detour ends at the route_point location, which is the START of that segment
+        // We should use that segment's bearing for the dwell GPS points
+        let detourEndSegmentBearing = leg3Bearing; // Fallback to detour leg 3 bearing
+        let foundSegmentIndex = -1;
+        for (let segIdx = 0; segIdx < segs.length; segIdx++) {
+          if (stopIndexMap[segIdx] === detourToStop) {
+            foundSegmentIndex = segIdx;
+            // Use THIS segment's bearing, which starts at detourToStop's route_point
+            detourEndSegmentBearing = segs[segIdx].bearing;
+            break;
+          }
+        }
+        console.log(`Detour end: using route bearing ${detourEndSegmentBearing.toFixed(1)}° at stop ${detourToStop} (segment ${foundSegmentIndex} leads from stop ${detourToStop}'s route_point, detour leg 3 bearing was ${leg3Bearing.toFixed(1)}°)`);
+
         groundTruth.push({ stop_idx: detourToStop, seg_idx: si, timestamp: ts, dwell_s: dwell });
         for (let t = 0; t < detourEndDwell; t++) {
-          emitStatic([toLat, toLon], leg3Bearing, false);
+          emitStatic([toLat, toLon], detourEndSegmentBearing, false);
         }
 
-        // Jump to the segment that leads to detour end stop
-        // Since we've already generated GPS to detourToStop's location,
-        // we need to find the segment index where stopIndexMap[si] === detourToStop
-        // and continue processing from there.
-        while (si < segs.length - 1 && stopIndexMap[si] !== detourToStop) {
-          si++;
+        // Jump to the segment that starts AT the detour end route_point
+        // The detour ends at route_point[toRoutePointIdx], which is the START of segment foundSegmentIndex
+        // We should process that segment to continue from where the detour ended
+        if (foundSegmentIndex >= 0) {
+          si = foundSegmentIndex; // Start from the segment that leads from detourToStop's route_point
+        } else {
+          // Fallback: search for the segment starting from segment 0
+          let searchIdx = 0;
+          while (searchIdx < segs.length - 1 && stopIndexMap[searchIdx] !== detourToStop) {
+            searchIdx++;
+          }
+          si = searchIdx;
         }
         // Clear detourActive flag since we've jumped to the target segment
         detourActive = false;
         detourCompleted = true;
-        console.log(`Detour GPS completed, jumped to segment ${si} leading to stop ${detourToStop}`);
-        // Continue processing from the segment that leads to detour end stop
+        console.log(`Detour GPS completed, continuing from segment ${si} at stop ${detourToStop}'s route_point`);
+        // Continue processing from the segment that starts at detour end route_point
         continue;
       }
     }

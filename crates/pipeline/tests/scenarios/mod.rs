@@ -13,3 +13,4 @@ mod edge_cases;
 mod detour_reentry_integration;
 mod normal_trace_validation;
 mod snap_recovery_coordination;
+mod ty225_short_detour_golden;

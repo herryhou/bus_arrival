@@ -37,8 +37,9 @@ SHORTCUT_TO_STOP ?= 5
 # For detour scenario (stop 6 in re-indexed, which is stop 11 in original)
 DETOUR_FROM_STOP ?= 1  # For detour scenario (stop 6 in re-indexed)
 DETOUR_TO_STOP ?= 6    # For detour scenario (stop 11 in re-indexed)
-DETOUR_WAYPOINT_LAT ?= 24.99207
-DETOUR_WAYPOINT_LON ?= 121.29562
+# Waypoint: same latitude as stop 6, same longitude as stop 1 (creates L-shape)
+DETOUR_WAYPOINT_LAT ?= 24.992071  # Stop 6 latitude (south end of L-shape)
+DETOUR_WAYPOINT_LON ?= 121.295621  # Stop 1 longitude (west end of L-shape)
 DETOUR_DURATION_S ?= 60
 
 # Input files
@@ -77,7 +78,8 @@ run: build gen_nmea preprocess pipeline
 # Run detour scenario (ty225_short route)
 run-detour:
 	@echo "=== Running detour scenario (ty225_short) ==="
-	$(MAKE) run ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.99207 DETOUR_WAYPOINT_LON=121.29562 DETOUR_DURATION_S=60
+	@echo "L-shaped detour: stop 1 → 10m east → south to waypoint → east to stop 6"
+	$(MAKE) run ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.992071 DETOUR_WAYPOINT_LON=121.295621 DETOUR_DURATION_S=60
 
 # Legacy two-step workflow (deprecated - use 'make run' instead)
 run-legacy: build gen_nmea preprocess simulate detect

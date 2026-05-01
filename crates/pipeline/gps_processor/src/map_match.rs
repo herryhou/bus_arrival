@@ -186,11 +186,38 @@ pub fn find_best_segment_restricted(
 
     // Fallback: full grid search.
     if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
-        return (window_best_any, window_any_dist2); // Outside bounding box — keep window result
+        // GPS is outside grid bounds - do global search over all segments
+        // This handles detour paths and GPS positions outside the route extent
+        let start = 0;
+        let end = route_data.node_count.saturating_sub(1);
+        let (global_best_eligible, global_eligible_dist2, global_eligible_found,
+             global_best_any, global_any_dist2) = best_eligible(
+            gps_x, gps_y, gps_heading, gps_speed, route_data, start..=end, is_first_fix
+        );
+        if global_eligible_found {
+            return (global_best_eligible, global_eligible_dist2);
+        } else {
+            return (global_best_any, global_any_dist2);
+        }
     }
 
     let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
     let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
+
+    if gx >= route_data.grid.cols || gy >= route_data.grid.rows {
+        // GPS is outside grid bounds - do global search over all segments
+        let start = 0;
+        let end = route_data.node_count.saturating_sub(1);
+        let (global_best_eligible, global_eligible_dist2, global_eligible_found,
+             global_best_any, global_any_dist2) = best_eligible(
+            gps_x, gps_y, gps_heading, gps_speed, route_data, start..=end, is_first_fix
+        );
+        if global_eligible_found {
+            return (global_best_eligible, global_eligible_dist2);
+        } else {
+            return (global_best_any, global_any_dist2);
+        }
+    }
 
     // PHASE 2: Grid search
     // Carry over the window winner as the seed — grid search only improves on it.
@@ -301,6 +328,84 @@ pub fn find_best_segment_grid_only(
                 .grid
                 .visit_cell(nx as u32, ny as u32, |idx: u16| {
                     if let Some(seg) = route_data.get_node(idx as usize) {
+                        let d2 = segment_score(gps_x, gps_y, &seg);
+
+                        // Update best_any tracker
+                        if d2 < best_any_dist2 {
+                            best_any_dist2 = d2;
+                            best_any_idx = idx as usize;
+                        }
+
+                        // Update best_eligible tracker if heading matches
+                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix) {
+                            if d2 < best_eligible_dist2 {
+                                best_eligible_dist2 = d2;
+                                best_eligible_idx = idx as usize;
+                                eligible_found = true;
+                            }
+                        }
+                    }
+                });
+        }
+    }
+
+    // If no segment passed the heading filter, fall back to pure distance
+    if !eligible_found {
+        return (best_any_idx, best_any_dist2);
+    }
+
+    (best_eligible_idx, best_eligible_dist2)
+}
+
+/// Find best segment using grid search with a minimum position constraint.
+///
+/// This is used for off-route re-entry where we want to prevent snapping to
+/// segments that project to positions before the frozen position.
+///
+/// The `min_s_cm` parameter constrains the search to only segments that
+/// project to positions >= min_s_cm. This prevents backward snaps and
+/// reduces the risk of snapping too far forward and skipping stops.
+pub fn find_best_segment_grid_only_with_min_s(
+    gps_x: DistCm,
+    gps_y: DistCm,
+    gps_heading: HeadCdeg,
+    gps_speed: SpeedCms,
+    route_data: &RouteData,
+    is_first_fix: bool,
+    min_s_cm: DistCm,
+) -> (usize, i64) {
+    // Check bounding box first
+    if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
+        // Outside bounding box - return segment 0 as fallback
+        return (0, i64::MAX);
+    }
+
+    let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
+    let gy = ((gps_y - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
+
+    // Grid search over 3x3 cells
+    let mut best_eligible_idx = 0;
+    let mut best_eligible_dist2 = Dist2::MAX;
+    let mut best_any_idx = 0;
+    let mut best_any_dist2 = Dist2::MAX;
+    let mut eligible_found = false;
+
+    for dy in 0..=2i32 {
+        for dx in 0..=2i32 {
+            let ny = gy as i32 + dy - 1;
+            let nx = gx as i32 + dx - 1;
+            if ny < 0 || nx < 0 {
+                continue;
+            }
+            let _ = route_data
+                .grid
+                .visit_cell(nx as u32, ny as u32, |idx: u16| {
+                    if let Some(seg) = route_data.get_node(idx as usize) {
+                        // Skip segments that project to positions before min_s_cm
+                        if seg.cum_dist_cm < min_s_cm {
+                            return;
+                        }
+
                         let d2 = segment_score(gps_x, gps_y, &seg);
 
                         // Update best_any tracker

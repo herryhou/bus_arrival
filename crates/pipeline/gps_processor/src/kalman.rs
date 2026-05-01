@@ -91,10 +91,12 @@ pub fn update_off_route_hysteresis(
         // (i.e., we had prior suspect ticks or position is frozen)
         let is_actually_suspect = state.off_route_suspect_ticks > 0 || state.frozen_s_cm.is_some();
 
-        // After 2 consecutive good matches, reset suspect counter and unfreeze
+        // After 2 consecutive good matches, reset suspect counter and return Normal
+        // CRITICAL: Do NOT clear frozen_s_cm here - let the snap logic handle it
+        // This ensures position stays frozen if snap fails
         if state.off_route_clear_ticks >= OFF_ROUTE_CLEAR_TICKS {
             state.off_route_suspect_ticks = 0;
-            state.frozen_s_cm = None;
+            // NOTE: frozen_s_cm is NOT cleared here - it will be cleared after successful snap
             // C1: Don't clear off_route_freeze_time here - state.rs needs it for recovery dt calculation
             // It will be cleared after recovery completes in state.rs
             OffRouteStatus::Normal
@@ -241,7 +243,7 @@ pub fn process_gps_update(
             OffRouteStatus::Normal => {
                 // CRITICAL: Check if we just transitioned from OffRoute/Suspect to Normal
                 // If so, snap to re-entry position immediately to avoid detecting stops during catch-up
-                if had_frozen_position && state.frozen_s_cm.is_none() {
+                if had_frozen_position {
                     // Just transitioned from OffRoute/Suspect to Normal
                     // Use grid-only search to find correct segment immediately
                     let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only(
@@ -253,28 +255,46 @@ pub fn process_gps_update(
                         use_relaxed_heading,
                     );
 
-                    // Project to route and snap immediately
+                    // Project to route to get re-entry position
                     let z_reentry = crate::map_match::project_to_route(gps_x, gps_y, new_seg_idx, route_data);
-                    state.s_cm = z_reentry;
-                    // Blend v_cms using EMA instead of hard assignment (M3 fix)
-                    let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
-                    state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
-                    state.last_seg_idx = new_seg_idx;
-                    dr.last_gps_time = Some(gps.timestamp);
-                    dr.last_valid_s = state.s_cm;
-                    dr.filtered_v = state.v_cms;
-                    dr.in_recovery = false; // Clear recovery flag - we've snapped
 
-                    let signals = PositionSignals {
-                        z_gps_cm: z_reentry,
-                        s_cm: state.s_cm,
-                    };
-                    return ProcessResult::Valid {
-                        signals,
-                        v_cms: state.v_cms,
-                        seg_idx: new_seg_idx,
-                        snapped: true,  // NEW: this is a snap operation
-                    };
+                    // CRITICAL: Only snap if the re-entry position is reasonably close to the frozen position
+                    // This prevents:
+                    // 1. Backward snaps (z_reentry < frozen position)
+                    // 2. Excessive forward snaps that skip stops (z_reentry >> frozen position)
+                    // Allow snaps up to 1000m forward - this handles detour scenarios where multiple stops are skipped
+                    // The detour scenario intentionally skips stops 2-5, so a larger forward snap is expected
+                    let frozen_s = state.s_cm;
+                    let max_snap_forward = 100000; // 1000m maximum forward snap (handles detour recovery)
+
+                    if z_reentry >= frozen_s && z_reentry <= frozen_s + max_snap_forward {
+                        // Safe to snap - position is within acceptable range
+                        state.s_cm = z_reentry;
+                        // Clear frozen position after successful snap
+                        state.frozen_s_cm = None;
+                        state.off_route_suspect_ticks = 0;
+                        // Blend v_cms using EMA instead of hard assignment (M3 fix)
+                        let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+                        state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
+                        state.last_seg_idx = new_seg_idx;
+                        dr.last_gps_time = Some(gps.timestamp);
+                        dr.last_valid_s = state.s_cm;
+                        dr.filtered_v = state.v_cms;
+                        dr.in_recovery = false; // Clear recovery flag - we've snapped
+
+                        let signals = PositionSignals {
+                            z_gps_cm: z_reentry,
+                            s_cm: state.s_cm,
+                        };
+                        return ProcessResult::Valid {
+                            signals,
+                            v_cms: state.v_cms,
+                            seg_idx: new_seg_idx,
+                            snapped: true,  // NEW: this is a snap operation
+                        };
+                    }
+                    // If z_reentry is outside acceptable range, fall through to normal processing
+                    // The position stays near frozen and normal map matching will handle re-entry
                 }
                 // Continue normal processing
             }
@@ -315,17 +335,18 @@ pub fn process_gps_update(
     }
 
     // 5. Speed constraint filter
-    // Use frozen position if off-route is suspected (immediate position freezing)
+    // Use frozen position if off-route is suspected OR just cleared off-route (hysteresis cleared but snap hasn't succeeded yet)
+    // This prevents position advancement via DR before snap can occur
     let current_s = state.frozen_s_cm.unwrap_or(state.s_cm);
     if !check_speed_constraint(z_raw, current_s, dt) {
         // Per spec Section 9.2: "拒絕後的行為：跳過 Kalman 更新步驟，僅執行 predict step（ŝ += v̂），等效於短暫 Dead-Reckoning"
         // Do prediction step (DR mode) instead of returning Rejected with zero position
-        // If off-route is suspected, keep position frozen instead of advancing
+        // If position is frozen, keep it frozen instead of advancing
         if state.frozen_s_cm.is_some() {
             // Keep frozen position, don't advance
             dr.last_gps_time = Some(gps.timestamp);
             return ProcessResult::DrOutage {
-                s_cm: state.frozen_s_cm.unwrap(),
+                s_cm: current_s,
                 v_cms: state.v_cms,
             };
         } else {
@@ -339,15 +360,15 @@ pub fn process_gps_update(
     }
 
     // 6. Monotonicity filter
-    // Use frozen position if off-route is suspected
+    // Use frozen position if position is frozen
     if !check_monotonic(z_raw, current_s) {
         // Per spec Section 9.2: same behavior as speed constraint rejection
-        // If off-route is suspected, keep position frozen instead of advancing
+        // If position is frozen, keep it frozen instead of advancing
         if state.frozen_s_cm.is_some() {
             // Keep frozen position, don't advance
             dr.last_gps_time = Some(gps.timestamp);
             return ProcessResult::DrOutage {
-                s_cm: state.frozen_s_cm.unwrap(),
+                s_cm: current_s,
                 v_cms: state.v_cms,
             };
         } else {
