@@ -569,18 +569,24 @@ mod tests {
     /// Create minimal test route data with specified segments.
     /// Returns loaded RouteData ready for testing.
     fn create_test_route_data(segments: &[(i32, i32, i16, i32)]) -> Result<RouteData<'static>, BusError> {
-        let nodes: Vec<RouteNode> = segments.iter().enumerate().map(|(i, &(x, y, heading, len_mm))| {
-            RouteNode {
+        let mut nodes: Vec<RouteNode> = Vec::new();
+        let mut cum_dist = 0;
+        for (i, &(x, y, heading, len_mm)) in segments.iter().enumerate() {
+            let dx_cm = len_mm / 10; // Each segment's dx = its length in cm
+
+            nodes.push(RouteNode {
                 x_cm: x,
                 y_cm: y,
-                cum_dist_cm: (i * len_mm as usize / 10) as i32,
+                cum_dist_cm: cum_dist,
                 heading_cdeg: heading,
                 seg_len_mm: len_mm as i32,
-                dx_cm: 0,
+                dx_cm: dx_cm as i16,
                 dy_cm: 0,
                 _pad: 0,
-            }
-        }).collect();
+            });
+
+            cum_dist += dx_cm;
+        }
 
         let stops: Vec<Stop> = vec![];
         let grid = SpatialGrid {
@@ -768,5 +774,32 @@ mod tests {
         // Distance to point for zero-length segment
         let d2 = distance_to_segment_squared(1200, 1300, &seg);
         assert_eq!(d2, 200*200 + 300*300); // sqrt(200² + 300²)²
+    }
+
+    #[test]
+    fn test_project_to_route_on_segment() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 0, 100_000),    // 10 m segment, cum_dist = 0
+            (10000, 0, 0, 100_000), // cum_dist = 10,000
+        ]).unwrap();
+
+        // Project point at start of segment 0
+        let s = project_to_route(0, 0, 0, &route_data);
+        assert_eq!(s, 0);
+
+        // Project point at end of segment 0
+        let s = project_to_route(10000, 0, 0, &route_data);
+        assert_eq!(s, 10_000);
+    }
+
+    #[test]
+    fn test_project_to_route_mid_segment() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 0, 100_000), // 10 m segment
+        ]).unwrap();
+
+        // Project point at middle of segment
+        let s = project_to_route(5000, 0, 0, &route_data);
+        assert_eq!(s, 5_000); // Halfway through 10 m segment
     }
 }
