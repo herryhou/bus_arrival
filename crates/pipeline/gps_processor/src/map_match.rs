@@ -589,13 +589,38 @@ mod tests {
         }
 
         let stops: Vec<Stop> = vec![];
+
+        // Create a proper grid that maps segments to cells
+        // Grid size: 1000 cm (10 m), enough resolution for our test
+        let grid_size_cm = 1000;
+
+        // Calculate grid bounds
+        let max_x = segments.iter().map(|(x, _, _, _)| *x).max().unwrap_or(0);
+        let max_y = segments.iter().map(|(_, y, _, _)| *y).max().unwrap_or(0);
+        let min_x = segments.iter().map(|(x, _, _, _)| *x).min().unwrap_or(0);
+        let min_y = segments.iter().map(|(_, y, _, _)| *y).min().unwrap_or(0);
+
+        let cols = ((max_x - min_x) / grid_size_cm + 1) as u32;
+        let rows = ((max_y - min_y) / grid_size_cm + 1) as u32;
+
+        // Populate grid cells with segment indices
+        let mut cells: Vec<Vec<usize>> = vec![vec![]; (cols * rows) as usize];
+        for (i, &(x, y, _, _)) in segments.iter().enumerate() {
+            let gx = ((x - min_x) / grid_size_cm) as usize;
+            let gy = ((y - min_y) / grid_size_cm) as usize;
+            let cell_idx = gy * cols as usize + gx;
+            if cell_idx < cells.len() {
+                cells[cell_idx].push(i);
+            }
+        }
+
         let grid = SpatialGrid {
-            cells: vec![vec![]],
-            grid_size_cm: 100_000,
-            cols: 1,
-            rows: 1,
-            x0_cm: 0,
-            y0_cm: 0,
+            cells,
+            grid_size_cm,
+            cols,
+            rows,
+            x0_cm: min_x,
+            y0_cm: min_y,
         };
 
         let mut buffer = Vec::new();
@@ -833,5 +858,37 @@ mod tests {
         // Should find segment 10 within early exit threshold
         assert_eq!(idx, 10);
         assert!(dist2 < 4_000_000); // MAX_DIST2_EARLY_EXIT
+    }
+
+    #[test]
+    fn test_find_best_segment_restricted_grid_fallback() {
+        // Create route with 20 segments
+        let segments: Vec<(i32, i32, i16, i32)> = (0..20)
+            .map(|i| (i * 1000, 0, 0, 20_000))
+            .collect();
+        let segments_refs: &[(i32, i32, i16, i32)] = &segments;
+        let route_data = create_test_route_data(segments_refs).unwrap();
+
+        // GPS far from last_idx, requires grid search
+        // Use GPS position that is unambiguously closest to segment 15
+        // Segment 14: starts at 14000, extends to 16000 (dx=2000)
+        // Segment 15: starts at 15000, extends to 17000 (dx=2000)
+        // Position at x=16500 is in segment 15 only (500 cm from start, 500 cm from end)
+        let gps_x = 16_500;
+        let gps_y = 0;
+
+        // last_idx = 5, window = [3, 7], GPS at segment 15
+        let (idx, _dist2) = find_best_segment_restricted(
+            gps_x,
+            gps_y,
+            0,      // heading aligned with segment
+            500,    // speed (moving)
+            &route_data,
+            5,      // last_idx far from GPS
+            false,  // not first fix
+        );
+
+        // Should find segment 15 via grid search
+        assert_eq!(idx, 15);
     }
 }
