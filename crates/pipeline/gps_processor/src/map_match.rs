@@ -654,4 +654,21 @@ mod tests {
         // 180° (opposite direction): not eligible at speed
         assert!(!heading_eligible(0, speed, 18000, false));
     }
+
+    #[test]
+    fn test_heading_threshold_cdeg() {
+        // At w=0 (stopped): gate disabled (u32::MAX)
+        assert_eq!(heading_threshold_cdeg(0), u32::MAX);
+
+        // At w=256 (full speed): 90° gate
+        assert_eq!(heading_threshold_cdeg(256), 9_000);
+
+        // At w=128 (half speed): intermediate threshold
+        let threshold = heading_threshold_cdeg(128);
+        assert!(threshold > 9_000 && threshold < 36_000);
+
+        // Threshold decreases as weight increases
+        assert!(heading_threshold_cdeg(64) > heading_threshold_cdeg(128));
+        assert!(heading_threshold_cdeg(128) > heading_threshold_cdeg(256));
+    }
 }
