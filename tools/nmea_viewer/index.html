@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NMEA GPS Path Visualizer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .controls {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+        }
+        .file-input {
+            margin: 10px 0;
+        }
+        #map {
+            height: 600px;
+            width: 100%;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        .info {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            border-radius: 4px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .stat-box {
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2196F3;
+        }
+        .legend {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #fff3e0;
+            border-radius: 4px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        .color-box {
+            width: 30px;
+            height: 15px;
+            margin-right: 10px;
+            border-radius: 2px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗺️ NMEA GPS Path Visualizer</h1>
+
+        <div class="controls">
+            <div class="file-input">
+                <label for="nmeaFile"><strong>Select NMEA file:</strong></label><br>
+                <select id="nmeaFileSelect">
+                    <option value="">-- Select a file --</option>
+                    <option value="ty225_short_normal_nmea.txt">ty225_short_normal (normal route)</option>
+                    <option value="ty225_short_detour_nmea.txt">ty225_short_detour (detour scenario)</option>
+                </select>
+                <input type="file" id="nmeaFile" accept=".txt" style="display:none">
+                <button onclick="loadDefault('ty225_short_detour_nmea.txt')">Load Detour Scenario</button>
+                <button onclick="loadDefault('ty225_short_normal_nmea.txt')">Load Normal Scenario</button>
+            </div>
+        </div>
+
+        <div class="info" id="info">
+            <strong>Instructions:</strong> Select a file or upload a NMEA file to visualize the GPS path on the map.
+        </div>
+
+        <div class="stats" id="stats" style="display:none;">
+            <div class="stat-box">
+                <div class="stat-value" id="totalPoints">0</div>
+                <div>Total GPS Points</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value" id="startTime">-</div>
+                <div>Start Time</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value" id="endTime">-</div>
+                <div>End Time</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value" id="duration">-</div>
+                <div>Duration (s)</div>
+            </div>
+        </div>
+
+        <div class="legend">
+            <strong>Legend:</strong>
+            <div class="legend-item">
+                <div class="color-box" style="background-color: #2196F3;"></div>
+                GPS Path (blue line)
+            </div>
+            <div class="legend-item">
+                <div class="color-box" style="background-color: #4CAF50;"></div>
+                Start Point (green)
+            </div>
+            <div class="legend-item">
+                <div class="color-box" style="background-color: #F44336;"></div>
+                End Point (red)
+            </div>
+            <div class="legend-item">
+                <div class="color-box" style="background-color: #FF9800;"></div>
+                GPS Points (orange dots)
+            </div>
+        </div>
+
+        <div id="map"></div>
+    </div>
+
+    <script>
+        let map;
+        let polyline;
+        let startMarker;
+        let endMarker;
+        let gpsMarkers = [];
+
+        // Initialize the map
+        function initMap() {
+            // Center on Taipei area (approximate location of test data)
+            map = L.map('map').setView([24.994, 121.305], 13);
+
+            // Add OpenStreetMap tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(map);
+        }
+
+        // Parse NMEA file
+        function parseNMEA(nmeaText) {
+            const lines = nmeaText.split('\n');
+            const points = [];
+            let startTime = null;
+            let endTime = null;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (line.startsWith('$GPRMC')) {
+                    const parts = line.split(',');
+                    if (parts.length >= 10 && parts[2] === 'A') { // Valid fix
+                        const time = parts[1];
+                        const lat = parseNMEALatLon(parts[3], parts[4]);
+                        const lon = parseNMEALatLon(parts[5], parts[6]);
+
+                        if (lat && lon) {
+                            points.push({
+                                lat: lat,
+                                lon: lon,
+                                time: time,
+                                heading: parseFloat(parts[8]) || 0
+                            });
+
+                            if (!startTime) startTime = time;
+                            endTime = time;
+                        }
+                    }
+                }
+            }
+
+            return { points, startTime, endTime };
+        }
+
+        // Parse NMEA latitude/longitude
+        function parseNMEALatLon(value, direction) {
+            if (!value || value.length < 7) return null;
+
+            // NMEA format: DDMM.MMMM (lat) or DDDMM.MMMM (lon)
+            // Find decimal point to determine degree/minute split
+            const dotIdx = value.indexOf('.');
+            // Degrees are 2 digits (lat) or 3 digits (lon) before the minutes
+            const isLon = value.length > 9; // Longitude has more digits
+            const degDigits = isLon ? 3 : 2;
+            const degrees = parseInt(value.substring(0, degDigits));
+            const minutes = parseFloat(value.substring(degDigits));
+
+            let decimal = degrees + (minutes / 60);
+
+            if (direction === 'S' || direction === 'W') {
+                decimal = -decimal;
+            }
+
+            return decimal;
+        }
+
+        // Visualize NMEA data on map
+        function visualizeNMEA(nmeaText) {
+            const { points, startTime, endTime } = parseNMEA(nmeaText);
+
+            if (points.length === 0) {
+                document.getElementById('info').innerHTML =
+                    '<strong style="color: red;">Error:</strong> No valid GPRMC sentences found in the file.';
+                return;
+            }
+
+            // Clear existing layers
+            if (polyline) map.removeLayer(polyline);
+            if (startMarker) map.removeLayer(startMarker);
+            if (endMarker) map.removeLayer(endMarker);
+            gpsMarkers.forEach(m => map.removeLayer(m));
+            gpsMarkers = [];
+
+            // Create polyline
+            const latLngs = points.map(p => [p.lat, p.lon]);
+            polyline = L.polyline(latLngs, {
+                color: '#2196F3',
+                weight: 3,
+                opacity: 0.7
+            }).addTo(map);
+
+            // Add start marker
+            startMarker = L.marker(latLngs[0], {
+                icon: createMarkerIcon('#4CAF50')
+            }).addTo(map).bindPopup('Start: ' + startTime);
+
+            // Add end marker
+            endMarker = L.marker(latLngs[latLngs.length - 1], {
+                icon: createMarkerIcon('#F44336')
+            }).addTo(map).bindPopup('End: ' + endTime);
+
+            // Add GPS point markers (sample every 10th point for performance)
+            for (let i = 0; i < points.length; i += 10) {
+                const marker = L.circleMarker([points[i].lat, points[i].lon], {
+                    radius: 3,
+                    fillColor: '#FF9800',
+                    color: '#FF9800',
+                    weight: 1,
+                    opacity: 0.6
+                }).addTo(map).bindPopup(`Time: ${points[i].time}<br>Heading: ${points[i].heading.toFixed(1)}°`);
+                gpsMarkers.push(marker);
+            }
+
+            // Fit map to show entire path
+            map.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+
+            // Update stats
+            document.getElementById('totalPoints').textContent = points.length;
+            document.getElementById('startTime').textContent = startTime;
+            document.getElementById('endTime').textContent = endTime;
+
+            // Calculate duration
+            const startSec = parseInt(startTime.substring(0, 2)) * 3600 +
+                                parseInt(startTime.substring(2, 4)) * 60 +
+                                parseInt(startTime.substring(4, 6));
+            const endSec = parseInt(endTime.substring(0, 2)) * 3600 +
+                              parseInt(endTime.substring(2, 4)) * 60 +
+                              parseInt(endTime.substring(4, 6));
+            document.getElementById('duration').textContent = (endSec - startSec);
+
+            document.getElementById('stats').style.display = 'grid';
+            document.getElementById('info').innerHTML =
+                `<strong>Success!</strong> Loaded ${points.length} GPS points. Blue line shows the path.`;
+        }
+
+        // Create marker icon
+        function createMarkerIcon(color) {
+            return L.divIcon({
+                className: 'custom-marker',
+                html: `<div style="
+                    background-color: ${color};
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 50%;
+                    border: 2px solid white;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                "></div>`,
+                iconSize: [16, 16],
+                iconAnchor: [8, 8]
+            });
+        }
+
+        // Load default file
+        async function loadDefault(filename) {
+            try {
+                const response = await fetch('../../test_data/' + filename);
+                if (!response.ok) throw new Error('File not found');
+                const nmeaText = await response.text();
+                visualizeNMEA(nmeaText);
+            } catch (error) {
+                document.getElementById('info').innerHTML =
+                    `<strong style="color: red;">Error:</strong> Failed to load ${filename}: ${error.message}`;
+            }
+        }
+
+        // Handle file upload
+        document.getElementById('nmeaFileSelect').addEventListener('change', async function(e) {
+            if (e.target.value) {
+                loadDefault(e.target.value);
+            }
+        });
+
+        document.getElementById('nmeaFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    visualizeNMEA(e.target.result);
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        // Initialize on page load
+        window.onload = function() {
+            initMap();
+            // Auto-load detour scenario
+            loadDefault('ty225_short_detour_nmea.txt');
+        };
+    </script>
+</body>
+</html>
