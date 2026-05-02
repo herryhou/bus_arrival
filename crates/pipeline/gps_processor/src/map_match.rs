@@ -975,7 +975,7 @@ mod tests {
             (1000, 0, 0, 1000 * 1000), // 1000m segment
         ]).unwrap();
 
-        
+
         // GPS at position of segment 1 (x=1000)
         let gps_x = 1000;
         let gps_y = 0;
@@ -992,5 +992,63 @@ mod tests {
         );
 
         assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn test_sentinel_heading_always_eligible() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 18000, 20_000), // Opposite heading
+        ]).unwrap();
+
+        // Sentinel heading should always be eligible
+        let (idx, _dist2) = find_best_segment_grid_only(
+            0,
+            0,
+            i16::MIN, // Sentinel
+            500,
+            &route_data,
+            false,
+        );
+
+        assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn test_first_fix_relaxed_heading() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 18000, 20_000), // Opposite heading (180°)
+        ]).unwrap();
+
+        // First fix mode: relaxed 180° threshold
+        let (idx, _dist2) = find_best_segment_grid_only(
+            0,
+            0,
+            0,      // Heading 0°
+            500,    // Moving
+            &route_data,
+            true,   // FIRST FIX MODE
+        );
+
+        // Should match despite 180° heading difference
+        assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn test_zero_speed_heading_gate_disabled() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 9001, 20_000), // 90.01° off (normally rejected)
+        ]).unwrap();
+
+        // Zero speed: heading gate disabled
+        let (idx, _dist2) = find_best_segment_grid_only(
+            0,
+            0,
+            0,      // Heading 0°
+            0,      // STOPPED
+            &route_data,
+            false,
+        );
+
+        assert_eq!(idx, 0);
     }
 }
