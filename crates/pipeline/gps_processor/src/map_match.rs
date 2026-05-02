@@ -162,7 +162,30 @@ pub fn find_best_segment_restricted(
     let start = last_idx.saturating_sub(WINDOW_BACK);
     let end = (last_idx + WINDOW_FWD).min(route_data.node_count.saturating_sub(1));
 
-    // PHASE 1: Window search
+    /// Global search fallback when GPS is outside grid bounds.
+/// Searches all segments and returns the best eligible (or best any if none eligible).
+fn global_search_fallback(
+    gps_x: DistCm,
+    gps_y: DistCm,
+    gps_heading: HeadCdeg,
+    gps_speed: SpeedCms,
+    route_data: &RouteData,
+    is_first_fix: bool,
+) -> (usize, Dist2) {
+    let start = 0;
+    let end = route_data.node_count.saturating_sub(1);
+    let (best_eligible, eligible_dist2, eligible_found,
+         best_any, any_dist2) = best_eligible(
+        gps_x, gps_y, gps_heading, gps_speed, route_data, start..=end, is_first_fix
+    );
+    if eligible_found {
+        (best_eligible, eligible_dist2)
+    } else {
+        (best_any, any_dist2)
+    }
+}
+
+// PHASE 1: Window search
     let (
         window_best_eligible,
         window_eligible_dist2,
@@ -186,37 +209,17 @@ pub fn find_best_segment_restricted(
 
     // Fallback: full grid search.
     if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
-        // GPS is outside grid bounds - do global search over all segments
+        // GPS is outside grid bounds - use global search fallback
         // This handles detour paths and GPS positions outside the route extent
-        let start = 0;
-        let end = route_data.node_count.saturating_sub(1);
-        let (global_best_eligible, global_eligible_dist2, global_eligible_found,
-             global_best_any, global_any_dist2) = best_eligible(
-            gps_x, gps_y, gps_heading, gps_speed, route_data, start..=end, is_first_fix
-        );
-        if global_eligible_found {
-            return (global_best_eligible, global_eligible_dist2);
-        } else {
-            return (global_best_any, global_any_dist2);
-        }
+        return global_search_fallback(gps_x, gps_y, gps_heading, gps_speed, route_data, is_first_fix);
     }
 
     let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
     let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
 
     if gx >= route_data.grid.cols || gy >= route_data.grid.rows {
-        // GPS is outside grid bounds - do global search over all segments
-        let start = 0;
-        let end = route_data.node_count.saturating_sub(1);
-        let (global_best_eligible, global_eligible_dist2, global_eligible_found,
-             global_best_any, global_any_dist2) = best_eligible(
-            gps_x, gps_y, gps_heading, gps_speed, route_data, start..=end, is_first_fix
-        );
-        if global_eligible_found {
-            return (global_best_eligible, global_eligible_dist2);
-        } else {
-            return (global_best_any, global_any_dist2);
-        }
+        // GPS is outside grid bounds - use global search fallback
+        return global_search_fallback(gps_x, gps_y, gps_heading, gps_speed, route_data, is_first_fix);
     }
 
     // PHASE 2: Grid search
