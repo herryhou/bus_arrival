@@ -802,4 +802,36 @@ mod tests {
         let s = project_to_route(5000, 0, 0, &route_data);
         assert_eq!(s, 5_000); // Halfway through 10 m segment
     }
+
+    #[test]
+    fn test_find_best_segment_restricted_window_early_exit() {
+        // Create route with 20 segments
+        let segments: Vec<(i32, i32, i16, i32)> = (0..20)
+            .map(|i| (i * 1000, 0, 0, 20_000))
+            .collect();
+        let segments_refs: &[(i32, i32, i16, i32)] = &segments;
+        let route_data = create_test_route_data(segments_refs).unwrap();
+
+        // GPS near segment 10, within SIGMA_GPS_CM (2000 cm)
+        // Position at x=11500 to ensure segment 10 is uniquely closest
+        // Segment 9: [9000, 11000], dist to x=11500 = 500
+        // Segment 10: [10000, 12000], dist to x=11500 = 0
+        let gps_x = 11_500;
+        let gps_y = 0;
+
+        // last_idx = 10, window = [8, 12], GPS at segment 10
+        let (idx, dist2) = find_best_segment_restricted(
+            gps_x,
+            gps_y,
+            0,      // heading
+            500,    // speed (moving, heading filter active)
+            &route_data,
+            10,     // last_idx
+            false,  // not first fix
+        );
+
+        // Should find segment 10 within early exit threshold
+        assert_eq!(idx, 10);
+        assert!(dist2 < 4_000_000); // MAX_DIST2_EARLY_EXIT
+    }
 }
