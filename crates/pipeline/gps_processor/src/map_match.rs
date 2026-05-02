@@ -562,7 +562,42 @@ pub fn latlon_to_cm_absolute_with_lat_avg(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared::binfile::{GridData, RouteData};
+    use shared::binfile::{BusError, GridData, RouteData};
+    use shared::{SpatialGrid, Stop};
+
+    /// Create minimal test route data with specified segments.
+    /// Returns loaded RouteData ready for testing.
+    fn create_test_route_data(segments: &[(i32, i32, i16, i32)]) -> Result<RouteData<'static>, BusError> {
+        let nodes: Vec<RouteNode> = segments.iter().enumerate().map(|(i, &(x, y, heading, len_mm))| {
+            RouteNode {
+                x_cm: x,
+                y_cm: y,
+                cum_dist_cm: (i * len_mm / 10) as i32,
+                heading_cdeg: heading,
+                seg_len_mm: len_mm as u32,
+                dx_cm: 0,
+                dy_cm: 0,
+                _pad: 0,
+            }
+        }).collect();
+
+        let stops: Vec<Stop> = vec![];
+        let grid = SpatialGrid {
+            cells: vec![vec![]],
+            grid_size_cm: 100_000,
+            cols: 1,
+            rows: 1,
+            x0_cm: 0,
+            y0_cm: 0,
+        };
+
+        let mut buffer = Vec::new();
+        shared::binfile::pack_route_data(&nodes, &stops, &grid, 25.0, &mut buffer)?;
+
+        // Leak the buffer to get 'static lifetime (safe for tests)
+        let leaked: &'static [u8] = Box::leak(buffer.into_boxed_slice());
+        RouteData::load(leaked)
+    }
 
     /// Builder for creating test RouteData instances
     struct RouteDataBuilder {
