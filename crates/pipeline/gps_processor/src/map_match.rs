@@ -562,6 +562,7 @@ pub fn latlon_to_cm_absolute_with_lat_avg(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use shared::binfile::{BusError, RouteData};
     use shared::{SpatialGrid, Stop};
 
@@ -670,5 +671,26 @@ mod tests {
         // Threshold decreases as weight increases
         assert!(heading_threshold_cdeg(64) > heading_threshold_cdeg(128));
         assert!(heading_threshold_cdeg(128) > heading_threshold_cdeg(256));
+    }
+
+    proptest! {
+        #[test]
+        fn prop_heading_diff_symmetric(a in -18000i16..18000, b in -18000i16..18000) {
+            let diff1 = heading_diff_cdeg(a, b);
+            let diff2 = heading_diff_cdeg(b, a);
+            assert_eq!(diff1, diff2);
+        }
+
+        #[test]
+        fn prop_heading_diff_identity(a in -18000i16..18000) {
+            let diff = heading_diff_cdeg(a, a);
+            assert_eq!(diff, 0);
+        }
+
+        #[test]
+        fn prop_heading_diff_max_180(a in -18000i16..18000, b in -18000i16..18000) {
+            let diff = heading_diff_cdeg(a, b);
+            assert!(diff <= 18000);
+        }
     }
 }
