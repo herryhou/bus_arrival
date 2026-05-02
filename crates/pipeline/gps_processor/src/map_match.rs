@@ -562,6 +562,82 @@ pub fn latlon_to_cm_absolute_with_lat_avg(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::binfile::{GridData, RouteData};
+
+    /// Builder for creating test RouteData instances
+    struct RouteDataBuilder {
+        nodes: Vec<RouteNode>,
+        grid: GridData,
+        x0_cm: i64,
+        y0_cm: i64,
+    }
+
+    impl RouteDataBuilder {
+        fn new() -> Self {
+            Self {
+                nodes: Vec::new(),
+                grid: GridData {
+                    cols: 10,
+                    rows: 10,
+                    grid_size_cm: 100_000, // 1km cells
+                    cell_offsets: vec![0u16; 100], // 10x10 = 100 cells
+                },
+                x0_cm: 0,
+                y0_cm: 0,
+            }
+        }
+
+        fn with_grid_size(mut self, cols: u32, rows: u32, cell_size_cm: u32) -> Self {
+            self.grid.cols = cols;
+            self.grid.rows = rows;
+            self.grid.grid_size_cm = cell_size_cm;
+            self.grid.cell_offsets = vec![0u16; (cols * rows) as usize];
+            self
+        }
+
+        fn with_origin(mut self, x0_cm: i64, y0_cm: i64) -> Self {
+            self.x0_cm = x0_cm;
+            self.y0_cm = y0_cm;
+            self
+        }
+
+        fn add_segment(mut self, idx: usize, x_cm: i32, y_cm: i32, heading_cdeg: i16, seg_len_mm: u32) -> Self {
+            let node = RouteNode {
+                x_cm,
+                y_cm,
+                cum_dist_cm: self.nodes.iter().last().map_or(0, |n| n.cum_dist_cm + (seg_len_mm / 10) as i32),
+                heading_cdeg,
+                seg_len_mm,
+                dx_cm: 0,  // Simplified for tests
+                dy_cm: 0,
+                _pad: 0,
+            };
+            if idx >= self.nodes.len() {
+                self.nodes.push(node);
+            } else {
+                self.nodes[idx] = node;
+            }
+            self
+        }
+
+        fn add_to_grid(mut self, cell_x: u32, cell_y: u32, segment_idx: u16) -> Self {
+            let cell_idx = (cell_y * self.grid.cols + cell_x) as usize;
+            if cell_idx < self.grid.cell_offsets.len() {
+                self.grid.cell_offsets[cell_idx] = segment_idx;
+            }
+            self
+        }
+
+        fn build(self) -> RouteData {
+            RouteData {
+                node_count: self.nodes.len(),
+                nodes: self.nodes,
+                grid: self.grid,
+                x0_cm: self.x0_cm,
+                y0_cm: self.y0_cm,
+            }
+        }
+    }
 
     #[test]
     fn test_segment_score_is_pure_distance() {
