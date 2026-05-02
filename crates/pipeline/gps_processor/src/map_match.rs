@@ -693,4 +693,80 @@ mod tests {
             assert!(diff <= 18000);
         }
     }
+
+    #[test]
+    fn test_distance_to_segment_squared_on_segment() {
+        let seg = RouteNode {
+            x_cm: 0,
+            y_cm: 0,
+            cum_dist_cm: 0,
+            heading_cdeg: 0,
+            seg_len_mm: 10_000, // 1000 cm = 10 m (1000 cm * 10 = 10,000 mm)
+            dx_cm: 1000,
+            dy_cm: 0,
+            _pad: 0,
+        };
+
+        // Point on segment
+        let d2 = distance_to_segment_squared(500, 0, &seg);
+        assert_eq!(d2, 0); // Perpendicular distance is 0
+
+        // Point at start
+        let d2 = distance_to_segment_squared(0, 0, &seg);
+        assert_eq!(d2, 0);
+    }
+
+    #[test]
+    fn test_distance_to_segment_squared_perpendicular() {
+        let seg = RouteNode {
+            x_cm: 0,
+            y_cm: 0,
+            cum_dist_cm: 0,
+            heading_cdeg: 0,
+            seg_len_mm: 10_000, // 10 m (1000 cm * 10 = 10,000 mm)
+            dx_cm: 1000,
+            dy_cm: 0,
+            _pad: 0,
+        };
+
+        // Point 300 cm away perpendicular to segment
+        let d2 = distance_to_segment_squared(500, 300, &seg);
+        assert_eq!(d2, 90_000); // 300² = 90,000 cm²
+    }
+
+    #[test]
+    fn test_distance_to_segment_squared_clamped_before() {
+        let seg = RouteNode {
+            x_cm: 1000,
+            y_cm: 0,
+            cum_dist_cm: 0,
+            heading_cdeg: 0,
+            seg_len_mm: 10_000, // 10 m (1000 cm * 10 = 10,000 mm)
+            dx_cm: 1000,
+            dy_cm: 0,
+            _pad: 0,
+        };
+
+        // Point before segment start (at x=0)
+        let d2 = distance_to_segment_squared(0, 0, &seg);
+        assert_eq!(d2, 1_000_000); // (1000)² = 1,000,000 cm²
+    }
+
+    #[test]
+    fn test_distance_to_segment_squared_zero_length() {
+        let seg = RouteNode {
+            x_cm: 1000,
+            y_cm: 1000,
+            cum_dist_cm: 0,
+            heading_cdeg: 0,
+            seg_len_mm: 0, // Zero length
+            dx_cm: 0,
+            dy_cm: 0,
+            _pad: 0,
+        };
+
+        // Distance to point for zero-length segment
+        let d2 = distance_to_segment_squared(1200, 1300, &seg);
+        assert_eq!(d2, 200*200 + 300*300); // sqrt(200² + 300²)²
+    }
 }
