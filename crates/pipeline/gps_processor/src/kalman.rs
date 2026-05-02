@@ -260,11 +260,11 @@ pub fn process_gps_update(
 
                     // CRITICAL: Only snap if the re-entry position is reasonably close to the frozen position
                     // This prevents:
-                    // 1. Backward snaps (z_reentry < frozen position)
+                    // 1. Backward snaps (z_reentry < frozen position) - would cause false arrivals at intermediate stops
                     // 2. Excessive forward snaps that skip stops (z_reentry >> frozen position)
                     // Allow snaps up to 1000m forward - this handles detour scenarios where multiple stops are skipped
                     // The detour scenario intentionally skips stops 2-5, so a larger forward snap is expected
-                    let frozen_s = state.s_cm;
+                    let frozen_s = state.frozen_s_cm.unwrap_or(state.s_cm);
                     let max_snap_forward = 100000; // 1000m maximum forward snap (handles detour recovery)
 
                     if z_reentry >= frozen_s && z_reentry <= frozen_s + max_snap_forward {
