@@ -156,6 +156,14 @@ pub fn find_best_segment_restricted(
     // Now that scores are pure dist2, this comparison is physically meaningful.
     const MAX_DIST2_EARLY_EXIT: Dist2 = SIGMA_GPS_CM as i64 * SIGMA_GPS_CM as i64; // 4 000 000 cm²
 
+    /// Window search looks back 2 segments and forward 10 segments from last_idx.
+    ///
+    /// These values are derived from:
+    /// - GPS update rate: 1 Hz
+    /// - Typical bus speed: 30-50 km/h (~8-14 m/s)
+    /// - Segment length: ~20 m on average
+    /// - In one second, a bus travels ~8-14 m, or ~0.4-0.7 segments
+    /// - Window of ±10 segments provides ~20 second buffer for GPS outliers
     const WINDOW_BACK: usize = 2;
     const WINDOW_FWD: usize = 10;
 
