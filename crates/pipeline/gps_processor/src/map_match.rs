@@ -891,4 +891,49 @@ mod tests {
         // Should find segment 15 via grid search
         assert_eq!(idx, 15);
     }
+
+    #[test]
+    fn test_find_best_segment_grid_only() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 0, 20_000),
+            (2000, 0, 0, 20_000),
+            (4000, 0, 0, 20_000),
+        ]).unwrap();
+
+        // GPS in middle of segment 1 (from 2000 to 4000)
+        let gps_x = 3000;
+        let gps_y = 0;
+
+        let (idx, _dist2) = find_best_segment_grid_only(
+            gps_x,
+            gps_y,
+            0,      // heading
+            500,    // speed
+            &route_data,
+            false,  // not first fix
+        );
+
+        assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn test_find_best_segment_grid_only_outside_bounds() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 0, 20_000),
+        ]).unwrap();
+
+        // GPS outside grid bounds
+        let (idx, dist2) = find_best_segment_grid_only(
+            -50_000, // Before grid origin
+            -50_000,
+            0,
+            500,
+            &route_data,
+            false,
+        );
+
+        // Should return fallback
+        assert_eq!(idx, 0);
+        assert_eq!(dist2, i64::MAX);
+    }
 }
