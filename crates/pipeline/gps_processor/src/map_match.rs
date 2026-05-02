@@ -381,7 +381,7 @@ pub fn find_best_segment_grid_only_with_min_s(
     }
 
     let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
-    let gy = ((gps_y - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
+    let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
 
     // Grid search over 3x3 cells
     let mut best_eligible_idx = 0;
@@ -935,5 +935,62 @@ mod tests {
         // Should return fallback
         assert_eq!(idx, 0);
         assert_eq!(dist2, i64::MAX);
+    }
+
+    #[test]
+    fn test_find_best_segment_grid_only_with_min_s_constraint() {
+        // Create segments with increasing cum_dist
+        // Each segment is 1000m long, so cumulative distances are:
+        // seg0: 0, seg1: 1000, seg2: 2000, seg3: 3000, ...
+        let segments: Vec<(i32, i32, i16, i32)> = (0..10)
+            .map(|i| (i * 1000, 0, 0, 1000 * 1000)) // 1000m = 100,000 mm
+            .collect();
+        let segments_refs: &[(i32, i32, i16, i32)] = &segments;
+        let route_data = create_test_route_data(segments_refs).unwrap();
+
+        
+        // GPS at position after segment 2 (x=3000, which is in segment 3)
+        let gps_x = 3000;
+        let gps_y = 0;
+
+        // Set min_s_cm to 250,000 cm (2.5 km) - should skip segments 0-2
+        let (idx, _dist2) = find_best_segment_grid_only_with_min_s(
+            gps_x,
+            gps_y,
+            0,
+            500,
+            &route_data,
+            false,
+            250_000, // min_s_cm
+        );
+
+        // Should skip to segment 3 or later (cum_dist >= 2,500,000 cm)
+        assert!(idx >= 3);
+    }
+
+    #[test]
+    fn test_find_best_segment_grid_only_with_min_s_no_filter() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 0, 1000 * 1000), // 1000m segment
+            (1000, 0, 0, 1000 * 1000), // 1000m segment
+        ]).unwrap();
+
+        
+        // GPS at position of segment 1 (x=1000)
+        let gps_x = 1000;
+        let gps_y = 0;
+
+        // min_s_cm = 0, no filtering
+        let (idx, _dist2) = find_best_segment_grid_only_with_min_s(
+            gps_x,
+            gps_y,
+            0,
+            500,
+            &route_data,
+            false,
+            0, // no minimum
+        );
+
+        assert_eq!(idx, 1);
     }
 }
