@@ -245,7 +245,98 @@ pub fn process_gps_update(
                 // If so, snap to re-entry position immediately to avoid detecting stops during catch-up
                 if had_frozen_position {
                     // Just transitioned from OffRoute/Suspect to Normal
-                    // Use grid-only search to find correct segment immediately
+                    let frozen_s = state.frozen_s_cm.unwrap_or(state.s_cm);
+
+                    // For off-route recovery, find the closest stop to the GPS position
+                    // This handles detour scenarios where GPS is physically close to wrong part of route
+                    let stops = route_data.stops();
+                    let mut best_stop_idx: Option<usize> = None;
+                    let mut best_stop_dist2 = i32::MAX;
+
+                    // For each stop, find the route node closest to that stop's progress_cm
+                    // Then calculate distance from GPS to that node
+                    for (stop_idx, stop) in stops.iter().enumerate() {
+                        // Skip stops before frozen position (prevent backward snaps)
+                        if stop.progress_cm < frozen_s {
+                            continue;
+                        }
+
+                        // Find the route node closest to this stop's progress_cm
+                        let mut best_node_idx: Option<usize> = None;
+                        let mut best_node_dist = i32::MAX;
+                        for node_idx in 0..route_data.node_count {
+                            if let Some(node) = route_data.get_node(node_idx) {
+                                let dist = (node.cum_dist_cm - stop.progress_cm).abs();
+                                if dist < best_node_dist {
+                                    best_node_dist = dist;
+                                    best_node_idx = Some(node_idx);
+                                }
+                            }
+                        }
+
+                        // Calculate GPS distance to this stop (using its closest route node)
+                        if let Some(node_idx) = best_node_idx {
+                            if let Some(node) = route_data.get_node(node_idx) {
+                                // RouteNode already has x_cm, y_cm coordinates
+                                // Use i64 to prevent overflow when squaring large coordinate values
+                                let dx = (gps_x - node.x_cm) as i64;
+                                let dy = (gps_y - node.y_cm) as i64;
+                                let dist2 = dx * dx + dy * dy;
+
+                                // Check if this is the closest stop (clamp to i32 range)
+                                let dist2_i32 = if dist2 > i32::MAX as i64 { i32::MAX } else { dist2 as i32 };
+                                if dist2_i32 < best_stop_dist2 {
+                                    best_stop_dist2 = dist2_i32;
+                                    best_stop_idx = Some(stop_idx);
+                                }
+                            }
+                        }
+                    }
+
+                    // Use the closest stop if found within reasonable distance (500m)
+                    const MAX_STOP_DISTANCE_CM: i32 = 50000;
+                    if let Some(stop_idx) = best_stop_idx {
+                        if best_stop_dist2 < (MAX_STOP_DISTANCE_CM as i64 * MAX_STOP_DISTANCE_CM as i64) as i32 {
+                            // Snap to the stop's position
+                            let stop = &stops[stop_idx];
+                            state.s_cm = stop.progress_cm;
+
+                            // Find the segment closest to this position
+                            let (new_seg_idx, _) = crate::map_match::find_best_segment_grid_only(
+                                gps_x,
+                                gps_y,
+                                gps.heading_cdeg,
+                                gps.speed_cms,
+                                route_data,
+                                use_relaxed_heading,
+                            );
+                            state.last_seg_idx = new_seg_idx;
+
+                            // Clear frozen position after successful snap
+                            state.frozen_s_cm = None;
+                            state.off_route_suspect_ticks = 0;
+                            // Blend v_cms using EMA instead of hard assignment (M3 fix)
+                            let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+                            state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
+                            dr.last_gps_time = Some(gps.timestamp);
+                            dr.last_valid_s = state.s_cm;
+                            dr.filtered_v = state.v_cms;
+                            dr.in_recovery = false;
+
+                            let signals = PositionSignals {
+                                z_gps_cm: state.s_cm,
+                                s_cm: state.s_cm,
+                            };
+                            return ProcessResult::Valid {
+                                signals,
+                                v_cms: state.v_cms,
+                                seg_idx: new_seg_idx,
+                                snapped: true,
+                            };
+                        }
+                    }
+
+                    // Fall back to grid search if no stop found close enough
                     let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only(
                         gps_x,
                         gps_y,
@@ -259,16 +350,9 @@ pub fn process_gps_update(
                     let z_reentry = crate::map_match::project_to_route(gps_x, gps_y, new_seg_idx, route_data);
 
                     // CRITICAL: Only snap if the re-entry position is reasonably close to the frozen position
-                    // This prevents:
-                    // 1. Backward snaps (z_reentry < frozen position) - would cause false arrivals at intermediate stops
-                    // 2. Excessive forward snaps that skip stops (z_reentry >> frozen position)
-                    // Allow snaps up to 1000m forward - this handles detour scenarios where multiple stops are skipped
-                    // The detour scenario intentionally skips stops 2-5, so a larger forward snap is expected
-                    let frozen_s = state.frozen_s_cm.unwrap_or(state.s_cm);
-                    let max_snap_forward = 100000; // 1000m maximum forward snap (handles detour recovery)
-
-                    if z_reentry >= frozen_s && z_reentry <= frozen_s + max_snap_forward {
-                        // Safe to snap - position is within acceptable range
+                    // This prevents backward snaps which would cause false arrivals at intermediate stops
+                    if z_reentry >= frozen_s {
+                        // Safe to snap - position is forward
                         state.s_cm = z_reentry;
                         // Clear frozen position after successful snap
                         state.frozen_s_cm = None;
@@ -280,7 +364,7 @@ pub fn process_gps_update(
                         dr.last_gps_time = Some(gps.timestamp);
                         dr.last_valid_s = state.s_cm;
                         dr.filtered_v = state.v_cms;
-                        dr.in_recovery = false; // Clear recovery flag - we've snapped
+                        dr.in_recovery = false;
 
                         let signals = PositionSignals {
                             z_gps_cm: z_reentry,
@@ -290,11 +374,10 @@ pub fn process_gps_update(
                             signals,
                             v_cms: state.v_cms,
                             seg_idx: new_seg_idx,
-                            snapped: true,  // NEW: this is a snap operation
+                            snapped: true,
                         };
                     }
-                    // If z_reentry is outside acceptable range, fall through to normal processing
-                    // The position stays near frozen and normal map matching will handle re-entry
+                    // If z_reentry is backward, fall through to normal processing
                 }
                 // Continue normal processing
             }

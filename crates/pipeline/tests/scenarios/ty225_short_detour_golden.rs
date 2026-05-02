@@ -710,3 +710,81 @@ fn test_announce_precedes_arrival() {
 
     println!("✓ All announce events precede their corresponding arrivals");
 }
+
+/// Test that off-route re-entry snaps forward to near stop 6 (not gradual catch-up)
+///
+/// BUG: At tick 80149, when transitioning from off_route=true to off_route=false,
+/// the position should snap near 176535 (between stop 5 and stop 6) per ground truth.
+/// Instead, it only moves to 58227 (near stop 1), causing gradual catch-up.
+///
+/// Expected behavior: "脫離路線 5 秒後位置凍結，重入時直接 snap 至前方站點"
+/// (Off-route 5s → position freeze → re-entry → DIRECT SNAP to forward stop)
+#[test]
+fn test_off_route_reentry_snap_to_forward_stop() {
+    println!("\n=== TEST: Off-Route Re-Entry Direct Snap ===");
+
+    let trace_reader = load_trace_reader("short_detour");
+    let mut prev_off_route = false;
+    let mut frozen_s_cm: Option<i64> = None;
+    let mut reentry_found = false;
+
+    for line in trace_reader.lines() {
+        let line = line.expect("Failed to read trace line");
+        let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
+
+        let time = trace["time"].as_u64().unwrap();
+        let s_cm = trace["s_cm"].as_i64().unwrap();
+        let off_route = trace["off_route"].as_bool().unwrap_or(false);
+
+        // Track frozen position during off-route
+        if off_route {
+            frozen_s_cm = Some(s_cm);
+            prev_off_route = true;
+        } else if prev_off_route && !off_route {
+            // RE-ENTRY DETECTED: transition from off_route=true to off_route=false
+            let frozen_pos = frozen_s_cm.expect("Should have frozen position");
+
+            println!("  Off-route re-entry at tick {}", time);
+            println!("    Frozen position: {} cm", frozen_pos);
+            println!("    Re-entry position: {} cm", s_cm);
+            println!("    Position jump: {} cm", s_cm - frozen_pos);
+
+            // CRITICAL ASSERTION: Re-entry should snap to near stop 6 (176535 cm)
+            // NOT gradual catch-up to 58227 cm (near stop 1)
+            //
+            // Ground truth: re_acquisition at stop 6 (s_cm ~176535)
+            // Bug: s_cm only advances to 58227 (divergence_cm = 116534!)
+            //
+            // The position should snap FORWARD significantly (>100m jump is expected),
+            // but it should snap to the CORRECT location, not just slightly ahead.
+
+            // Minimum requirement: snap should move us significantly forward
+            // (this will pass - we do move from 44149 to 58227)
+            let position_jump = s_cm - frozen_pos;
+            assert!(
+                position_jump > 10000,
+                "Re-entry must cause position jump (>100m). Got {} cm",
+                position_jump
+            );
+
+            // THE FAILING ASSERTION: Position should be near stop 6 (~176535)
+            // not still near stop 1 (~58227)
+            //
+            // Allow ±50km tolerance for GPS noise, but 58227 is ~118km behind 176535!
+            let expected_s_cm_min = 150000; // Minimum expected position near stop 6
+            assert!(
+                s_cm >= expected_s_cm_min,
+                "Re-entry should snap to near stop 6 (s_cm >= {}), not stop 1. Got s_cm = {} (divergence = {} cm from expected)",
+                expected_s_cm_min,
+                s_cm,
+                176535 - s_cm
+            );
+
+            println!("  ✓ Direct snap to forward stop verified");
+            reentry_found = true;
+            break; // Found the re-entry, stop searching
+        }
+    }
+
+    assert!(reentry_found, "Off-route re-entry should be detected in trace");
+}
