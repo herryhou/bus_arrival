@@ -39,8 +39,8 @@ fn test_verify_stop_at_gps_position() {
             if gps_s_cm >= stop.corridor_start_cm && gps_s_cm <= stop.corridor_end_cm {
                 println!("  ACTIVE Stop {}: progress={}, corridor=[{}, {}], distance_from_stop={} cm ({} m)",
                     i, stop.progress_cm, stop.corridor_start_cm, stop.corridor_end_cm,
-                    stop.progress_cm as i32 - gps_s_cm,
-                    (stop.progress_cm as i32 - gps_s_cm).abs() / 100);
+                    stop.progress_cm - gps_s_cm,
+                    (stop.progress_cm - gps_s_cm).abs() / 100);
             }
         }
     }

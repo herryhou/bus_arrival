@@ -17,10 +17,10 @@ use shared::{probability_constants::*, PositionSignals, Stop};
 #[cfg(feature = "std")]
 pub fn build_gaussian_lut() -> [u8; 256] {
     let mut lut = [0u8; 256];
-    for i in 0..256 {
+    for (i, lut_entry) in lut.iter_mut().enumerate() {
         let x = (i as f64) / 64.0;  // 0 to 4.0
         let g = (-0.5 * x * x).exp();
-        lut[i] = (g * 255.0).min(255.0).round() as u8;  // Use .round() for proper rounding
+        *lut_entry = (g * 255.0).min(255.0).round() as u8;  // Use .round() for proper rounding
     }
     lut
 }
@@ -33,10 +33,10 @@ pub fn build_logistic_lut() -> [u8; 128] {
     let mut lut = [0u8; 128];
     let k = 0.01;
     let v_stop = 200.0;
-    for i in 0..128 {
+    for (i, lut_entry) in lut.iter_mut().enumerate() {
         let v = (i as f64) * 10.0;  // 0 to 1270 cm/s
         let l = 1.0 / (1.0 + (k * (v - v_stop)).exp());
-        lut[i] = (l * 255.0).min(255.0).round() as u8;  // Use .round() for proper rounding
+        *lut_entry = (l * 255.0).min(255.0).round() as u8;  // Use .round() for proper rounding
     }
     lut
 }
@@ -57,7 +57,7 @@ fn compute_features(
     // Defensive: blend z_gps_cm and s_cm based on divergence to handle
     // cases where map matcher produces poor projections during normal operation
     let divergence = signals.divergence_cm();
-    let (d1_cm, use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
+    let (d1_cm, _use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
         // When z_gps_cm and s_cm diverge significantly, use s_cm for p1
         // This prevents poor map matching from dragging down probability
         ((signals.s_cm - stop.progress_cm).abs(), true)
@@ -84,7 +84,7 @@ fn compute_features(
     };
 
     // Feature 4: Dwell time likelihood (T_ref = 10s)
-    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
+    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255);
 
     (p1, p2, p3, p4)
 }
@@ -126,6 +126,7 @@ pub fn compute_arrival_probability(
 ///
 /// When next sequential stop is < 120m away, removes dwell time (p4)
 /// weight and redistributes: (14, 7, 11, 0) instead of (13, 6, 10, 3).
+#[allow(clippy::too_many_arguments)]
 pub fn compute_arrival_probability_adaptive(
     signals: PositionSignals,
     v_cms: SpeedCms,
@@ -228,7 +229,7 @@ pub fn compute_probability(
     stop_progress: DistCm,
     dwell_time_s: u16,
 ) -> Prob8 {
-    compute_probability_with_luts(s_cm, v_cms, stop_progress, dwell_time_s, &gaussian_lut(), &logistic_lut())
+    compute_probability_with_luts(s_cm, v_cms, stop_progress, dwell_time_s, gaussian_lut(), logistic_lut())
 }
 
 /// Get or build the Gaussian LUT (cached in std environments)

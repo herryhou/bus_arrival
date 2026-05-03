@@ -90,8 +90,8 @@ pub fn query_neighbors(grid: &SpatialGrid, x_cm: i32, y_cm: i32, radius: u32) ->
     }
 
     // Convert point to grid coordinates
-    let gx = ((x_cm - grid.x0_cm) / grid.grid_size_cm) as i32;
-    let gy = ((y_cm - grid.y0_cm) / grid.grid_size_cm) as i32;
+    let gx = (x_cm - grid.x0_cm) / grid.grid_size_cm;
+    let gy = (y_cm - grid.y0_cm) / grid.grid_size_cm;
 
     let mut candidates = Vec::new();
 

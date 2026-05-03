@@ -28,6 +28,12 @@ pub struct NmeaState {
     point: GpsPoint,
 }
 
+impl Default for NmeaState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NmeaState {
     pub fn new() -> Self {
         NmeaState {

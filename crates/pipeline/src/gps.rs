@@ -68,6 +68,7 @@ impl GpsRecord {
     }
 
     /// Builder method to set diagnostic fields
+    #[allow(clippy::too_many_arguments)]
     pub fn with_diagnostics(
         mut self,
         segment_idx: Option<u16>,

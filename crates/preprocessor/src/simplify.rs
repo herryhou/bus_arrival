@@ -157,7 +157,7 @@ fn perpendicular_distance(p: (i64, i64), a: (i64, i64), b: (i64, i64)) -> f64 {
     let denominator = (dx.powi(2) + dy.powi(2)).sqrt();
 
     if denominator < 1e-6 {
-        return (((x0 - x1).powi(2) + (y0 - y1).powi(2)) as f64).sqrt();
+        return ((x0 - x1).powi(2) + (y0 - y1).powi(2)).sqrt();
     }
 
     let numerator = (dy * x0 - dx * y0 + x2 * y1 - y2 * x1).abs();

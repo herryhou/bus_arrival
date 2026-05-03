@@ -97,7 +97,7 @@ pub fn linearize_route(nodes_cm: &[(i64, i64)]) -> Vec<RouteNode> {
         let seg_len_mm = ((len2_cm2 as f64).sqrt() * MM_PRECISION).round() as i32;
 
         // Segment length in cm (for cumulative distance)
-        let seg_len_cm = (seg_len_mm / 10) as i32;
+        let seg_len_cm = seg_len_mm / 10;
 
         // Validate segment length constraint (100m max)
         if seg_len_cm > MAX_SEGMENT_LENGTH_CM {

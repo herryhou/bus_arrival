@@ -183,6 +183,12 @@ pub struct GpsPoint {
     pub has_fix: bool,
 }
 
+impl Default for GpsPoint {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GpsPoint {
     pub fn new() -> Self {
         GpsPoint {
@@ -227,6 +233,12 @@ pub struct KalmanState {
     pub off_route_freeze_time: Option<u64>,
     /// Off-route freeze context for spatial anchoring during recovery
     pub freeze_ctx: Option<FreezeContext>,
+}
+
+impl Default for KalmanState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl KalmanState {
@@ -323,8 +335,8 @@ impl SpatialGrid {
         // 3×3 neighborhood
         for dy in 0..=2 {
             for dx in 0..=2 {
-                let ny = gy as i32 + dy as i32 - 1;
-                let nx = gx as i32 + dx as i32 - 1;
+                let ny = gy as i32 + dy - 1;
+                let nx = gx as i32 + dx - 1;
 
                 if ny >= 0 && nx >= 0 && ny < self.rows as i32 && nx < self.cols as i32 {
                     let idx = ny as usize * (self.cols as usize) + nx as usize;
@@ -346,6 +358,12 @@ pub struct DrState {
     /// H3: Flag indicating we're in GPS recovery mode
     /// Set to true when returning from outage, cleared after first valid GPS
     pub in_recovery: bool,
+}
+
+impl Default for DrState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DrState {

@@ -36,7 +36,7 @@ fn test_new_ty225_bin_active_stops() {
             .filter_map(|i| {
                 route_data
                     .get_stop(i)
-                    .map(|stop| {
+                    .and_then(|stop| {
                         let s = s_cm as i32;
                         if s >= stop.corridor_start_cm && s <= stop.corridor_end_cm {
                             Some(i)
@@ -44,7 +44,6 @@ fn test_new_ty225_bin_active_stops() {
                             None
                         }
                     })
-                    .flatten()
             })
             .collect();
 

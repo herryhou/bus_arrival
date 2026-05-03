@@ -128,7 +128,7 @@ fn scenario_dense_stops_adjacent_corridors() {
     // Verify no gaps: every point should have at least one active stop
     for progress in [0, 5000, 10000, 15000, 20000, 25000, 30000].iter() {
         let active = find_active_stops(*progress, &stops);
-        assert!(active.len() >= 1, "Should have at least one active stop at progress {}", progress);
+        assert!(!active.is_empty(), "Should have at least one active stop at progress {}", progress);
     }
 }
 

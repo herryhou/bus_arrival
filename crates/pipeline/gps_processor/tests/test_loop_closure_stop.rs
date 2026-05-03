@@ -53,7 +53,7 @@ fn test_loop_closure_stop() {
                     stop.progress_cm,
                     stop.corridor_start_cm,
                     stop.corridor_end_cm,
-                    stop.progress_cm as i32 - gps_s_cm
+                    stop.progress_cm - gps_s_cm
                 );
                 found_active = true;
             }

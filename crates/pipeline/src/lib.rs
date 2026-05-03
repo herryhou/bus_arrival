@@ -48,21 +48,12 @@ pub use gps_processor::nmea::NmeaState;
 pub use detection::state_machine::{StopState, StopEvent};
 
 /// Configuration for pipeline processing
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PipelineConfig {
     /// Enable trace output (for debugging)
     pub enable_trace: bool,
     /// Enable announce output
     pub enable_announce: bool,
-}
-
-impl Default for PipelineConfig {
-    fn default() -> Self {
-        Self {
-            enable_trace: false,
-            enable_announce: false,
-        }
-    }
 }
 
 /// Pipeline result containing arrival and departure events
@@ -216,7 +207,7 @@ impl<'a> LocalizationState<'a> {
         match result {
             gps_processor::kalman::ProcessResult::Valid { signals, v_cms, seg_idx, snapped: _ } => {
                 let shared::PositionSignals { z_gps_cm, s_cm } = signals;
-                let divergence_cm = z_gps_cm as i32 - s_cm as i32;
+                let divergence_cm = z_gps_cm - s_cm;
                 let hdop = if gps.hdop_x10 > 0 { Some(gps.hdop_x10 as f32 / 10.0) } else { None };
                 Some(gps::GpsRecord::new(
                     gps.timestamp,
@@ -380,8 +371,8 @@ impl DetectionState {
                 stop,
                 stop_state.dwell_time_s,
                 gps_status,
-                &detection::probability::gaussian_lut(),
-                &detection::probability::logistic_lut(),
+                detection::probability::gaussian_lut(),
+                detection::probability::logistic_lut(),
             );
 
             // Update state machine
@@ -400,7 +391,7 @@ impl DetectionState {
                     result.arrivals.push(ArrivalEvent {
                         time: record.time,
                         stop_idx: *idx as u8,
-                        s_cm: record.s_cm as i32,
+                        s_cm: record.s_cm,
                         v_cms: record.v_cms,
                         probability,
                         event_type: shared::ArrivalEventType::Arrival,
@@ -410,7 +401,7 @@ impl DetectionState {
                     result.departures.push(DepartureEvent {
                         time: record.time,
                         stop_idx: *idx as u8,
-                        s_cm: record.s_cm as i32,
+                        s_cm: record.s_cm,
                         v_cms: record.v_cms,
                     });
                 }
@@ -421,15 +412,17 @@ impl DetectionState {
         // Check for announcements (v8.4: corridor entry announcement)
         // Suppress announcements when off-route (detouring)
         #[cfg(feature = "std")]
-        if result.announce_events.is_some() && !self.off_route {
-            for (idx, stop_state) in self.stop_states.iter_mut().enumerate() {
-                if stop_state.should_announce(s_cm, stops[idx].corridor_start_cm) {
-                    result.announce_events.as_mut().unwrap().push(AnnounceEvent {
-                        time: record.time,
-                        stop_idx: idx as u8,
-                        s_cm: record.s_cm as i32,
-                        v_cms: record.v_cms,
-                    });
+        if let Some(ref mut announce_events) = result.announce_events {
+            if !self.off_route {
+                for (idx, stop_state) in self.stop_states.iter_mut().enumerate() {
+                    if stop_state.should_announce(s_cm, stops[idx].corridor_start_cm) {
+                        announce_events.push(AnnounceEvent {
+                            time: record.time,
+                            stop_idx: idx as u8,
+                            s_cm: record.s_cm,
+                            v_cms: record.v_cms,
+                        });
+                    }
                 }
             }
         }
@@ -460,8 +453,8 @@ impl DetectionState {
                 record.v_cms,
                 stop,
                 stop_state.dwell_time_s,
-                &detection::probability::gaussian_lut(),
-                &detection::probability::logistic_lut(),
+                detection::probability::gaussian_lut(),
+                detection::probability::logistic_lut(),
             );
 
             // Re-compute probability for trace output
@@ -474,8 +467,8 @@ impl DetectionState {
 
             StopTraceState {
                 stop_idx: idx as u8,
-                gps_distance_cm: (z_gps_cm - stop.progress_cm) as i32,
-                progress_distance_cm: (record.s_cm - stop.progress_cm) as i32,
+                gps_distance_cm: z_gps_cm - stop.progress_cm,
+                progress_distance_cm: record.s_cm - stop.progress_cm,
                 fsm_state: format!("{:?}", stop_state.fsm_state),
                 dwell_time_s: stop_state.dwell_time_s,
                 probability,
@@ -554,7 +547,7 @@ impl Pipeline {
 
         // Process NMEA sentences
         for line in reader.lines() {
-            let line = line.map_err(|e| PipelineError::IoError(e))?;
+            let line = line.map_err(PipelineError::IoError)?;
 
             if let Some(gps) = loc_state.nmea.parse_sentence(&line) {
                 // Phase 2: Localization (Kalman + Map Matching)
@@ -632,7 +625,7 @@ impl PipelineResult {
             // Compute corridor info from first active stop
             let (corridor_start_cm, corridor_end_cm) = if let Some(&first_idx) = det_state.active_indices.first() {
                 let stop = &route_data.stops()[first_idx];
-                (Some(stop.corridor_start_cm as i32), Some(stop.corridor_end_cm as i32))
+                (Some(stop.corridor_start_cm), Some(stop.corridor_end_cm))
             } else {
                 (None, None)
             };
@@ -641,7 +634,7 @@ impl PipelineResult {
             let next_stop = if let Some(end) = corridor_end_cm {
                 let mut result = None;
                 for (idx, stop) in route_data.stops().iter().enumerate() {
-                    if stop.progress_cm as i32 > end {
+                    if stop.progress_cm > end {
                         // Get probability from stop_states if available
                         let prob = stop_states.iter()
                             .find(|s| s.stop_idx == idx as u8)
@@ -663,7 +656,7 @@ impl PipelineResult {
                 time: record.time,
                 lat: record.lat,
                 lon: record.lon,
-                s_cm: record.s_cm as i32,
+                s_cm: record.s_cm,
                 v_cms: record.v_cms,
                 heading_cdeg: record.heading_cdeg,
                 active_stops,

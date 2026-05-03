@@ -14,31 +14,30 @@ use shared::{RouteNode, SpatialGrid};
 #[test]
 fn test_gps_outside_bounds_returns_last_idx() {
     // Create minimal route data with x0_cm=100000, y0_cm=100000
-    let mut nodes = Vec::new();
-
-    // Single segment at (100000, 100000) with heading 0 (North)
-    nodes.push(RouteNode {
-        seg_len_mm: 100000, // 100m
-        x_cm: 100000,
-        y_cm: 100000,
-        cum_dist_cm: 0,
-        dx_cm: 0,
-        dy_cm: 10000,
-        heading_cdeg: 0,
-        _pad: 0,
-    });
-
-    // End node
-    nodes.push(RouteNode {
-        seg_len_mm: 0,
-        x_cm: 100000,
-        y_cm: 110000,
-        cum_dist_cm: 10000,
-        dx_cm: 0,
-        dy_cm: 0,
-        heading_cdeg: 0,
-        _pad: 0,
-    });
+    let nodes = vec![
+        // Single segment at (100000, 100000) with heading 0 (North)
+        RouteNode {
+            seg_len_mm: 100000, // 100m
+            x_cm: 100000,
+            y_cm: 100000,
+            cum_dist_cm: 0,
+            dx_cm: 0,
+            dy_cm: 10000,
+            heading_cdeg: 0,
+            _pad: 0,
+        },
+        // End node
+        RouteNode {
+            seg_len_mm: 0,
+            x_cm: 100000,
+            y_cm: 110000,
+            cum_dist_cm: 10000,
+            dx_cm: 0,
+            dy_cm: 0,
+            heading_cdeg: 0,
+            _pad: 0,
+        },
+    ];
 
     // Create grid with x0_cm=100000, y0_cm=100000
     let grid = SpatialGrid {
@@ -77,29 +76,28 @@ fn test_gps_outside_bounds_returns_last_idx() {
 #[test]
 fn test_gps_outside_y_bounds_returns_last_idx() {
     // Create minimal route data
-    let mut nodes = Vec::new();
-
-    nodes.push(RouteNode {
-        seg_len_mm: 100000,
-        x_cm: 100000,
-        y_cm: 100000,
-        cum_dist_cm: 0,
-        dx_cm: 0,
-        dy_cm: 10000,
-        heading_cdeg: 0,
-        _pad: 0,
-    });
-
-    nodes.push(RouteNode {
-        seg_len_mm: 0,
-        x_cm: 100000,
-        y_cm: 110000,
-        cum_dist_cm: 10000,
-        dx_cm: 0,
-        dy_cm: 0,
-        heading_cdeg: 0,
-        _pad: 0,
-    });
+    let nodes = vec![
+        RouteNode {
+            seg_len_mm: 100000,
+            x_cm: 100000,
+            y_cm: 100000,
+            cum_dist_cm: 0,
+            dx_cm: 0,
+            dy_cm: 10000,
+            heading_cdeg: 0,
+            _pad: 0,
+        },
+        RouteNode {
+            seg_len_mm: 0,
+            x_cm: 100000,
+            y_cm: 110000,
+            cum_dist_cm: 10000,
+            dx_cm: 0,
+            dy_cm: 0,
+            heading_cdeg: 0,
+            _pad: 0,
+        },
+    ];
 
     let grid = SpatialGrid {
         cells: vec![vec![0]],
@@ -134,29 +132,28 @@ fn test_gps_outside_y_bounds_returns_last_idx() {
 #[test]
 fn test_gps_inside_bounds_works_normally() {
     // Create minimal route data
-    let mut nodes = Vec::new();
-
-    nodes.push(RouteNode {
-        seg_len_mm: 100000,
-        x_cm: 100000,
-        y_cm: 100000,
-        cum_dist_cm: 0,
-        dx_cm: 0,
-        dy_cm: 10000,
-        heading_cdeg: 0,
-        _pad: 0,
-    });
-
-    nodes.push(RouteNode {
-        seg_len_mm: 0,
-        x_cm: 100000,
-        y_cm: 110000,
-        cum_dist_cm: 10000,
-        dx_cm: 0,
-        dy_cm: 0,
-        heading_cdeg: 0,
-        _pad: 0,
-    });
+    let nodes = vec![
+        RouteNode {
+            seg_len_mm: 100000,
+            x_cm: 100000,
+            y_cm: 100000,
+            cum_dist_cm: 0,
+            dx_cm: 0,
+            dy_cm: 10000,
+            heading_cdeg: 0,
+            _pad: 0,
+        },
+        RouteNode {
+            seg_len_mm: 0,
+            x_cm: 100000,
+            y_cm: 110000,
+            cum_dist_cm: 10000,
+            dx_cm: 0,
+            dy_cm: 0,
+            heading_cdeg: 0,
+            _pad: 0,
+        },
+    ];
 
     let grid = SpatialGrid {
         cells: vec![vec![0]],

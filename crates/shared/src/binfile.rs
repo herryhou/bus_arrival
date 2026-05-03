@@ -73,7 +73,6 @@ pub fn crc32(data: &[u8]) -> u32 {
 /// Pack route data into binary format.
 ///
 /// This function is intended for use in the preprocessor (requires std).
-
 /// Magic bytes for route_data.bin: "BUSA" (BUS Arrival)
 pub const MAGIC: u32 = 0x42555341;
 
@@ -197,7 +196,7 @@ impl<'a> SpatialGridView<'a> {
         let indices_ptr = unsafe { data_ptr.add(2) as *const u16 };
 
         // Check alignment and handle appropriately
-        if indices_ptr as usize % 2 == 0 {
+        if (indices_ptr as usize).is_multiple_of(2) {
             // Aligned, can use from_raw_parts directly
             Ok(unsafe { core::slice::from_raw_parts(indices_ptr, count) })
         } else {
@@ -376,7 +375,7 @@ impl<'a> RouteData<'a> {
 
         let cell_count = (cols * rows) as usize;
         // v5: bitmask (1 bit per cell, rounded up to whole bytes)
-        let bitmask_bytes = (cell_count + 7) / 8;
+        let bitmask_bytes = cell_count.div_ceil(8);
         if data.len() < offset + bitmask_bytes { return Err(BusError::InvalidLength); }
         let bitmask_base = data[offset..].as_ptr();
         offset += bitmask_bytes;
@@ -470,7 +469,7 @@ pub fn pack_route_data(
 
     // v5: Build bitmask and sparse offsets
     let cell_count = (grid.cols * grid.rows) as usize;
-    let bitmask_bytes = (cell_count + 7) / 8;
+    let bitmask_bytes = cell_count.div_ceil(8);
     let mut bitmask = vec![0u8; bitmask_bytes];
 
     let mut index_data = Vec::new();
@@ -593,7 +592,7 @@ mod tests {
             buf.extend_from_slice(&grid_data);
             let data_base = buf[prefix_len..].as_ptr();
 
-            if data_base as usize % 2 != 0 {
+            if !(data_base as usize).is_multiple_of(2) {
                 misaligned_result = Some((buf, SpatialGridView {
                     cols: 1, rows: 1, grid_size_cm: 10000,
                     bitmask_base: [1u8].as_ptr(),

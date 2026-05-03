@@ -15,40 +15,38 @@ fn test_find_best_segment_returns_distance_squared() {
     // Segment 1: (1000, 0) to (2000, 0) - heading 0°
     // Segment 2: (2000, 0) to (3000, 0) - heading 0°
 
-    let mut nodes = Vec::new();
-
-    nodes.push(RouteNode {
-        x_cm: 0,
-        y_cm: 0,
-        cum_dist_cm: 0,
-        heading_cdeg: 0,
-        seg_len_mm: 10000, // 1000 cm
-        dx_cm: 1000,
-        dy_cm: 0,
-        _pad: 0,
-    });
-
-    nodes.push(RouteNode {
-        x_cm: 1000,
-        y_cm: 0,
-        cum_dist_cm: 1000,
-        heading_cdeg: 0,
-        seg_len_mm: 10000, // 1000 cm
-        dx_cm: 1000,
-        dy_cm: 0,
-        _pad: 0,
-    });
-
-    nodes.push(RouteNode {
-        x_cm: 2000,
-        y_cm: 0,
-        cum_dist_cm: 2000,
-        heading_cdeg: 0,
-        seg_len_mm: 10000, // 1000 cm
-        dx_cm: 1000,
-        dy_cm: 0,
-        _pad: 0,
-    });
+    let nodes = vec![
+        RouteNode {
+            x_cm: 0,
+            y_cm: 0,
+            cum_dist_cm: 0,
+            heading_cdeg: 0,
+            seg_len_mm: 10000, // 1000 cm
+            dx_cm: 1000,
+            dy_cm: 0,
+            _pad: 0,
+        },
+        RouteNode {
+            x_cm: 1000,
+            y_cm: 0,
+            cum_dist_cm: 1000,
+            heading_cdeg: 0,
+            seg_len_mm: 10000, // 1000 cm
+            dx_cm: 1000,
+            dy_cm: 0,
+            _pad: 0,
+        },
+        RouteNode {
+            x_cm: 2000,
+            y_cm: 0,
+            cum_dist_cm: 2000,
+            heading_cdeg: 0,
+            seg_len_mm: 10000, // 1000 cm
+            dx_cm: 1000,
+            dy_cm: 0,
+            _pad: 0,
+        },
+    ];
 
     let grid = SpatialGrid {
         cells: vec![vec![0, 1, 2]], // One row with 3 cells
@@ -133,18 +131,18 @@ fn test_find_best_segment_returns_distance_squared() {
 #[test]
 fn test_find_best_segment_distance_squared_properties() {
     // Create minimal route
-    let mut nodes = Vec::new();
-
-    nodes.push(RouteNode {
-        x_cm: 1000,
-        y_cm: 1000,
-        cum_dist_cm: 0,
-        heading_cdeg: 0,
-        seg_len_mm: 10000,
-        dx_cm: 1000,
-        dy_cm: 0,
-        _pad: 0,
-    });
+    let nodes = vec![
+        RouteNode {
+            x_cm: 1000,
+            y_cm: 1000,
+            cum_dist_cm: 0,
+            heading_cdeg: 0,
+            seg_len_mm: 10000,
+            dx_cm: 1000,
+            dy_cm: 0,
+            _pad: 0,
+        },
+    ];
 
     let grid = SpatialGrid {
         cells: vec![vec![0]],

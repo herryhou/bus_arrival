@@ -44,7 +44,7 @@ mod tests {
     #[test]
     fn test_parse_trace_empty_file() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
-        writeln!(file, "").unwrap();
+        writeln!(file).unwrap();
 
         let result = Parser::parse_trace(file.path());
         assert!(result.is_ok());
@@ -83,7 +83,7 @@ mod tests {
         assert_eq!(result[0].stop_states[0].features.p1, 5);
         // Verify new fields
         assert_eq!(result[0].segment_idx, Some(0));
-        assert_eq!(result[0].heading_constraint_met, true);
+        assert!(result[0].heading_constraint_met);
         assert_eq!(result[0].divergence_cm, 5);
         assert_eq!(result[0].hdop, Some(1.5));
         assert_eq!(result[0].num_sats, Some(12));

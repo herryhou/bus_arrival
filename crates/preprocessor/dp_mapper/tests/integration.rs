@@ -667,9 +667,9 @@ fn test_integration_stops_near_segment_boundaries() {
     assert_eq!(result.len(), 3);
 
     // All should be properly mapped without precision issues
-    for i in 0..result.len() {
+    for (i, stop) in result.iter().enumerate() {
         assert!(
-            result[i].progress_cm >= 0 && result[i].progress_cm <= 20000,
+            stop.progress_cm >= 0 && stop.progress_cm <= 20000,
             "stop {} mapped within route bounds: {}",
             i,
             result[i].progress_cm
@@ -872,7 +872,7 @@ fn position_at_progress(route_nodes: &[RouteNode], progress_cm: i32) -> (i32, i3
     let offset_cm = progress_cm - node.cum_dist_cm;
 
     // t = offset / seg_len (clamped to [0, 1])
-    let seg_len_cm = (node.seg_len_mm / 10) as i32;
+    let seg_len_cm = node.seg_len_mm / 10;
     let t = if seg_len_cm > 0 {
         (offset_cm as f64 / seg_len_cm as f64).clamp(0.0, 1.0)
     } else {

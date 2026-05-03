@@ -1,10 +1,10 @@
 //! Recovery function with search window limitation
 
 use crate::recovery::RecoveryInput;
-use shared::{DistCm, Stop};
+use shared::DistCm;
 
 /// Maximum backward recovery distance (100 m)
-const MAX_BACKWARD_RECOVERY_CM: i64 = 100_00;
+const MAX_BACKWARD_RECOVERY_CM: i64 = 10_000;
 
 /// Maximum bus speed for city bus operations: 60 km/h = 1667 cm/s
 const V_MAX_CMS: u32 = 1667;
@@ -13,10 +13,10 @@ const V_MAX_CMS: u32 = 1667;
 const MIN_RECOVERY_RATE_CMS: i64 = 200;
 
 /// Maximum base uncertainty term (200 m)
-const MAX_BASE_DISTANCE_CM: i64 = 200_00;
+const MAX_BASE_DISTANCE_CM: i64 = 20_000;
 
 /// Maximum recovery distance cap (500 m)
-const MAX_RECOVERY_DISTANCE_CM: i64 = 500_00;
+const MAX_RECOVERY_DISTANCE_CM: i64 = 50_000;
 
 /// Find correct stop after GPS anomaly
 ///
@@ -88,7 +88,7 @@ pub fn recover(input: RecoveryInput) -> Option<u8> {
         // Score: distance + index penalty + spatial anchor penalty
         let index_penalty = 5000 * (input.hint_idx as i32 - i as i32).max(0);
         let score = d.saturating_add(index_penalty)
-                       .saturating_add(spatial_anchor_penalty as i32);
+                       .saturating_add(spatial_anchor_penalty);
 
         if score < best_score {
             best_score = score;
@@ -116,6 +116,7 @@ fn compute_spatial_anchor_penalty(s_cm: DistCm, frozen_s_cm: DistCm) -> i32 {
 mod tests {
     use super::*;
     use heapless::Vec;
+    use shared::Stop;
 
     #[test]
     fn test_recovery_with_hint() {

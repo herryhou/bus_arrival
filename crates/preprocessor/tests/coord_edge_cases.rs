@@ -20,12 +20,11 @@ fn test_i64_to_i32_conversion_in_range() {
     let lat_avg = 25.0;
 
     // --- WHEN ---
-    let (x_cm, y_cm) = latlon_to_cm_relative(lat, lon, lat_avg);
+    let (_x_cm, _y_cm) = latlon_to_cm_relative(lat, lon, lat_avg);
 
     // --- THEN ---
     // Should convert without loss
-    assert!(x_cm >= i32::MIN as i32 && x_cm <= i32::MAX as i32);
-    assert!(y_cm >= i32::MIN as i32 && y_cm <= i32::MAX as i32);
+    // Note: These assertions are always true since x_cm and y_cm are i32
 }
 
 #[test]
@@ -37,12 +36,11 @@ fn test_floating_point_to_integer_rounding() {
     let lat_avg = 25.0;
 
     // --- WHEN ---
-    let (x_cm, y_cm) = latlon_to_cm_relative(lat, lon, lat_avg);
+    let (_x_cm, _y_cm) = latlon_to_cm_relative(lat, lon, lat_avg);
 
     // --- THEN ---
     // Should round to nearest integer
-    assert_eq!(x_cm % 1, 0); // x_cm is integer
-    assert_eq!(y_cm % 1, 0); // y_cm is integer
+    // Note: Modulo 1 is always 0 for integers, so these assertions are removed
 }
 
 #[test]
@@ -216,7 +214,7 @@ fn test_heading_overflow_i16_max() {
 
     // --- THEN ---
     // Should stay within i16 range (-180° to 180° or similar)
-    assert!(heading_cdeg >= -18000 && heading_cdeg <= 18000);
+    assert!((-18000..=18000).contains(&heading_cdeg));
 }
 
 #[test]
@@ -294,7 +292,7 @@ fn test_conversion_at_equator() {
     // Should handle lat=0 without division by zero
     // Note: The y coordinate is relative to FIXED_ORIGIN_LAT_DEG (20°N)
     // So lat=0 gives a negative y offset from the origin
-    assert!(x_cm >= -10 && x_cm <= 10, "equator x ~ 0: {}", x_cm);
+    assert!((-10..=10).contains(&x_cm), "equator x ~ 0: {}", x_cm);
     // y_cm should be approximately -R_CM * 20° in radians (offset from 20°N origin)
     let expected_y = -(20.0_f64.to_radians() * R_CM).round() as i32;
     assert!((y_cm - expected_y).abs() < 10000, "equator y relative to 20°N origin: {} ~ {}", y_cm, expected_y);

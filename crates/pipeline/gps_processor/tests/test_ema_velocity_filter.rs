@@ -32,7 +32,7 @@ fn test_ema_velocity_filter_formula() {
     }
     // After 10 updates, should be close to 600
     assert!(
-        v_filtered >= 580 && v_filtered <= 600,
+        (580..=600).contains(&v_filtered),
         "EMA should converge: got {}",
         v_filtered
     );

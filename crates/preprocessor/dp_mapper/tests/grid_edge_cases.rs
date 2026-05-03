@@ -308,7 +308,7 @@ fn test_query_outside_grid_bounds() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_mm: (0 * 10),
+            seg_len_mm: 0,
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -347,7 +347,7 @@ fn test_query_at_negative_coordinates() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_mm: (0 * 10),
+            seg_len_mm: 0,
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -385,7 +385,7 @@ fn test_query_with_radius_larger_than_grid() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_mm: (0 * 10),
+            seg_len_mm: 0,
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -423,7 +423,7 @@ fn test_query_with_zero_radius() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_mm: (0 * 10),
+            seg_len_mm: 0,
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -552,7 +552,7 @@ fn test_multiple_segments_same_cell() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_mm: (0 * 10),
+            seg_len_mm: 0,
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -598,7 +598,7 @@ fn test_grid_with_negative_coordinates() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_mm: (0 * 10),
+            seg_len_mm: 0,
         },
     ];
     let grid_size_cm = 10000;
@@ -635,7 +635,7 @@ fn test_grid_offset_origin() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_mm: (0 * 10),
+            seg_len_mm: 0,
         },
     ];
     let grid_size_cm = 10000;
@@ -675,7 +675,7 @@ fn test_very_small_grid_cells() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_mm: (0 * 10),
+            seg_len_mm: 0,
         },
     ];
     let grid_size_cm = 100; // 1m cells - very small
@@ -710,7 +710,7 @@ fn test_very_large_grid_cells() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_mm: (0 * 10),
+            seg_len_mm: 0,
         },
     ];
     let grid_size_cm = 100000; // 1km cells - very large
@@ -750,7 +750,7 @@ fn test_query_at_exact_cell_boundary() {
             cum_dist_cm: 20000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_mm: (0 * 10),
+            seg_len_mm: 0,
         },
     ];
     let grid = build_grid(&route, 10000);
@@ -786,7 +786,7 @@ fn test_query_at_segment_endpoint() {
             cum_dist_cm: 10000,
             dx_cm: 0,
             dy_cm: 0,
-            seg_len_mm: (0 * 10),
+            seg_len_mm: 0,
         },
     ];
     let grid = build_grid(&route, 10000);

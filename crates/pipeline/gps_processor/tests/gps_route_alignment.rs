@@ -7,6 +7,7 @@
 //! 4. Verify the GPS position matches the expected route position
 //!
 //! This ensures the coordinate systems are aligned between preprocessor and simulator.
+#![allow(clippy::unnecessary_cast)]
 
 use shared::{EARTH_R_CM, FIXED_ORIGIN_LON_DEG, FIXED_ORIGIN_Y_CM};
 

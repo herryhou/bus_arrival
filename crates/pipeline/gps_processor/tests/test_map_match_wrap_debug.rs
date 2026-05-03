@@ -42,8 +42,8 @@ fn test_grid_lookup_with_wrapped_coordinates() {
     let gy = 5u32;
 
     // The current code does:
-    let ny = gy as i32 + 0i32 - 1; // 4
-    let nx = gx as i32 + 0i32 - 1; // -6
+    let ny = gy as i32 - 1; // 4
+    let nx = gx as i32 - 1; // -6
 
     println!("ny = {}", ny);
     println!("nx = {}", nx);

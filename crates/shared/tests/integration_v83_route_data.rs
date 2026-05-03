@@ -7,7 +7,6 @@
 /// Grid space reduced from ~16KB to ~5KB (60-70% savings).
 /// This requires VERSION 5. Existing route_data.bin files need to be regenerated
 /// with the preprocessor.
-
 use std::fs;
 use shared::binfile::RouteData;
 

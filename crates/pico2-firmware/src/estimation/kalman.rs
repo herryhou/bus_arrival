@@ -11,6 +11,12 @@ pub struct KalmanState {
     pub last_seg_idx: usize,
 }
 
+impl Default for KalmanState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KalmanState {
     pub fn new() -> Self {
         Self {

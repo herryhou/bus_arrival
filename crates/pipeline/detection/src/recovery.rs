@@ -7,7 +7,7 @@ const GPS_JUMP_THRESHOLD: DistCm = 30000;  // 300 m (increased for velocity cons
 
 /// Maximum backward recovery distance (100 m)
 /// Prevents pathological backward jumps while allowing legitimate re-selection
-const MAX_BACKWARD_RECOVERY_CM: i64 = 100_00;
+const MAX_BACKWARD_RECOVERY_CM: i64 = 10_000;
 
 /// Maximum bus speed for city bus operations: 60 km/h = 1667 cm/s
 /// Per spec Section 9.1: urban transit routes, not highway speeds
@@ -19,11 +19,11 @@ const MIN_RECOVERY_RATE_CMS: i64 = 200;
 
 /// Maximum base uncertainty term (200 m)
 /// Caps the uncertainty buffer for very long outages to prevent it dominating velocity
-const MAX_BASE_DISTANCE_CM: i64 = 200_00;
+const MAX_BASE_DISTANCE_CM: i64 = 20_000;
 
 /// Maximum recovery distance cap (500 m)
 /// Tuned for urban routes with ~100-200m stop spacing. Prevents search explosion.
-const MAX_RECOVERY_DISTANCE_CM: i64 = 500_00;
+const MAX_RECOVERY_DISTANCE_CM: i64 = 50_000;
 
 /// Find correct stop after GPS jump
 ///

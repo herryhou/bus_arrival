@@ -14,9 +14,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = parse_args()?;
 
     // Build configuration
-    let mut config = PipelineConfig::default();
-    config.enable_trace = args.trace.is_some();
-    config.enable_announce = args.announce.is_some();
+    let config = PipelineConfig {
+        enable_trace: args.trace.is_some(),
+        enable_announce: args.announce.is_some(),
+    };
 
     // Run pipeline
     let result = Pipeline::process_nmea_file(

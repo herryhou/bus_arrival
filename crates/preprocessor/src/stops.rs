@@ -76,7 +76,7 @@ pub fn preprocess_close_stop_corridors(stops: &mut [Stop]) {
         let distance = stops[i + 1].progress_cm - stops[i].progress_cm;
 
         // Skip if distance is too small or at threshold
-        if distance < 2_000 || distance >= CLOSE_STOP_THRESHOLD_CM {
+        if !(2_000..CLOSE_STOP_THRESHOLD_CM).contains(&distance) {
             continue;
         }
 

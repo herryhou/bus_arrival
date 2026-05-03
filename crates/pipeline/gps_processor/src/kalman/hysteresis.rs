@@ -15,7 +15,7 @@
 //! false positives from transient multipath. Position is frozen during off-route
 //! episodes, and recovery re-synchronizes stop indices when GPS returns to route.
 
-use shared::{DistCm, KalmanState};
+use shared::KalmanState;
 
 /// Off-route distance threshold: d=50m → d²=2,500 m² = 25,000,000 cm²
 pub const OFF_ROUTE_D2_THRESHOLD: i64 = 25_000_000;
@@ -106,6 +106,7 @@ pub fn reset_off_route_state(state: &mut KalmanState) {
 
 #[cfg(test)]
 mod tests {
+    use shared::DistCm;
     use super::*;
 
     // ===== Test Constants =====

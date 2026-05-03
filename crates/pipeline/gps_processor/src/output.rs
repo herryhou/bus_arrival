@@ -38,7 +38,7 @@ fn create_stop_states(s_cm: DistCm, active_stops: &[usize], stops: &[Stop]) -> V
         .iter()
         .filter_map(|&idx| {
             stops.get(idx).map(|stop| {
-                let distance_cm = stop.progress_cm as i32 - s_cm as i32;
+                let distance_cm = stop.progress_cm - s_cm;
                 StopTraceState {
                     stop_idx: idx as u8,
                     distance_cm,
@@ -86,7 +86,7 @@ pub fn write_output<W: Write>(
             lat,
             lon,
             s_cm: signals.s_cm as i64,
-            v_cms: *v_cms as i32,
+            v_cms: *v_cms,
             heading_cdeg: Some(heading_cdeg),
             status: "valid".to_string(),
             seg_idx: Some(*seg_idx),
@@ -128,7 +128,7 @@ pub fn write_output<W: Write>(
             lat,
             lon,
             s_cm: *s_cm as i64,
-            v_cms: *v_cms as i32,
+            v_cms: *v_cms,
             heading_cdeg: None,
             status: "dr_outage".to_string(),
             seg_idx: None,
@@ -146,7 +146,7 @@ pub fn write_output<W: Write>(
             lat,
             lon,
             s_cm: *last_valid_s as i64,
-            v_cms: *last_valid_v as i32,
+            v_cms: *last_valid_v,
             heading_cdeg: None,
             status: "off_route".to_string(),
             seg_idx: None,
@@ -160,7 +160,7 @@ pub fn write_output<W: Write>(
             lat,
             lon,
             s_cm: *s_cm as i64,
-            v_cms: *v_cms as i32,
+            v_cms: *v_cms,
             heading_cdeg: None,
             status: "suspect_off_route".to_string(),
             seg_idx: None,

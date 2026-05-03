@@ -175,7 +175,7 @@ pub fn process_gps_update(
                         state.frozen_s_cm = None;
                         state.off_route_suspect_ticks = 0;
                         // Blend v_cms using EMA instead of hard assignment (M3 fix)
-                        let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+                        let v_gps = gps.speed_cms.clamp(0, V_MAX_CMS);
                         state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
                         state.last_seg_idx = new_seg_idx;
                         dr.last_gps_time = Some(gps.timestamp);
@@ -213,7 +213,7 @@ pub fn process_gps_update(
         state.s_cm = z_raw;
 
         // Blend v_cms using EMA instead of hard assignment (M3 fix)
-        let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+        let v_gps = gps.speed_cms.clamp(0, V_MAX_CMS);
         state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
         state.last_seg_idx = seg_idx;
         dr.last_gps_time = Some(gps.timestamp);
@@ -239,32 +239,30 @@ pub fn process_gps_update(
     // The snap logic handles validation of re-entry position
     // When frozen, we expect large position jumps (detour scenarios) and should
     // allow the snap logic to validate, not reject here
-    if state.frozen_s_cm.is_none() {
-        if !check_speed_constraint(z_raw, state.s_cm, dt) {
-            // Per spec Section 9.2: "拒絕後的行為：跳過 Kalman 更新步驟，僅執行 predict step（ŝ += v̂），等效於短暫 Dead-Reckoning"
-            // Do prediction step (DR mode) instead of returning Rejected with zero position
-            state.s_cm += state.v_cms * (dt as DistCm);
-            dr.last_gps_time = Some(gps.timestamp);
-            return ProcessResult::DrOutage {
-                s_cm: state.s_cm,
-                v_cms: state.v_cms,
-            };
-        }
+    if state.frozen_s_cm.is_none()
+        && !check_speed_constraint(z_raw, state.s_cm, dt) {
+        // Per spec Section 9.2: "拒絕後的行為：跳過 Kalman 更新步驟，僅執行 predict step（ŝ += v̂），等效於短暫 Dead-Reckoning"
+        // Do prediction step (DR mode) instead of returning Rejected with zero position
+        state.s_cm += state.v_cms * (dt as DistCm);
+        dr.last_gps_time = Some(gps.timestamp);
+        return ProcessResult::DrOutage {
+            s_cm: state.s_cm,
+            v_cms: state.v_cms,
+        };
     }
 
     // 6. Monotonicity filter
     // CRITICAL: Skip this check when position is frozen to allow off-route recovery
     // The snap logic handles validation of re-entry position
-    if state.frozen_s_cm.is_none() {
-        if !check_monotonic(z_raw, state.s_cm) {
-            // Per spec Section 9.2: same behavior as speed constraint rejection
-            state.s_cm += state.v_cms * (dt as DistCm);
-            dr.last_gps_time = Some(gps.timestamp);
-            return ProcessResult::DrOutage {
-                s_cm: state.s_cm,
-                v_cms: state.v_cms,
-            };
-        }
+    if state.frozen_s_cm.is_none()
+        && !check_monotonic(z_raw, state.s_cm) {
+        // Per spec Section 9.2: same behavior as speed constraint rejection
+        state.s_cm += state.v_cms * (dt as DistCm);
+        dr.last_gps_time = Some(gps.timestamp);
+        return ProcessResult::DrOutage {
+            s_cm: state.s_cm,
+            v_cms: state.v_cms,
+        };
     }
 
     // 7. Kalman update (HDOP-adaptive) with soft-resync for GPS recovery

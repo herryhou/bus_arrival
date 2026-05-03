@@ -1,4 +1,5 @@
 //! Find the exact route position for GPS at s_cm=1717259
+#![allow(clippy::unnecessary_cast)]
 
 mod common;
 use common::load_test_asset_bytes;

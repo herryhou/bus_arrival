@@ -1,4 +1,5 @@
 //! Heading-constrained map matching
+#![allow(unexpected_cfgs)]
 
 use shared::binfile::RouteData;
 use shared::{Dist2, DistCm, HeadCdeg, RouteNode, SpeedCms};
@@ -65,7 +66,7 @@ fn heading_eligible(gps_heading: HeadCdeg, gps_speed: SpeedCms, seg_heading: Hea
 ///
 /// Returns:
 /// - (best_eligible_idx, best_eligible_dist2, eligible_found,
-///    best_any_idx, best_any_dist2)
+///   best_any_idx, best_any_dist2)
 ///
 /// "Best" = minimum dist2. If no segment passes the heading filter,
 /// best_eligible_dist2 = Dist2::MAX and eligible_found = false.
@@ -267,12 +268,11 @@ fn global_search_fallback(
                         }
 
                         // Update best_eligible tracker if heading matches
-                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix) {
-                            if d2 < best_eligible_dist2 {
-                                best_eligible_dist2 = d2;
-                                best_eligible_idx = idx as usize;
-                                eligible_found = true;
-                            }
+                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix)
+                            && d2 < best_eligible_dist2 {
+                            best_eligible_dist2 = d2;
+                            best_eligible_idx = idx as usize;
+                            eligible_found = true;
                         }
                     }
                 });
@@ -348,12 +348,11 @@ pub fn find_best_segment_grid_only(
                         }
 
                         // Update best_eligible tracker if heading matches
-                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix) {
-                            if d2 < best_eligible_dist2 {
-                                best_eligible_dist2 = d2;
-                                best_eligible_idx = idx as usize;
-                                eligible_found = true;
-                            }
+                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix)
+                            && d2 < best_eligible_dist2 {
+                            best_eligible_dist2 = d2;
+                            best_eligible_idx = idx as usize;
+                            eligible_found = true;
                         }
                     }
                 });
@@ -426,12 +425,11 @@ pub fn find_best_segment_grid_only_with_min_s(
                         }
 
                         // Update best_eligible tracker if heading matches
-                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix) {
-                            if d2 < best_eligible_dist2 {
-                                best_eligible_dist2 = d2;
-                                best_eligible_idx = idx as usize;
-                                eligible_found = true;
-                            }
+                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix)
+                            && d2 < best_eligible_dist2 {
+                            best_eligible_dist2 = d2;
+                            best_eligible_idx = idx as usize;
+                            eligible_found = true;
                         }
                     }
                 });
@@ -582,7 +580,7 @@ mod tests {
     fn create_test_route_data(segments: &[(i32, i32, i16, i32)]) -> Result<RouteData<'static>, BusError> {
         let mut nodes: Vec<RouteNode> = Vec::new();
         let mut cum_dist = 0;
-        for (i, &(x, y, heading, len_mm)) in segments.iter().enumerate() {
+        for &(x, y, heading, len_mm) in segments.iter() {
             let dx_cm = len_mm / 10; // Each segment's dx = its length in cm
 
             nodes.push(RouteNode {
@@ -590,7 +588,7 @@ mod tests {
                 y_cm: y,
                 cum_dist_cm: cum_dist,
                 heading_cdeg: heading,
-                seg_len_mm: len_mm as i32,
+                seg_len_mm: len_mm,
                 dx_cm: dx_cm as i16,
                 dy_cm: 0,
                 _pad: 0,

@@ -3,10 +3,10 @@
 
 fn build_gaussian_lut() -> [u8; 256] {
     let mut lut = [0u8; 256];
-    for i in 0..256 {
+    for (i, lut_entry) in lut.iter_mut().enumerate() {
         let x = (i as f64) / 64.0;  // Match runtime formula - no integer division!
         let g = (-0.5 * x * x).exp();
-        lut[i] = (g * 255.0).min(255.0).round() as u8;
+        *lut_entry = (g * 255.0).min(255.0).round() as u8;
     }
     lut
 }
@@ -15,10 +15,10 @@ fn build_logistic_lut() -> [u8; 128] {
     let mut lut = [0u8; 128];
     let k = 0.01;
     let v_stop = 200.0;
-    for i in 0..128 {
+    for (i, lut_entry) in lut.iter_mut().enumerate() {
         let v = (i as f64) * 10.0;  // 0 to 1270 cm/s
         let l = 1.0 / (1.0 + (k * (v - v_stop)).exp());
-        lut[i] = (l * 255.0).min(255.0).round() as u8;
+        *lut_entry = (l * 255.0).min(255.0).round() as u8;
     }
     lut
 }
