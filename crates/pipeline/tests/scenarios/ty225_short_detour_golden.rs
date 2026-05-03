@@ -10,9 +10,11 @@
 //! ## Validations Performed
 //!
 //! ### 1. Arrival Sequence Validation (PRD Requirement)
-//! - Expected arrivals: [0, 1, 6, 7, 8, 9]
-//! - Stops 2, 3, 4, 5 MUST be skipped (completely absent from arrivals)
-//! - Minimum 6 arrivals, maximum 7 arrivals (allowing for potential edge cases)
+//! - Expected arrivals: [0, 6, 7, 8, 9]
+//! - Stops 1, 2, 3, 4, 5 MUST be skipped (completely absent from arrivals)
+//!   - Stop 1: off-route triggered before dwell completes
+//!   - Stops 2, 3, 4, 5: intermediate stops during detour
+//! - Minimum 5 arrivals, maximum 6 arrivals (allowing for potential edge cases)
 //!
 //! ### 2. GPS Position Monotonicity (No Backward Jumps)
 //! - Position (s_cm) must be monotonically increasing OR frozen during off-route
@@ -96,7 +98,8 @@ fn test_ty225_short_detour_golden_standard() {
     println!("\n=== VALIDATION 1: Arrival Sequence ===");
 
     // Core PRD requirement: stops 2, 3, 4, 5 must be skipped
-    let skipped_stops = vec![2, 3, 4, 5, 6];
+    // Note: Stop 6 is NOT skipped - it's the re-acquisition point where we snap to
+    let skipped_stops = vec![2, 3, 4, 5];
     for &skipped in &skipped_stops {
         assert!(
             !detected_stops.contains(&skipped),
@@ -107,11 +110,12 @@ fn test_ty225_short_detour_golden_standard() {
     }
     println!("✓ skipped Stops: {:?}", skipped_stops);
 
-    // Must include stop 0 (before detour) and stops 6+ (after re-entry)
+    // Must include stop 0 (before detour), stop 6 (re-acquisition snap point), and stops 7+ (after)
     // Note: Stop 1 is NOT detected because off-route is triggered before dwell completes
     // The detour waypoint (stop 6) is ~300m from stop 1, causing off-route detection
     // before stop 1 arrival can be confirmed. This is expected behavior.
-    for &expected in &[0, 7, 8, 9] {
+    // Per ground truth, stop 6 is the re-acquisition point and SHOULD be detected.
+    for &expected in &[0, 6, 7, 8, 9] {
         assert!(
             detected_stops.contains(&expected),
             "Stop {} should be DETECTED. Detected: {:?}",
@@ -120,7 +124,7 @@ fn test_ty225_short_detour_golden_standard() {
         );
     }
 
-    // Expected sequence: [0, 7, 8, 9] (stop 1 skipped due to off-route)
+    // Expected sequence: [0, 6, 7, 8, 9] (stop 1 skipped due to off-route)
     println!("✓ Arrival sequence: {:?}", detected_stops);
 
     // ============================================================
