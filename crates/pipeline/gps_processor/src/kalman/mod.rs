@@ -154,14 +154,21 @@ pub fn process_gps_update(
                     // Just transitioned from OffRoute/Suspect to Normal
                     let frozen_s = state.frozen_s_cm.unwrap_or(state.s_cm);
 
-                    // Use relaxed heading grid search for off-route recovery
-                    let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only(
+                    // Use relaxed heading grid search with min_s and max_s constraints for off-route recovery
+                    // This prevents snapping to segments that are spatially close but route-wise distant
+                    // (e.g., when route has loops, parallel segments, or crosses itself)
+                    // Calculate max_s constraint to prevent jumping too far forward
+                    // Allow up to 5km forward (reasonable for GPS outage recovery)
+                    let max_s = frozen_s + 500_000; // 5km forward
+                    let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only_with_min_max_s(
                         gps_x,
                         gps_y,
                         gps.heading_cdeg,
                         gps.speed_cms,
                         route_data,
                         use_relaxed_heading,
+                        frozen_s, // Constrain to segments >= frozen position
+                        max_s,    // Constrain to segments <= frozen position + 5km
                     );
 
                     // Project to route to get re-entry position
@@ -208,6 +215,22 @@ pub fn process_gps_update(
     // M12 recovery in state.rs handles all post-off-route recovery scenarios
     // The hysteresis logic handles the off-route → normal transition
     // M12 uses 4-feature scoring and receives clean input (z_raw, not pre-snapped)
+
+    // Route position consistency check: prevent map matcher from jumping between
+    // segments that are spatially close but route-wise distant (e.g., crossing loops).
+    // If projection jumps > 10x the physically possible distance, reject and use DR.
+    // This prevents missed stops when map matcher switches to wrong segment after GPS outage.
+    let max_possible_dist = (V_MAX_CMS * dt.max(1) + SIGMA_GPS_CM) as i64;
+    let route_jump_excess = (z_raw.abs_diff(state.s_cm) as i64) > 10 * max_possible_dist;
+    if route_jump_excess && !is_first_fix && state.frozen_s_cm.is_none() {
+        // Map matcher selected wrong segment - use DR instead
+        state.s_cm += state.v_cms * (dt as DistCm);
+        dr.last_gps_time = Some(gps.timestamp);
+        return ProcessResult::DrOutage {
+            s_cm: state.s_cm,
+            v_cms: state.v_cms,
+        };
+    }
 
     if is_first_fix {
         state.s_cm = z_raw;

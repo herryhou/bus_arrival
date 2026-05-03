@@ -296,14 +296,9 @@ fn global_search_fallback(
     (best_eligible_idx, best_eligible_dist2)
 }
 
-/// Find best segment using grid search only (no window search around last_idx).
+/// Find best segment using grid search only (no min/max constraints).
 ///
-/// This is used for off-route re-entry where the bus might be at a completely
-/// different part of the route than where it left off.
-///
-/// The `is_first_fix` parameter controls the heading filter strictness:
-/// - true: Use relaxed 180° threshold for post-outage recovery
-/// - false: Use normal 90° threshold for steady-state operation
+/// This is used for off-route re-entry and testing where no position constraints are needed.
 pub fn find_best_segment_grid_only(
     gps_x: DistCm,
     gps_y: DistCm,
@@ -367,15 +362,19 @@ pub fn find_best_segment_grid_only(
     (best_eligible_idx, best_eligible_dist2)
 }
 
-/// Find best segment using grid search with a minimum position constraint.
+/// Find best segment using grid search only with min_s and max_s constraints.
 ///
-/// This is used for off-route re-entry where we want to prevent snapping to
-/// segments that project to positions before the frozen position.
+/// This is used for off-route re-entry where the bus might be at a completely
+/// different part of the route than where it left off.
 ///
 /// The `min_s_cm` parameter constrains the search to only segments that
 /// project to positions >= min_s_cm. This prevents backward snaps and
 /// reduces the risk of snapping too far forward and skipping stops.
-pub fn find_best_segment_grid_only_with_min_s(
+///
+/// The `max_s_cm` parameter constrains the search to only segments that
+/// project to positions <= max_s_cm. This prevents forward snaps that skip
+/// too many stops when the route has loops or crossing segments.
+pub fn find_best_segment_grid_only_with_min_max_s(
     gps_x: DistCm,
     gps_y: DistCm,
     gps_heading: HeadCdeg,
@@ -383,6 +382,7 @@ pub fn find_best_segment_grid_only_with_min_s(
     route_data: &RouteData,
     is_first_fix: bool,
     min_s_cm: DistCm,
+    max_s_cm: DistCm,
 ) -> (usize, i64) {
     // Check bounding box first
     if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
@@ -415,6 +415,10 @@ pub fn find_best_segment_grid_only_with_min_s(
                         if seg.cum_dist_cm < min_s_cm {
                             return;
                         }
+                        // Skip segments that project to positions after max_s_cm
+                        if seg.cum_dist_cm > max_s_cm {
+                            return;
+                        }
 
                         let d2 = segment_score(gps_x, gps_y, &seg);
 
@@ -442,6 +446,32 @@ pub fn find_best_segment_grid_only_with_min_s(
     }
 
     (best_eligible_idx, best_eligible_dist2)
+}
+
+/// Find best segment using grid search only with min_s constraint (backward compatibility wrapper).
+///
+/// This function is kept for backward compatibility and internally calls
+/// `find_best_segment_grid_only_with_min_max_s` with a very large max_s constraint.
+pub fn find_best_segment_grid_only_with_min_s(
+    gps_x: DistCm,
+    gps_y: DistCm,
+    gps_heading: HeadCdeg,
+    gps_speed: SpeedCms,
+    route_data: &RouteData,
+    is_first_fix: bool,
+    min_s_cm: DistCm,
+) -> (usize, i64) {
+    // Use a very large max_s (effectively no upper bound) for backward compatibility
+    find_best_segment_grid_only_with_min_max_s(
+        gps_x,
+        gps_y,
+        gps_heading,
+        gps_speed,
+        route_data,
+        is_first_fix,
+        min_s_cm,
+        DistCm::MAX, // No upper bound
+    )
 }
 
 /// Distance-squared from GPS point to segment (clamped projection).

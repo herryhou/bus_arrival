@@ -3,19 +3,19 @@
     "stop_idx": 0,
     "seg_idx": 0,
     "timestamp": 1700000000,
-    "dwell_s": 5
+    "dwell_s": 10
   },
   {
     "stop_idx": 1,
     "seg_idx": 1,
-    "timestamp": 1700000076,
+    "timestamp": 1700000084,
     "dwell_s": 14
   },
   {
     "stop_idx": 1,
     "lat": 24.994334,
     "lon": 121.295621,
-    "timestamp": 1700000090,
+    "timestamp": 1700000098,
     "phase": "detour_start",
     "event": "departure_detour"
   },
@@ -23,7 +23,7 @@
     "stop_idx": 6,
     "lat": 24.992071,
     "lon": 121.301108,
-    "timestamp": 1700000152,
+    "timestamp": 1700000160,
     "phase": "detour_end",
     "event": "re_acquisition",
     "off_route_duration_s": 62
@@ -31,31 +31,31 @@
   {
     "stop_idx": 6,
     "seg_idx": 1,
-    "timestamp": 1700000152,
+    "timestamp": 1700000160,
     "dwell_s": 8
   },
   {
     "stop_idx": 6,
     "seg_idx": 13,
-    "timestamp": 1700000160,
-    "dwell_s": 3
+    "timestamp": 1700000168,
+    "dwell_s": 8
   },
   {
     "stop_idx": 7,
     "seg_idx": 14,
-    "timestamp": 1700000170,
-    "dwell_s": 4
+    "timestamp": 1700000183,
+    "dwell_s": 8
   },
   {
     "stop_idx": 8,
     "seg_idx": 16,
-    "timestamp": 1700000210,
-    "dwell_s": 9
+    "timestamp": 1700000229,
+    "dwell_s": 10
   },
   {
     "stop_idx": 9,
     "seg_idx": 17,
-    "timestamp": 1700000251,
-    "dwell_s": 8
+    "timestamp": 1700000270,
+    "dwell_s": 10
   }
 ]

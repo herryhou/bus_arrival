@@ -24,7 +24,7 @@ pub mod gps;
 pub mod serde;
 
 use shared::binfile::RouteData;
-use shared::{GpsPoint, KalmanState, DrState};
+use shared::{DistCm, GpsPoint, KalmanState, DrState};
 use thiserror::Error;
 
 /// Serialize f64 with at most 6 decimal places
@@ -284,6 +284,8 @@ pub struct DetectionState {
     active_indices: Vec<usize>,
     /// Track whether the bus is currently off-route (detouring)
     off_route: bool,
+    /// Track the last position during off-route (for detecting re-entry jumps)
+    off_route_last_s_cm: Option<DistCm>,
 }
 
 impl DetectionState {
@@ -299,6 +301,7 @@ impl DetectionState {
             arrived_this_frame: Vec::new(),
             active_indices: Vec::new(),
             off_route: false,
+            off_route_last_s_cm: None,
         }
     }
 
@@ -329,10 +332,33 @@ impl DetectionState {
         match record.status {
             "off_route" => {
                 self.off_route = true;
+                // Track the last position during off-route for re-entry jump detection
+                self.off_route_last_s_cm = Some(record.s_cm);
             }
             "valid" => {
-                // Clear off_route as soon as we get a valid fix
+                // Check for off-route re-entry with large forward jump
+                let just_reentered = self.off_route;
+                let large_forward_jump = if let Some(off_route_s) = self.off_route_last_s_cm {
+                    // Large forward jump indicates detour re-entry snap
+                    record.s_cm > off_route_s + 10000 // >100m jump
+                } else {
+                    false
+                };
+
+                // Clear off_route on valid fix
                 self.off_route = false;
+                self.off_route_last_s_cm = None;
+
+                // During off-route re-entry with large forward jump, mark intermediate stops as skipped
+                // This prevents them from being triggered even if we're in their corridor
+                if just_reentered && large_forward_jump {
+                    // Mark all stops that are behind the snap position as skipped
+                    for (idx, stop) in stops.iter().enumerate() {
+                        if stop.progress_cm < record.s_cm {
+                            self.stop_states[idx].skipped = true;
+                        }
+                    }
+                }
             }
             "dr_outage" => {
                 // Do NOT clear off_route during dr_outage - only clear when we get a valid fix
@@ -345,8 +371,9 @@ impl DetectionState {
         }
 
         // Find active stops (corridor filter)
+        // Skip stops that were marked as skipped during detour re-entry
         for (idx, stop) in stops.iter().enumerate() {
-            if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm {
+            if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm && !self.stop_states[idx].skipped {
                 self.active_indices.push(idx);
             }
         }
