@@ -58,7 +58,7 @@ ANNOUNCE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_announce.jsonl
 # Node.js executable
 NODE := node
 
-.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour
+.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour run-detour-no-gen
 
 # Default target
 all: run
@@ -80,6 +80,13 @@ run-detour:
 	@echo "=== Running detour scenario (ty225_short) ==="
 	@echo "L-shaped detour: stop 1 → 10m east → south to waypoint → east to stop 6"
 	$(MAKE) run ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.992071 DETOUR_WAYPOINT_LON=121.295621 DETOUR_DURATION_S=60
+
+# Run detour scenario without generating NMEA (uses existing NMEA file)
+run-detour-no-gen: build preprocess
+	@echo "=== Running detour scenario (ty225_short) - skipping gen_nmea ==="
+	@echo "Using existing NMEA: $(NMEA_OUT)"
+	@echo "L-shaped detour: stop 1 → 10m east → south to waypoint → east to stop 6"
+	$(MAKE) pipeline-no-gen ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.992071 DETOUR_WAYPOINT_LON=121.295621 DETOUR_DURATION_S=60
 
 # Legacy two-step workflow (deprecated - use 'make run' instead)
 run-legacy: build gen_nmea preprocess simulate detect
@@ -176,6 +183,22 @@ pipeline: gen_nmea preprocess
 	@echo "Generated: $(TRACE_OUT)"
 	@echo "Generated: $(ANNOUNCE_OUT)"
 
+# Run unified pipeline without generating NMEA (uses existing NMEA file)
+pipeline-no-gen: preprocess
+	@echo "=== Running unified pipeline (using existing NMEA) ==="
+	@echo "Binary: $(PIPELINE)"
+	@echo "Source: pipeline/"
+	@echo "Using existing NMEA: $(NMEA_OUT)"
+	@if [ ! -f "$(NMEA_OUT)" ]; then \
+		echo "Error: NMEA file not found: $(NMEA_OUT)"; \
+		echo "Run 'make gen_nmea' first to generate it."; \
+		exit 1; \
+	fi
+	$(PIPELINE) $(NMEA_OUT) $(ROUTE_DATA_BIN) $(DETECTOR_OUT) --trace $(TRACE_OUT) --announce $(ANNOUNCE_OUT)
+	@echo "Generated: $(DETECTOR_OUT)"
+	@echo "Generated: $(TRACE_OUT)"
+	@echo "Generated: $(ANNOUNCE_OUT)"
+
 # Clean all generated files
 clean:
 	@echo "=== Cleaning generated files ==="
@@ -194,6 +217,7 @@ help:
 	@echo "  make run ROUTE_NAME=<route> SCENARIO=<name>     Run full unified pipeline"
 	@echo "                                                    (default: ROUTE_NAME=ty225 SCENARIO=normal)"
 	@echo "  make run-detour                                  Run detour scenario (ty225_short)"
+	@echo "  make run-detour-no-gen                           Run detour scenario without regenerating NMEA"
 	@echo "  make pipeline ROUTE_NAME=<route> SCENARIO=<name> Run unified pipeline (same as 'run')"
 	@echo "  make gen_nmea ROUTE_NAME=<route> SCENARIO=<name> Generate NMEA test data"
 	@echo "  make preprocess ROUTE_NAME=<route>               Generate route_data.bin"
