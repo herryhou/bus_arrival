@@ -32,7 +32,6 @@ tools/data/stops.json
 .playwright-mcp/
 .playwright-test/
 settings.local.json
-test_data/
 
 # Debug/test files (generated during development)
 check_nmea*
@@ -64,3 +63,16 @@ ground_truth_*.json
 
 # Generated test binaries (regenerated from test_data/*.json)
 simulator/test_assets/*.bin
+
+# test_data/ - specific exclusions (track source test data, ignore generated)
+test_data/*.bin
+test_data/*_fixed*.*
+test_data/*_test*.*
+test_data/*_backup*.*
+test_data/*_original*.*
+test_data/*_curved*.*
+test_data/*_consistent*.*
+test_data/* copy*.*
+test_data/*.sim.json
+test_data/*_summary.md
+test_data/*.nmea
