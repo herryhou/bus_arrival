@@ -65,7 +65,8 @@ ground_truth_*.json
 simulator/test_assets/*.bin
 
 # test_data/ - specific exclusions (track source test data, ignore generated)
-test_data/*.bin
+# Note: .bin files ARE tracked in test_data/ as golden master test data
+# They are regenerated from route.json + stops.json but specific versions are needed for tests
 test_data/*_fixed*.*
 test_data/*_test*.*
 test_data/*_backup*.*
