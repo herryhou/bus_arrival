@@ -67,6 +67,26 @@ pub fn load_expected_arrivals(scenario: &str) -> Vec<usize> {
         .collect()
 }
 
+/// Load ground truth arrivals from ty225_*_gt.json
+/// This file contains the authoritative stop list for the test scenario
+pub fn load_ground_truth_arrivals(scenario: &str) -> Vec<usize> {
+    let filename = format!("ty225_{}_gt.json", scenario);
+    let mut path = test_data_dir();
+    path.push(&filename);
+    let content = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("Failed to load {}: {:?}", filename, e));
+
+    // Parse ground truth JSON array
+    let value: serde_json::Value = serde_json::from_str(&content)
+        .unwrap_or_else(|e| panic!("Failed to parse {}: {:?}", filename, e));
+
+    value.as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["stop_idx"].as_u64().unwrap() as usize)
+        .collect()
+}
+
 /// Expected results for scenario validation
 #[derive(Debug, Clone)]
 pub struct ExpectedResults {
@@ -78,7 +98,7 @@ pub struct ExpectedResults {
 impl ExpectedResults {
     /// Create expected results from ground truth
     pub fn from_ground_truth(scenario: &str) -> Self {
-        let arrivals = load_expected_arrivals(scenario);
+        let arrivals = load_ground_truth_arrivals(scenario);
         let count = arrivals.len();
         Self {
             arrivals,
