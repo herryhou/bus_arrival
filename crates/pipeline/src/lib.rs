@@ -134,6 +134,8 @@ pub struct StopTraceState {
     pub probability: u8,
     pub features: detection::trace::FeatureScores,
     pub just_arrived: bool,
+    /// Whether this stop was skipped during detour/off-route re-entry
+    pub skipped: bool,
 }
 
 /// Announce event
@@ -501,6 +503,7 @@ impl DetectionState {
                 probability,
                 features,
                 just_arrived: self.arrived_this_frame.contains(&(idx as u8)),
+                skipped: stop_state.skipped,
             }
         }).collect();
 

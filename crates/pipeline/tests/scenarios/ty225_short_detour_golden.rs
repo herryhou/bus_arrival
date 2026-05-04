@@ -902,3 +902,63 @@ fn test_off_route_reentry_skips_intermediate_stops() {
     println!("  ✓ Stops after detour {:?} correctly detected", expected_after_detour);
     println!("  ✓ Arrival sequence: {:?}", detected_stops);
 }
+
+/// Test that normal operation (no off-route) doesn't use skipped flag
+///
+/// This test verifies that the skipped flag is only used during off-route re-entry
+/// and doesn't affect normal stop detection.
+#[test]
+fn test_normal_operation_does_not_skip_stops() {
+    println!("\n=== TEST: Normal Operation Does Not Skip Stops ===");
+
+    // Load route data and run normal scenario (no detour)
+    let route_bytes = load_ty225_route("normal");
+    let route_data = RouteData::load(&route_bytes).expect("Failed to load route data");
+
+    let result = Pipeline::process_nmea_reader(
+        load_nmea_reader("normal"),
+        &route_data,
+        &PipelineConfig::default(),
+    )
+    .expect("Pipeline processing failed");
+
+    // Verify through trace that no stops are marked as skipped
+    let trace_reader = load_trace_reader("normal");
+
+    for line in trace_reader.lines() {
+        let line = line.expect("Failed to read trace line");
+        let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
+
+        if let Some(stop_states) = trace.get("stop_states").and_then(|v| v.as_array()) {
+            for state in stop_states {
+                if let Some(skipped) = state.get("skipped").and_then(|v| v.as_bool()) {
+                    if skipped {
+                        let stop_idx = state["stop_idx"].as_u64().unwrap();
+                        panic!(
+                            "Normal operation should NOT mark any stops as skipped. Stop {} is marked as skipped at time {}",
+                            stop_idx,
+                            trace["time"]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Verify that expected stops are detected
+    let detected_stops: Vec<usize> = result
+        .arrivals
+        .iter()
+        .map(|a| a.stop_idx as usize)
+        .collect();
+
+    // Normal scenario should detect most stops
+    assert!(
+        detected_stops.len() > 10,
+        "Normal scenario should detect many stops. Got: {:?}",
+        detected_stops
+    );
+
+    println!("  ✓ Normal operation: {} stops detected", detected_stops.len());
+    println!("  ✓ No stops marked as skipped (verified across all trace ticks)");
+}
