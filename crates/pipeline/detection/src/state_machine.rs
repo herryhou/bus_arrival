@@ -31,9 +31,9 @@ pub struct StopState {
     pub announced: bool,
     /// Previous distance to stop (for re-acquisition detection)
     pub previous_distance_cm: Option<i32>,
-    /// Whether this stop was skipped during detour/off-route re-entry
+    /// Whether this stop should be skipped on off-route re-entry
     /// When true, the stop should not trigger any arrival events
-    pub skipped: bool,
+    pub skip_on_reentry: bool,
 }
 
 impl StopState {
@@ -46,7 +46,7 @@ impl StopState {
             last_announced_stop: u8::MAX,
             announced: false,
             previous_distance_cm: None,
-            skipped: false,
+            skip_on_reentry: false,
         }
     }
 

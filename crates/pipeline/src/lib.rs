@@ -134,8 +134,8 @@ pub struct StopTraceState {
     pub probability: u8,
     pub features: detection::trace::FeatureScores,
     pub just_arrived: bool,
-    /// Whether this stop was skipped during detour/off-route re-entry
-    pub skipped: bool,
+    /// Whether this stop should be skipped on off-route re-entry
+    pub skip_on_reentry: bool,
 }
 
 /// Announce event
@@ -351,13 +351,13 @@ impl DetectionState {
                 self.off_route = false;
                 self.off_route_last_s_cm = None;
 
-                // During off-route re-entry with large forward jump, mark intermediate stops as skipped
+                // During off-route re-entry with large forward jump, mark intermediate stops to skip
                 // This prevents them from being triggered even if we're in their corridor
                 if just_reentered && large_forward_jump {
-                    // Mark all stops that are behind the snap position as skipped
+                    // Mark all stops that are behind the snap position as skip_on_reentry
                     for (idx, stop) in stops.iter().enumerate() {
                         if stop.progress_cm < record.s_cm {
-                            self.stop_states[idx].skipped = true;
+                            self.stop_states[idx].skip_on_reentry = true;
                         }
                     }
                 }
@@ -373,9 +373,9 @@ impl DetectionState {
         }
 
         // Find active stops (corridor filter)
-        // Skip stops that were marked as skipped during detour re-entry
+        // Skip stops that were marked to skip on re-entry
         for (idx, stop) in stops.iter().enumerate() {
-            if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm && !self.stop_states[idx].skipped {
+            if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm && !self.stop_states[idx].skip_on_reentry {
                 self.active_indices.push(idx);
             }
         }
@@ -503,7 +503,7 @@ impl DetectionState {
                 probability,
                 features,
                 just_arrived: self.arrived_this_frame.contains(&(idx as u8)),
-                skipped: stop_state.skipped,
+                skip_on_reentry: stop_state.skip_on_reentry,
             }
         }).collect();
 

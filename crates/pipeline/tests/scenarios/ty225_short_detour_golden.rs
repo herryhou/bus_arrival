@@ -922,7 +922,7 @@ fn test_normal_operation_does_not_skip_stops() {
     )
     .expect("Pipeline processing failed");
 
-    // Verify through trace that no stops are marked as skipped
+    // Verify through trace that no stops are marked to skip on re-entry
     let trace_reader = load_trace_reader("normal");
 
     for line in trace_reader.lines() {
@@ -931,11 +931,11 @@ fn test_normal_operation_does_not_skip_stops() {
 
         if let Some(stop_states) = trace.get("stop_states").and_then(|v| v.as_array()) {
             for state in stop_states {
-                if let Some(skipped) = state.get("skipped").and_then(|v| v.as_bool()) {
-                    if skipped {
+                if let Some(skip) = state.get("skip_on_reentry").and_then(|v| v.as_bool()) {
+                    if skip {
                         let stop_idx = state["stop_idx"].as_u64().unwrap();
                         panic!(
-                            "Normal operation should NOT mark any stops as skipped. Stop {} is marked as skipped at time {}",
+                            "Normal operation should NOT mark any stops to skip on re-entry. Stop {} is marked at time {}",
                             stop_idx,
                             trace["time"]
                         );
@@ -960,5 +960,5 @@ fn test_normal_operation_does_not_skip_stops() {
     );
 
     println!("  ✓ Normal operation: {} stops detected", detected_stops.len());
-    println!("  ✓ No stops marked as skipped (verified across all trace ticks)");
+    println!("  ✓ No stops marked to skip on re-entry (verified across all trace ticks)");
 }
