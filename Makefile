@@ -58,7 +58,7 @@ ANNOUNCE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_announce.jsonl
 # Node.js executable
 NODE := node
 
-.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour run-detour-no-gen
+.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour run-detour-no-gen regression-test regression-save
 
 # Default target
 all: run
@@ -232,6 +232,10 @@ help:
 	@echo "  make clean                                       Remove generated files"
 	@echo "  make help                                        Show this help message"
 	@echo ""
+	@echo "Regression Testing:"
+	@echo "  make regression-test                             Run all regression tests"
+	@echo "  make regression-save CASE_NAME=<name> DESC='...' Save failing case as regression test"
+	@echo ""
 	@echo "Parameters:"
 	@echo "  ROUTE_NAME    Route identifier (default: ty225)"
 	@echo "                Expects files: test_data/<ROUTE_NAME>_route.json"
@@ -272,3 +276,18 @@ validate-all:
 		output=$${trace%_trace.jsonl}_report.html; \
 		cargo run --release --bin trace_validator -- "$$trace" -o "$$output"; \
 	done
+
+# Regression testing targets
+regression-test:
+	@echo "=== Running regression tests ==="
+	cargo test -p pipeline --test regression_tests
+
+# Quick alias for saving regression test case
+# Usage: make regression-save CASE_NAME=<name> DESC="<description>"
+regression-save:
+	@if [ -z "$(CASE_NAME)" ]; then \
+		echo "Error: CASE_NAME is required"; \
+		echo "Usage: make regression-save CASE_NAME=<name> DESC=\"<description>\""; \
+		exit 1; \
+	fi
+	@./tools/save_regression.sh "$(CASE_NAME)" "$(DESC)"

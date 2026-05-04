@@ -488,7 +488,9 @@ fn test_ty225_short_detour_golden_standard() {
     }
 
     println!("✓ Announce events: {:?}", announce_stops);
-    println!("  Note: Stop 5 announced (corridor entry after re-entry) but NO arrivals - acceptable");
+    println!(
+        "  Note: Stop 5 announced (corridor entry after re-entry) but NO arrivals - acceptable"
+    );
     println!("  Stops 2, 3, 4 correctly NOT announced (no corridor entry)");
 
     // ============================================================
@@ -859,14 +861,20 @@ fn test_off_route_reentry_skips_intermediate_stops() {
     let reentry_time = reentry_time.expect("Re-entry should be detected");
     let reentry_s_cm = reentry_s_cm.expect("Re-entry s_cm should be available");
 
-    println!("  Off-route re-entry at tick {}, s_cm={} cm", reentry_time, reentry_s_cm);
+    println!(
+        "  Off-route re-entry at tick {}, s_cm={} cm",
+        reentry_time, reentry_s_cm
+    );
 
     // Get stop 5's progress position
     let stops = route_data.stops();
     let stop_5_progress = stops[5].progress_cm as i64;
 
     println!("  Stop 5 progress_cm={} cm", stop_5_progress);
-    println!("  At re-entry, s_cm={} > stop_5_progress={} (stop 5 is behind)", reentry_s_cm, stop_5_progress);
+    println!(
+        "  At re-entry, s_cm={} > stop_5_progress={} (stop 5 is behind)",
+        reentry_s_cm, stop_5_progress
+    );
 
     // Core validation: intermediate stops (2, 3, 4, 5) must NOT be in arrivals
     // because their progress_cm < reentry_s_cm (they're behind the snap position)
@@ -876,7 +884,9 @@ fn test_off_route_reentry_skips_intermediate_stops() {
         assert!(
             stop_progress < reentry_s_cm,
             "Intermediate stop {} progress_cm={} should be < reentry_s_cm={}",
-            stop, stop_progress, reentry_s_cm
+            stop,
+            stop_progress,
+            reentry_s_cm
         );
         assert!(
             !detected_stops.contains(&stop),
@@ -886,7 +896,10 @@ fn test_off_route_reentry_skips_intermediate_stops() {
         );
     }
 
-    println!("  ✓ Intermediate stops {:?} correctly skipped (behind snap position)", intermediate_stops);
+    println!(
+        "  ✓ Intermediate stops {:?} correctly skipped (behind snap position)",
+        intermediate_stops
+    );
 
     // Verify that stops after the detour (7, 8, 9) ARE detected
     let expected_after_detour = vec![7, 8, 9];
@@ -899,13 +912,16 @@ fn test_off_route_reentry_skips_intermediate_stops() {
         );
     }
 
-    println!("  ✓ Stops after detour {:?} correctly detected", expected_after_detour);
+    println!(
+        "  ✓ Stops after detour {:?} correctly detected",
+        expected_after_detour
+    );
     println!("  ✓ Arrival sequence: {:?}", detected_stops);
 }
 
 /// Test that normal operation (no off-route) doesn't use skipped flag
 ///
-/// This test verifies that the skipped flag is only used during off-route re-entry
+/// This test verifies that the skip_on_reentry flag is only used during off-route re-entry
 /// and doesn't affect normal stop detection.
 #[test]
 fn test_normal_operation_does_not_skip_stops() {
@@ -959,6 +975,9 @@ fn test_normal_operation_does_not_skip_stops() {
         detected_stops
     );
 
-    println!("  ✓ Normal operation: {} stops detected", detected_stops.len());
+    println!(
+        "  ✓ Normal operation: {} stops detected",
+        detected_stops.len()
+    );
     println!("  ✓ No stops marked to skip on re-entry (verified across all trace ticks)");
 }
