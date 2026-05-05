@@ -17,7 +17,7 @@ if [ ! -f "$TRACE_FILE" ]; then
 fi
 
 jq 'select(.stop_states) |
-  .stop_states[] |
+  {time, s_cm, v_cms} + .stop_states[] |
   select(.just_arrived == true) |
-  {time: .time, stop_idx, s_cm, v_cms, probability}' \
+  {time, stop_idx, s_cm, v_cms, probability}' \
   "$TRACE_FILE"
