@@ -16,6 +16,8 @@ if [ ! -f "$TRACE_FILE" ]; then
     exit 1
 fi
 
-jq 'select(.stop_states and (.stop_states[] | select(.just_arrived == true))) |
-    {time, stop_idx: (.stop_states[] | select(.just_arrived == true) | .stop_idx), s_cm, v_cms, probability: (.stop_states[] | select(.just_arrived == true) | .probability)}' \
+jq 'select(.stop_states) |
+  .stop_states[] |
+  select(.just_arrived == true) |
+  {time: .time, stop_idx, s_cm, v_cms, probability}' \
   "$TRACE_FILE"
