@@ -3,7 +3,7 @@
 use shared::{DistCm, SpeedCms, Stop, FreezeContext};
 
 /// Trigger conditions
-const GPS_JUMP_THRESHOLD: DistCm = 30000;  // 300 m (increased for velocity constraint compatibility)
+const GPS_JUMP_THRESHOLD: DistCm = 20000;  // 200 m (per spec Section 15.2)
 
 /// Maximum backward recovery distance (100 m)
 /// Prevents pathological backward jumps while allowing legitimate re-selection
@@ -75,7 +75,7 @@ pub fn find_stop_index(
     for (i, stop) in stops.iter().enumerate() {
         let d = (s_cm - stop.progress_cm).abs();
 
-        // Filter: within ±300m and >= last_index - 1
+        // Filter: within ±200m and >= last_index - 1
         if d >= GPS_JUMP_THRESHOLD || (i as u8) < last_index.saturating_sub(1) {
             continue;
         }
