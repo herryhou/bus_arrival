@@ -136,7 +136,6 @@ fn test_stop6_missed_at_reentry() {
     let result = pipeline::Pipeline::process_nmea_reader(
         reader,
         &route_data,
-        &pipeline::PipelineConfig::default(),
     )
     .expect("Pipeline processing failed");
 

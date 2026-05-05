@@ -11,7 +11,6 @@
 //! let result = Pipeline::process_nmea_file(
 //!     "gps.nmea",
 //!     "route_data.bin",
-//!     "output.jsonl"
 //! )?;
 //!
 //! println!("Detected {} arrivals", result.arrivals.len());
@@ -39,7 +38,7 @@ where
 #[cfg(feature = "std")]
 use std::path::Path;
 #[cfg(feature = "std")]
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 
 // Re-export from sub-crates
 pub use gps_processor::nmea::NmeaState;
@@ -478,14 +477,10 @@ impl Pipeline {
     ///
     /// * `nmea_path` - Path to NMEA log file
     /// * `route_data_path` - Path to route_data.bin
-    /// * `output_path` - Path to write arrival/departure events
-    /// * `config` - Pipeline configuration
     #[cfg(feature = "std")]
     pub fn process_nmea_file(
         nmea_path: impl AsRef<Path>,
         route_data_path: impl AsRef<Path>,
-        output_path: impl AsRef<Path>,
-        config: &PipelineConfig,
     ) -> Result<PipelineResult, PipelineError> {
         use std::fs::File;
         use std::io::BufReader;
@@ -501,11 +496,7 @@ impl Pipeline {
         let result = Self::process_nmea_reader(
             reader,
             &route_data,
-            config,
         )?;
-
-        // Write output
-        Self::write_output(&result, output_path)?;
 
         Ok(result)
     }
@@ -516,18 +507,16 @@ impl Pipeline {
     ///
     /// * `reader` - BufReader over NMEA data
     /// * `route_data` - Loaded route data
-    /// * `config` - Pipeline configuration
     ///
     /// # Returns
     ///
-    /// Returns `PipelineResult` containing arrivals, departures, and optional trace/announce events
+    /// Returns `PipelineResult` containing arrivals, departures, and trace records
     #[cfg(feature = "std")]
     pub fn process_nmea_reader<R: BufRead>(
         reader: R,
         route_data: &RouteData,
-        config: &PipelineConfig,
     ) -> Result<PipelineResult, PipelineError> {
-        let mut result = PipelineResult::new(config);
+        let mut result = PipelineResult::new();
 
         // Initialize localization state
         let mut loc_state = LocalizationState::new(route_data);
@@ -545,11 +534,9 @@ impl Pipeline {
                     // Phase 3: Arrival Detection
                     det_state.process_gps_record(&gps_record, route_data, &mut result);
 
-                    // Add trace record if enabled (after detection so we have stop states)
+                    // Add trace record (after detection so we have stop states)
                     #[cfg(feature = "std")]
-                    if config.enable_trace {
-                        result.add_trace_record(&gps_record, &det_state, route_data);
-                    }
+                    result.add_trace_record(&gps_record, &det_state, route_data);
                 }
             }
         }
@@ -557,38 +544,12 @@ impl Pipeline {
         Ok(result)
     }
 
-    #[cfg(feature = "std")]
-    fn write_output(result: &PipelineResult, output_path: impl AsRef<Path>) -> Result<(), PipelineError> {
-        use std::fs::File;
-        use std::io::BufWriter;
-
-        let file = File::create(output_path.as_ref())?;
-        let mut writer = BufWriter::new(file);
-
-        // Merge arrivals and departures by time for chronological order
-        let mut events = Vec::new();
-        for arrival in &result.arrivals {
-            events.push((arrival.time, serde_json::to_string(arrival).unwrap()));
-        }
-        for departure in &result.departures {
-            events.push((departure.time, serde_json::to_string(departure).unwrap()));
-        }
-        events.sort_by_key(|(time, _)| *time);
-
-        // Write events in chronological order
-        for (_, event_json) in events {
-            writeln!(writer, "{}", event_json)?;
-        }
-
-        writer.flush()?;
-        Ok(())
-    }
 }
 
 impl PipelineResult {
     /// Create new PipelineResult
     #[cfg(feature = "std")]
-    fn new(_config: &PipelineConfig) -> Self {
+    fn new() -> Self {
         Self {
             arrivals: Vec::new(),
             departures: Vec::new(),
@@ -598,7 +559,7 @@ impl PipelineResult {
 
     /// Create new PipelineResult (no_std version)
     #[cfg(not(feature = "std"))]
-    fn new(_config: &PipelineConfig) -> Self {
+    fn new() -> Self {
         Self {
             arrivals: Vec::new(),
             departures: Vec::new(),
