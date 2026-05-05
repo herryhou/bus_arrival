@@ -53,7 +53,6 @@ GROUND_TRUTH_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_gt.json
 # SIMULATOR_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_sim.json  # Deprecated
 DETECTOR_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_arrivals.json
 TRACE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_trace.jsonl
-ANNOUNCE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_announce.jsonl
 
 # Node.js executable
 NODE := node
@@ -71,9 +70,10 @@ run: build gen_nmea preprocess pipeline
 	@echo "Scenario: $(SCENARIO)"
 	@echo "NMEA output: $(NMEA_OUT)"
 	@echo "Route data: $(ROUTE_DATA_BIN)"
-	@echo "Output: $(DETECTOR_OUT)"
 	@echo "Trace output: $(TRACE_OUT)"
-	@echo "Announce output: $(ANNOUNCE_OUT)"
+	@echo ""
+	@echo "Extract arrivals: ./tools/arrival_from_trace.sh $(TRACE_OUT) > arrivals.jsonl"
+	@echo "Extract announce: ./tools/announce_from_trace.sh $(TRACE_OUT) > announce.jsonl"
 
 # Run detour scenario (ty225_short route)
 run-detour:
@@ -99,7 +99,6 @@ run-legacy: build gen_nmea preprocess simulate detect
 	@echo "Simulator output: $(SIMULATOR_OUT)"
 	@echo "Arrival detector output: $(DETECTOR_OUT)"
 	@echo "Trace output: $(TRACE_OUT)"
-	@echo "Announce output: $(ANNOUNCE_OUT)"
 
 # Build all Rust binaries in release mode
 build: build-firmware
@@ -173,15 +172,13 @@ detect: simulate
 	@echo "  make pipeline ROUTE_NAME=$(ROUTE_NAME) SCENARIO=$(SCENARIO)"
 	@false
 
-# Run unified pipeline: NMEA + route_data → arrivals + departures (single binary)
+# Run unified pipeline: NMEA + route_data → trace (single binary)
 pipeline: gen_nmea preprocess
 	@echo "=== Running unified pipeline ==="
 	@echo "Binary: $(PIPELINE)"
 	@echo "Source: pipeline/"
-	$(PIPELINE) $(NMEA_OUT) $(ROUTE_DATA_BIN) $(DETECTOR_OUT) --trace $(TRACE_OUT) --announce $(ANNOUNCE_OUT)
-	@echo "Generated: $(DETECTOR_OUT)"
+	$(PIPELINE) $(NMEA_OUT) $(ROUTE_DATA_BIN)
 	@echo "Generated: $(TRACE_OUT)"
-	@echo "Generated: $(ANNOUNCE_OUT)"
 
 # Run unified pipeline without generating NMEA (uses existing NMEA file)
 pipeline-no-gen: preprocess
@@ -194,19 +191,15 @@ pipeline-no-gen: preprocess
 		echo "Run 'make gen_nmea' first to generate it."; \
 		exit 1; \
 	fi
-	$(PIPELINE) $(NMEA_OUT) $(ROUTE_DATA_BIN) $(DETECTOR_OUT) --trace $(TRACE_OUT) --announce $(ANNOUNCE_OUT)
-	@echo "Generated: $(DETECTOR_OUT)"
+	$(PIPELINE) $(NMEA_OUT) $(ROUTE_DATA_BIN)
 	@echo "Generated: $(TRACE_OUT)"
-	@echo "Generated: $(ANNOUNCE_OUT)"
 
 # Clean all generated files
 clean:
 	@echo "=== Cleaning generated files ==="
-	rm -f $(DATA_DIR)/nmea_*.txt
-	rm -f $(DATA_DIR)/sim_*.jsonl
-	rm -f $(DATA_DIR)/arrivals_*.jsonl
-	rm -f $(DATA_DIR)/trace_*.jsonl
-	rm -f $(ROUTE_DATA_BIN)
+	rm -f $(DATA_DIR)/*_nmea.txt
+	rm -f $(DATA_DIR)/*_trace.jsonl
+	rm -f $(DATA_DIR)/*.bin
 	@echo "Clean complete"
 
 # Help target

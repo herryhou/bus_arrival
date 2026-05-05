@@ -132,7 +132,11 @@ fn generate_trace_path(nmea_path: &PathBuf) -> PathBuf {
     let file_stem = trace_path.file_stem().unwrap_or_default();
     let parent = trace_path.parent();
 
-    let new_name = format!("{}_trace.jsonl", file_stem.to_string_lossy());
+    // Strip _nmea suffix if present
+    let stem_str = file_stem.to_string_lossy();
+    let base_name = stem_str.strip_suffix("_nmea").unwrap_or(&stem_str);
+
+    let new_name = format!("{}_trace.jsonl", base_name);
 
     if let Some(p) = parent {
         trace_path = p.join(new_name);
