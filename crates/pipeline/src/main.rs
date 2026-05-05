@@ -8,57 +8,39 @@ use std::path::PathBuf;
 
 #[cfg(feature = "std")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use pipeline::{Pipeline, PipelineConfig};
+    use pipeline::Pipeline;
     use std::io::Write;
 
     let args = parse_args()?;
 
-    // Build configuration
-    let config = PipelineConfig {
-        enable_trace: args.trace.is_some(),
-        enable_announce: args.announce.is_some(),
-    };
+    // Determine trace output path
+    let trace_path = args.output.unwrap_or_else(|| {
+        let auto_path = generate_trace_path(&args.nmea);
+        eprintln!("Auto-generating trace output: {}", auto_path.display());
+        auto_path
+    });
 
     // Run pipeline
     let result = Pipeline::process_nmea_file(
         &args.nmea,
         &args.route_data,
-        &args.output,
-        &config,
     )?;
 
-    // Write trace if requested
-    if let Some(trace_path) = args.trace {
-        use std::io::BufWriter;
-        let file = std::fs::File::create(&trace_path)?;
-        let mut writer = BufWriter::new(file);
-        for trace_record in result.trace_records.as_ref().unwrap() {
-            writeln!(writer, "{}", serde_json::to_string(trace_record)?)?;
-        }
-        writer.flush()?;
-        eprintln!("Trace written to: {}", trace_path.display());
+    // Write trace file
+    use std::io::BufWriter;
+    let file = std::fs::File::create(&trace_path)?;
+    let mut writer = BufWriter::new(file);
+    for trace_record in &result.trace_records {
+        writeln!(writer, "{}", serde_json::to_string(trace_record)?)?;
     }
-
-    // Write announce if requested
-    if let Some(announce_path) = args.announce {
-        use std::io::BufWriter;
-        let file = std::fs::File::create(&announce_path)?;
-        let mut writer = BufWriter::new(file);
-        for announce_event in result.announce_events.as_ref().unwrap() {
-            writeln!(writer, "{}", serde_json::to_string(announce_event)?)?;
-        }
-        writer.flush()?;
-        eprintln!("Announce events written to: {}", announce_path.display());
-    }
+    writer.flush()?;
+    eprintln!("Trace written to: {}", trace_path.display());
 
     // Print summary
     eprintln!("=== Pipeline Complete ===");
-    eprintln!("Processed {} GPS updates", result.trace_records.as_ref().map(|t| t.len()).unwrap_or(0));
+    eprintln!("Processed {} GPS updates", result.trace_records.len());
     eprintln!("Detected {} arrivals", result.arrivals.len());
     eprintln!("Detected {} departures", result.departures.len());
-    if config.enable_announce {
-        eprintln!("Generated {} announce events", result.announce_events.as_ref().unwrap().len());
-    }
 
     Ok(())
 }
@@ -67,9 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 struct Args {
     nmea: PathBuf,
     route_data: PathBuf,
-    output: PathBuf,
-    trace: Option<PathBuf>,
-    announce: Option<PathBuf>,
+    output: Option<PathBuf>,
 }
 
 #[cfg(feature = "std")]
@@ -77,25 +57,16 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     let mut nmea = None;
     let mut route_data = None;
     let mut output = None;
-    let mut trace = None;
-    let mut announce = None;
 
     let mut args_iter = std::env::args().skip(1);
 
     while let Some(arg) = args_iter.next() {
         match arg.as_str() {
-            "--trace" => {
-                if let Some(trace_path) = args_iter.next() {
-                    trace = Some(PathBuf::from(trace_path));
+            "--output" => {
+                if let Some(output_path) = args_iter.next() {
+                    output = Some(PathBuf::from(output_path));
                 } else {
-                    return Err("--trace requires an argument".into());
-                }
-            }
-            "--announce" => {
-                if let Some(announce_path) = args_iter.next() {
-                    announce = Some(PathBuf::from(announce_path));
-                } else {
-                    return Err("--announce requires an argument".into());
+                    return Err("--output requires an argument".into());
                 }
             }
             "-h" | "--help" => {
@@ -106,15 +77,13 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
                 return Err(format!("Unknown option: {}", arg).into());
             }
             _ => {
-                // Positional arguments: nmea route_data output
+                // Positional arguments: nmea route_data
                 if nmea.is_none() {
                     nmea = Some(PathBuf::from(arg));
                 } else if route_data.is_none() {
                     route_data = Some(PathBuf::from(arg));
-                } else if output.is_none() {
-                    output = Some(PathBuf::from(arg));
                 } else {
-                    return Err("Too many arguments".into());
+                    return Err("Too many arguments. Usage: pipeline <nmea> <route_data> [--output <trace.jsonl>]".into());
                 }
             }
         }
@@ -122,14 +91,11 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
 
     let nmea = nmea.ok_or("Missing NMEA input file")?;
     let route_data = route_data.ok_or("Missing route_data.bin file")?;
-    let output = output.ok_or("Missing output file")?;
 
     Ok(Args {
         nmea,
         route_data,
         output,
-        trace,
-        announce,
     })
 }
 
@@ -137,18 +103,42 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
 fn print_help() {
     println!("Bus Arrival Detection Pipeline");
     println!();
-    println!("Usage: pipeline [OPTIONS] <nmea> <route_data> <output>");
+    println!("Usage: pipeline [OPTIONS] <nmea> <route_data>");
     println!();
     println!("Arguments:");
     println!("  <nmea>       NMEA log file (GPS data)");
     println!("  <route_data> Route data binary file");
-    println!("  <output>     Output JSONL file for arrivals/departures");
     println!();
     println!("Options:");
-    println!("  --trace <file>    Enable trace output to file (for debugging)");
-    println!("  --announce <file> Enable announce event output to file");
-    println!("  -h, --help        Show this help message");
+    println!("  --output <file>    Trace output file (default: auto-generated from input name)");
+    println!("  -h, --help         Show this help message");
     println!();
-    println!("Example:");
-    println!("  pipeline gps.nmea route_data.bin arrivals.jsonl --trace trace.jsonl");
+    println!("Examples:");
+    println!("  pipeline gps.nmea route_data.bin");
+    println!("  pipeline gps.nmea route_data.bin --output custom_trace.jsonl");
+    println!();
+    println!("Helper scripts:");
+    println!("  ./tools/arrival_from_trace.sh trace.jsonl > arrivals.jsonl");
+    println!("  ./tools/announce_from_trace.sh trace.jsonl > announce.jsonl");
+}
+
+/// Generate trace output path from NMEA input path
+/// Example: test_data/ty225_normal_nmea.txt -> test_data/ty225_normal_trace.jsonl
+#[cfg(feature = "std")]
+fn generate_trace_path(nmea_path: &PathBuf) -> PathBuf {
+    let mut trace_path = nmea_path.clone();
+
+    // Replace extension with _trace.jsonl
+    let file_stem = trace_path.file_stem().unwrap_or_default();
+    let parent = trace_path.parent();
+
+    let new_name = format!("{}_trace.jsonl", file_stem.to_string_lossy());
+
+    if let Some(p) = parent {
+        trace_path = p.join(new_name);
+    } else {
+        trace_path = PathBuf::from(new_name);
+    }
+
+    trace_path
 }
