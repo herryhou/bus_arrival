@@ -53,7 +53,7 @@ pipeline input.nmea route.bin --output custom_trace.jsonl
 **Keep:**
 - `arrivals: Vec<ArrivalEvent>` - primary output, used by tests
 - `departures: Vec<DepartureEvent>` - primary output
-- `trace_records: Vec<TraceRecord>` - **Changed from Option to Vec** (trace always enabled)
+- `trace_records: Vec<TraceRecord>` - **Changed from Option to Vec** (trace always enabled, std only)
 
 **Remove:**
 - `PipelineConfig` struct - no longer needed
@@ -62,6 +62,9 @@ pipeline input.nmea route.bin --output custom_trace.jsonl
 
 **Rationale for removing Option:**
 Since trace is always enabled, `Option<Vec>` adds unnecessary `unwrap()` overhead. Change to `Vec` directly.
+
+**Note on no_std/embedded:**
+`trace_records` is gated by `#[cfg(feature = "std")]` and is NOT compiled for the embedded firmware. The firmware uses its own 2-layer architecture (Control/Estimation layers) and doesn't use `PipelineResult` at all. This change affects only the std (host) build.
 
 ### Component Changes
 
