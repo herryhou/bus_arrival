@@ -9,6 +9,12 @@ pub struct DrState {
     pub last_valid_s: Option<shared::DistCm>,
 }
 
+impl Default for DrState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DrState {
     pub fn new() -> Self {
         Self {

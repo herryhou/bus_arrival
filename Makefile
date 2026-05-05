@@ -53,12 +53,11 @@ GROUND_TRUTH_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_gt.json
 # SIMULATOR_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_sim.json  # Deprecated
 DETECTOR_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_arrivals.json
 TRACE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_trace.jsonl
-ANNOUNCE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_announce.jsonl
 
 # Node.js executable
 NODE := node
 
-.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour
+.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour run-detour-no-gen regression-test regression-save
 
 # Default target
 all: run
@@ -71,15 +70,23 @@ run: build gen_nmea preprocess pipeline
 	@echo "Scenario: $(SCENARIO)"
 	@echo "NMEA output: $(NMEA_OUT)"
 	@echo "Route data: $(ROUTE_DATA_BIN)"
-	@echo "Output: $(DETECTOR_OUT)"
 	@echo "Trace output: $(TRACE_OUT)"
-	@echo "Announce output: $(ANNOUNCE_OUT)"
+	@echo ""
+	@echo "Extract arrivals: ./tools/arrival_from_trace.sh $(TRACE_OUT) > arrivals.jsonl"
+	@echo "Extract announce: ./tools/announce_from_trace.sh $(TRACE_OUT) > announce.jsonl"
 
 # Run detour scenario (ty225_short route)
 run-detour:
 	@echo "=== Running detour scenario (ty225_short) ==="
 	@echo "L-shaped detour: stop 1 → 10m east → south to waypoint → east to stop 6"
 	$(MAKE) run ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.992071 DETOUR_WAYPOINT_LON=121.295621 DETOUR_DURATION_S=60
+
+# Run detour scenario without generating NMEA (uses existing NMEA file)
+run-detour-no-gen: build preprocess
+	@echo "=== Running detour scenario (ty225_short) - skipping gen_nmea ==="
+	@echo "Using existing NMEA: $(NMEA_OUT)"
+	@echo "L-shaped detour: stop 1 → 10m east → south to waypoint → east to stop 6"
+	$(MAKE) pipeline-no-gen ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.992071 DETOUR_WAYPOINT_LON=121.295621 DETOUR_DURATION_S=60
 
 # Legacy two-step workflow (deprecated - use 'make run' instead)
 run-legacy: build gen_nmea preprocess simulate detect
@@ -92,7 +99,6 @@ run-legacy: build gen_nmea preprocess simulate detect
 	@echo "Simulator output: $(SIMULATOR_OUT)"
 	@echo "Arrival detector output: $(DETECTOR_OUT)"
 	@echo "Trace output: $(TRACE_OUT)"
-	@echo "Announce output: $(ANNOUNCE_OUT)"
 
 # Build all Rust binaries in release mode
 build: build-firmware
@@ -166,24 +172,34 @@ detect: simulate
 	@echo "  make pipeline ROUTE_NAME=$(ROUTE_NAME) SCENARIO=$(SCENARIO)"
 	@false
 
-# Run unified pipeline: NMEA + route_data → arrivals + departures (single binary)
+# Run unified pipeline: NMEA + route_data → trace (single binary)
 pipeline: gen_nmea preprocess
 	@echo "=== Running unified pipeline ==="
 	@echo "Binary: $(PIPELINE)"
 	@echo "Source: pipeline/"
-	$(PIPELINE) $(NMEA_OUT) $(ROUTE_DATA_BIN) $(DETECTOR_OUT) --trace $(TRACE_OUT) --announce $(ANNOUNCE_OUT)
-	@echo "Generated: $(DETECTOR_OUT)"
+	$(PIPELINE) $(NMEA_OUT) $(ROUTE_DATA_BIN)
 	@echo "Generated: $(TRACE_OUT)"
-	@echo "Generated: $(ANNOUNCE_OUT)"
+
+# Run unified pipeline without generating NMEA (uses existing NMEA file)
+pipeline-no-gen: preprocess
+	@echo "=== Running unified pipeline (using existing NMEA) ==="
+	@echo "Binary: $(PIPELINE)"
+	@echo "Source: pipeline/"
+	@echo "Using existing NMEA: $(NMEA_OUT)"
+	@if [ ! -f "$(NMEA_OUT)" ]; then \
+		echo "Error: NMEA file not found: $(NMEA_OUT)"; \
+		echo "Run 'make gen_nmea' first to generate it."; \
+		exit 1; \
+	fi
+	$(PIPELINE) $(NMEA_OUT) $(ROUTE_DATA_BIN)
+	@echo "Generated: $(TRACE_OUT)"
 
 # Clean all generated files
 clean:
 	@echo "=== Cleaning generated files ==="
-	rm -f $(DATA_DIR)/nmea_*.txt
-	rm -f $(DATA_DIR)/sim_*.jsonl
-	rm -f $(DATA_DIR)/arrivals_*.jsonl
-	rm -f $(DATA_DIR)/trace_*.jsonl
-	rm -f $(ROUTE_DATA_BIN)
+	rm -f $(DATA_DIR)/*_nmea.txt
+	rm -f $(DATA_DIR)/*_trace.jsonl
+	rm -f $(DATA_DIR)/*.bin
 	@echo "Clean complete"
 
 # Help target
@@ -194,6 +210,7 @@ help:
 	@echo "  make run ROUTE_NAME=<route> SCENARIO=<name>     Run full unified pipeline"
 	@echo "                                                    (default: ROUTE_NAME=ty225 SCENARIO=normal)"
 	@echo "  make run-detour                                  Run detour scenario (ty225_short)"
+	@echo "  make run-detour-no-gen                           Run detour scenario without regenerating NMEA"
 	@echo "  make pipeline ROUTE_NAME=<route> SCENARIO=<name> Run unified pipeline (same as 'run')"
 	@echo "  make gen_nmea ROUTE_NAME=<route> SCENARIO=<name> Generate NMEA test data"
 	@echo "  make preprocess ROUTE_NAME=<route>               Generate route_data.bin"
@@ -207,6 +224,10 @@ help:
 	@echo "Maintenance:"
 	@echo "  make clean                                       Remove generated files"
 	@echo "  make help                                        Show this help message"
+	@echo ""
+	@echo "Regression Testing:"
+	@echo "  make regression-test                             Run all regression tests"
+	@echo "  make regression-save CASE_NAME=<name> DESC='...' Save failing case as regression test"
 	@echo ""
 	@echo "Parameters:"
 	@echo "  ROUTE_NAME    Route identifier (default: ty225)"
@@ -248,3 +269,18 @@ validate-all:
 		output=$${trace%_trace.jsonl}_report.html; \
 		cargo run --release --bin trace_validator -- "$$trace" -o "$$output"; \
 	done
+
+# Regression testing targets
+regression-test:
+	@echo "=== Running regression tests ==="
+	cargo test -p pipeline --test regression_tests
+
+# Quick alias for saving regression test case
+# Usage: make regression-save CASE_NAME=<name> DESC="<description>"
+regression-save:
+	@if [ -z "$(CASE_NAME)" ]; then \
+		echo "Error: CASE_NAME is required"; \
+		echo "Usage: make regression-save CASE_NAME=<name> DESC=\"<description>\""; \
+		exit 1; \
+	fi
+	@./tools/save_regression.sh "$(CASE_NAME)" "$(DESC)"

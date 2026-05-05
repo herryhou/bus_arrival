@@ -1,4 +1,5 @@
 //! Test to check coordinate alignment between NMEA and route data
+#![allow(clippy::unnecessary_cast)]
 
 mod common;
 use common::load_test_asset_bytes;

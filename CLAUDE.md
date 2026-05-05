@@ -26,18 +26,62 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 cargo build --release
 make build
 
-# Run full pipeline with test data
+# Run full pipeline with test data (generates trace.jsonl)
 make run ROUTE_NAME=ty225 SCENARIO=normal
 
 # Generate route data from GeoJSON
 cargo run -p preprocessor -- test_data/ty225_route.json test_data/ty225_stops.json test_data/ty225.bin
 
-# Run pipeline (NMEA + route_data → arrivals/departures)
-cargo run -p pipeline -- test_data/ty225_normal_nmea.txt test_data/ty225.bin arrivals.jsonl --trace trace.jsonl
+# Run pipeline (NMEA + route_data → trace.jsonl)
+cargo run -p pipeline -- test_data/ty225_normal_nmea.txt test_data/ty225.bin
+
+# Extract arrivals from trace
+./tools/arrival_from_trace.sh test_data/ty225_normal_trace.jsonl > arrivals.jsonl
+
+# Extract announce events from trace
+./tools/announce_from_trace.sh test_data/ty225_normal_trace.jsonl > announce.jsonl
 
 # Build Pico 2 W firmware (no_std, RP2350)
 cargo build --release --target thumbv8m.main-none-eabi -p pico2-firmware
 make build-firmware
+```
+
+## Filtering trace.jsonl
+
+The pipeline now outputs a single `trace.jsonl` file containing all state machine information. Use jq or helper scripts to extract what you need.
+
+### Using helper scripts
+
+```bash
+# Extract arrivals
+./tools/arrival_from_trace.sh trace.jsonl > arrivals.jsonl
+
+# Extract announce events (corridor entries)
+./tools/announce_from_trace.sh trace.jsonl > announce.jsonl
+```
+
+### Using jq directly
+
+```bash
+# Extract arrivals
+jq 'select(.stop_states[].just_arrived == true) |
+    {time, stop_idx: .stop_states[0].stop_idx, s_cm, v_cms, probability}' \
+  trace.jsonl > arrivals.jsonl
+
+# Extract announce events (corridor entry)
+jq 'select(.active_stops | length > 0) |
+    {time, stop_idx: .active_stops[0], s_cm, v_cms}' \
+  trace.jsonl > announce.jsonl
+
+# Find all Approaching/Arriving states
+jq '.stop_states[]? | select(.fsm_state == "Approaching" or .fsm_state == "Arriving")' \
+  trace.jsonl
+
+# Filter by time range
+jq 'select(.time >= 1234567890 and .time <= 1234567900)' trace.jsonl
+
+# Show off-route episodes
+jq 'select(.off_route == true)' trace.jsonl
 ```
 
 ## Architecture
@@ -57,7 +101,7 @@ The system processes GPS NMEA data to detect bus arrivals using a 3-phase pipeli
 - Stop corridor filtering, state machine (Approaching → Arriving → AtStop → Departed)
 - Stop index recovery after GPS anomalies
 
-**Output:** `arrivals.jsonl` (events), `trace.jsonl` (debug state), `announce.jsonl` (voice events)
+**Output:** `trace.jsonl` (complete state machine trace with arrivals, departures, and all intermediate states)
 
 ## Workspace Structure
 

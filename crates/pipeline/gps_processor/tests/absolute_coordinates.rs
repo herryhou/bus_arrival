@@ -5,6 +5,7 @@
 //!
 //! This test would have caught the bug where the simulator was subtracting grid origin
 //! from GPS coordinates, causing bus positions to appear far from the route path.
+#![allow(clippy::unnecessary_cast)]
 
 use gps_processor::map_match;
 

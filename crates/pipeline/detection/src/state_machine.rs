@@ -31,6 +31,9 @@ pub struct StopState {
     pub announced: bool,
     /// Previous distance to stop (for re-acquisition detection)
     pub previous_distance_cm: Option<i32>,
+    /// Whether this stop should be skipped on off-route re-entry
+    /// When true, the stop should not trigger any arrival events
+    pub skip_on_reentry: bool,
 }
 
 impl StopState {
@@ -43,6 +46,7 @@ impl StopState {
             last_announced_stop: u8::MAX,
             announced: false,
             previous_distance_cm: None,
+            skip_on_reentry: false,
         }
     }
 
@@ -72,7 +76,7 @@ impl StopState {
         let d_to_stop = (s_cm - stop_progress).abs();
 
         // Track previous distance for re-acquisition detection
-        let current_distance = (stop_progress as i32) - (s_cm as i32);
+        let current_distance = stop_progress - s_cm;
         self.previous_distance_cm = Some(current_distance);
 
         match self.fsm_state {

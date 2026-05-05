@@ -20,5 +20,5 @@ pub fn pack_v8_route_data(
         grid,
         lat_avg_deg,
         output
-    ).map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))
+    ).map_err(|e| io::Error::other(format!("{:?}", e)))
 }

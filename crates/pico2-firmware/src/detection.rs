@@ -35,6 +35,7 @@ pub fn find_active_stops(
 ) -> heapless::Vec<usize, 16> {
     let s_cm = signals.s_cm;
     let mut active = heapless::Vec::new();
+    #[allow(clippy::collapsible_if)]
     for i in 0..route_data.stop_count {
         if let Some(stop) = route_data.get_stop(i) {
             if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm {
@@ -80,7 +81,7 @@ fn compute_features(
     // Defensive: blend z_gps_cm and s_cm based on divergence to handle
     // cases where map matcher produces poor projections during normal operation
     let divergence = signals.divergence_cm();
-    let (d1_cm, use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
+    let (d1_cm, _use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
         // When z_gps_cm and s_cm diverge significantly, use s_cm for p1
         // This prevents poor map matching from dragging down probability
         ((signals.s_cm - stop.progress_cm).abs(), true)
@@ -106,7 +107,7 @@ fn compute_features(
     };
 
     // Feature 4: Dwell time likelihood (T_ref = 10s)
-    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
+    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255);
 
     (p1, p2, p3, p4)
 }

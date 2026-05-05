@@ -154,14 +154,21 @@ pub fn process_gps_update(
                     // Just transitioned from OffRoute/Suspect to Normal
                     let frozen_s = state.frozen_s_cm.unwrap_or(state.s_cm);
 
-                    // Use relaxed heading grid search for off-route recovery
-                    let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only(
+                    // Use relaxed heading grid search with min_s and max_s constraints for off-route recovery
+                    // This prevents snapping to segments that are spatially close but route-wise distant
+                    // (e.g., when route has loops, parallel segments, or crosses itself)
+                    // Calculate max_s constraint to prevent jumping too far forward
+                    // Allow up to 5km forward (reasonable for GPS outage recovery)
+                    let max_s = frozen_s + 500_000; // 5km forward
+                    let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only_with_min_max_s(
                         gps_x,
                         gps_y,
                         gps.heading_cdeg,
                         gps.speed_cms,
                         route_data,
                         use_relaxed_heading,
+                        frozen_s, // Constrain to segments >= frozen position
+                        max_s,    // Constrain to segments <= frozen position + 5km
                     );
 
                     // Project to route to get re-entry position
@@ -175,7 +182,7 @@ pub fn process_gps_update(
                         state.frozen_s_cm = None;
                         state.off_route_suspect_ticks = 0;
                         // Blend v_cms using EMA instead of hard assignment (M3 fix)
-                        let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+                        let v_gps = gps.speed_cms.clamp(0, V_MAX_CMS);
                         state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
                         state.last_seg_idx = new_seg_idx;
                         dr.last_gps_time = Some(gps.timestamp);
@@ -209,11 +216,27 @@ pub fn process_gps_update(
     // The hysteresis logic handles the off-route → normal transition
     // M12 uses 4-feature scoring and receives clean input (z_raw, not pre-snapped)
 
+    // Route position consistency check: prevent map matcher from jumping between
+    // segments that are spatially close but route-wise distant (e.g., crossing loops).
+    // If projection jumps > 10x the physically possible distance, reject and use DR.
+    // This prevents missed stops when map matcher switches to wrong segment after GPS outage.
+    let max_possible_dist = (V_MAX_CMS * dt.max(1) + SIGMA_GPS_CM) as i64;
+    let route_jump_excess = (z_raw.abs_diff(state.s_cm) as i64) > 10 * max_possible_dist;
+    if route_jump_excess && !is_first_fix && state.frozen_s_cm.is_none() {
+        // Map matcher selected wrong segment - use DR instead
+        state.s_cm += state.v_cms * (dt as DistCm);
+        dr.last_gps_time = Some(gps.timestamp);
+        return ProcessResult::DrOutage {
+            s_cm: state.s_cm,
+            v_cms: state.v_cms,
+        };
+    }
+
     if is_first_fix {
         state.s_cm = z_raw;
 
         // Blend v_cms using EMA instead of hard assignment (M3 fix)
-        let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+        let v_gps = gps.speed_cms.clamp(0, V_MAX_CMS);
         state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
         state.last_seg_idx = seg_idx;
         dr.last_gps_time = Some(gps.timestamp);
@@ -239,32 +262,30 @@ pub fn process_gps_update(
     // The snap logic handles validation of re-entry position
     // When frozen, we expect large position jumps (detour scenarios) and should
     // allow the snap logic to validate, not reject here
-    if state.frozen_s_cm.is_none() {
-        if !check_speed_constraint(z_raw, state.s_cm, dt) {
-            // Per spec Section 9.2: "拒絕後的行為：跳過 Kalman 更新步驟，僅執行 predict step（ŝ += v̂），等效於短暫 Dead-Reckoning"
-            // Do prediction step (DR mode) instead of returning Rejected with zero position
-            state.s_cm += state.v_cms * (dt as DistCm);
-            dr.last_gps_time = Some(gps.timestamp);
-            return ProcessResult::DrOutage {
-                s_cm: state.s_cm,
-                v_cms: state.v_cms,
-            };
-        }
+    if state.frozen_s_cm.is_none()
+        && !check_speed_constraint(z_raw, state.s_cm, dt) {
+        // Per spec Section 9.2: "拒絕後的行為：跳過 Kalman 更新步驟，僅執行 predict step（ŝ += v̂），等效於短暫 Dead-Reckoning"
+        // Do prediction step (DR mode) instead of returning Rejected with zero position
+        state.s_cm += state.v_cms * (dt as DistCm);
+        dr.last_gps_time = Some(gps.timestamp);
+        return ProcessResult::DrOutage {
+            s_cm: state.s_cm,
+            v_cms: state.v_cms,
+        };
     }
 
     // 6. Monotonicity filter
     // CRITICAL: Skip this check when position is frozen to allow off-route recovery
     // The snap logic handles validation of re-entry position
-    if state.frozen_s_cm.is_none() {
-        if !check_monotonic(z_raw, state.s_cm) {
-            // Per spec Section 9.2: same behavior as speed constraint rejection
-            state.s_cm += state.v_cms * (dt as DistCm);
-            dr.last_gps_time = Some(gps.timestamp);
-            return ProcessResult::DrOutage {
-                s_cm: state.s_cm,
-                v_cms: state.v_cms,
-            };
-        }
+    if state.frozen_s_cm.is_none()
+        && !check_monotonic(z_raw, state.s_cm) {
+        // Per spec Section 9.2: same behavior as speed constraint rejection
+        state.s_cm += state.v_cms * (dt as DistCm);
+        dr.last_gps_time = Some(gps.timestamp);
+        return ProcessResult::DrOutage {
+            s_cm: state.s_cm,
+            v_cms: state.v_cms,
+        };
     }
 
     // 7. Kalman update (HDOP-adaptive) with soft-resync for GPS recovery

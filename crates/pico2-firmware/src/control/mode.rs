@@ -56,7 +56,7 @@ pub fn check_normal_to_offroute(
 ) -> bool {
     if divergence_d2 > OFF_ROUTE_D2_THRESHOLD {
         *suspect_ticks += 1;
-        return *suspect_ticks >= 5;
+        *suspect_ticks >= 5
     } else {
         *suspect_ticks = 0;
         false

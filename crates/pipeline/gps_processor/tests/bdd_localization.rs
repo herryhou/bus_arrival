@@ -1,3 +1,5 @@
+#![allow(clippy::unnecessary_cast)]
+
 use gps_processor::kalman::{process_gps_update, ProcessResult};
 use gps_processor::route_data::RouteData;
 use shared::{DrState, GpsPoint, KalmanState, RouteNode};

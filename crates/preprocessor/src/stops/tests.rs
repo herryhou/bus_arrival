@@ -1,6 +1,7 @@
 // Unit tests for stop sequence validation
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::stops::validation::validate_stop_sequence;
     use shared::{RouteNode, SpatialGrid};
@@ -35,7 +36,7 @@ mod tests {
                 _pad: 0,
             });
 
-            cum_dist += (seg_len_mm / 10) as i32;
+            cum_dist += seg_len_mm / 10;
         }
         nodes
     }

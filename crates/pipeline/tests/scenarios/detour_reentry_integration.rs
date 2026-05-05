@@ -37,7 +37,7 @@ fn test_detour_reentry_snap_behavior() {
     let mut frozen_s_cm = 0;
     let mut reentry_tick = 0;
     let mut reentry_s_cm = 0;
-    let mut s_cm_before_offroute = 0;
+    let s_cm_before_offroute = 0;
 
     for line in trace_reader.lines() {
         let line = line.expect("Failed to read trace line");
@@ -53,9 +53,9 @@ fn test_detour_reentry_snap_behavior() {
             off_route_start_tick = time;
             frozen_s_cm = s_cm;
             // Record s_cm before off-route (should be from previous tick)
-            if let Ok(trace_file_full) = std::fs::File::open("test_data/ty225_short_detour_trace.jsonl")
             {
                 // We'll capture the pre-off-route s_cm from the first off-route tick
+                let _ = s_cm_before_offroute;
             }
         }
 
@@ -257,7 +257,7 @@ fn test_reentry_immediate_snap_not_gradual() {
 
     // Find off-route to re-entry transition
     let mut reentry_idx = 0;
-    for (i, (_, s_cm, off_route)) in ticks.iter().enumerate() {
+    for (i, (_time, _s, off_route)) in ticks.iter().enumerate() {
         if !off_route && i > 0 && ticks[i - 1].2 {
             // Found first non-off-route tick after off-route
             reentry_idx = i;

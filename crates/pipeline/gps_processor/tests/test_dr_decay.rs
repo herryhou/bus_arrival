@@ -14,5 +14,5 @@
 fn test_dr_decay_placeholder() {
     // This test will fail initially and pass after implementing the fix
     // The actual test logic is in kalman.rs as it needs access to internal types
-    assert!(true, "Placeholder - actual test is in kalman.rs module");
+    // TODO: Implement actual test
 }

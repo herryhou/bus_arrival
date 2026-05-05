@@ -298,6 +298,17 @@
           class="route-progress-line"
           style="left: {progressToPixel(busProgress)}px"
         ></div>
+        <!-- Corridor indicator lines -->
+        {#each routeData.stops as stop, stopIndex (stopIndex)}
+          {@const corridorStart = progressToPixel(stop.corridor_start_cm)}
+          {@const corridorEnd = progressToPixel(stop.corridor_end_cm)}
+          {@const corridorWidth = corridorEnd - corridorStart}
+          <div
+            class="corridor-line"
+            style="left: {corridorStart}px; width: {corridorWidth}px"
+            title="Stop #{stopIndex + 1} detection corridor"
+          ></div>
+        {/each}
       </div>
 
       <!-- Stops -->
@@ -567,6 +578,15 @@
       0 0 12px rgba(59, 130, 246, 0.9),
       0 0 24px rgba(59, 130, 246, 0.4);
     transform: translateX(-50%);
+  }
+
+  .corridor-line {
+    position: absolute;
+    top: 0;
+    height: 30%;
+    background: rgba(255, 247, 17, 0.3);
+    border-radius: 1px;
+    pointer-events: none;
   }
 
   .stops-row {

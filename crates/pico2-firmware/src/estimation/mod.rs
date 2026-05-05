@@ -18,6 +18,12 @@ pub struct EstimationState {
     pub dr: DrState,
 }
 
+impl Default for EstimationState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EstimationState {
     pub fn new() -> Self {
         Self {
@@ -100,7 +106,7 @@ pub fn estimate(
     let (s_cm, v_cms) = if input.is_first_fix {
         // First fix: initialize Kalman
         state.kalman.s_cm = z_raw;
-        let v_gps = input.gps.speed_cms.max(0).min(1667);
+        let v_gps = input.gps.speed_cms.clamp(0, 1667);
         state.kalman.v_cms = state.kalman.v_cms + 3 * (v_gps - state.kalman.v_cms) / 10;
         state.kalman.last_seg_idx = seg_idx;
 
@@ -169,7 +175,7 @@ fn handle_outage(state: &mut EstimationState, timestamp: u64) -> EstimationOutpu
 
     // DR mode
     state.dr.last_valid_s = Some(state.kalman.s_cm);  // Save before advancing
-    state.kalman.s_cm = state.kalman.s_cm + state.dr.filtered_v * (dt as DistCm);
+    state.kalman.s_cm += state.dr.filtered_v * (dt as DistCm);
 
     // Speed decay
     let dt_idx = dt.min(10) as usize;

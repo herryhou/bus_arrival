@@ -40,7 +40,7 @@ pub fn generate_candidates(
             let dy = stop.1 - node.y_cm as i64;
 
             // Compute len2_cm2 at runtime: (seg_len_mm / 10)^2
-            let seg_len_cm = (node.seg_len_mm / 10) as i32;
+            let seg_len_cm = node.seg_len_mm / 10;
             let len2_cm2 = seg_len_cm as i64 * seg_len_cm as i64;
 
             // t = [(P - A) · (B - A)] / |B - A|²
@@ -102,7 +102,7 @@ pub fn generate_candidates_with_snap(
     // Find first segment whose END is past max_prev_progress_cm
     let snap_seg_idx = route_nodes
         .iter()
-        .position(|n| n.cum_dist_cm + (n.seg_len_mm / 10) as i32 >= max_prev_progress_cm)
+        .position(|n| n.cum_dist_cm + n.seg_len_mm / 10 >= max_prev_progress_cm)
         .unwrap_or(route_nodes.len().saturating_sub(2));
 
     // Create snap candidate at segment start

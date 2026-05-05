@@ -568,12 +568,12 @@ fn test_dense_stops_with_gaps() {
     assert_eq!(result.len(), 20);
 
     // First cluster should map to 0-1000 range
-    for i in 0..10 {
+    for (i, stop) in result.iter().take(10).enumerate() {
         assert!(
-            result[i].progress_cm >= 0 && result[i].progress_cm <= 1500,
+            stop.progress_cm >= 0 && stop.progress_cm <= 1500,
             "cluster 1 stop {} in range: {}",
             i,
-            result[i].progress_cm
+            stop.progress_cm
         );
     }
 

@@ -151,7 +151,7 @@ fn main() {
             eprintln!("  This usually indicates:");
             eprintln!("    1. Input stop order does not match route geometry");
             eprintln!("    2. Route has self-intersection or loop-back");
-            eprintln!("");
+            eprintln!();
             eprintln!("  Segment mapping shown above for debugging.");
             eprintln!("  Review the segment sequence to understand the route geometry.");
             process::exit(1);

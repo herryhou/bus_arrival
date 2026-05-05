@@ -33,7 +33,7 @@ pub fn parse_input(path: &std::path::Path) -> impl Iterator<Item=InputRecord> {
     let file = std::fs::File::open(path).unwrap();
     let reader = BufReader::new(file);
 
-    reader.lines().filter_map(|line| line.ok())
+    reader.lines().map_while(Result::ok)
         .filter_map(|line| serde_json::from_str::<Phase2Record>(&line).ok())
         .map(|rec| InputRecord {
             time: rec.time,

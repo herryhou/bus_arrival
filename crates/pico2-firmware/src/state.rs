@@ -23,7 +23,6 @@ use shared::{
 /// The value 3 represents approximately 3 seconds at 1 Hz GPS update rate, which empirical
 /// testing shows is sufficient for the filter to reach acceptable convergence in typical
 /// urban canyon conditions.
-
 // ===== Estimation Readiness =====
 /// Valid GPS ticks required for estimation to be ready (affects heading filter, Kalman)
 const ESTIMATION_WARMUP_TICKS: u8 = 3;
@@ -122,7 +121,7 @@ impl<'a> State<'a> {
         let stop_count = route_data.stop_count;
         let mut stop_states = heapless::Vec::new();
         for i in 0..stop_count {
-            if let Err(_) = stop_states.push(StopState::new(i as u8)) {
+            if stop_states.push(StopState::new(i as u8)).is_err() {
                 #[cfg(feature = "firmware")]
                 defmt::warn!("Route has {} stops but only 256 supported - stops beyond index 255 will be ignored", stop_count);
                 break;
@@ -223,7 +222,7 @@ impl<'a> State<'a> {
                     let mut stops_vec = heapless::Vec::<Stop, 256>::new();
                     for i in 0..self.route_data.stop_count {
                         if let Some(stop) = self.route_data.get_stop(i) {
-                            if let Err(_) = stops_vec.push(stop) {
+                            if stops_vec.push(stop).is_err() {
                                 #[cfg(feature = "firmware")]
                                 defmt::warn!("Too many stops for recovery buffer");
                                 break;

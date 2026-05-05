@@ -241,7 +241,7 @@ fn test_very_small_segment() {
     // Very small segment should be handled
     // Length should round to 1cm or 0cm appropriately (in mm)
     let node1_seg = route[1].seg_len_mm;
-    assert!(node1_seg >= 0 && node1_seg <= 20);
+    assert!((0..=20).contains(&node1_seg));
 }
 
 #[test]

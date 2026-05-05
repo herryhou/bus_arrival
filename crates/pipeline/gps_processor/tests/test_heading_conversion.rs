@@ -87,7 +87,7 @@ fn test_no_heading_overflow_for_common_values() {
         );
         // Result should be in valid range
         assert!(
-            heading_cdeg >= -18000 && heading_cdeg <= 18000,
+            (-18000..=18000).contains(&heading_cdeg),
             "Heading {}° resulted in {} cdeg, which is outside valid range [-18000, 18000]",
             heading_deg,
             heading_cdeg

@@ -6,14 +6,11 @@
 //! # Example
 //!
 //! ```no_run
-//! use pipeline::{Pipeline, PipelineConfig};
+//! use pipeline::Pipeline;
 //!
-//! let config = PipelineConfig::default();
 //! let result = Pipeline::process_nmea_file(
 //!     "gps.nmea",
 //!     "route_data.bin",
-//!     "output.jsonl",
-//!     &config
 //! )?;
 //!
 //! println!("Detected {} arrivals", result.arrivals.len());
@@ -24,7 +21,7 @@ pub mod gps;
 pub mod serde;
 
 use shared::binfile::RouteData;
-use shared::{GpsPoint, KalmanState, DrState};
+use shared::{DistCm, GpsPoint, KalmanState, DrState};
 use thiserror::Error;
 
 /// Serialize f64 with at most 6 decimal places
@@ -41,29 +38,12 @@ where
 #[cfg(feature = "std")]
 use std::path::Path;
 #[cfg(feature = "std")]
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 
 // Re-export from sub-crates
 pub use gps_processor::nmea::NmeaState;
 pub use detection::state_machine::{StopState, StopEvent};
 
-/// Configuration for pipeline processing
-#[derive(Debug, Clone)]
-pub struct PipelineConfig {
-    /// Enable trace output (for debugging)
-    pub enable_trace: bool,
-    /// Enable announce output
-    pub enable_announce: bool,
-}
-
-impl Default for PipelineConfig {
-    fn default() -> Self {
-        Self {
-            enable_trace: false,
-            enable_announce: false,
-        }
-    }
-}
 
 /// Pipeline result containing arrival and departure events
 #[derive(Debug)]
@@ -72,12 +52,9 @@ pub struct PipelineResult {
     pub arrivals: Vec<ArrivalEvent>,
     /// Departure events detected
     pub departures: Vec<DepartureEvent>,
-    /// Trace records (if enabled)
+    /// Trace records
     #[cfg(feature = "std")]
-    pub trace_records: Option<Vec<TraceRecord>>,
-    /// Announce events (if enabled)
-    #[cfg(feature = "std")]
-    pub announce_events: Option<Vec<AnnounceEvent>>,
+    pub trace_records: Vec<TraceRecord>,
 }
 
 /// Arrival event
@@ -143,17 +120,10 @@ pub struct StopTraceState {
     pub probability: u8,
     pub features: detection::trace::FeatureScores,
     pub just_arrived: bool,
+    /// Whether this stop should be skipped on off-route re-entry
+    pub skip_on_reentry: bool,
 }
 
-/// Announce event
-#[cfg(feature = "std")]
-#[derive(Debug, Clone, ::serde::Serialize)]
-pub struct AnnounceEvent {
-    pub time: u64,
-    pub stop_idx: u8,
-    pub s_cm: i32,
-    pub v_cms: i32,
-}
 
 /// Pipeline errors
 #[derive(Error, Debug)]
@@ -216,7 +186,7 @@ impl<'a> LocalizationState<'a> {
         match result {
             gps_processor::kalman::ProcessResult::Valid { signals, v_cms, seg_idx, snapped: _ } => {
                 let shared::PositionSignals { z_gps_cm, s_cm } = signals;
-                let divergence_cm = z_gps_cm as i32 - s_cm as i32;
+                let divergence_cm = z_gps_cm - s_cm;
                 let hdop = if gps.hdop_x10 > 0 { Some(gps.hdop_x10 as f32 / 10.0) } else { None };
                 Some(gps::GpsRecord::new(
                     gps.timestamp,
@@ -293,6 +263,8 @@ pub struct DetectionState {
     active_indices: Vec<usize>,
     /// Track whether the bus is currently off-route (detouring)
     off_route: bool,
+    /// Track the last position during off-route (for detecting re-entry jumps)
+    off_route_last_s_cm: Option<DistCm>,
 }
 
 impl DetectionState {
@@ -308,6 +280,7 @@ impl DetectionState {
             arrived_this_frame: Vec::new(),
             active_indices: Vec::new(),
             off_route: false,
+            off_route_last_s_cm: None,
         }
     }
 
@@ -338,10 +311,33 @@ impl DetectionState {
         match record.status {
             "off_route" => {
                 self.off_route = true;
+                // Track the last position during off-route for re-entry jump detection
+                self.off_route_last_s_cm = Some(record.s_cm);
             }
             "valid" => {
-                // Clear off_route as soon as we get a valid fix
+                // Check for off-route re-entry with large forward jump
+                let just_reentered = self.off_route;
+                let large_forward_jump = if let Some(off_route_s) = self.off_route_last_s_cm {
+                    // Large forward jump indicates detour re-entry snap
+                    record.s_cm > off_route_s + 10000 // >100m jump
+                } else {
+                    false
+                };
+
+                // Clear off_route on valid fix
                 self.off_route = false;
+                self.off_route_last_s_cm = None;
+
+                // During off-route re-entry with large forward jump, mark intermediate stops to skip
+                // This prevents them from being triggered even if we're in their corridor
+                if just_reentered && large_forward_jump {
+                    // Mark all stops that are behind the snap position as skip_on_reentry
+                    for (idx, stop) in stops.iter().enumerate() {
+                        if stop.progress_cm < record.s_cm {
+                            self.stop_states[idx].skip_on_reentry = true;
+                        }
+                    }
+                }
             }
             "dr_outage" => {
                 // Do NOT clear off_route during dr_outage - only clear when we get a valid fix
@@ -354,8 +350,9 @@ impl DetectionState {
         }
 
         // Find active stops (corridor filter)
+        // Skip stops that were marked to skip on re-entry
         for (idx, stop) in stops.iter().enumerate() {
-            if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm {
+            if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm && !self.stop_states[idx].skip_on_reentry {
                 self.active_indices.push(idx);
             }
         }
@@ -380,8 +377,8 @@ impl DetectionState {
                 stop,
                 stop_state.dwell_time_s,
                 gps_status,
-                &detection::probability::gaussian_lut(),
-                &detection::probability::logistic_lut(),
+                detection::probability::gaussian_lut(),
+                detection::probability::logistic_lut(),
             );
 
             // Update state machine
@@ -400,7 +397,7 @@ impl DetectionState {
                     result.arrivals.push(ArrivalEvent {
                         time: record.time,
                         stop_idx: *idx as u8,
-                        s_cm: record.s_cm as i32,
+                        s_cm: record.s_cm,
                         v_cms: record.v_cms,
                         probability,
                         event_type: shared::ArrivalEventType::Arrival,
@@ -410,27 +407,11 @@ impl DetectionState {
                     result.departures.push(DepartureEvent {
                         time: record.time,
                         stop_idx: *idx as u8,
-                        s_cm: record.s_cm as i32,
+                        s_cm: record.s_cm,
                         v_cms: record.v_cms,
                     });
                 }
                 StopEvent::None => {}
-            }
-        }
-
-        // Check for announcements (v8.4: corridor entry announcement)
-        // Suppress announcements when off-route (detouring)
-        #[cfg(feature = "std")]
-        if result.announce_events.is_some() && !self.off_route {
-            for (idx, stop_state) in self.stop_states.iter_mut().enumerate() {
-                if stop_state.should_announce(s_cm, stops[idx].corridor_start_cm) {
-                    result.announce_events.as_mut().unwrap().push(AnnounceEvent {
-                        time: record.time,
-                        stop_idx: idx as u8,
-                        s_cm: record.s_cm as i32,
-                        v_cms: record.v_cms,
-                    });
-                }
             }
         }
     }
@@ -460,8 +441,8 @@ impl DetectionState {
                 record.v_cms,
                 stop,
                 stop_state.dwell_time_s,
-                &detection::probability::gaussian_lut(),
-                &detection::probability::logistic_lut(),
+                detection::probability::gaussian_lut(),
+                detection::probability::logistic_lut(),
             );
 
             // Re-compute probability for trace output
@@ -474,13 +455,14 @@ impl DetectionState {
 
             StopTraceState {
                 stop_idx: idx as u8,
-                gps_distance_cm: (z_gps_cm - stop.progress_cm) as i32,
-                progress_distance_cm: (record.s_cm - stop.progress_cm) as i32,
+                gps_distance_cm: z_gps_cm - stop.progress_cm,
+                progress_distance_cm: record.s_cm - stop.progress_cm,
                 fsm_state: format!("{:?}", stop_state.fsm_state),
                 dwell_time_s: stop_state.dwell_time_s,
                 probability,
                 features,
                 just_arrived: self.arrived_this_frame.contains(&(idx as u8)),
+                skip_on_reentry: stop_state.skip_on_reentry,
             }
         }).collect();
 
@@ -495,14 +477,10 @@ impl Pipeline {
     ///
     /// * `nmea_path` - Path to NMEA log file
     /// * `route_data_path` - Path to route_data.bin
-    /// * `output_path` - Path to write arrival/departure events
-    /// * `config` - Pipeline configuration
     #[cfg(feature = "std")]
     pub fn process_nmea_file(
         nmea_path: impl AsRef<Path>,
         route_data_path: impl AsRef<Path>,
-        output_path: impl AsRef<Path>,
-        config: &PipelineConfig,
     ) -> Result<PipelineResult, PipelineError> {
         use std::fs::File;
         use std::io::BufReader;
@@ -518,11 +496,7 @@ impl Pipeline {
         let result = Self::process_nmea_reader(
             reader,
             &route_data,
-            config,
         )?;
-
-        // Write output
-        Self::write_output(&result, output_path)?;
 
         Ok(result)
     }
@@ -533,18 +507,16 @@ impl Pipeline {
     ///
     /// * `reader` - BufReader over NMEA data
     /// * `route_data` - Loaded route data
-    /// * `config` - Pipeline configuration
     ///
     /// # Returns
     ///
-    /// Returns `PipelineResult` containing arrivals, departures, and optional trace/announce events
+    /// Returns `PipelineResult` containing arrivals, departures, and trace records
     #[cfg(feature = "std")]
     pub fn process_nmea_reader<R: BufRead>(
         reader: R,
         route_data: &RouteData,
-        config: &PipelineConfig,
     ) -> Result<PipelineResult, PipelineError> {
-        let mut result = PipelineResult::new(config);
+        let mut result = PipelineResult::new();
 
         // Initialize localization state
         let mut loc_state = LocalizationState::new(route_data);
@@ -554,7 +526,7 @@ impl Pipeline {
 
         // Process NMEA sentences
         for line in reader.lines() {
-            let line = line.map_err(|e| PipelineError::IoError(e))?;
+            let line = line.map_err(PipelineError::IoError)?;
 
             if let Some(gps) = loc_state.nmea.parse_sentence(&line) {
                 // Phase 2: Localization (Kalman + Map Matching)
@@ -562,11 +534,9 @@ impl Pipeline {
                     // Phase 3: Arrival Detection
                     det_state.process_gps_record(&gps_record, route_data, &mut result);
 
-                    // Add trace record if enabled (after detection so we have stop states)
+                    // Add trace record (after detection so we have stop states)
                     #[cfg(feature = "std")]
-                    if config.enable_trace {
-                        result.add_trace_record(&gps_record, &det_state, route_data);
-                    }
+                    result.add_trace_record(&gps_record, &det_state, route_data);
                 }
             }
         }
@@ -574,116 +544,87 @@ impl Pipeline {
         Ok(result)
     }
 
-    #[cfg(feature = "std")]
-    fn write_output(result: &PipelineResult, output_path: impl AsRef<Path>) -> Result<(), PipelineError> {
-        use std::fs::File;
-        use std::io::BufWriter;
-
-        let file = File::create(output_path.as_ref())?;
-        let mut writer = BufWriter::new(file);
-
-        // Merge arrivals and departures by time for chronological order
-        let mut events = Vec::new();
-        for arrival in &result.arrivals {
-            events.push((arrival.time, serde_json::to_string(arrival).unwrap()));
-        }
-        for departure in &result.departures {
-            events.push((departure.time, serde_json::to_string(departure).unwrap()));
-        }
-        events.sort_by_key(|(time, _)| *time);
-
-        // Write events in chronological order
-        for (_, event_json) in events {
-            writeln!(writer, "{}", event_json)?;
-        }
-
-        writer.flush()?;
-        Ok(())
-    }
 }
 
 impl PipelineResult {
-    /// Create new PipelineResult with optional trace/announce based on config
+    /// Create new PipelineResult
     #[cfg(feature = "std")]
-    fn new(config: &PipelineConfig) -> Self {
+    fn new() -> Self {
         Self {
             arrivals: Vec::new(),
             departures: Vec::new(),
-            trace_records: if config.enable_trace { Some(Vec::new()) } else { None },
-            announce_events: if config.enable_announce { Some(Vec::new()) } else { None },
+            trace_records: Vec::new(),
         }
     }
 
     /// Create new PipelineResult (no_std version)
     #[cfg(not(feature = "std"))]
-    fn new(_config: &PipelineConfig) -> Self {
+    fn new() -> Self {
         Self {
             arrivals: Vec::new(),
             departures: Vec::new(),
         }
     }
 
-    /// Add a trace record (only if trace is enabled)
+    /// Add a trace record
     #[cfg(feature = "std")]
     fn add_trace_record(&mut self, record: &gps::GpsRecord, det_state: &DetectionState, route_data: &RouteData) {
-        if let Some(ref mut trace) = self.trace_records {
-            let (active_stops, stop_states) = det_state.get_trace_info(record, route_data);
+        let (active_stops, stop_states) = det_state.get_trace_info(record, route_data);
 
-            // Compute corridor info from first active stop
-            let (corridor_start_cm, corridor_end_cm) = if let Some(&first_idx) = det_state.active_indices.first() {
-                let stop = &route_data.stops()[first_idx];
-                (Some(stop.corridor_start_cm as i32), Some(stop.corridor_end_cm as i32))
-            } else {
-                (None, None)
-            };
+        // Compute corridor info from first active stop
+        let (corridor_start_cm, corridor_end_cm) = if let Some(&first_idx) = det_state.active_indices.first() {
+            let stop = &route_data.stops()[first_idx];
+            (Some(stop.corridor_start_cm), Some(stop.corridor_end_cm))
+        } else {
+            (None, None)
+        };
 
-            // Find next stop outside corridor
-            let next_stop = if let Some(end) = corridor_end_cm {
-                let mut result = None;
-                for (idx, stop) in route_data.stops().iter().enumerate() {
-                    if stop.progress_cm as i32 > end {
-                        // Get probability from stop_states if available
-                        let prob = stop_states.iter()
-                            .find(|s| s.stop_idx == idx as u8)
-                            .map(|s| s.probability)
-                            .unwrap_or(0);
-                        // Only include if not at final stop
-                        if idx < route_data.stops().len() - 1 {
-                            result = Some((idx as u8, prob));
-                            break;
-                        }
+        // Find next stop outside corridor
+        let next_stop = if let Some(end) = corridor_end_cm {
+            let mut result = None;
+            for (idx, stop) in route_data.stops().iter().enumerate() {
+                if stop.progress_cm > end {
+                    // Get probability from stop_states if available
+                    let prob = stop_states.iter()
+                        .find(|s| s.stop_idx == idx as u8)
+                        .map(|s| s.probability)
+                        .unwrap_or(0);
+                    // Only include if not at final stop
+                    if idx < route_data.stops().len() - 1 {
+                        result = Some((idx as u8, prob));
+                        break;
                     }
                 }
-                result
-            } else {
-                None
-            };
+            }
+            result
+        } else {
+            None
+        };
 
-            trace.push(TraceRecord {
-                time: record.time,
-                lat: record.lat,
-                lon: record.lon,
-                s_cm: record.s_cm as i32,
-                v_cms: record.v_cms,
-                heading_cdeg: record.heading_cdeg,
-                active_stops,
-                stop_states,
-                gps_jump: false,  // TODO: implement GPS jump detection
-                recovery_idx: None, // TODO: implement recovery
-                status: record.status.to_string(),
-                off_route: det_state.off_route,
-                // New fields
-                segment_idx: record.segment_idx,
-                heading_constraint_met: record.heading_constraint_met,
-                divergence_cm: record.divergence_cm,
-                hdop: record.hdop,
-                num_sats: record.num_sats,
-                fix_type: record.fix_type.clone(),
-                variance_cm2: record.variance_cm2,
-                corridor_start_cm,
-                corridor_end_cm,
-                next_stop,
-            });
-        }
+        self.trace_records.push(TraceRecord {
+            time: record.time,
+            lat: record.lat,
+            lon: record.lon,
+            s_cm: record.s_cm,
+            v_cms: record.v_cms,
+            heading_cdeg: record.heading_cdeg,
+            active_stops,
+            stop_states,
+            gps_jump: false,  // TODO: implement GPS jump detection
+            recovery_idx: None, // TODO: implement recovery
+            status: record.status.to_string(),
+            off_route: det_state.off_route,
+            // New fields
+            segment_idx: record.segment_idx,
+            heading_constraint_met: record.heading_constraint_met,
+            divergence_cm: record.divergence_cm,
+            hdop: record.hdop,
+            num_sats: record.num_sats,
+            fix_type: record.fix_type.clone(),
+            variance_cm2: record.variance_cm2,
+            corridor_start_cm,
+            corridor_end_cm,
+            next_stop,
+        });
     }
 }
