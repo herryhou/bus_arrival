@@ -6,14 +6,12 @@
 //! # Example
 //!
 //! ```no_run
-//! use pipeline::{Pipeline, PipelineConfig};
+//! use pipeline::Pipeline;
 //!
-//! let config = PipelineConfig::default();
 //! let result = Pipeline::process_nmea_file(
 //!     "gps.nmea",
 //!     "route_data.bin",
-//!     "output.jsonl",
-//!     &config
+//!     "output.jsonl"
 //! )?;
 //!
 //! println!("Detected {} arrivals", result.arrivals.len());
@@ -47,14 +45,6 @@ use std::io::{BufRead, Write};
 pub use gps_processor::nmea::NmeaState;
 pub use detection::state_machine::{StopState, StopEvent};
 
-/// Configuration for pipeline processing
-#[derive(Debug, Clone, Default)]
-pub struct PipelineConfig {
-    /// Enable trace output (for debugging)
-    pub enable_trace: bool,
-    /// Enable announce output
-    pub enable_announce: bool,
-}
 
 /// Pipeline result containing arrival and departure events
 #[derive(Debug)]
@@ -63,12 +53,9 @@ pub struct PipelineResult {
     pub arrivals: Vec<ArrivalEvent>,
     /// Departure events detected
     pub departures: Vec<DepartureEvent>,
-    /// Trace records (if enabled)
+    /// Trace records
     #[cfg(feature = "std")]
-    pub trace_records: Option<Vec<TraceRecord>>,
-    /// Announce events (if enabled)
-    #[cfg(feature = "std")]
-    pub announce_events: Option<Vec<AnnounceEvent>>,
+    pub trace_records: Vec<TraceRecord>,
 }
 
 /// Arrival event
@@ -138,15 +125,6 @@ pub struct StopTraceState {
     pub skip_on_reentry: bool,
 }
 
-/// Announce event
-#[cfg(feature = "std")]
-#[derive(Debug, Clone, ::serde::Serialize)]
-pub struct AnnounceEvent {
-    pub time: u64,
-    pub stop_idx: u8,
-    pub s_cm: i32,
-    pub v_cms: i32,
-}
 
 /// Pipeline errors
 #[derive(Error, Debug)]
@@ -437,24 +415,6 @@ impl DetectionState {
                 StopEvent::None => {}
             }
         }
-
-        // Check for announcements (v8.4: corridor entry announcement)
-        // Suppress announcements when off-route (detouring)
-        #[cfg(feature = "std")]
-        if let Some(ref mut announce_events) = result.announce_events {
-            if !self.off_route {
-                for (idx, stop_state) in self.stop_states.iter_mut().enumerate() {
-                    if stop_state.should_announce(s_cm, stops[idx].corridor_start_cm) {
-                        announce_events.push(AnnounceEvent {
-                            time: record.time,
-                            stop_idx: idx as u8,
-                            s_cm: record.s_cm,
-                            v_cms: record.v_cms,
-                        });
-                    }
-                }
-            }
-        }
     }
 
     /// Get trace information for the last processed GPS record
@@ -626,14 +586,13 @@ impl Pipeline {
 }
 
 impl PipelineResult {
-    /// Create new PipelineResult with optional trace/announce based on config
+    /// Create new PipelineResult
     #[cfg(feature = "std")]
-    fn new(config: &PipelineConfig) -> Self {
+    fn new(_config: &PipelineConfig) -> Self {
         Self {
             arrivals: Vec::new(),
             departures: Vec::new(),
-            trace_records: if config.enable_trace { Some(Vec::new()) } else { None },
-            announce_events: if config.enable_announce { Some(Vec::new()) } else { None },
+            trace_records: Vec::new(),
         }
     }
 
@@ -646,67 +605,65 @@ impl PipelineResult {
         }
     }
 
-    /// Add a trace record (only if trace is enabled)
+    /// Add a trace record
     #[cfg(feature = "std")]
     fn add_trace_record(&mut self, record: &gps::GpsRecord, det_state: &DetectionState, route_data: &RouteData) {
-        if let Some(ref mut trace) = self.trace_records {
-            let (active_stops, stop_states) = det_state.get_trace_info(record, route_data);
+        let (active_stops, stop_states) = det_state.get_trace_info(record, route_data);
 
-            // Compute corridor info from first active stop
-            let (corridor_start_cm, corridor_end_cm) = if let Some(&first_idx) = det_state.active_indices.first() {
-                let stop = &route_data.stops()[first_idx];
-                (Some(stop.corridor_start_cm), Some(stop.corridor_end_cm))
-            } else {
-                (None, None)
-            };
+        // Compute corridor info from first active stop
+        let (corridor_start_cm, corridor_end_cm) = if let Some(&first_idx) = det_state.active_indices.first() {
+            let stop = &route_data.stops()[first_idx];
+            (Some(stop.corridor_start_cm), Some(stop.corridor_end_cm))
+        } else {
+            (None, None)
+        };
 
-            // Find next stop outside corridor
-            let next_stop = if let Some(end) = corridor_end_cm {
-                let mut result = None;
-                for (idx, stop) in route_data.stops().iter().enumerate() {
-                    if stop.progress_cm > end {
-                        // Get probability from stop_states if available
-                        let prob = stop_states.iter()
-                            .find(|s| s.stop_idx == idx as u8)
-                            .map(|s| s.probability)
-                            .unwrap_or(0);
-                        // Only include if not at final stop
-                        if idx < route_data.stops().len() - 1 {
-                            result = Some((idx as u8, prob));
-                            break;
-                        }
+        // Find next stop outside corridor
+        let next_stop = if let Some(end) = corridor_end_cm {
+            let mut result = None;
+            for (idx, stop) in route_data.stops().iter().enumerate() {
+                if stop.progress_cm > end {
+                    // Get probability from stop_states if available
+                    let prob = stop_states.iter()
+                        .find(|s| s.stop_idx == idx as u8)
+                        .map(|s| s.probability)
+                        .unwrap_or(0);
+                    // Only include if not at final stop
+                    if idx < route_data.stops().len() - 1 {
+                        result = Some((idx as u8, prob));
+                        break;
                     }
                 }
-                result
-            } else {
-                None
-            };
+            }
+            result
+        } else {
+            None
+        };
 
-            trace.push(TraceRecord {
-                time: record.time,
-                lat: record.lat,
-                lon: record.lon,
-                s_cm: record.s_cm,
-                v_cms: record.v_cms,
-                heading_cdeg: record.heading_cdeg,
-                active_stops,
-                stop_states,
-                gps_jump: false,  // TODO: implement GPS jump detection
-                recovery_idx: None, // TODO: implement recovery
-                status: record.status.to_string(),
-                off_route: det_state.off_route,
-                // New fields
-                segment_idx: record.segment_idx,
-                heading_constraint_met: record.heading_constraint_met,
-                divergence_cm: record.divergence_cm,
-                hdop: record.hdop,
-                num_sats: record.num_sats,
-                fix_type: record.fix_type.clone(),
-                variance_cm2: record.variance_cm2,
-                corridor_start_cm,
-                corridor_end_cm,
-                next_stop,
-            });
-        }
+        self.trace_records.push(TraceRecord {
+            time: record.time,
+            lat: record.lat,
+            lon: record.lon,
+            s_cm: record.s_cm,
+            v_cms: record.v_cms,
+            heading_cdeg: record.heading_cdeg,
+            active_stops,
+            stop_states,
+            gps_jump: false,  // TODO: implement GPS jump detection
+            recovery_idx: None, // TODO: implement recovery
+            status: record.status.to_string(),
+            off_route: det_state.off_route,
+            // New fields
+            segment_idx: record.segment_idx,
+            heading_constraint_met: record.heading_constraint_met,
+            divergence_cm: record.divergence_cm,
+            hdop: record.hdop,
+            num_sats: record.num_sats,
+            fix_type: record.fix_type.clone(),
+            variance_cm2: record.variance_cm2,
+            corridor_start_cm,
+            corridor_end_cm,
+            next_stop,
+        });
     }
 }
