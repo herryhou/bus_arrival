@@ -7,7 +7,7 @@
 //! Tests generate their own trace data fresh each run to avoid fragility.
 
 use super::common::{load_nmea_reader, load_ty225_route};
-use pipeline::{Pipeline, PipelineConfig};
+use pipeline::Pipeline;
 use shared::binfile::RouteData;
 
 /// Test GPS quality metrics in normal scenario
@@ -21,13 +21,10 @@ fn test_normal_gps_quality() {
     let route_bytes = load_ty225_route("normal");
     let route_data = RouteData::load(&route_bytes).expect("Failed to load route data");
 
-    let mut config = PipelineConfig::default();
-    config.enable_trace = true;
-
-    let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data, &config)
+    let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data)
         .expect("Pipeline processing failed");
 
-    let trace_records = result.trace_records.expect("Trace should be enabled");
+    let trace_records = result.trace_records;
 
     let mut tick_count = 0;
     let mut hdop_violations = 0;
@@ -77,13 +74,10 @@ fn test_normal_status_transitions() {
     let route_bytes = load_ty225_route("normal");
     let route_data = RouteData::load(&route_bytes).expect("Failed to load route data");
 
-    let mut config = PipelineConfig::default();
-    config.enable_trace = true;
-
-    let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data, &config)
+    let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data)
         .expect("Pipeline processing failed");
 
-    let trace_records = result.trace_records.expect("Trace should be enabled");
+    let trace_records = result.trace_records;
 
     let mut dr_outage_count = 0;
     let mut invalid_transitions = 0;
@@ -141,13 +135,10 @@ fn test_normal_fsm_state_progression() {
     let route_bytes = load_ty225_route("normal");
     let route_data = RouteData::load(&route_bytes).expect("Failed to load route data");
 
-    let mut config = PipelineConfig::default();
-    config.enable_trace = true;
-
-    let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data, &config)
+    let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data)
         .expect("Pipeline processing failed");
 
-    let trace_records = result.trace_records.expect("Trace should be enabled");
+    let trace_records = result.trace_records;
 
     let mut stop_states: std::collections::HashMap<usize, Vec<String>> = std::collections::HashMap::new();
 
@@ -201,13 +192,10 @@ fn test_normal_position_accuracy_at_arrivals() {
     let route_bytes = load_ty225_route("normal");
     let route_data = RouteData::load(&route_bytes).expect("Failed to load route data");
 
-    let mut config = PipelineConfig::default();
-    config.enable_trace = true;
-
-    let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data, &config)
+    let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data)
         .expect("Pipeline processing failed");
 
-    let trace_records = result.trace_records.expect("Trace should be enabled");
+    let trace_records = result.trace_records;
 
     let mut arrival_positions = Vec::new();
 
@@ -264,13 +252,10 @@ fn test_normal_corridor_boundaries() {
     let route_bytes = load_ty225_route("normal");
     let route_data = RouteData::load(&route_bytes).expect("Failed to load route data");
 
-    let mut config = PipelineConfig::default();
-    config.enable_trace = true;
-
-    let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data, &config)
+    let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data)
         .expect("Pipeline processing failed");
 
-    let trace_records = result.trace_records.expect("Trace should be enabled");
+    let trace_records = result.trace_records;
 
     let mut corridor_checks = 0;
     let mut corridor_violations = 0;
@@ -333,13 +318,10 @@ fn test_normal_trace_completeness() {
     let route_bytes = load_ty225_route("normal");
     let route_data = RouteData::load(&route_bytes).expect("Failed to load route data");
 
-    let mut config = PipelineConfig::default();
-    config.enable_trace = true;
-
-    let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data, &config)
+    let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data)
         .expect("Pipeline processing failed");
 
-    let trace_records = result.trace_records.expect("Trace should be enabled");
+    let trace_records = result.trace_records;
 
     let mut tick_count = 0;
     let mut missing_critical_fields = 0;

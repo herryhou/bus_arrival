@@ -6,7 +6,6 @@
 //! 3. Stops between frozen position and re-entry position are fully skipped
 
 use pipeline::Pipeline;
-use pipeline::PipelineConfig;
 use shared::binfile::RouteData;
 use std::io::BufRead;
 
@@ -23,7 +22,6 @@ fn test_detour_reentry_snap_behavior() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("short_detour"),
         &route_data,
-        &PipelineConfig::default(),
     )
     .expect("Pipeline processing failed");
 
@@ -171,7 +169,6 @@ fn test_no_arrivals_during_offroute() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("short_detour"),
         &route_data,
-        &PipelineConfig::default(),
     )
     .expect("Pipeline processing failed");
 
@@ -233,7 +230,6 @@ fn test_reentry_immediate_snap_not_gradual() {
     let _result = Pipeline::process_nmea_reader(
         load_nmea_reader("short_detour"),
         &route_data,
-        &PipelineConfig::default(),
     )
     .expect("Pipeline processing failed");
 

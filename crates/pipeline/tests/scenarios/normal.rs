@@ -24,7 +24,6 @@ fn test_normal_complete_route() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("normal"),
         &route_data,
-        &pipeline::PipelineConfig::default(),
     ).expect("Pipeline processing failed");
 
     let detected_arrivals: Vec<usize> = result.arrivals
@@ -99,7 +98,6 @@ fn test_normal_exact_stop_matching() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("normal"),
         &route_data,
-        &pipeline::PipelineConfig::default(),
     ).expect("Pipeline processing failed");
 
     let detected_arrivals: Vec<usize> = result.arrivals
@@ -137,7 +135,6 @@ fn test_normal_arrival_order() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("normal"),
         &route_data,
-        &pipeline::PipelineConfig::default(),
     ).expect("Pipeline processing failed");
 
     let detected_arrivals: Vec<usize> = result.arrivals
@@ -161,14 +158,9 @@ fn test_normal_position_accuracy() {
     let route_data = RouteData::load(&route_bytes)
         .expect("Failed to load route data");
 
-    // Enable trace output
-    let mut config = pipeline::PipelineConfig::default();
-    config.enable_trace = true;
-
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("normal"),
         &route_data,
-        &config,
     ).expect("Pipeline processing failed");
 
     // The result should include trace data

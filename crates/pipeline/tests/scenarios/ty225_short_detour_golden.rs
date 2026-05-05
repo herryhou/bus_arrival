@@ -65,7 +65,6 @@
 //! - No FSM states for stops 2, 3, 4, 5
 
 use pipeline::Pipeline;
-use pipeline::PipelineConfig;
 use shared::binfile::RouteData;
 use std::io::BufRead;
 
@@ -82,7 +81,6 @@ fn test_ty225_short_detour_golden_standard() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("short_detour"),
         &route_data,
-        &PipelineConfig::default(),
     )
     .expect("Pipeline processing failed");
 
@@ -656,7 +654,6 @@ fn test_announce_precedes_arrival() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("short_detour"),
         &route_data,
-        &PipelineConfig::default(),
     )
     .expect("Pipeline processing failed");
 
@@ -820,7 +817,6 @@ fn test_off_route_reentry_skips_intermediate_stops() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("short_detour"),
         &route_data,
-        &PipelineConfig::default(),
     )
     .expect("Pipeline processing failed");
 
@@ -934,7 +930,6 @@ fn test_normal_operation_does_not_skip_stops() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("normal"),
         &route_data,
-        &PipelineConfig::default(),
     )
     .expect("Pipeline processing failed");
 

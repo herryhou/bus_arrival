@@ -23,7 +23,6 @@ fn test_drift_recovery() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("drift"),
         &route_data,
-        &pipeline::PipelineConfig::default(),
     ).expect("Pipeline processing failed");
 
     let detected_arrivals: Vec<usize> = result.arrivals
@@ -55,7 +54,6 @@ fn test_jump_skip_stop_prevention() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("jump"),
         &route_data,
-        &pipeline::PipelineConfig::default(),
     ).expect("Pipeline processing failed");
 
     let detected_arrivals: Vec<usize> = result.arrivals
@@ -106,7 +104,6 @@ fn test_drift_exact_stop_matching() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("drift"),
         &route_data,
-        &pipeline::PipelineConfig::default(),
     ).expect("Pipeline processing failed");
 
     let detected_arrivals: Vec<usize> = result.arrivals
@@ -140,7 +137,6 @@ fn test_jump_exact_stop_matching() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("jump"),
         &route_data,
-        &pipeline::PipelineConfig::default(),
     ).expect("Pipeline processing failed");
 
     let detected_arrivals: Vec<usize> = result.arrivals

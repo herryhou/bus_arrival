@@ -18,7 +18,6 @@ fn test_outage_dead_reckoning() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("outage"),
         &route_data,
-        &pipeline::PipelineConfig::default(),
     ).expect("Pipeline processing failed");
 
     let detected_arrivals: Vec<usize> = result.arrivals
@@ -112,7 +111,6 @@ fn test_outage_exact_stop_matching() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("outage"),
         &route_data,
-        &pipeline::PipelineConfig::default(),
     ).expect("Pipeline processing failed");
 
     let detected_arrivals: Vec<usize> = result.arrivals

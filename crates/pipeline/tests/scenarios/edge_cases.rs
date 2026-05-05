@@ -25,7 +25,6 @@ fn test_empty_nmea() {
     let result = Pipeline::process_nmea_reader(
         reader,
         &route_data,
-        &pipeline::PipelineConfig::default(),
     );
 
     // Should succeed with no arrivals
@@ -48,7 +47,6 @@ fn test_corrupt_nmea() {
     let result = Pipeline::process_nmea_reader(
         reader,
         &route_data,
-        &pipeline::PipelineConfig::default(),
     );
 
     // Should skip corrupt sentences and process valid ones
@@ -69,7 +67,6 @@ fn test_stationary_gps() {
     let result = Pipeline::process_nmea_reader(
         reader,
         &route_data,
-        &pipeline::PipelineConfig::default(),
     );
 
     assert!(result.is_ok());
@@ -93,7 +90,6 @@ fn test_extreme_gps_jump() {
     let result = Pipeline::process_nmea_reader(
         load_nmea_reader("jump"),
         &route_data,
-        &pipeline::PipelineConfig::default(),
     );
 
     assert!(result.is_ok(), "Extreme jumps should not crash pipeline");
