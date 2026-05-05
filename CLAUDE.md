@@ -1,87 +1,78 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Working Style
+
+### 1. Think Before Coding
+Don't assume. Don't hide confusion. Surface tradeoffs.
+- State assumptions explicitly. If uncertain, ask.
+- Present multiple interpretations — don't pick silently.
+- Push back when simpler approaches exist.
+- Stop when unclear. Name what's confusing. Ask.
+
+### 2. Simplicity First
+Minimum code that solves the problem. Nothing speculative.
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" that wasn't requested.
+- No error handling for impossible scenarios.
+- If 200 lines could be 50, rewrite it.
+
+### 3. Surgical Changes
+Touch only what you must. Clean up only your own mess.
+- Don't "improve" adjacent code or formatting.
+- Don't refactor what isn't broken.
+- Match existing style, even if you'd do it differently.
+- Remove orphans your changes created; leave pre-existing dead code alone.
+
+### 4. Goal-Driven Execution
+Define success criteria. Loop until verified.
+- "Add validation" → Write tests for invalid inputs, then make them pass
+- "Fix the bug" → Write a test that reproduces it, then make it pass
+- "Refactor X" → Ensure tests pass before and after
+
+---
 
 ## Source of Truth
 
-**LLM Specs (READ THESE FIRST):**
-- `docs/SPEC.md` — Master spec index with task→spec mapping
-- `docs/specs/00-constraints.md` — **MUST read before any work** — Integer-only, semantic types, budgets
-
-**Implementation Details:**
-- `docs/specs/*.md` — Module-specific specs (map matching, Kalman, detection, etc.)
-
-**Background Reading (not for implementation):**
-- `docs/bus_arrival_tech_report_v8.md` — Algorithm explanations (why things work)
-- `docs/spatial_grid_binary_format.md` — Grid index v5.1 format details
-
-**Related:**
-- `docs/dev_guide.md` — Embedded Rust development guide for RP2350 (no_std, embassy-rp)
-- `docs/arrival_detector_test.md` — BDD-style test plan and validation approach
+**MUST read before any work:**
+- `bus_arrival_tech_report_v8.md` — Detailed design doc with rationale, algorithms, and data structures
+- `docs/SPEC.md` — Master spec index
 
 ## Build Commands
 
 ```bash
-# Build all binaries (host + firmware)
-cargo build --release
+# Build all
 make build
 
-# Run full pipeline with test data (generates trace.jsonl)
+# Run pipeline (NMEA + route_data → trace.jsonl)
 make run ROUTE_NAME=ty225 SCENARIO=normal
 
 # Generate route data from GeoJSON
-cargo run -p preprocessor -- test_data/ty225_route.json test_data/ty225_stops.json test_data/ty225.bin
+cargo run -p preprocessor -- route.json stops.json output.bin
 
-# Run pipeline (NMEA + route_data → trace.jsonl)
-cargo run -p pipeline -- test_data/ty225_normal_nmea.txt test_data/ty225.bin
+# Run pipeline directly
+cargo run -p pipeline -- nmea.txt route.bin
 
-# Extract arrivals from trace
-./tools/arrival_from_trace.sh test_data/ty225_normal_trace.jsonl > arrivals.jsonl
-
-# Extract announce events from trace
-./tools/announce_from_trace.sh test_data/ty225_normal_trace.jsonl > announce.jsonl
-
-# Build Pico 2 W firmware (no_std, RP2350)
-cargo build --release --target thumbv8m.main-none-eabi -p pico2-firmware
-make build-firmware
-```
-
-## Filtering trace.jsonl
-
-The pipeline now outputs a single `trace.jsonl` file containing all state machine information. Use jq or helper scripts to extract what you need.
-
-### Using helper scripts
-
-```bash
-# Extract arrivals
+# Extract from trace
 ./tools/arrival_from_trace.sh trace.jsonl > arrivals.jsonl
-
-# Extract announce events (corridor entries)
 ./tools/announce_from_trace.sh trace.jsonl > announce.jsonl
+
+# Tests
+cargo test
+cargo test -p pipeline
 ```
 
-### Using jq directly
+## Architecture
 
-```bash
-# Extract arrivals
-jq 'select(.stop_states[].just_arrived == true) |
-    {time, stop_idx: .stop_states[0].stop_idx, s_cm, v_cms, probability}' \
-  trace.jsonl > arrivals.jsonl
+3-phase pipeline: NMEA → GPS localization (Kalman + map matching) → Bayesian arrival detection → `trace.jsonl`
 
-# Extract announce events (corridor entry)
-jq 'select(.active_stops | length > 0) |
-    {time, stop_idx: .active_stops[0], s_cm, v_cms}' \
-  trace.jsonl > announce.jsonl
-
-# Find all Approaching/Arriving states
-jq '.stop_states[]? | select(.fsm_state == "Approaching" or .fsm_state == "Arriving")' \
-  trace.jsonl
-
-# Filter by time range
-jq 'select(.time >= 1234567890 and .time <= 1234567900)' trace.jsonl
-
-# Show off-route episodes
-jq 'select(.off_route == true)' trace.jsonl
+```
+crates/
+├── shared/           # Types, binary format
+├── preprocessor/     # Route simplification
+├── pipeline/         # GPS + detection
+├── trace_validator/  # Validation tool
+└── pico2-firmware/   # Embedded (RP2350, no_std)
 ```
 
 ## Architecture
@@ -116,71 +107,18 @@ crates/
 └── pico2-firmware/   # Embedded firmware (RP2350, no_std, embassy-rp)
 ```
 
-## Firmware Architecture (2-Layer Design)
+## Firmware (pico2-firmware)
 
-The pico2-firmware crate implements a 2-layer architecture for embedded deployment:
+2-layer architecture:
+- **Control Layer:** SystemState manages Normal/OffRoute/Recovering modes via unified triggers (`divergence_d2`, `displacement`)
+- **Estimation Layer:** Isolated GPS → position pipeline (Kalman, DR/EMA), returns `EstimationOutput`
+- **Recovery:** Pure function, hint_idx ± 10 stops, spatial anchor penalty
 
-**Control Layer** (`crates/pico2-firmware/src/control/`):
-- `SystemState` — state machine managing Normal/OffRoute/Recovering modes
-- `SystemMode` — mode enum with transition functions
-- Unified triggers based on `divergence_d2` and `displacement`
-- Recovery timeout (30s) with geometric fallback
-- `tick()` orchestrator — coordinates estimation and detection
-
-**Estimation Layer** (`crates/pico2-firmware/src/estimation/`):
-- `estimate()` — isolated GPS → position pipeline
-- `KalmanState` — Kalman filter (no control state)
-- `DrState` — DR/EMA state (no control state)
-- Returns `EstimationOutput` with confidence signal
-
-**Recovery Module** (`crates/pico2-firmware/src/recovery/`):
-- `recover()` — pure function with explicit `RecoveryInput`
-- Search window: hint_idx ± 10 stops (O(20) performance)
-- Spatial anchor penalty for off-route recovery
-- Velocity constraint prevents physically impossible jumps
-
-**Key Design Principles:**
-- **Isolation:** Estimation layer has bounded internal state, no access to control layer
-- **Unified triggers:** All mode transitions use estimation signals only
-- **Single transition:** Only ONE mode change per tick (prevents race conditions)
-- **First-class recovery:** Recovery is a system mode, not inline logic
-
-## Testing
-
-```bash
-# Run all tests
-cargo test
-
-# Run specific crate tests
-cargo test -p pipeline
-cargo test -p shared
-
-# Run scenario-based integration tests
-cargo test -p pipeline --test integration_test -- scenarios
-
-# Validate trace against ground truth
-cargo run --release --bin trace_validator -- trace.jsonl --ground-truth gt.json -o report.html
-```
-
-Test coverage follows the plan in `docs/arrival_detector_test.md`:
-- Scenario-based validation (normal, drift, jump, outage)
-- Exact validation (precision/recall metrics, target ≥97%)
-- Order validation (monotonically increasing stop detection)
-- Position accuracy (within 50m at AtStop state)
-- Edge cases (corrupt NMEA, stationary GPS, extreme jumps)
+Principles: isolation (estimation has no control access), single transition per tick, recovery as first-class mode
 
 ## Key Constraints
 
-- **Integer-only arithmetic** for RP2350 (no hardware FPU)
-- **Semantic type system:** `DistCm` (i32), `SpeedCms` (i32), `HeadCdeg` (i16), `Prob8` (u8)
-- **XIP (Execute-in-Place)** for route data in Flash - zero-copy access
-- **CPU budget:** < 8% @ 150MHz for 1Hz GPS updates
-- **Memory budget:** ~34 KB Flash, < 1 KB SRAM runtime
-
-## Off-Route Detection (feat/off-route-detection branch)
-
-The system includes off-route detection and recovery:
-- Immediate position freezing when off-route suspected
-- Re-acquisition detection for recovery
-- Arrival suppression during off-route episodes
-- Off-route state exposed in trace output
+- **Integer-only** (no FPU on RP2350)
+- **Semantic types:** `DistCm` (i32), `SpeedCms` (i32), `HeadCdeg` (i16), `Prob8` (u8)
+- **XIP:** Route data in Flash, zero-copy
+- **Budget:** < 8% CPU @ 150MHz (1Hz GPS), ~34 KB Flash, < 1 KB SRAM

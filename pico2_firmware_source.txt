@@ -86,7 +86,10 @@ Directory Structure
           trace.rs
       gps_processor/
         src/
-          kalman.rs
+          kalman/
+            filters.rs
+            hysteresis.rs
+            mod.rs
           lib.rs
           map_match.rs
           nmea.rs
@@ -587,7 +590,7 @@ pub fn check_normal_to_offroute(
 ) -> bool {
     if divergence_d2 > OFF_ROUTE_D2_THRESHOLD {
         *suspect_ticks += 1;
-        return *suspect_ticks >= 5;
+        *suspect_ticks >= 5
     } else {
         *suspect_ticks = 0;
         false
@@ -793,6 +796,12 @@ pub struct DrState {
     pub last_valid_s: Option<shared::DistCm>,
 }
 
+impl Default for DrState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DrState {
     pub fn new() -> Self {
         Self {
@@ -818,6 +827,12 @@ pub struct KalmanState {
     pub s_cm: DistCm,
     pub v_cms: SpeedCms,
     pub last_seg_idx: usize,
+}
+
+impl Default for KalmanState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl KalmanState {
@@ -872,6 +887,12 @@ pub use dr::DrState;
 pub struct EstimationState {
     pub kalman: KalmanState,
     pub dr: DrState,
+}
+
+impl Default for EstimationState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EstimationState {
@@ -956,7 +977,7 @@ pub fn estimate(
     let (s_cm, v_cms) = if input.is_first_fix {
         // First fix: initialize Kalman
         state.kalman.s_cm = z_raw;
-        let v_gps = input.gps.speed_cms.max(0).min(1667);
+        let v_gps = input.gps.speed_cms.clamp(0, 1667);
         state.kalman.v_cms = state.kalman.v_cms + 3 * (v_gps - state.kalman.v_cms) / 10;
         state.kalman.last_seg_idx = seg_idx;
 
@@ -1025,7 +1046,7 @@ fn handle_outage(state: &mut EstimationState, timestamp: u64) -> EstimationOutpu
 
     // DR mode
     state.dr.last_valid_s = Some(state.kalman.s_cm);  // Save before advancing
-    state.kalman.s_cm = state.kalman.s_cm + state.dr.filtered_v * (dt as DistCm);
+    state.kalman.s_cm += state.dr.filtered_v * (dt as DistCm);
 
     // Speed decay
     let dt_idx = dt.min(10) as usize;
@@ -1112,10 +1133,10 @@ File: ./crates/pico2-firmware/src/recovery/search.rs
 //! Recovery function with search window limitation
 
 use crate::recovery::RecoveryInput;
-use shared::{DistCm, Stop};
+use shared::DistCm;
 
 /// Maximum backward recovery distance (100 m)
-const MAX_BACKWARD_RECOVERY_CM: i64 = 100_00;
+const MAX_BACKWARD_RECOVERY_CM: i64 = 10_000;
 
 /// Maximum bus speed for city bus operations: 60 km/h = 1667 cm/s
 const V_MAX_CMS: u32 = 1667;
@@ -1124,10 +1145,10 @@ const V_MAX_CMS: u32 = 1667;
 const MIN_RECOVERY_RATE_CMS: i64 = 200;
 
 /// Maximum base uncertainty term (200 m)
-const MAX_BASE_DISTANCE_CM: i64 = 200_00;
+const MAX_BASE_DISTANCE_CM: i64 = 20_000;
 
 /// Maximum recovery distance cap (500 m)
-const MAX_RECOVERY_DISTANCE_CM: i64 = 500_00;
+const MAX_RECOVERY_DISTANCE_CM: i64 = 50_000;
 
 /// Find correct stop after GPS anomaly
 ///
@@ -1199,7 +1220,7 @@ pub fn recover(input: RecoveryInput) -> Option<u8> {
         // Score: distance + index penalty + spatial anchor penalty
         let index_penalty = 5000 * (input.hint_idx as i32 - i as i32).max(0);
         let score = d.saturating_add(index_penalty)
-                       .saturating_add(spatial_anchor_penalty as i32);
+                       .saturating_add(spatial_anchor_penalty);
 
         if score < best_score {
             best_score = score;
@@ -1227,6 +1248,7 @@ fn compute_spatial_anchor_penalty(s_cm: DistCm, frozen_s_cm: DistCm) -> i32 {
 mod tests {
     use super::*;
     use heapless::Vec;
+    use shared::Stop;
 
     #[test]
     fn test_recovery_with_hint() {
@@ -1338,6 +1360,7 @@ pub fn find_active_stops(
 ) -> heapless::Vec<usize, 16> {
     let s_cm = signals.s_cm;
     let mut active = heapless::Vec::new();
+    #[allow(clippy::collapsible_if)]
     for i in 0..route_data.stop_count {
         if let Some(stop) = route_data.get_stop(i) {
             if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm {
@@ -1383,7 +1406,7 @@ fn compute_features(
     // Defensive: blend z_gps_cm and s_cm based on divergence to handle
     // cases where map matcher produces poor projections during normal operation
     let divergence = signals.divergence_cm();
-    let (d1_cm, use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
+    let (d1_cm, _use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
         // When z_gps_cm and s_cm diverge significantly, use s_cm for p1
         // This prevents poor map matching from dragging down probability
         ((signals.s_cm - stop.progress_cm).abs(), true)
@@ -1409,7 +1432,7 @@ fn compute_features(
     };
 
     // Feature 4: Dwell time likelihood (T_ref = 10s)
-    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
+    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255);
 
     (p1, p2, p3, p4)
 }
@@ -1860,7 +1883,7 @@ use shared::DistCm;
 pub fn should_trigger_recovery(s_cm: DistCm, prev_s_cm: DistCm) -> bool {
     // GPS jump > 200 m (per spec Section 15.1)
     // Triggers recovery when position jumps > 200 m between consecutive fixes
-    let jump_distance = s_cm.abs_diff(prev_s_cm) as u32;
+    let jump_distance = s_cm.abs_diff(prev_s_cm);
     jump_distance > 20000
 }
 
@@ -1923,7 +1946,6 @@ use shared::{
 /// The value 3 represents approximately 3 seconds at 1 Hz GPS update rate, which empirical
 /// testing shows is sufficient for the filter to reach acceptable convergence in typical
 /// urban canyon conditions.
-
 // ===== Estimation Readiness =====
 /// Valid GPS ticks required for estimation to be ready (affects heading filter, Kalman)
 const ESTIMATION_WARMUP_TICKS: u8 = 3;
@@ -2022,7 +2044,7 @@ impl<'a> State<'a> {
         let stop_count = route_data.stop_count;
         let mut stop_states = heapless::Vec::new();
         for i in 0..stop_count {
-            if let Err(_) = stop_states.push(StopState::new(i as u8)) {
+            if stop_states.push(StopState::new(i as u8)).is_err() {
                 #[cfg(feature = "firmware")]
                 defmt::warn!("Route has {} stops but only 256 supported - stops beyond index 255 will be ignored", stop_count);
                 break;
@@ -2123,7 +2145,7 @@ impl<'a> State<'a> {
                     let mut stops_vec = heapless::Vec::<Stop, 256>::new();
                     for i in 0..self.route_data.stop_count {
                         if let Some(stop) = self.route_data.get_stop(i) {
-                            if let Err(_) = stops_vec.push(stop) {
+                            if stops_vec.push(stop).is_err() {
                                 #[cfg(feature = "firmware")]
                                 defmt::warn!("Too many stops for recovery buffer");
                                 break;
@@ -3077,10 +3099,10 @@ File: ./crates/pipeline/detection/src/bin/gen_luts.rs
 
 fn build_gaussian_lut() -> [u8; 256] {
     let mut lut = [0u8; 256];
-    for i in 0..256 {
+    for (i, lut_entry) in lut.iter_mut().enumerate() {
         let x = (i as f64) / 64.0;  // Match runtime formula - no integer division!
         let g = (-0.5 * x * x).exp();
-        lut[i] = (g * 255.0).min(255.0).round() as u8;
+        *lut_entry = (g * 255.0).min(255.0).round() as u8;
     }
     lut
 }
@@ -3089,10 +3111,10 @@ fn build_logistic_lut() -> [u8; 128] {
     let mut lut = [0u8; 128];
     let k = 0.01;
     let v_stop = 200.0;
-    for i in 0..128 {
+    for (i, lut_entry) in lut.iter_mut().enumerate() {
         let v = (i as f64) * 10.0;  // 0 to 1270 cm/s
         let l = 1.0 / (1.0 + (k * (v - v_stop)).exp());
-        lut[i] = (l * 255.0).min(255.0).round() as u8;
+        *lut_entry = (l * 255.0).min(255.0).round() as u8;
     }
     lut
 }
@@ -3358,7 +3380,7 @@ pub fn parse_input(path: &std::path::Path) -> impl Iterator<Item=InputRecord> {
     let file = std::fs::File::open(path).unwrap();
     let reader = BufReader::new(file);
 
-    reader.lines().filter_map(|line| line.ok())
+    reader.lines().map_while(Result::ok)
         .filter_map(|line| serde_json::from_str::<Phase2Record>(&line).ok())
         .map(|rec| InputRecord {
             time: rec.time,
@@ -3488,10 +3510,10 @@ use shared::{probability_constants::*, PositionSignals, Stop};
 #[cfg(feature = "std")]
 pub fn build_gaussian_lut() -> [u8; 256] {
     let mut lut = [0u8; 256];
-    for i in 0..256 {
+    for (i, lut_entry) in lut.iter_mut().enumerate() {
         let x = (i as f64) / 64.0;  // 0 to 4.0
         let g = (-0.5 * x * x).exp();
-        lut[i] = (g * 255.0).min(255.0).round() as u8;  // Use .round() for proper rounding
+        *lut_entry = (g * 255.0).min(255.0).round() as u8;  // Use .round() for proper rounding
     }
     lut
 }
@@ -3504,10 +3526,10 @@ pub fn build_logistic_lut() -> [u8; 128] {
     let mut lut = [0u8; 128];
     let k = 0.01;
     let v_stop = 200.0;
-    for i in 0..128 {
+    for (i, lut_entry) in lut.iter_mut().enumerate() {
         let v = (i as f64) * 10.0;  // 0 to 1270 cm/s
         let l = 1.0 / (1.0 + (k * (v - v_stop)).exp());
-        lut[i] = (l * 255.0).min(255.0).round() as u8;  // Use .round() for proper rounding
+        *lut_entry = (l * 255.0).min(255.0).round() as u8;  // Use .round() for proper rounding
     }
     lut
 }
@@ -3528,7 +3550,7 @@ fn compute_features(
     // Defensive: blend z_gps_cm and s_cm based on divergence to handle
     // cases where map matcher produces poor projections during normal operation
     let divergence = signals.divergence_cm();
-    let (d1_cm, use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
+    let (d1_cm, _use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
         // When z_gps_cm and s_cm diverge significantly, use s_cm for p1
         // This prevents poor map matching from dragging down probability
         ((signals.s_cm - stop.progress_cm).abs(), true)
@@ -3555,7 +3577,7 @@ fn compute_features(
     };
 
     // Feature 4: Dwell time likelihood (T_ref = 10s)
-    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255) as u32;
+    let p4 = ((dwell_time_s as u32) * 255 / 10).min(255);
 
     (p1, p2, p3, p4)
 }
@@ -3597,6 +3619,7 @@ pub fn compute_arrival_probability(
 ///
 /// When next sequential stop is < 120m away, removes dwell time (p4)
 /// weight and redistributes: (14, 7, 11, 0) instead of (13, 6, 10, 3).
+#[allow(clippy::too_many_arguments)]
 pub fn compute_arrival_probability_adaptive(
     signals: PositionSignals,
     v_cms: SpeedCms,
@@ -3699,7 +3722,7 @@ pub fn compute_probability(
     stop_progress: DistCm,
     dwell_time_s: u16,
 ) -> Prob8 {
-    compute_probability_with_luts(s_cm, v_cms, stop_progress, dwell_time_s, &gaussian_lut(), &logistic_lut())
+    compute_probability_with_luts(s_cm, v_cms, stop_progress, dwell_time_s, gaussian_lut(), logistic_lut())
 }
 
 /// Get or build the Gaussian LUT (cached in std environments)
@@ -4100,7 +4123,7 @@ const GPS_JUMP_THRESHOLD: DistCm = 30000;  // 300 m (increased for velocity cons
 
 /// Maximum backward recovery distance (100 m)
 /// Prevents pathological backward jumps while allowing legitimate re-selection
-const MAX_BACKWARD_RECOVERY_CM: i64 = 100_00;
+const MAX_BACKWARD_RECOVERY_CM: i64 = 10_000;
 
 /// Maximum bus speed for city bus operations: 60 km/h = 1667 cm/s
 /// Per spec Section 9.1: urban transit routes, not highway speeds
@@ -4112,11 +4135,11 @@ const MIN_RECOVERY_RATE_CMS: i64 = 200;
 
 /// Maximum base uncertainty term (200 m)
 /// Caps the uncertainty buffer for very long outages to prevent it dominating velocity
-const MAX_BASE_DISTANCE_CM: i64 = 200_00;
+const MAX_BASE_DISTANCE_CM: i64 = 20_000;
 
 /// Maximum recovery distance cap (500 m)
 /// Tuned for urban routes with ~100-200m stop spacing. Prevents search explosion.
-const MAX_RECOVERY_DISTANCE_CM: i64 = 500_00;
+const MAX_RECOVERY_DISTANCE_CM: i64 = 50_000;
 
 /// Find correct stop after GPS jump
 ///
@@ -4395,6 +4418,9 @@ pub struct StopState {
     pub announced: bool,
     /// Previous distance to stop (for re-acquisition detection)
     pub previous_distance_cm: Option<i32>,
+    /// Whether this stop should be skipped on off-route re-entry
+    /// When true, the stop should not trigger any arrival events
+    pub skip_on_reentry: bool,
 }
 
 impl StopState {
@@ -4407,6 +4433,7 @@ impl StopState {
             last_announced_stop: u8::MAX,
             announced: false,
             previous_distance_cm: None,
+            skip_on_reentry: false,
         }
     }
 
@@ -4436,7 +4463,7 @@ impl StopState {
         let d_to_stop = (s_cm - stop_progress).abs();
 
         // Track previous distance for re-acquisition detection
-        let current_distance = (stop_progress as i32) - (s_cm as i32);
+        let current_distance = stop_progress - s_cm;
         self.previous_distance_cm = Some(current_distance);
 
         match self.fsm_state {
@@ -5014,33 +5041,14 @@ pub fn write_trace_record<W: Write>(
 }
 
 ================
-File: ./crates/pipeline/gps_processor/src/kalman.rs
+File: ./crates/pipeline/gps_processor/src/kalman/filters.rs
 ================
-//! Kalman filter and GPS processing pipeline
+//! GPS input validation filters for speed constraint and monotonicity
+//!
+//! This module provides filters to reject GPS updates that exceed physical limits
+//! or violate monotonicity constraints.
 
-/// Off-Route Detection Notes:
-///
-/// This module implements off-route detection to handle sustained GPS drift where
-/// positions consistently don't fit route geometry (distance > 50m for 5+ seconds).
-///
-/// This feature detects:
-/// - Urban canyon multipath causing GPS drift away from road
-/// - Physical deviations (detour, depot, wrong route loaded)
-///
-/// LIMITATION: Cannot detect "along-route drift" where GPS stays on the road
-/// but advances faster than the bus. This requires external ground truth and
-/// is not detectable with a single GPS sensor.
-///
-/// The detection uses hysteresis (5 ticks to confirm, 2 to clear) to avoid
-/// false positives from transient multipath. Position is frozen during off-route
-/// episodes, and recovery re-synchronizes stop indices when GPS returns to route.
-///
-/// See: docs/superpowers/specs/2026-04-14-off-route-detection-design.md
-
-use core::cmp::Ord;
-
-use crate::route_data::RouteData;
-use shared::{DistCm, DrState, GpsPoint, KalmanState, PositionSignals, SpeedCms};
+use shared::{DistCm, SpeedCms};
 
 /// Maximum bus speed for city bus operations: 60 km/h = 1667 cm/s
 /// Per spec Section 9.1: urban transit routes, not highway speeds
@@ -5049,6 +5057,238 @@ pub const V_MAX_CMS: SpeedCms = 1667;
 /// GPS noise margin for urban canyon conditions: 20 m
 /// Per spec Section 9.1: accommodates multipath errors
 pub const SIGMA_GPS_CM: DistCm = 2000;
+
+/// Reject GPS updates that exceed physical limits
+pub fn check_speed_constraint(z_new: DistCm, z_prev: DistCm, dt: i32) -> bool {
+    let dist_abs = (z_new - z_prev).unsigned_abs() as i32;
+    let max_dist = V_MAX_CMS * dt.max(1) + SIGMA_GPS_CM;
+    dist_abs <= max_dist
+}
+
+/// Monotonicity constraint with noise tolerance
+///
+/// Per spec Section 8.3: reject if z(t) - ŝ(t-1) < -1000 cm
+/// Implementation uses -5000 cm (-50 m) as a practical balance:
+/// - Tolerates GPS noise in urban canyon conditions
+/// - Catches legitimate anomalies (route reversals, GPS glitches)
+/// - Middle ground between spec (-10m) and previous (-500m)
+pub fn check_monotonic(z_new: DistCm, z_prev: DistCm) -> bool {
+    z_new >= z_prev - 5000
+}
+
+/// EMA velocity filter update per spec Section 11.1
+/// Formula: v_filtered(t) = v_filtered(t-1) + 3*(v_gps - v_filtered(t-1))/10
+/// Uses α = 3/10 = 0.3 for smoothing
+pub fn update_dr_ema(v_filtered_prev: SpeedCms, v_gps: SpeedCms) -> SpeedCms {
+    v_filtered_prev + 3 * (v_gps - v_filtered_prev) / 10
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===== Test Constants =====
+
+    /// Default previous position for tests (cm)
+    const TEST_Z_PREV: DistCm = 100_000;
+    /// Normal movement distance (10 m/s over 1 second = 1000 cm)
+    const NORMAL_MOVE: DistCm = 1000;
+    /// Monotonicity threshold (-50 m)
+    const MONOTONIC_THRESHOLD: DistCm = 5000;
+
+    // ===== Monotonicity Tests =====
+
+    #[test]
+    fn test_monotonicity_accepts_small_backward() {
+        // Accept -10m backward jump (GPS noise)
+        assert!(check_monotonic(TEST_Z_PREV, TEST_Z_PREV + 1000));
+    }
+
+    #[test]
+    fn test_monotonicity_accepts_threshold() {
+        // Accept exactly -50m (at threshold)
+        assert!(check_monotonic(TEST_Z_PREV, TEST_Z_PREV + MONOTONIC_THRESHOLD));
+    }
+
+    #[test]
+    fn test_monotonicity_rejects_large_backward() {
+        // Reject -51m (exceeds threshold)
+        assert!(!check_monotonic(TEST_Z_PREV, TEST_Z_PREV + MONOTONIC_THRESHOLD + 100));
+    }
+
+    #[test]
+    fn test_monotonicity_allows_forward() {
+        // Always allow forward movement
+        assert!(check_monotonic(TEST_Z_PREV + 5000, TEST_Z_PREV));
+    }
+
+    // ===== Speed Constraint Tests =====
+
+    #[test]
+    fn test_speed_constraint_accepts_normal_movement() {
+        // Normal movement: 10 m/s over 1 second = 1000 cm
+        assert!(check_speed_constraint(TEST_Z_PREV + NORMAL_MOVE, TEST_Z_PREV, 1));
+    }
+
+    #[test]
+    fn test_speed_constraint_accepts_max_speed() {
+        // At max speed: 16.67 m/s over 1 second = 1667 cm
+        assert!(check_speed_constraint(TEST_Z_PREV + V_MAX_CMS, TEST_Z_PREV, 1));
+    }
+
+    #[test]
+    fn test_speed_constraint_accepts_with_noise_margin() {
+        // Max speed + GPS noise margin should be accepted
+        assert!(check_speed_constraint(
+            TEST_Z_PREV + V_MAX_CMS + SIGMA_GPS_CM,
+            TEST_Z_PREV,
+            1
+        ));
+    }
+
+    #[test]
+    fn test_speed_constraint_rejects_excessive_speed() {
+        // Exceed max speed + noise margin
+        assert!(!check_speed_constraint(
+            TEST_Z_PREV + V_MAX_CMS + SIGMA_GPS_CM + 1,
+            TEST_Z_PREV,
+            1
+        ));
+    }
+
+    #[test]
+    fn test_speed_constraint_scales_with_dt() {
+        // For longer dt, proportionally more distance is allowed
+        assert!(check_speed_constraint(
+            TEST_Z_PREV + V_MAX_CMS * 2,
+            TEST_Z_PREV,
+            2
+        ));
+    }
+
+    #[test]
+    fn test_speed_constraint_backward_movement() {
+        // Backward movement is treated the same (absolute distance)
+        // Use a small distance that's within speed constraint
+        assert!(check_speed_constraint(TEST_Z_PREV - 1000, TEST_Z_PREV, 1));
+    }
+
+    #[test]
+    fn test_speed_constraint_dt_zero() {
+        // dt=0 should use min(1) in calculation, allowing noise margin
+        assert!(check_speed_constraint(
+            TEST_Z_PREV + SIGMA_GPS_CM,
+            TEST_Z_PREV,
+            0
+        ));
+    }
+
+    #[test]
+    fn test_speed_constraint_large_dt() {
+        // Large dt should allow proportionally large distance
+        assert!(check_speed_constraint(
+            TEST_Z_PREV + V_MAX_CMS * 10,
+            TEST_Z_PREV,
+            10
+        ));
+    }
+
+    #[test]
+    fn test_speed_constraint_exceeds_large_dt() {
+        // Even with large dt, physically impossible movement is rejected
+        assert!(!check_speed_constraint(
+            TEST_Z_PREV + V_MAX_CMS * 10 + SIGMA_GPS_CM + 1,
+            TEST_Z_PREV,
+            10
+        ));
+    }
+
+    // ===== EMA Velocity Filter Tests =====
+
+    /// EMA coefficient α = 3/10 = 0.3
+    /// Formula: v_filtered(t) = v_filtered(t-1) + 3*(v_gps - v_filtered(t-1))/10
+
+    #[test]
+    fn test_ema_velocity_filter_initial_value() {
+        // First GPS update should initialize filtered_v to v_gps
+        const V_GPS: SpeedCms = 500; // 5 m/s
+        const V_FILTERED_INITIAL: SpeedCms = 0;
+
+        // EMA update: v = 0 + 3*(500 - 0)/10 = 150
+        let expected = V_FILTERED_INITIAL + 3 * (V_GPS - V_FILTERED_INITIAL) / 10;
+        assert_eq!(expected, 150);
+    }
+
+    #[test]
+    fn test_ema_velocity_filter_convergence() {
+        // EMA should converge toward the GPS speed over time
+        const V_FILTERED: SpeedCms = 300;
+        const V_GPS: SpeedCms = 500;
+
+        // EMA update: v = 300 + 3*(500 - 300)/10 = 300 + 60 = 360
+        let expected = V_FILTERED + 3 * (V_GPS - V_FILTERED) / 10;
+        assert_eq!(expected, 360);
+
+        // Next update: v = 360 + 3*(500 - 360)/10 = 360 + 42 = 402
+        let expected = expected + 3 * (V_GPS - expected) / 10;
+        assert_eq!(expected, 402);
+    }
+
+    #[test]
+    fn test_ema_velocity_filter_smoothing() {
+        // EMA should smooth out GPS speed noise
+        const V_FILTERED: SpeedCms = 400;
+        const V_GPS_NOISY: SpeedCms = 700; // Sudden jump
+
+        // EMA update: v = 400 + 3*(700 - 400)/10 = 400 + 90 = 490
+        // The filtered value changes only 30% toward the noisy GPS value
+        let expected = V_FILTERED + 3 * (V_GPS_NOISY - V_FILTERED) / 10;
+        assert_eq!(expected, 490);
+        assert!(expected < V_GPS_NOISY, "EMA should smooth out sudden jumps");
+    }
+
+    #[test]
+    fn test_ema_velocity_filter_integer_arithmetic() {
+        // Verify integer arithmetic doesn't accumulate excessive error
+        // Formula: v += 3*(v_gps - v)/10
+        // Using integer division, we lose some precision but should be close
+
+        const V_FILTERED: SpeedCms = 433; // Odd number to test rounding
+        const V_GPS: SpeedCms = 567;
+
+        // EMA update with integer arithmetic
+        let delta = V_GPS - V_FILTERED;
+        let adjustment = (3 * delta) / 10; // Integer division
+        let expected = V_FILTERED + adjustment;
+
+        // Verify the adjustment is approximately 30% of the delta
+        // 3 * 134 / 10 = 402 / 10 = 40 (integer division)
+        assert_eq!(adjustment, 40);
+        assert_eq!(expected, 473);
+    }
+}
+
+================
+File: ./crates/pipeline/gps_processor/src/kalman/hysteresis.rs
+================
+//! Off-route detection using hysteresis to avoid false positives from transient GPS multipath
+//!
+//! This module implements off-route detection to handle sustained GPS drift where
+//! positions consistently don't fit route geometry (distance > 50m for 5+ seconds).
+//!
+//! This feature detects:
+//! - Urban canyon multipath causing GPS drift away from road
+//! - Physical deviations (detour, depot, wrong route loaded)
+//!
+//! LIMITATION: Cannot detect "along-route drift" where GPS stays on the road
+//! but advances faster than the bus. This requires external ground truth and
+//! is not detectable with a single GPS sensor.
+//!
+//! The detection uses hysteresis (5 ticks to confirm, 2 to clear) to avoid
+//! false positives from transient multipath. Position is frozen during off-route
+//! episodes, and recovery re-synchronizes stop indices when GPS returns to route.
+
+use shared::KalmanState;
 
 /// Off-route distance threshold: d=50m → d²=2,500 m² = 25,000,000 cm²
 pub const OFF_ROUTE_D2_THRESHOLD: i64 = 25_000_000;
@@ -5078,7 +5318,7 @@ pub fn update_off_route_hysteresis(
     state: &mut KalmanState,
     match_d2: i64,
     gps_timestamp: u64,
-    current_stop_idx: u8,  // C3: for freeze context
+    current_stop_idx: u8,
 ) -> OffRouteStatus {
     if match_d2 > OFF_ROUTE_D2_THRESHOLD {
         // Poor GPS match: increment suspect counter
@@ -5109,10 +5349,12 @@ pub fn update_off_route_hysteresis(
         // (i.e., we had prior suspect ticks or position is frozen)
         let is_actually_suspect = state.off_route_suspect_ticks > 0 || state.frozen_s_cm.is_some();
 
-        // After 2 consecutive good matches, reset suspect counter and unfreeze
+        // After 2 consecutive good matches, reset suspect counter and return Normal
+        // CRITICAL: Do NOT clear frozen_s_cm here - let the snap logic handle it
+        // This ensures position stays frozen if snap fails
         if state.off_route_clear_ticks >= OFF_ROUTE_CLEAR_TICKS {
             state.off_route_suspect_ticks = 0;
-            state.frozen_s_cm = None;
+            // NOTE: frozen_s_cm is NOT cleared here - it will be cleared after successful snap
             // C1: Don't clear off_route_freeze_time here - state.rs needs it for recovery dt calculation
             // It will be cleared after recovery completes in state.rs
             OffRouteStatus::Normal
@@ -5132,8 +5374,288 @@ pub fn reset_off_route_state(state: &mut KalmanState) {
     state.off_route_suspect_ticks = 0;
     state.off_route_clear_ticks = 0;
     state.off_route_freeze_time = None;
-    state.frozen_s_cm = None;  // C2 fix: clear frozen position
+    state.frozen_s_cm = None; // C2 fix: clear frozen position
 }
+
+#[cfg(test)]
+mod tests {
+    use shared::DistCm;
+    use super::*;
+
+    // ===== Test Constants =====
+
+    /// Default position for test state (cm)
+    const TEST_S_CM: DistCm = 100_000;
+    /// Default velocity for test state (cm/s)
+    const TEST_V_CMS: i32 = 500;
+    /// Good GPS match distance (well below threshold)
+    const GOOD_MATCH_D2: i64 = 10_000_000;
+    /// Bad GPS match distance (above threshold)
+    const BAD_MATCH_D2: i64 = 30_000_000;
+    /// Default GPS timestamp for tests
+    const TEST_TIMESTAMP: u64 = 1000;
+
+    // ===== Test Helpers =====
+
+    /// Create a fresh KalmanState with default test values
+    fn test_state() -> KalmanState {
+        KalmanState {
+            s_cm: TEST_S_CM,
+            v_cms: TEST_V_CMS,
+            last_seg_idx: 0,
+            off_route_suspect_ticks: 0,
+            off_route_clear_ticks: 0,
+            frozen_s_cm: None,
+            off_route_freeze_time: None,
+            freeze_ctx: None,
+        }
+    }
+
+    /// Create a KalmanState with off-route already confirmed
+    fn off_route_state() -> KalmanState {
+        KalmanState {
+            s_cm: TEST_S_CM,
+            v_cms: TEST_V_CMS,
+            last_seg_idx: 0,
+            off_route_suspect_ticks: 5,
+            off_route_clear_ticks: 0,
+            frozen_s_cm: Some(TEST_S_CM),
+            off_route_freeze_time: Some(1000),
+            freeze_ctx: None,
+        }
+    }
+
+    // ===== Off-Route Hysteresis Tests =====
+
+    #[test]
+    fn test_off_route_hysteresis_normal_state() {
+        // Good GPS match should stay in Normal state
+        let mut state = test_state();
+
+        let status = update_off_route_hysteresis(&mut state, GOOD_MATCH_D2, TEST_TIMESTAMP, 0);
+
+        assert_eq!(status, OffRouteStatus::Normal);
+        assert_eq!(state.off_route_suspect_ticks, 0);
+        assert_eq!(state.off_route_clear_ticks, 1);
+        assert!(state.frozen_s_cm.is_none()); // No freeze on good match
+    }
+
+    #[test]
+    fn test_off_route_hysteresis_first_suspect_tick() {
+        // First poor match should freeze position immediately
+        let mut state = test_state();
+
+        let status = update_off_route_hysteresis(&mut state, BAD_MATCH_D2, TEST_TIMESTAMP, 5);
+
+        assert_eq!(status, OffRouteStatus::Suspect);
+        assert_eq!(state.off_route_suspect_ticks, 1);
+        assert_eq!(state.frozen_s_cm, Some(TEST_S_CM)); // Position frozen
+        assert_eq!(state.off_route_freeze_time, Some(TEST_TIMESTAMP)); // Time recorded
+        assert_eq!(state.off_route_clear_ticks, 0);
+        // Verify freeze context is stored
+        assert!(state.freeze_ctx.is_some());
+        let ctx = state.freeze_ctx.unwrap();
+        assert_eq!(ctx.frozen_s_cm, TEST_S_CM);
+        assert_eq!(ctx.frozen_stop_idx, 5);
+    }
+
+    #[test]
+    fn test_off_route_hysteresis_confirmation() {
+        // 5 consecutive poor matches should confirm off-route
+        let mut state = test_state();
+
+        // First tick: Suspect
+        let status = update_off_route_hysteresis(&mut state, BAD_MATCH_D2, TEST_TIMESTAMP, 0);
+        assert_eq!(status, OffRouteStatus::Suspect);
+        assert_eq!(state.off_route_suspect_ticks, 1);
+
+        // Ticks 2-4: Still Suspect
+        for i in 2..5 {
+            let status = update_off_route_hysteresis(&mut state, BAD_MATCH_D2, TEST_TIMESTAMP + i as u64, 0);
+            assert_eq!(status, OffRouteStatus::Suspect);
+            assert_eq!(state.off_route_suspect_ticks, i);
+        }
+
+        // Tick 5: Confirmed OffRoute
+        let status = update_off_route_hysteresis(&mut state, BAD_MATCH_D2, TEST_TIMESTAMP + 5, 0);
+        assert_eq!(status, OffRouteStatus::OffRoute);
+        assert_eq!(state.off_route_suspect_ticks, 5);
+    }
+
+    #[test]
+    fn test_off_route_hysteresis_clear_after_two_good_matches() {
+        // After off-route confirmation, 2 good matches should return to Normal
+        let mut state = off_route_state();
+
+        // First good match: Still Suspect (need 2 to clear)
+        let status = update_off_route_hysteresis(&mut state, GOOD_MATCH_D2, 2000, 0);
+        assert_eq!(status, OffRouteStatus::Suspect);
+        assert_eq!(state.off_route_clear_ticks, 1);
+        assert_eq!(state.off_route_suspect_ticks, 5); // Not reset yet
+        assert!(state.frozen_s_cm.is_some()); // Still frozen
+
+        // Second good match: Normal
+        let status = update_off_route_hysteresis(&mut state, GOOD_MATCH_D2, 2001, 0);
+        assert_eq!(status, OffRouteStatus::Normal);
+        assert_eq!(state.off_route_clear_ticks, 2);
+        assert_eq!(state.off_route_suspect_ticks, 0); // Reset
+        // NOTE: frozen_s_cm is NOT cleared here - snap logic handles it
+        assert!(state.frozen_s_cm.is_some()); // Still frozen until snap succeeds
+    }
+
+    #[test]
+    fn test_off_route_hysteresis_intermittent_bad_matches() {
+        // Intermittent bad matches should reset clear counter
+        let mut state = KalmanState {
+            s_cm: TEST_S_CM,
+            v_cms: TEST_V_CMS,
+            last_seg_idx: 0,
+            off_route_suspect_ticks: 3,
+            off_route_clear_ticks: 0,
+            frozen_s_cm: Some(TEST_S_CM),
+            off_route_freeze_time: None,
+            freeze_ctx: None,
+        };
+
+        // Good match: start clearing
+        let status = update_off_route_hysteresis(&mut state, GOOD_MATCH_D2, TEST_TIMESTAMP, 0);
+        assert_eq!(status, OffRouteStatus::Suspect);
+        assert_eq!(state.off_route_clear_ticks, 1);
+
+        // Bad match: clear counter resets, suspect ticks increase
+        let status = update_off_route_hysteresis(&mut state, BAD_MATCH_D2, TEST_TIMESTAMP + 1, 0);
+        assert_eq!(status, OffRouteStatus::Suspect);
+        assert_eq!(state.off_route_clear_ticks, 0); // Reset
+        assert_eq!(state.off_route_suspect_ticks, 4); // Increased
+    }
+
+    #[test]
+    fn test_off_route_hysteresis_at_threshold() {
+        // Match distance exactly at threshold should trigger suspect
+        let mut state = test_state();
+
+        let status = update_off_route_hysteresis(&mut state, OFF_ROUTE_D2_THRESHOLD, TEST_TIMESTAMP, 0);
+
+        // At threshold, should NOT trigger (condition is >, not >=)
+        assert_eq!(status, OffRouteStatus::Normal);
+        assert_eq!(state.off_route_suspect_ticks, 0);
+    }
+
+    #[test]
+    fn test_off_route_hysteresis_just_above_threshold() {
+        // Match distance just above threshold should trigger suspect
+        let mut state = test_state();
+
+        let status = update_off_route_hysteresis(&mut state, OFF_ROUTE_D2_THRESHOLD + 1, TEST_TIMESTAMP, 0);
+
+        assert_eq!(status, OffRouteStatus::Suspect);
+        assert_eq!(state.off_route_suspect_ticks, 1);
+        assert!(state.frozen_s_cm.is_some());
+    }
+
+    // ===== Reset Off-Route State Tests =====
+
+    #[test]
+    fn test_reset_off_route_state_clears_all_counters() {
+        let mut state = KalmanState {
+            s_cm: TEST_S_CM,
+            v_cms: TEST_V_CMS,
+            last_seg_idx: 0,
+            off_route_suspect_ticks: 3,
+            off_route_clear_ticks: 1,
+            off_route_freeze_time: Some(TEST_TIMESTAMP),
+            frozen_s_cm: Some(50_000),
+            freeze_ctx: None,
+        };
+
+        reset_off_route_state(&mut state);
+
+        assert_eq!(state.off_route_suspect_ticks, 0);
+        assert_eq!(state.off_route_clear_ticks, 0);
+        assert_eq!(state.off_route_freeze_time, None);
+        assert_eq!(state.frozen_s_cm, None);
+    }
+
+    #[test]
+    fn test_reset_off_route_state_idempotent() {
+        // Resetting already-reset state should be safe
+        let mut state = test_state();
+
+        reset_off_route_state(&mut state);
+        reset_off_route_state(&mut state);
+
+        assert_eq!(state.off_route_suspect_ticks, 0);
+        assert_eq!(state.off_route_clear_ticks, 0);
+        assert_eq!(state.off_route_freeze_time, None);
+        assert_eq!(state.frozen_s_cm, None);
+    }
+
+    // ===== Combined Scenario Tests =====
+
+    #[test]
+    fn test_off_route_flow_full_cycle() {
+        // Full cycle: Normal → Suspect → OffRoute → Normal
+        let mut state = test_state();
+
+        // Start: Normal
+        let status = update_off_route_hysteresis(&mut state, GOOD_MATCH_D2, TEST_TIMESTAMP, 0);
+        assert_eq!(status, OffRouteStatus::Normal);
+
+        // 5 bad matches: Confirm OffRoute
+        for i in 1..=5 {
+            let status = update_off_route_hysteresis(&mut state, BAD_MATCH_D2, TEST_TIMESTAMP + i as u64, 0);
+            if i < 5 {
+                assert_eq!(status, OffRouteStatus::Suspect);
+            } else {
+                assert_eq!(status, OffRouteStatus::OffRoute);
+            }
+        }
+
+        // Verify state is frozen
+        assert_eq!(state.frozen_s_cm, Some(TEST_S_CM));
+
+        // 2 good matches: Return to Normal
+        let status = update_off_route_hysteresis(&mut state, GOOD_MATCH_D2, 2000, 0);
+        assert_eq!(status, OffRouteStatus::Suspect); // First good match
+        let status = update_off_route_hysteresis(&mut state, GOOD_MATCH_D2, 2001, 0);
+        assert_eq!(status, OffRouteStatus::Normal); // Second good match
+
+        // Verify suspect counter reset
+        assert_eq!(state.off_route_suspect_ticks, 0);
+        // But frozen position remains (until snap logic clears it)
+        assert!(state.frozen_s_cm.is_some());
+    }
+}
+
+================
+File: ./crates/pipeline/gps_processor/src/kalman/mod.rs
+================
+//! Kalman filter and GPS processing pipeline
+//!
+//! This module provides the main GPS processing pipeline including:
+//! - Off-route detection with hysteresis (see `hysteresis` module)
+//! - Speed and monotonicity filters (see `filters` module)
+//! - 1D Kalman filter for route progress estimation
+//! - Dead-reckoning for GPS outage compensation
+
+mod hysteresis;
+mod filters;
+
+use core::cmp::Ord;
+
+use crate::route_data::RouteData;
+use shared::{DistCm, DrState, GpsPoint, KalmanState, PositionSignals, SpeedCms};
+
+// Re-export constants and types from submodules
+pub use hysteresis::{
+    OFF_ROUTE_D2_THRESHOLD, OFF_ROUTE_CLEAR_TICKS, OFF_ROUTE_CONFIRM_TICKS,
+    OffRouteStatus, update_off_route_hysteresis, reset_off_route_state,
+};
+
+pub use filters::{
+    V_MAX_CMS, SIGMA_GPS_CM,
+    check_speed_constraint, check_monotonic, update_dr_ema,
+};
 
 /// DR decay factors: (9/10)^dt * 10000 for integer arithmetic
 const DR_DECAY_NUMERATOR: [u32; 11] = [
@@ -5156,7 +5678,7 @@ pub enum ProcessResult {
         signals: PositionSignals,
         v_cms: SpeedCms,
         seg_idx: usize,
-        snapped: bool,  // NEW: true if this Valid result is from off-route snap
+        snapped: bool,
     },
     Rejected(&'static str),
     Outage,
@@ -5171,7 +5693,6 @@ pub enum ProcessResult {
         freeze_time: u64,
     },
     /// GPS is suspect off-route — position frozen, awaiting confirmation
-    /// M1: Separate from DrOutage to prevent warmup timeout exploitation
     SuspectOffRoute {
         s_cm: DistCm,
         v_cms: SpeedCms,
@@ -5186,7 +5707,7 @@ pub fn process_gps_update(
     route_data: &RouteData,
     _current_time: u64,
     is_first_fix: bool,
-    current_stop_idx: u8,  // C3: for freeze context
+    current_stop_idx: u8,
 ) -> ProcessResult {
     // 1. Check for GPS outage
     if !gps.has_fix {
@@ -5233,7 +5754,7 @@ pub fn process_gps_update(
             state,
             match_d2,
             gps.timestamp,
-            current_stop_idx,  // C3: use passed value
+            current_stop_idx,
         );
 
         match off_route_status {
@@ -5249,7 +5770,6 @@ pub fn process_gps_update(
             }
             OffRouteStatus::Suspect => {
                 // During off-route suspicion, skip projection and filters to prevent s_cm advance
-                // M1: Return SuspectOffRoute instead of DrOutage to distinguish from genuine GPS loss
                 dr.last_gps_time = Some(gps.timestamp);
                 return ProcessResult::SuspectOffRoute {
                     s_cm: state.frozen_s_cm.unwrap_or(state.s_cm),
@@ -5259,40 +5779,61 @@ pub fn process_gps_update(
             OffRouteStatus::Normal => {
                 // CRITICAL: Check if we just transitioned from OffRoute/Suspect to Normal
                 // If so, snap to re-entry position immediately to avoid detecting stops during catch-up
-                if had_frozen_position && state.frozen_s_cm.is_none() {
+                if had_frozen_position {
+                    // Set recovery flag to enable relaxed heading filter during off-route re-entry
+                    dr.in_recovery = true;
+
                     // Just transitioned from OffRoute/Suspect to Normal
-                    // Use grid-only search to find correct segment immediately
-                    let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only(
+                    let frozen_s = state.frozen_s_cm.unwrap_or(state.s_cm);
+
+                    // Use relaxed heading grid search with min_s and max_s constraints for off-route recovery
+                    // This prevents snapping to segments that are spatially close but route-wise distant
+                    // (e.g., when route has loops, parallel segments, or crosses itself)
+                    // Calculate max_s constraint to prevent jumping too far forward
+                    // Allow up to 5km forward (reasonable for GPS outage recovery)
+                    let max_s = frozen_s + 500_000; // 5km forward
+                    let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only_with_min_max_s(
                         gps_x,
                         gps_y,
                         gps.heading_cdeg,
                         gps.speed_cms,
                         route_data,
                         use_relaxed_heading,
+                        frozen_s, // Constrain to segments >= frozen position
+                        max_s,    // Constrain to segments <= frozen position + 5km
                     );
 
-                    // Project to route and snap immediately
+                    // Project to route to get re-entry position
                     let z_reentry = crate::map_match::project_to_route(gps_x, gps_y, new_seg_idx, route_data);
-                    state.s_cm = z_reentry;
-                    // Blend v_cms using EMA instead of hard assignment (M3 fix)
-                    let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
-                    state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
-                    state.last_seg_idx = new_seg_idx;
-                    dr.last_gps_time = Some(gps.timestamp);
-                    dr.last_valid_s = state.s_cm;
-                    dr.filtered_v = state.v_cms;
-                    dr.in_recovery = false; // Clear recovery flag - we've snapped
 
-                    let signals = PositionSignals {
-                        z_gps_cm: z_reentry,
-                        s_cm: state.s_cm,
-                    };
-                    return ProcessResult::Valid {
-                        signals,
-                        v_cms: state.v_cms,
-                        seg_idx: new_seg_idx,
-                        snapped: true,  // NEW: this is a snap operation
-                    };
+                    // CRITICAL: Only snap if the re-entry position is reasonably close to the frozen position
+                    // This prevents backward snaps which would cause false arrivals at intermediate stops
+                    if z_reentry >= frozen_s {
+                        // Safe to snap - position is forward
+                        state.s_cm = z_reentry;
+                        state.frozen_s_cm = None;
+                        state.off_route_suspect_ticks = 0;
+                        // Blend v_cms using EMA instead of hard assignment (M3 fix)
+                        let v_gps = gps.speed_cms.clamp(0, V_MAX_CMS);
+                        state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
+                        state.last_seg_idx = new_seg_idx;
+                        dr.last_gps_time = Some(gps.timestamp);
+                        dr.last_valid_s = state.s_cm;
+                        dr.filtered_v = state.v_cms;
+                        dr.in_recovery = false;
+
+                        let signals = PositionSignals {
+                            z_gps_cm: z_reentry,
+                            s_cm: state.s_cm,
+                        };
+                        return ProcessResult::Valid {
+                            signals,
+                            v_cms: state.v_cms,
+                            seg_idx: new_seg_idx,
+                            snapped: true,
+                        };
+                    }
+                    // If z_reentry is backward, fall through to normal processing
                 }
                 // Continue normal processing
             }
@@ -5304,14 +5845,30 @@ pub fn process_gps_update(
 
     // NOTE: §4.5 (GPS Jump Recovery) removed per Bug 2 fix
     // M12 recovery in state.rs handles all post-off-route recovery scenarios
-    // The hysteresis logic (lines 149-156) handles the off-route → normal transition
+    // The hysteresis logic handles the off-route → normal transition
     // M12 uses 4-feature scoring and receives clean input (z_raw, not pre-snapped)
+
+    // Route position consistency check: prevent map matcher from jumping between
+    // segments that are spatially close but route-wise distant (e.g., crossing loops).
+    // If projection jumps > 10x the physically possible distance, reject and use DR.
+    // This prevents missed stops when map matcher switches to wrong segment after GPS outage.
+    let max_possible_dist = (V_MAX_CMS * dt.max(1) + SIGMA_GPS_CM) as i64;
+    let route_jump_excess = (z_raw.abs_diff(state.s_cm) as i64) > 10 * max_possible_dist;
+    if route_jump_excess && !is_first_fix && state.frozen_s_cm.is_none() {
+        // Map matcher selected wrong segment - use DR instead
+        state.s_cm += state.v_cms * (dt as DistCm);
+        dr.last_gps_time = Some(gps.timestamp);
+        return ProcessResult::DrOutage {
+            s_cm: state.s_cm,
+            v_cms: state.v_cms,
+        };
+    }
 
     if is_first_fix {
         state.s_cm = z_raw;
 
         // Blend v_cms using EMA instead of hard assignment (M3 fix)
-        let v_gps = gps.speed_cms.max(0).min(V_MAX_CMS);
+        let v_gps = gps.speed_cms.clamp(0, V_MAX_CMS);
         state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
         state.last_seg_idx = seg_idx;
         dr.last_gps_time = Some(gps.timestamp);
@@ -5328,54 +5885,39 @@ pub fn process_gps_update(
             signals,
             v_cms: state.v_cms,
             seg_idx,
-            snapped: false,  // NEW: first fix is not a snap
+            snapped: false,
         };
     }
 
     // 5. Speed constraint filter
-    // Use frozen position if off-route is suspected (immediate position freezing)
-    let current_s = state.frozen_s_cm.unwrap_or(state.s_cm);
-    if !check_speed_constraint(z_raw, current_s, dt) {
+    // CRITICAL: Skip this check when position is frozen to allow off-route recovery
+    // The snap logic handles validation of re-entry position
+    // When frozen, we expect large position jumps (detour scenarios) and should
+    // allow the snap logic to validate, not reject here
+    if state.frozen_s_cm.is_none()
+        && !check_speed_constraint(z_raw, state.s_cm, dt) {
         // Per spec Section 9.2: "拒絕後的行為：跳過 Kalman 更新步驟，僅執行 predict step（ŝ += v̂），等效於短暫 Dead-Reckoning"
         // Do prediction step (DR mode) instead of returning Rejected with zero position
-        // If off-route is suspected, keep position frozen instead of advancing
-        if state.frozen_s_cm.is_some() {
-            // Keep frozen position, don't advance
-            dr.last_gps_time = Some(gps.timestamp);
-            return ProcessResult::DrOutage {
-                s_cm: state.frozen_s_cm.unwrap(),
-                v_cms: state.v_cms,
-            };
-        } else {
-            state.s_cm += state.v_cms * (dt as DistCm);
-            dr.last_gps_time = Some(gps.timestamp);
-            return ProcessResult::DrOutage {
-                s_cm: state.s_cm,
-                v_cms: state.v_cms,
-            };
-        }
+        state.s_cm += state.v_cms * (dt as DistCm);
+        dr.last_gps_time = Some(gps.timestamp);
+        return ProcessResult::DrOutage {
+            s_cm: state.s_cm,
+            v_cms: state.v_cms,
+        };
     }
 
     // 6. Monotonicity filter
-    // Use frozen position if off-route is suspected
-    if !check_monotonic(z_raw, current_s) {
+    // CRITICAL: Skip this check when position is frozen to allow off-route recovery
+    // The snap logic handles validation of re-entry position
+    if state.frozen_s_cm.is_none()
+        && !check_monotonic(z_raw, state.s_cm) {
         // Per spec Section 9.2: same behavior as speed constraint rejection
-        // If off-route is suspected, keep position frozen instead of advancing
-        if state.frozen_s_cm.is_some() {
-            // Keep frozen position, don't advance
-            dr.last_gps_time = Some(gps.timestamp);
-            return ProcessResult::DrOutage {
-                s_cm: state.frozen_s_cm.unwrap(),
-                v_cms: state.v_cms,
-            };
-        } else {
-            state.s_cm += state.v_cms * (dt as DistCm);
-            dr.last_gps_time = Some(gps.timestamp);
-            return ProcessResult::DrOutage {
-                s_cm: state.s_cm,
-                v_cms: state.v_cms,
-            };
-        }
+        state.s_cm += state.v_cms * (dt as DistCm);
+        dr.last_gps_time = Some(gps.timestamp);
+        return ProcessResult::DrOutage {
+            s_cm: state.s_cm,
+            v_cms: state.v_cms,
+        };
     }
 
     // 7. Kalman update (HDOP-adaptive) with soft-resync for GPS recovery
@@ -5416,33 +5958,8 @@ pub fn process_gps_update(
         signals,
         v_cms: state.v_cms,
         seg_idx,
-        snapped: false,  // NEW: normal GPS processing is not a snap
+        snapped: false,
     }
-}
-
-/// Reject GPS updates that exceed physical limits
-pub fn check_speed_constraint(z_new: DistCm, z_prev: DistCm, dt: i32) -> bool {
-    let dist_abs = (z_new - z_prev).unsigned_abs() as i32;
-    let max_dist = V_MAX_CMS * dt.max(1) + SIGMA_GPS_CM;
-    dist_abs <= max_dist
-}
-
-/// Monotonicity constraint with noise tolerance
-///
-/// Per spec Section 8.3: reject if z(t) - ŝ(t-1) < -1000 cm
-/// Implementation uses -5000 cm (-50 m) as a practical balance:
-/// - Tolerates GPS noise in urban canyon conditions
-/// - Catches legitimate anomalies (route reversals, GPS glitches)
-/// - Middle ground between spec (-10m) and previous (-500m)
-fn check_monotonic(z_new: DistCm, z_prev: DistCm) -> bool {
-    z_new >= z_prev - 5000 // CHANGED from 50000
-}
-
-/// EMA velocity filter update per spec Section 11.1
-/// Formula: v_filtered(t) = v_filtered(t-1) + 3*(v_gps - v_filtered(t-1))/10
-/// Uses α = 3/10 = 0.3 for smoothing
-pub fn update_dr_ema(v_filtered_prev: SpeedCms, v_gps: SpeedCms) -> SpeedCms {
-    v_filtered_prev + 3 * (v_gps - v_filtered_prev) / 10
 }
 
 /// Handle GPS outage (max 10 seconds per spec Section 11.2)
@@ -5484,10 +6001,17 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> P
 mod tests {
     use super::*;
 
+    // ===== Test Constants =====
+
+    /// Initial velocity for DR decay tests (10 m/s)
+    const V_INITIAL: u32 = 1000;
+
+    // ===== DR Decay Tests =====
+
     #[test]
     fn test_dr_decay_normalization() {
         // DR decay factors: (9/10)^dt * 10000 for integer arithmetic
-        let expected_factors = [
+        const EXPECTED_FACTORS: [u32; 11] = [
             10000, // dt=0: 1.0
             9000,  // dt=1: 0.9
             8100,  // dt=2: 0.81
@@ -5502,7 +6026,7 @@ mod tests {
         ];
 
         // Verify LUT values match expected decay factors
-        for (i, &expected) in expected_factors.iter().enumerate() {
+        for (i, &expected) in EXPECTED_FACTORS.iter().enumerate() {
             assert_eq!(
                 DR_DECAY_NUMERATOR[i], expected,
                 "DR decay factor for dt={} should be {}",
@@ -5511,18 +6035,16 @@ mod tests {
         }
 
         // Verify decay is normalized by dt (not constant)
-        let v_initial = 1000; // 10 m/s
-
         // dt=1: v = 1000 * 0.9 = 900
-        let v_dt1 = (v_initial as u32 * DR_DECAY_NUMERATOR[1] / 10000) as SpeedCms;
+        let v_dt1 = (V_INITIAL * DR_DECAY_NUMERATOR[1] / 10000) as SpeedCms;
         assert_eq!(v_dt1, 900);
 
         // dt=2: v = 1000 * 0.81 = 810
-        let v_dt2 = (v_initial as u32 * DR_DECAY_NUMERATOR[2] / 10000) as SpeedCms;
+        let v_dt2 = (V_INITIAL * DR_DECAY_NUMERATOR[2] / 10000) as SpeedCms;
         assert_eq!(v_dt2, 810);
 
         // dt=5: v = 1000 * 0.5905 = 590 (rounded)
-        let v_dt5 = (v_initial as u32 * DR_DECAY_NUMERATOR[5] / 10000) as SpeedCms;
+        let v_dt5 = (V_INITIAL * DR_DECAY_NUMERATOR[5] / 10000) as SpeedCms;
         assert_eq!(v_dt5, 590);
 
         // Decay should be monotonic decreasing with dt
@@ -5530,95 +6052,6 @@ mod tests {
             v_dt1 > v_dt2 && v_dt2 > v_dt5,
             "DR decay should decrease monotonically with dt"
         );
-    }
-
-    #[test]
-    fn test_monotonicity_accepts_small_backward() {
-        // Accept -10m backward jump (GPS noise)
-        assert!(check_monotonic(100_000, 101_000));
-    }
-
-    #[test]
-    fn test_monotonicity_accepts_threshold() {
-        // Accept exactly -50m (at threshold)
-        assert!(check_monotonic(100_000, 105_000));
-    }
-
-    #[test]
-    fn test_monotonicity_rejects_large_backward() {
-        // Reject -51m (exceeds threshold)
-        assert!(!check_monotonic(100_000, 105_100));
-    }
-
-    #[test]
-    fn test_monotonicity_allows_forward() {
-        // Always allow forward movement
-        assert!(check_monotonic(105_000, 100_000));
-    }
-
-    // ===== H4: EMA Velocity Filter Tests =====
-
-    /// EMA coefficient α = 3/10 = 0.3
-    /// Formula: v_filtered(t) = v_filtered(t-1) + 3*(v_gps - v_filtered(t-1))/10
-
-    #[test]
-    fn test_ema_velocity_filter_initial_value() {
-        // First GPS update should initialize filtered_v to v_gps
-        let v_gps = 500; // 5 m/s
-        let v_filtered_initial = 0;
-
-        // EMA update: v = 0 + 3*(500 - 0)/10 = 150
-        let expected = v_filtered_initial + 3 * (v_gps - v_filtered_initial) / 10;
-        assert_eq!(expected, 150);
-    }
-
-    #[test]
-    fn test_ema_velocity_filter_convergence() {
-        // EMA should converge toward the GPS speed over time
-        let v_filtered = 300;
-        let v_gps = 500;
-
-        // EMA update: v = 300 + 3*(500 - 300)/10 = 300 + 60 = 360
-        let expected = v_filtered + 3 * (v_gps - v_filtered) / 10;
-        assert_eq!(expected, 360);
-
-        // Next update: v = 360 + 3*(500 - 360)/10 = 360 + 42 = 402
-        let v_filtered = expected;
-        let expected = v_filtered + 3 * (v_gps - v_filtered) / 10;
-        assert_eq!(expected, 402);
-    }
-
-    #[test]
-    fn test_ema_velocity_filter_smoothing() {
-        // EMA should smooth out GPS speed noise
-        let v_filtered = 400;
-        let v_gps_noisy = 700; // Sudden jump
-
-        // EMA update: v = 400 + 3*(700 - 400)/10 = 400 + 90 = 490
-        // The filtered value changes only 30% toward the noisy GPS value
-        let expected = v_filtered + 3 * (v_gps_noisy - v_filtered) / 10;
-        assert_eq!(expected, 490);
-        assert!(expected < v_gps_noisy, "EMA should smooth out sudden jumps");
-    }
-
-    #[test]
-    fn test_ema_velocity_filter_integer_arithmetic() {
-        // Verify integer arithmetic doesn't accumulate excessive error
-        // Formula: v += 3*(v_gps - v)/10
-        // Using integer division, we lose some precision but should be close
-
-        let v_filtered = 433; // Odd number to test rounding
-        let v_gps = 567;
-
-        // EMA update with integer arithmetic
-        let delta = v_gps - v_filtered;
-        let adjustment = (3 * delta) / 10; // Integer division
-        let expected = v_filtered + adjustment;
-
-        // Verify the adjustment is approximately 30% of the delta
-        // 3 * 134 / 10 = 402 / 10 = 40 (integer division)
-        assert_eq!(adjustment, 40);
-        assert_eq!(expected, 473);
     }
 }
 
@@ -5646,6 +6079,7 @@ pub use nmea::NmeaState;
 File: ./crates/pipeline/gps_processor/src/map_match.rs
 ================
 //! Heading-constrained map matching
+#![allow(unexpected_cfgs)]
 
 use shared::binfile::RouteData;
 use shared::{Dist2, DistCm, HeadCdeg, RouteNode, SpeedCms};
@@ -5712,7 +6146,7 @@ fn heading_eligible(gps_heading: HeadCdeg, gps_speed: SpeedCms, seg_heading: Hea
 ///
 /// Returns:
 /// - (best_eligible_idx, best_eligible_dist2, eligible_found,
-///    best_any_idx, best_any_dist2)
+///   best_any_idx, best_any_dist2)
 ///
 /// "Best" = minimum dist2. If no segment passes the heading filter,
 /// best_eligible_dist2 = Dist2::MAX and eligible_found = false.
@@ -5803,13 +6237,44 @@ pub fn find_best_segment_restricted(
     // Now that scores are pure dist2, this comparison is physically meaningful.
     const MAX_DIST2_EARLY_EXIT: Dist2 = SIGMA_GPS_CM as i64 * SIGMA_GPS_CM as i64; // 4 000 000 cm²
 
+    /// Window search looks back 2 segments and forward 10 segments from last_idx.
+    ///
+    /// These values are derived from:
+    /// - GPS update rate: 1 Hz
+    /// - Typical bus speed: 30-50 km/h (~8-14 m/s)
+    /// - Segment length: ~20 m on average
+    /// - In one second, a bus travels ~8-14 m, or ~0.4-0.7 segments
+    /// - Window of ±10 segments provides ~20 second buffer for GPS outliers
     const WINDOW_BACK: usize = 2;
     const WINDOW_FWD: usize = 10;
 
     let start = last_idx.saturating_sub(WINDOW_BACK);
     let end = (last_idx + WINDOW_FWD).min(route_data.node_count.saturating_sub(1));
 
-    // PHASE 1: Window search
+    /// Global search fallback when GPS is outside grid bounds.
+/// Searches all segments and returns the best eligible (or best any if none eligible).
+fn global_search_fallback(
+    gps_x: DistCm,
+    gps_y: DistCm,
+    gps_heading: HeadCdeg,
+    gps_speed: SpeedCms,
+    route_data: &RouteData,
+    is_first_fix: bool,
+) -> (usize, Dist2) {
+    let start = 0;
+    let end = route_data.node_count.saturating_sub(1);
+    let (best_eligible, eligible_dist2, eligible_found,
+         best_any, any_dist2) = best_eligible(
+        gps_x, gps_y, gps_heading, gps_speed, route_data, start..=end, is_first_fix
+    );
+    if eligible_found {
+        (best_eligible, eligible_dist2)
+    } else {
+        (best_any, any_dist2)
+    }
+}
+
+// PHASE 1: Window search
     let (
         window_best_eligible,
         window_eligible_dist2,
@@ -5833,11 +6298,18 @@ pub fn find_best_segment_restricted(
 
     // Fallback: full grid search.
     if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
-        return (window_best_any, window_any_dist2); // Outside bounding box — keep window result
+        // GPS is outside grid bounds - use global search fallback
+        // This handles detour paths and GPS positions outside the route extent
+        return global_search_fallback(gps_x, gps_y, gps_heading, gps_speed, route_data, is_first_fix);
     }
 
     let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
     let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
+
+    if gx >= route_data.grid.cols || gy >= route_data.grid.rows {
+        // GPS is outside grid bounds - use global search fallback
+        return global_search_fallback(gps_x, gps_y, gps_heading, gps_speed, route_data, is_first_fix);
+    }
 
     // PHASE 2: Grid search
     // Carry over the window winner as the seed — grid search only improves on it.
@@ -5876,12 +6348,11 @@ pub fn find_best_segment_restricted(
                         }
 
                         // Update best_eligible tracker if heading matches
-                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix) {
-                            if d2 < best_eligible_dist2 {
-                                best_eligible_dist2 = d2;
-                                best_eligible_idx = idx as usize;
-                                eligible_found = true;
-                            }
+                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix)
+                            && d2 < best_eligible_dist2 {
+                            best_eligible_dist2 = d2;
+                            best_eligible_idx = idx as usize;
+                            eligible_found = true;
                         }
                     }
                 });
@@ -5905,14 +6376,9 @@ pub fn find_best_segment_restricted(
     (best_eligible_idx, best_eligible_dist2)
 }
 
-/// Find best segment using grid search only (no window search around last_idx).
+/// Find best segment using grid search only (no min/max constraints).
 ///
-/// This is used for off-route re-entry where the bus might be at a completely
-/// different part of the route than where it left off.
-///
-/// The `is_first_fix` parameter controls the heading filter strictness:
-/// - true: Use relaxed 180° threshold for post-outage recovery
-/// - false: Use normal 90° threshold for steady-state operation
+/// This is used for off-route re-entry and testing where no position constraints are needed.
 pub fn find_best_segment_grid_only(
     gps_x: DistCm,
     gps_y: DistCm,
@@ -5957,12 +6423,11 @@ pub fn find_best_segment_grid_only(
                         }
 
                         // Update best_eligible tracker if heading matches
-                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix) {
-                            if d2 < best_eligible_dist2 {
-                                best_eligible_dist2 = d2;
-                                best_eligible_idx = idx as usize;
-                                eligible_found = true;
-                            }
+                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix)
+                            && d2 < best_eligible_dist2 {
+                            best_eligible_dist2 = d2;
+                            best_eligible_idx = idx as usize;
+                            eligible_found = true;
                         }
                     }
                 });
@@ -5975,6 +6440,118 @@ pub fn find_best_segment_grid_only(
     }
 
     (best_eligible_idx, best_eligible_dist2)
+}
+
+/// Find best segment using grid search only with min_s and max_s constraints.
+///
+/// This is used for off-route re-entry where the bus might be at a completely
+/// different part of the route than where it left off.
+///
+/// The `min_s_cm` parameter constrains the search to only segments that
+/// project to positions >= min_s_cm. This prevents backward snaps and
+/// reduces the risk of snapping too far forward and skipping stops.
+///
+/// The `max_s_cm` parameter constrains the search to only segments that
+/// project to positions <= max_s_cm. This prevents forward snaps that skip
+/// too many stops when the route has loops or crossing segments.
+pub fn find_best_segment_grid_only_with_min_max_s(
+    gps_x: DistCm,
+    gps_y: DistCm,
+    gps_heading: HeadCdeg,
+    gps_speed: SpeedCms,
+    route_data: &RouteData,
+    is_first_fix: bool,
+    min_s_cm: DistCm,
+    max_s_cm: DistCm,
+) -> (usize, i64) {
+    // Check bounding box first
+    if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
+        // Outside bounding box - return segment 0 as fallback
+        return (0, i64::MAX);
+    }
+
+    let gx = ((gps_x - route_data.x0_cm) / route_data.grid.grid_size_cm) as u32;
+    let gy = ((gps_y - route_data.y0_cm) / route_data.grid.grid_size_cm) as u32;
+
+    // Grid search over 3x3 cells
+    let mut best_eligible_idx = 0;
+    let mut best_eligible_dist2 = Dist2::MAX;
+    let mut best_any_idx = 0;
+    let mut best_any_dist2 = Dist2::MAX;
+    let mut eligible_found = false;
+
+    for dy in 0..=2i32 {
+        for dx in 0..=2i32 {
+            let ny = gy as i32 + dy - 1;
+            let nx = gx as i32 + dx - 1;
+            if ny < 0 || nx < 0 {
+                continue;
+            }
+            let _ = route_data
+                .grid
+                .visit_cell(nx as u32, ny as u32, |idx: u16| {
+                    if let Some(seg) = route_data.get_node(idx as usize) {
+                        // Skip segments that project to positions before min_s_cm
+                        if seg.cum_dist_cm < min_s_cm {
+                            return;
+                        }
+                        // Skip segments that project to positions after max_s_cm
+                        if seg.cum_dist_cm > max_s_cm {
+                            return;
+                        }
+
+                        let d2 = segment_score(gps_x, gps_y, &seg);
+
+                        // Update best_any tracker
+                        if d2 < best_any_dist2 {
+                            best_any_dist2 = d2;
+                            best_any_idx = idx as usize;
+                        }
+
+                        // Update best_eligible tracker if heading matches
+                        if heading_eligible(gps_heading, gps_speed, seg.heading_cdeg, is_first_fix)
+                            && d2 < best_eligible_dist2 {
+                            best_eligible_dist2 = d2;
+                            best_eligible_idx = idx as usize;
+                            eligible_found = true;
+                        }
+                    }
+                });
+        }
+    }
+
+    // If no segment passed the heading filter, fall back to pure distance
+    if !eligible_found {
+        return (best_any_idx, best_any_dist2);
+    }
+
+    (best_eligible_idx, best_eligible_dist2)
+}
+
+/// Find best segment using grid search only with min_s constraint (backward compatibility wrapper).
+///
+/// This function is kept for backward compatibility and internally calls
+/// `find_best_segment_grid_only_with_min_max_s` with a very large max_s constraint.
+pub fn find_best_segment_grid_only_with_min_s(
+    gps_x: DistCm,
+    gps_y: DistCm,
+    gps_heading: HeadCdeg,
+    gps_speed: SpeedCms,
+    route_data: &RouteData,
+    is_first_fix: bool,
+    min_s_cm: DistCm,
+) -> (usize, i64) {
+    // Use a very large max_s (effectively no upper bound) for backward compatibility
+    find_best_segment_grid_only_with_min_max_s(
+        gps_x,
+        gps_y,
+        gps_heading,
+        gps_speed,
+        route_data,
+        is_first_fix,
+        min_s_cm,
+        DistCm::MAX, // No upper bound
+    )
 }
 
 /// Distance-squared from GPS point to segment (clamped projection).
@@ -6104,7 +6681,76 @@ pub fn latlon_to_cm_absolute_with_lat_avg(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+    use shared::binfile::{BusError, RouteData};
+    use shared::{SpatialGrid, Stop};
 
+    /// Create minimal test route data with specified segments.
+    /// Returns loaded RouteData ready for testing.
+    fn create_test_route_data(segments: &[(i32, i32, i16, i32)]) -> Result<RouteData<'static>, BusError> {
+        let mut nodes: Vec<RouteNode> = Vec::new();
+        let mut cum_dist = 0;
+        for &(x, y, heading, len_mm) in segments.iter() {
+            let dx_cm = len_mm / 10; // Each segment's dx = its length in cm
+
+            nodes.push(RouteNode {
+                x_cm: x,
+                y_cm: y,
+                cum_dist_cm: cum_dist,
+                heading_cdeg: heading,
+                seg_len_mm: len_mm,
+                dx_cm: dx_cm as i16,
+                dy_cm: 0,
+                _pad: 0,
+            });
+
+            cum_dist += dx_cm;
+        }
+
+        let stops: Vec<Stop> = vec![];
+
+        // Create a proper grid that maps segments to cells
+        // Grid size: 1000 cm (10 m), enough resolution for our test
+        let grid_size_cm = 1000;
+
+        // Calculate grid bounds
+        let max_x = segments.iter().map(|(x, _, _, _)| *x).max().unwrap_or(0);
+        let max_y = segments.iter().map(|(_, y, _, _)| *y).max().unwrap_or(0);
+        let min_x = segments.iter().map(|(x, _, _, _)| *x).min().unwrap_or(0);
+        let min_y = segments.iter().map(|(_, y, _, _)| *y).min().unwrap_or(0);
+
+        let cols = ((max_x - min_x) / grid_size_cm + 1) as u32;
+        let rows = ((max_y - min_y) / grid_size_cm + 1) as u32;
+
+        // Populate grid cells with segment indices
+        let mut cells: Vec<Vec<usize>> = vec![vec![]; (cols * rows) as usize];
+        for (i, &(x, y, _, _)) in segments.iter().enumerate() {
+            let gx = ((x - min_x) / grid_size_cm) as usize;
+            let gy = ((y - min_y) / grid_size_cm) as usize;
+            let cell_idx = gy * cols as usize + gx;
+            if cell_idx < cells.len() {
+                cells[cell_idx].push(i);
+            }
+        }
+
+        let grid = SpatialGrid {
+            cells,
+            grid_size_cm,
+            cols,
+            rows,
+            x0_cm: min_x,
+            y0_cm: min_y,
+        };
+
+        let mut buffer = Vec::new();
+        shared::binfile::pack_route_data(&nodes, &stops, &grid, 25.0, &mut buffer)?;
+
+        // Leak the buffer to get 'static lifetime (safe for tests)
+        let leaked: &'static [u8] = Box::leak(buffer.into_boxed_slice());
+        RouteData::load(leaked)
+    }
+
+    
     #[test]
     fn test_segment_score_is_pure_distance() {
         let seg = RouteNode {
@@ -6159,6 +6805,371 @@ mod tests {
         // 180° (opposite direction): not eligible at speed
         assert!(!heading_eligible(0, speed, 18000, false));
     }
+
+    #[test]
+    fn test_heading_threshold_cdeg() {
+        // At w=0 (stopped): gate disabled (u32::MAX)
+        assert_eq!(heading_threshold_cdeg(0), u32::MAX);
+
+        // At w=256 (full speed): 90° gate
+        assert_eq!(heading_threshold_cdeg(256), 9_000);
+
+        // At w=128 (half speed): intermediate threshold
+        let threshold = heading_threshold_cdeg(128);
+        assert!(threshold > 9_000 && threshold < 36_000);
+
+        // Threshold decreases as weight increases
+        assert!(heading_threshold_cdeg(64) > heading_threshold_cdeg(128));
+        assert!(heading_threshold_cdeg(128) > heading_threshold_cdeg(256));
+    }
+
+    proptest! {
+        #[test]
+        fn prop_heading_diff_symmetric(a in -18000i16..18000, b in -18000i16..18000) {
+            let diff1 = heading_diff_cdeg(a, b);
+            let diff2 = heading_diff_cdeg(b, a);
+            assert_eq!(diff1, diff2);
+        }
+
+        #[test]
+        fn prop_heading_diff_identity(a in -18000i16..18000) {
+            let diff = heading_diff_cdeg(a, a);
+            assert_eq!(diff, 0);
+        }
+
+        #[test]
+        fn prop_heading_diff_max_180(a in -18000i16..18000, b in -18000i16..18000) {
+            let diff = heading_diff_cdeg(a, b);
+            assert!(diff <= 18000);
+        }
+    }
+
+    #[test]
+    fn test_distance_to_segment_squared_on_segment() {
+        let seg = RouteNode {
+            x_cm: 0,
+            y_cm: 0,
+            cum_dist_cm: 0,
+            heading_cdeg: 0,
+            seg_len_mm: 10_000, // 1000 cm = 10 m (1000 cm * 10 = 10,000 mm)
+            dx_cm: 1000,
+            dy_cm: 0,
+            _pad: 0,
+        };
+
+        // Point on segment
+        let d2 = distance_to_segment_squared(500, 0, &seg);
+        assert_eq!(d2, 0); // Perpendicular distance is 0
+
+        // Point at start
+        let d2 = distance_to_segment_squared(0, 0, &seg);
+        assert_eq!(d2, 0);
+    }
+
+    #[test]
+    fn test_distance_to_segment_squared_perpendicular() {
+        let seg = RouteNode {
+            x_cm: 0,
+            y_cm: 0,
+            cum_dist_cm: 0,
+            heading_cdeg: 0,
+            seg_len_mm: 10_000, // 10 m (1000 cm * 10 = 10,000 mm)
+            dx_cm: 1000,
+            dy_cm: 0,
+            _pad: 0,
+        };
+
+        // Point 300 cm away perpendicular to segment
+        let d2 = distance_to_segment_squared(500, 300, &seg);
+        assert_eq!(d2, 90_000); // 300² = 90,000 cm²
+    }
+
+    #[test]
+    fn test_distance_to_segment_squared_clamped_before() {
+        let seg = RouteNode {
+            x_cm: 1000,
+            y_cm: 0,
+            cum_dist_cm: 0,
+            heading_cdeg: 0,
+            seg_len_mm: 10_000, // 10 m (1000 cm * 10 = 10,000 mm)
+            dx_cm: 1000,
+            dy_cm: 0,
+            _pad: 0,
+        };
+
+        // Point before segment start (at x=0)
+        let d2 = distance_to_segment_squared(0, 0, &seg);
+        assert_eq!(d2, 1_000_000); // (1000)² = 1,000,000 cm²
+    }
+
+    #[test]
+    fn test_distance_to_segment_squared_zero_length() {
+        let seg = RouteNode {
+            x_cm: 1000,
+            y_cm: 1000,
+            cum_dist_cm: 0,
+            heading_cdeg: 0,
+            seg_len_mm: 0, // Zero length
+            dx_cm: 0,
+            dy_cm: 0,
+            _pad: 0,
+        };
+
+        // Distance to point for zero-length segment
+        let d2 = distance_to_segment_squared(1200, 1300, &seg);
+        assert_eq!(d2, 200*200 + 300*300); // sqrt(200² + 300²)²
+    }
+
+    #[test]
+    fn test_project_to_route_on_segment() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 0, 100_000),    // 10 m segment, cum_dist = 0
+            (10000, 0, 0, 100_000), // cum_dist = 10,000
+        ]).unwrap();
+
+        // Project point at start of segment 0
+        let s = project_to_route(0, 0, 0, &route_data);
+        assert_eq!(s, 0);
+
+        // Project point at end of segment 0
+        let s = project_to_route(10000, 0, 0, &route_data);
+        assert_eq!(s, 10_000);
+    }
+
+    #[test]
+    fn test_project_to_route_mid_segment() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 0, 100_000), // 10 m segment
+        ]).unwrap();
+
+        // Project point at middle of segment
+        let s = project_to_route(5000, 0, 0, &route_data);
+        assert_eq!(s, 5_000); // Halfway through 10 m segment
+    }
+
+    #[test]
+    fn test_find_best_segment_restricted_window_early_exit() {
+        // Create route with 20 segments
+        let segments: Vec<(i32, i32, i16, i32)> = (0..20)
+            .map(|i| (i * 1000, 0, 0, 20_000))
+            .collect();
+        let segments_refs: &[(i32, i32, i16, i32)] = &segments;
+        let route_data = create_test_route_data(segments_refs).unwrap();
+
+        // GPS near segment 10, within SIGMA_GPS_CM (2000 cm)
+        // Position at x=11500 to ensure segment 10 is uniquely closest
+        // Segment 9: [9000, 11000], dist to x=11500 = 500
+        // Segment 10: [10000, 12000], dist to x=11500 = 0
+        let gps_x = 11_500;
+        let gps_y = 0;
+
+        // last_idx = 10, window = [8, 12], GPS at segment 10
+        let (idx, dist2) = find_best_segment_restricted(
+            gps_x,
+            gps_y,
+            0,      // heading
+            500,    // speed (moving, heading filter active)
+            &route_data,
+            10,     // last_idx
+            false,  // not first fix
+        );
+
+        // Should find segment 10 within early exit threshold
+        assert_eq!(idx, 10);
+        assert!(dist2 < 4_000_000); // MAX_DIST2_EARLY_EXIT
+    }
+
+    #[test]
+    fn test_find_best_segment_restricted_grid_fallback() {
+        // Create route with 20 segments
+        let segments: Vec<(i32, i32, i16, i32)> = (0..20)
+            .map(|i| (i * 1000, 0, 0, 20_000))
+            .collect();
+        let segments_refs: &[(i32, i32, i16, i32)] = &segments;
+        let route_data = create_test_route_data(segments_refs).unwrap();
+
+        // GPS far from last_idx, requires grid search
+        // Use GPS position that is unambiguously closest to segment 15
+        // Segment 14: starts at 14000, extends to 16000 (dx=2000)
+        // Segment 15: starts at 15000, extends to 17000 (dx=2000)
+        // Position at x=16500 is in segment 15 only (500 cm from start, 500 cm from end)
+        let gps_x = 16_500;
+        let gps_y = 0;
+
+        // last_idx = 5, window = [3, 7], GPS at segment 15
+        let (idx, _dist2) = find_best_segment_restricted(
+            gps_x,
+            gps_y,
+            0,      // heading aligned with segment
+            500,    // speed (moving)
+            &route_data,
+            5,      // last_idx far from GPS
+            false,  // not first fix
+        );
+
+        // Should find segment 15 via grid search
+        assert_eq!(idx, 15);
+    }
+
+    #[test]
+    fn test_find_best_segment_grid_only() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 0, 20_000),
+            (2000, 0, 0, 20_000),
+            (4000, 0, 0, 20_000),
+        ]).unwrap();
+
+        // GPS in middle of segment 1 (from 2000 to 4000)
+        let gps_x = 3000;
+        let gps_y = 0;
+
+        let (idx, _dist2) = find_best_segment_grid_only(
+            gps_x,
+            gps_y,
+            0,      // heading
+            500,    // speed
+            &route_data,
+            false,  // not first fix
+        );
+
+        assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn test_find_best_segment_grid_only_outside_bounds() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 0, 20_000),
+        ]).unwrap();
+
+        // GPS outside grid bounds
+        let (idx, dist2) = find_best_segment_grid_only(
+            -50_000, // Before grid origin
+            -50_000,
+            0,
+            500,
+            &route_data,
+            false,
+        );
+
+        // Should return fallback
+        assert_eq!(idx, 0);
+        assert_eq!(dist2, i64::MAX);
+    }
+
+    #[test]
+    fn test_find_best_segment_grid_only_with_min_s_constraint() {
+        // Create segments with increasing cum_dist
+        // Each segment is 1000m long, so cumulative distances are:
+        // seg0: 0, seg1: 1000, seg2: 2000, seg3: 3000, ...
+        let segments: Vec<(i32, i32, i16, i32)> = (0..10)
+            .map(|i| (i * 1000, 0, 0, 1000 * 1000)) // 1000m = 100,000 mm
+            .collect();
+        let segments_refs: &[(i32, i32, i16, i32)] = &segments;
+        let route_data = create_test_route_data(segments_refs).unwrap();
+
+        
+        // GPS at position after segment 2 (x=3000, which is in segment 3)
+        let gps_x = 3000;
+        let gps_y = 0;
+
+        // Set min_s_cm to 250,000 cm (2.5 km) - should skip segments 0-2
+        let (idx, _dist2) = find_best_segment_grid_only_with_min_s(
+            gps_x,
+            gps_y,
+            0,
+            500,
+            &route_data,
+            false,
+            250_000, // min_s_cm
+        );
+
+        // Should skip to segment 3 or later (cum_dist >= 2,500,000 cm)
+        assert!(idx >= 3);
+    }
+
+    #[test]
+    fn test_find_best_segment_grid_only_with_min_s_no_filter() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 0, 1000 * 1000), // 1000m segment
+            (1000, 0, 0, 1000 * 1000), // 1000m segment
+        ]).unwrap();
+
+
+        // GPS at position of segment 1 (x=1000)
+        let gps_x = 1000;
+        let gps_y = 0;
+
+        // min_s_cm = 0, no filtering
+        let (idx, _dist2) = find_best_segment_grid_only_with_min_s(
+            gps_x,
+            gps_y,
+            0,
+            500,
+            &route_data,
+            false,
+            0, // no minimum
+        );
+
+        assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn test_sentinel_heading_always_eligible() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 18000, 20_000), // Opposite heading
+        ]).unwrap();
+
+        // Sentinel heading should always be eligible
+        let (idx, _dist2) = find_best_segment_grid_only(
+            0,
+            0,
+            i16::MIN, // Sentinel
+            500,
+            &route_data,
+            false,
+        );
+
+        assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn test_first_fix_relaxed_heading() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 18000, 20_000), // Opposite heading (180°)
+        ]).unwrap();
+
+        // First fix mode: relaxed 180° threshold
+        let (idx, _dist2) = find_best_segment_grid_only(
+            0,
+            0,
+            0,      // Heading 0°
+            500,    // Moving
+            &route_data,
+            true,   // FIRST FIX MODE
+        );
+
+        // Should match despite 180° heading difference
+        assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn test_zero_speed_heading_gate_disabled() {
+        let route_data = create_test_route_data(&[
+            (0, 0, 9001, 20_000), // 90.01° off (normally rejected)
+        ]).unwrap();
+
+        // Zero speed: heading gate disabled
+        let (idx, _dist2) = find_best_segment_grid_only(
+            0,
+            0,
+            0,      // Heading 0°
+            0,      // STOPPED
+            &route_data,
+            false,
+        );
+
+        assert_eq!(idx, 0);
+    }
 }
 
 ================
@@ -6192,6 +7203,12 @@ const MAX_NMEA_FIELDS: usize = 20;
 /// NMEA parser state (accumulates data across sentences)
 pub struct NmeaState {
     point: GpsPoint,
+}
+
+impl Default for NmeaState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NmeaState {
@@ -6560,7 +7577,7 @@ fn create_stop_states(s_cm: DistCm, active_stops: &[usize], stops: &[Stop]) -> V
         .iter()
         .filter_map(|&idx| {
             stops.get(idx).map(|stop| {
-                let distance_cm = stop.progress_cm as i32 - s_cm as i32;
+                let distance_cm = stop.progress_cm - s_cm;
                 StopTraceState {
                     stop_idx: idx as u8,
                     distance_cm,
@@ -6608,7 +7625,7 @@ pub fn write_output<W: Write>(
             lat,
             lon,
             s_cm: signals.s_cm as i64,
-            v_cms: *v_cms as i32,
+            v_cms: *v_cms,
             heading_cdeg: Some(heading_cdeg),
             status: "valid".to_string(),
             seg_idx: Some(*seg_idx),
@@ -6650,7 +7667,7 @@ pub fn write_output<W: Write>(
             lat,
             lon,
             s_cm: *s_cm as i64,
-            v_cms: *v_cms as i32,
+            v_cms: *v_cms,
             heading_cdeg: None,
             status: "dr_outage".to_string(),
             seg_idx: None,
@@ -6668,7 +7685,7 @@ pub fn write_output<W: Write>(
             lat,
             lon,
             s_cm: *last_valid_s as i64,
-            v_cms: *last_valid_v as i32,
+            v_cms: *last_valid_v,
             heading_cdeg: None,
             status: "off_route".to_string(),
             seg_idx: None,
@@ -6682,7 +7699,7 @@ pub fn write_output<W: Write>(
             lat,
             lon,
             s_cm: *s_cm as i64,
-            v_cms: *v_cms as i32,
+            v_cms: *v_cms,
             heading_cdeg: None,
             status: "suspect_off_route".to_string(),
             seg_idx: None,
@@ -6806,7 +7823,6 @@ pub fn crc32(data: &[u8]) -> u32 {
 /// Pack route data into binary format.
 ///
 /// This function is intended for use in the preprocessor (requires std).
-
 /// Magic bytes for route_data.bin: "BUSA" (BUS Arrival)
 pub const MAGIC: u32 = 0x42555341;
 
@@ -6930,7 +7946,7 @@ impl<'a> SpatialGridView<'a> {
         let indices_ptr = unsafe { data_ptr.add(2) as *const u16 };
 
         // Check alignment and handle appropriately
-        if indices_ptr as usize % 2 == 0 {
+        if (indices_ptr as usize).is_multiple_of(2) {
             // Aligned, can use from_raw_parts directly
             Ok(unsafe { core::slice::from_raw_parts(indices_ptr, count) })
         } else {
@@ -7109,7 +8125,7 @@ impl<'a> RouteData<'a> {
 
         let cell_count = (cols * rows) as usize;
         // v5: bitmask (1 bit per cell, rounded up to whole bytes)
-        let bitmask_bytes = (cell_count + 7) / 8;
+        let bitmask_bytes = cell_count.div_ceil(8);
         if data.len() < offset + bitmask_bytes { return Err(BusError::InvalidLength); }
         let bitmask_base = data[offset..].as_ptr();
         offset += bitmask_bytes;
@@ -7203,7 +8219,7 @@ pub fn pack_route_data(
 
     // v5: Build bitmask and sparse offsets
     let cell_count = (grid.cols * grid.rows) as usize;
-    let bitmask_bytes = (cell_count + 7) / 8;
+    let bitmask_bytes = cell_count.div_ceil(8);
     let mut bitmask = vec![0u8; bitmask_bytes];
 
     let mut index_data = Vec::new();
@@ -7326,7 +8342,7 @@ mod tests {
             buf.extend_from_slice(&grid_data);
             let data_base = buf[prefix_len..].as_ptr();
 
-            if data_base as usize % 2 != 0 {
+            if !(data_base as usize).is_multiple_of(2) {
                 misaligned_result = Some((buf, SpatialGridView {
                     cols: 1, rows: 1, grid_size_cm: 10000,
                     bitmask_base: [1u8].as_ptr(),
@@ -7537,6 +8553,12 @@ pub struct GpsPoint {
     pub has_fix: bool,
 }
 
+impl Default for GpsPoint {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GpsPoint {
     pub fn new() -> Self {
         GpsPoint {
@@ -7581,6 +8603,12 @@ pub struct KalmanState {
     pub off_route_freeze_time: Option<u64>,
     /// Off-route freeze context for spatial anchoring during recovery
     pub freeze_ctx: Option<FreezeContext>,
+}
+
+impl Default for KalmanState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl KalmanState {
@@ -7677,8 +8705,8 @@ impl SpatialGrid {
         // 3×3 neighborhood
         for dy in 0..=2 {
             for dx in 0..=2 {
-                let ny = gy as i32 + dy as i32 - 1;
-                let nx = gx as i32 + dx as i32 - 1;
+                let ny = gy as i32 + dy - 1;
+                let nx = gx as i32 + dx - 1;
 
                 if ny >= 0 && nx >= 0 && ny < self.rows as i32 && nx < self.cols as i32 {
                     let idx = ny as usize * (self.cols as usize) + nx as usize;
@@ -7700,6 +8728,12 @@ pub struct DrState {
     /// H3: Flag indicating we're in GPS recovery mode
     /// Set to true when returning from outage, cleared after first valid GPS
     pub in_recovery: bool,
+}
+
+impl Default for DrState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DrState {
@@ -11412,8 +12446,9 @@ SHORTCUT_TO_STOP ?= 5
 # For detour scenario (stop 6 in re-indexed, which is stop 11 in original)
 DETOUR_FROM_STOP ?= 1  # For detour scenario (stop 6 in re-indexed)
 DETOUR_TO_STOP ?= 6    # For detour scenario (stop 11 in re-indexed)
-DETOUR_WAYPOINT_LAT ?= 24.99207
-DETOUR_WAYPOINT_LON ?= 121.29562
+# Waypoint: same latitude as stop 6, same longitude as stop 1 (creates L-shape)
+DETOUR_WAYPOINT_LAT ?= 24.992071  # Stop 6 latitude (south end of L-shape)
+DETOUR_WAYPOINT_LON ?= 121.295621  # Stop 1 longitude (west end of L-shape)
 DETOUR_DURATION_S ?= 60
 
 # Input files
@@ -11427,12 +12462,11 @@ GROUND_TRUTH_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_gt.json
 # SIMULATOR_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_sim.json  # Deprecated
 DETECTOR_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_arrivals.json
 TRACE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_trace.jsonl
-ANNOUNCE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_announce.jsonl
 
 # Node.js executable
 NODE := node
 
-.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour
+.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour run-detour-no-gen regression-test regression-save
 
 # Default target
 all: run
@@ -11445,14 +12479,23 @@ run: build gen_nmea preprocess pipeline
 	@echo "Scenario: $(SCENARIO)"
 	@echo "NMEA output: $(NMEA_OUT)"
 	@echo "Route data: $(ROUTE_DATA_BIN)"
-	@echo "Output: $(DETECTOR_OUT)"
 	@echo "Trace output: $(TRACE_OUT)"
-	@echo "Announce output: $(ANNOUNCE_OUT)"
+	@echo ""
+	@echo "Extract arrivals: ./tools/arrival_from_trace.sh $(TRACE_OUT) > arrivals.jsonl"
+	@echo "Extract announce: ./tools/announce_from_trace.sh $(TRACE_OUT) > announce.jsonl"
 
 # Run detour scenario (ty225_short route)
 run-detour:
 	@echo "=== Running detour scenario (ty225_short) ==="
-	$(MAKE) run ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.99207 DETOUR_WAYPOINT_LON=121.29562 DETOUR_DURATION_S=60
+	@echo "L-shaped detour: stop 1 → 10m east → south to waypoint → east to stop 6"
+	$(MAKE) run ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.992071 DETOUR_WAYPOINT_LON=121.295621 DETOUR_DURATION_S=60
+
+# Run detour scenario without generating NMEA (uses existing NMEA file)
+run-detour-no-gen: build preprocess
+	@echo "=== Running detour scenario (ty225_short) - skipping gen_nmea ==="
+	@echo "Using existing NMEA: $(NMEA_OUT)"
+	@echo "L-shaped detour: stop 1 → 10m east → south to waypoint → east to stop 6"
+	$(MAKE) pipeline-no-gen ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.992071 DETOUR_WAYPOINT_LON=121.295621 DETOUR_DURATION_S=60
 
 # Legacy two-step workflow (deprecated - use 'make run' instead)
 run-legacy: build gen_nmea preprocess simulate detect
@@ -11465,7 +12508,6 @@ run-legacy: build gen_nmea preprocess simulate detect
 	@echo "Simulator output: $(SIMULATOR_OUT)"
 	@echo "Arrival detector output: $(DETECTOR_OUT)"
 	@echo "Trace output: $(TRACE_OUT)"
-	@echo "Announce output: $(ANNOUNCE_OUT)"
 
 # Build all Rust binaries in release mode
 build: build-firmware
@@ -11539,24 +12581,34 @@ detect: simulate
 	@echo "  make pipeline ROUTE_NAME=$(ROUTE_NAME) SCENARIO=$(SCENARIO)"
 	@false
 
-# Run unified pipeline: NMEA + route_data → arrivals + departures (single binary)
+# Run unified pipeline: NMEA + route_data → trace (single binary)
 pipeline: gen_nmea preprocess
 	@echo "=== Running unified pipeline ==="
 	@echo "Binary: $(PIPELINE)"
 	@echo "Source: pipeline/"
-	$(PIPELINE) $(NMEA_OUT) $(ROUTE_DATA_BIN) $(DETECTOR_OUT) --trace $(TRACE_OUT) --announce $(ANNOUNCE_OUT)
-	@echo "Generated: $(DETECTOR_OUT)"
+	$(PIPELINE) $(NMEA_OUT) $(ROUTE_DATA_BIN)
 	@echo "Generated: $(TRACE_OUT)"
-	@echo "Generated: $(ANNOUNCE_OUT)"
+
+# Run unified pipeline without generating NMEA (uses existing NMEA file)
+pipeline-no-gen: preprocess
+	@echo "=== Running unified pipeline (using existing NMEA) ==="
+	@echo "Binary: $(PIPELINE)"
+	@echo "Source: pipeline/"
+	@echo "Using existing NMEA: $(NMEA_OUT)"
+	@if [ ! -f "$(NMEA_OUT)" ]; then \
+		echo "Error: NMEA file not found: $(NMEA_OUT)"; \
+		echo "Run 'make gen_nmea' first to generate it."; \
+		exit 1; \
+	fi
+	$(PIPELINE) $(NMEA_OUT) $(ROUTE_DATA_BIN)
+	@echo "Generated: $(TRACE_OUT)"
 
 # Clean all generated files
 clean:
 	@echo "=== Cleaning generated files ==="
-	rm -f $(DATA_DIR)/nmea_*.txt
-	rm -f $(DATA_DIR)/sim_*.jsonl
-	rm -f $(DATA_DIR)/arrivals_*.jsonl
-	rm -f $(DATA_DIR)/trace_*.jsonl
-	rm -f $(ROUTE_DATA_BIN)
+	rm -f $(DATA_DIR)/*_nmea.txt
+	rm -f $(DATA_DIR)/*_trace.jsonl
+	rm -f $(DATA_DIR)/*.bin
 	@echo "Clean complete"
 
 # Help target
@@ -11567,6 +12619,7 @@ help:
 	@echo "  make run ROUTE_NAME=<route> SCENARIO=<name>     Run full unified pipeline"
 	@echo "                                                    (default: ROUTE_NAME=ty225 SCENARIO=normal)"
 	@echo "  make run-detour                                  Run detour scenario (ty225_short)"
+	@echo "  make run-detour-no-gen                           Run detour scenario without regenerating NMEA"
 	@echo "  make pipeline ROUTE_NAME=<route> SCENARIO=<name> Run unified pipeline (same as 'run')"
 	@echo "  make gen_nmea ROUTE_NAME=<route> SCENARIO=<name> Generate NMEA test data"
 	@echo "  make preprocess ROUTE_NAME=<route>               Generate route_data.bin"
@@ -11580,6 +12633,10 @@ help:
 	@echo "Maintenance:"
 	@echo "  make clean                                       Remove generated files"
 	@echo "  make help                                        Show this help message"
+	@echo ""
+	@echo "Regression Testing:"
+	@echo "  make regression-test                             Run all regression tests"
+	@echo "  make regression-save CASE_NAME=<name> DESC='...' Save failing case as regression test"
 	@echo ""
 	@echo "Parameters:"
 	@echo "  ROUTE_NAME    Route identifier (default: ty225)"
@@ -11621,6 +12678,21 @@ validate-all:
 		output=$${trace%_trace.jsonl}_report.html; \
 		cargo run --release --bin trace_validator -- "$$trace" -o "$$output"; \
 	done
+
+# Regression testing targets
+regression-test:
+	@echo "=== Running regression tests ==="
+	cargo test -p pipeline --test regression_tests
+
+# Quick alias for saving regression test case
+# Usage: make regression-save CASE_NAME=<name> DESC="<description>"
+regression-save:
+	@if [ -z "$(CASE_NAME)" ]; then \
+		echo "Error: CASE_NAME is required"; \
+		echo "Usage: make regression-save CASE_NAME=<name> DESC=\"<description>\""; \
+		exit 1; \
+	fi
+	@./tools/save_regression.sh "$(CASE_NAME)" "$(DESC)"
 
 
 

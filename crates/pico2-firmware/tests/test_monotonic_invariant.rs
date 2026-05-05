@@ -243,8 +243,6 @@ fn test_recovering_mode_allows_backward() {
         state.tick(&gps, &mut est_state);
     }
 
-    let position_at_offroute_entry = state.last_s_cm;
-
     // Trigger OffRoute (GPS far from route) - multiple ticks needed
     // Use a point far north to cause large divergence
     let lat_off = FIXED_ORIGIN_LAT_DEG + (50000.0 / EARTH_R_CM).to_degrees(); // 500m north

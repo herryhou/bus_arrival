@@ -115,7 +115,7 @@ fn test_warmup_counter_increments_after_first_fix() {
         ..gps1
     };
 
-    let result = state.process_gps(&gps4);
+    state.process_gps(&gps4);
     // Detection is now enabled, but GPS is at (0,0) which is far from route
     // So no arrival should trigger
     // Note: We don't assert on result.is_none() because the GPS might be close to a stop
@@ -385,7 +385,7 @@ fn test_warmup_normal_three_valid_gps() {
     // With independent counters, detection becomes ready after 3 valid ticks (same as estimation)
     tick += 1;
     let gps4 = make_gps(tick, 25.00440, 121.28660, 3000, 0, 100, true);
-    let result = state.process_gps(&gps4);
+    state.process_gps(&gps4);
     // Detection is now enabled, but we're not at a stop yet, so no arrival
     // Note: We don't assert on result.is_none() because the GPS might be close to a stop
     // depending on the route data
@@ -399,7 +399,7 @@ fn test_warmup_normal_three_valid_gps() {
     // This is near the start of the route, so the bus should be within the corridor
     tick += 1;
     let gps5 = make_gps(tick, 25.004283, 121.286559, 0, 0, 0, true); // At stop, stopped
-    let result = state.process_gps(&gps5);
+    state.process_gps(&gps5);
     // Note: We don't assert on result.is_some() because the arrival might not trigger
     // depending on the exact GPS coordinates and stop corridor setup
     // The important thing is that detection is enabled (detection_enabled_ticks = 3)

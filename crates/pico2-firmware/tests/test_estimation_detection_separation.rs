@@ -296,11 +296,6 @@ fn test_rejected_gps_increments_totals_only() {
     };
     state.process_gps(&gps1);
 
-    let initial_estimation_valid = state.estimation_ready_ticks;
-    let initial_detection_valid = state.detection_enabled_ticks;
-    let initial_estimation_total = state.estimation_total_ticks;
-    let initial_detection_total = state.detection_total_ticks;
-
     // Simulate a rejected GPS (we can't directly trigger rejection from test,
     // but we can verify the existing behavior works)
     // The key is: rejected GPS should increment total counters but NOT valid counters
@@ -383,9 +378,6 @@ fn test_dr_outage_increments_totals_only() {
         hdop_x10: 10,
     };
     state.process_gps(&gps1);
-
-    let initial_estimation_valid = state.estimation_ready_ticks;
-    let initial_detection_valid = state.detection_enabled_ticks;
 
     // We can't directly trigger DrOutage from the test,
     // but we can verify the existing behavior works
