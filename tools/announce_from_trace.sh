@@ -16,6 +16,6 @@ if [ ! -f "$TRACE_FILE" ]; then
     exit 1
 fi
 
-jq 'select(.active_stops and (.active_stops | length > 0)) |
+jq -c 'select(.active_stops and (.active_stops | length > 0)) |
     {time, stop_idx: .active_stops[0], s_cm, v_cms}' \
   "$TRACE_FILE"
