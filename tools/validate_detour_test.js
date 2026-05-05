@@ -16,7 +16,6 @@ const path = require('path');
 const NMEA_FILE = 'test_data/ty225_short_detour_nmea.txt';
 const GT_FILE = 'test_data/ty225_short_detour_gt.json';
 const TRACE_FILE = 'test_data/ty225_short_detour_trace.jsonl';
-const ANNOUNCE_FILE = 'test_data/ty225_short_detour_announce.jsonl';
 const OUT_SUMMARY = 'test_data/ty225_short_detour_summary.md';
 
 // Validation results
@@ -88,14 +87,17 @@ console.log(`  Timing: ${results.timing.pass ? 'PASS' : 'FAIL'}`);
 // Check 3: Skipped Stops (2, 3, 4, 5 should NOT be announced)
 console.log('Check 3: Skipped Stops...');
 try {
-  const announceContent = fs.readFileSync(ANNOUNCE_FILE, 'utf8');
-  const announceLines = announceContent.split('\n').filter(line => line.trim());
+  const traceContent = fs.readFileSync(TRACE_FILE, 'utf8');
+  const traceLines = traceContent.split('\n').filter(line => line.trim());
 
   const skippedStopIndices = [2, 3, 4, 5];
-  const announcedStops = announceLines.map(line => {
-    const obj = JSON.parse(line);
-    return obj.stop_idx;
-  });
+  const announcedStops = traceLines
+    .map(line => {
+      const obj = JSON.parse(line);
+      return obj;
+    })
+    .filter(obj => obj.event === 'announce')
+    .map(obj => obj.stop_idx);
 
   const hasSkippedStops = announcedStops.some(idx => skippedStopIndices.includes(idx));
   if (!hasSkippedStops) {
@@ -106,20 +108,19 @@ try {
     results.skippedStops.details.push(`ERROR: Stops ${found.join(', ')} were announced (should be skipped)`);
   }
 } catch (e) {
-  results.skippedStops.details.push(`Could not read announce file: ${e.message}`);
+  results.skippedStops.details.push(`Could not read trace file: ${e.message}`);
 }
 console.log(`  ${results.skippedStops.pass ? 'PASS' : 'FAIL'}`);
 
 // Check 4: Re-Acquisition (stop 6 should be detected in arrivals)
 console.log('Check 4: Re-Acquisition...');
 try {
-  const arrivalsFile = 'test_data/ty225_short_detour_arrivals.json';
-  const arrivalsContent = fs.readFileSync(arrivalsFile, 'utf8');
-  const arrivalsLines = arrivalsContent.split('\n').filter(line => line.trim());
+  const traceContent = fs.readFileSync(TRACE_FILE, 'utf8');
+  const traceLines = traceContent.split('\n').filter(line => line.trim());
 
-  const stop6Detected = arrivalsLines.some(line => {
+  const stop6Detected = traceLines.some(line => {
     const obj = JSON.parse(line);
-    return obj.stop_idx === 6;
+    return obj.event === 'arrival' && obj.stop_idx === 6;
   });
 
   if (stop6Detected) {
@@ -129,7 +130,7 @@ try {
     results.reAcquisition.details.push('ERROR: Stop 6 NOT detected (re-acquisition failed)');
   }
 } catch (e) {
-  results.reAcquisition.details.push(`Could not read arrivals file: ${e.message}`);
+  results.reAcquisition.details.push(`Could not read trace file: ${e.message}`);
 }
 console.log(`  ${results.reAcquisition.pass ? 'PASS' : 'FAIL'}`);
 
