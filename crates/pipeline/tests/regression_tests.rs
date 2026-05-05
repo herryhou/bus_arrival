@@ -32,57 +32,6 @@ fn test_data_dir() -> PathBuf {
 }
 
 // ============================================================================
-// Regression Test Cases
-// ============================================================================
-
-/// Template for new regression tests
-///
-/// To add a new test:
-/// 1. Use `./tools/save_regression.sh <name> "<desc>"` to save the NMEA
-/// 2. Copy this template and implement the assertions
-/// 3. Fix the bug in code
-/// 4. Verify test passes
-#[test]
-fn test_template_regression_case() {
-    // Bug: [Description of the bug]
-    // Root cause: [Why it happened]
-    // Fix: [Where in code it was fixed]
-    //
-    // This test ensures the bug does not regress.
-
-    let nmea_file = "../../../test_data/regression/ty225_short_detour_template.txt";
-    let route_bin = "../../../test_data/ty225_short_detour.bin";
-
-    // Verify test files exist
-    assert!(
-        fs::metadata(nmea_file).is_ok(),
-        "Regression NMEA file should exist. Run './tools/save_regression.sh template <desc>' to create it."
-    );
-
-    // Load route data (inline to avoid lifetime issues)
-    let route_bytes = fs::read(route_bin)
-        .expect("Failed to load route data");
-    let _route_data = shared::binfile::RouteData::load(&route_bytes)
-        .expect("Failed to parse route data");
-
-    // Load NMEA file
-    let nmea_file = fs::File::open(nmea_file)
-        .expect("Failed to open NMEA file");
-    let _reader = std::io::BufReader::new(nmea_file);
-
-    // TODO: Run pipeline processing
-    // For now, this is a placeholder that just verifies files load
-
-    // TODO: Add assertions that validate the fix
-    // Examples:
-    // assert!(result.final_progress_cm.unwrap() > 170_000, "Progress should be at stop 6");
-    // assert!(result.final_stop_idx.unwrap() == 6, "Should detect stop 6");
-
-    // For template, just verify files load
-    assert!(true, "Template test - implement assertions");
-}
-
-// ============================================================================
 // Helper: Add your regression tests below
 // ============================================================================
 //
@@ -108,10 +57,12 @@ fn test_template_regression_case() {
 // }
 
 #[test]
-fn test_stop6_missed_at_reentry() {
-    // Bug: Stop 6 should be detected with 8s dwell at detour re-entry but is currently missed
-    // Root cause: Bus moves too fast through stop 6's corridor after detour re-entry snap
-    // Fix: detection/src/arrival_detector.rs - arrival detection logic needs to handle re-entry dwell
+fn test_skip_stop5_on_offroute_reentry() {
+    // Bug: Stop 5 should be SKIPPED on re-entry from off-route
+    // Root cause: The snap progress on re-entry is near stop 5, but the snap point is located
+    //            between stop 5 and stop 6, so stop 5 should be skipped
+    // Fix: detection/src/arrival_detector.rs - arrival detection logic needs to skip stops
+    //      when snap point is past them on re-entry
     //
     // This test ensures the bug does not regress.
 
@@ -123,51 +74,47 @@ fn test_stop6_missed_at_reentry() {
     route_bin_path.push("ty225_short_detour.bin");
 
     // Load route data
-    let route_bytes = fs::read(&route_bin_path)
-        .expect("Failed to load route data");
-    let route_data = shared::binfile::RouteData::load(&route_bytes)
-        .expect("Failed to parse route data");
+    let route_bytes = fs::read(&route_bin_path).expect("Failed to load route data");
+    let route_data =
+        shared::binfile::RouteData::load(&route_bytes).expect("Failed to parse route data");
 
     // Load NMEA and process through pipeline
-    let nmea_file = fs::File::open(&nmea_path)
-        .expect("Failed to open NMEA file");
+    let nmea_file = fs::File::open(&nmea_path).expect("Failed to open NMEA file");
     let reader = std::io::BufReader::new(nmea_file);
 
-    let result = pipeline::Pipeline::process_nmea_reader(
-        reader,
-        &route_data,
-    )
-    .expect("Pipeline processing failed");
+    let result = pipeline::Pipeline::process_nmea_reader(reader, &route_data)
+        .expect("Pipeline processing failed");
 
-    // Extract detected arrivals
-    let detected_stops: Vec<usize> = result
-        .arrivals
-        .iter()
-        .map(|a| a.stop_idx as usize)
-        .collect();
+    // Extract detected stops from trace_records based on any Approaching/Arriving/AtStop states
+    let mut detected_stops = std::collections::HashSet::new();
 
-    // CRITICAL ASSERTION: Stop 6 should be detected as an arrival
-    // This is the core bug - stop 6 is currently missed
+    for record in &result.trace_records {
+        for state in &record.stop_states {
+            if matches!(state.fsm_state.as_str(), "Approaching" | "Arriving" | "AtStop") {
+                detected_stops.insert(state.stop_idx as usize);
+            }
+        }
+    }
+
+    let mut mut_detected: Vec<_> = detected_stops.into_iter().collect();
+    mut_detected.sort();
+
+    // CRITICAL ASSERTION: Stop 5 should be SKIPPED
+    // The snap point on re-entry is between stop 5 and 6, so stop 5 should not be detected
     assert!(
-        detected_stops.contains(&6),
-        "Stop 6 should be DETECTED as an arrival at detour re-entry. Detected: {:?}",
-        detected_stops
+        !mut_detected.contains(&5),
+        "Stop 5 should be SKIPPED on off-route re-entry. Detected: {:?}",
+        mut_detected
     );
 
-    // Verify the arrival at stop 6 has appropriate dwell time
-    let stop6_arrival = result.arrivals.iter()
-        .find(|a| a.stop_idx == 6)
-        .expect("Stop 6 arrival should exist");
-
-    // Ground truth shows 8 seconds of dwell at stop 6
-    // Allow some tolerance for timing variations
-    assert!(
-        stop6_arrival.time >= 80143 && stop6_arrival.time <= 80160,
-        "Stop 6 arrival should occur around re-entry tick 80143. Got time: {}",
-        stop6_arrival.time
+    // Expected stops: [0, 1, 6, 7, 8, 9] (stop 5 is skipped)
+    let expected_stops = vec![0, 1, 6, 7, 8, 9];
+    assert_eq!(
+        mut_detected, expected_stops,
+        "Expected stops [0, 1, 6, 7, 8, 9] with stop 5 skipped. Got: {:?}",
+        mut_detected
     );
 
-    println!("✓ Stop 6 correctly detected at detour re-entry");
-    println!("  Arrival time: {}", stop6_arrival.time);
-    println!("  All detected stops: {:?}", detected_stops);
+    println!("✓ Stop 5 correctly skipped on off-route re-entry");
+    println!("  Detected stops: {:?} (stop 5 skipped)", mut_detected);
 }

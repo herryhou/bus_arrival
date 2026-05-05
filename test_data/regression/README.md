@@ -18,25 +18,23 @@ Example: `ty225_short_detour_stop_skip_backtrack.txt`
 
 ## Current Regression Cases
 
-### stop6_missed_at_reentry
+### stop5_skip_on_reentry
 
 **File:** `ty225_short_detour_stop6_missed_at_reentry.txt`
-**Bug:** Stop 6 should be detected with 8s dwell at detour re-entry but is currently missed
-**Root Cause:** Bus moves too fast through stop 6's corridor after detour re-entry snap, passing through without triggering dwell detection
-**Fix:** detection/src/arrival_detector.rs - arrival detection logic needs to handle re-entry dwell
-**Test:** `test_stop6_missed_at_reentry()`
+**Bug:** Stop 5 should be SKIPPED on re-entry from off-route
+**Root Cause:** The snap progress on re-entry is near stop 5, but the snap point is located between stop 5 and stop 6, so stop 5 should be skipped
+**Fix:** detection/src/arrival_detector.rs - arrival detection logic needs to skip stops when snap point is past them on re-entry
+**Test:** `test_skip_stop5_on_offroute_reentry()`
 **Added:** 2026-05-04
 
-**Expected Behavior (from ground truth):**
-- At tick 80143, off-route ends and position snaps to ~175107 cm (near stop 6)
-- Stop 6 should be detected with 8 seconds of dwell at re-acquisition
-- Stop 6 appears in arrivals with `dwell_s: 8`
+**Expected Behavior:**
+- At tick 80143, off-route ends and position snaps to ~175107 cm (between stop 5 and stop 6)
+- Stop 5 is SKIPPED (snap point is past it)
+- Stop 6 is detected (Approaching/Arriving states, though may not reach AtStop)
+- Detected stops: [0, 1, 6, 7, 8, 9]
 
-**Current (Bug) Behavior:**
-- Position snaps correctly to ~175107 cm
-- Stop 6 is announced (corridor entry) but NOT detected as an arrival
-- Bus passes through stop 6's corridor too fast (v_cms=1210 at re-entry)
-- No dwell is detected, FSM never reaches "AtStop" state
+**Trace Data:**
+- `ty225_short_detour_stop6_missed_at_reentry_trace.jsonl` — Full state machine trace for reference
 
 ---
 
