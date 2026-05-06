@@ -252,7 +252,7 @@ fn test_recovering_mode_allows_backward() {
             lon: FIXED_ORIGIN_LON_DEG,
             timestamp: base_timestamp + 25 + i as u64,
             speed_cms: Some(500),
-            heading_cdeg: 9000,
+            heading_cdeg: Some(9000),
             hdop_x10: Some(10),
             has_fix: true,
         };
