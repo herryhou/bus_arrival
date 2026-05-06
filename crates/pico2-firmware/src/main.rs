@@ -9,7 +9,9 @@ use panic_probe as _;
 
 // Embassy imports
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
+
+// GPS processing imports
+use gps_processor::FixAccumulator;
 
 // HAL imports
 use embassy_rp::bind_interrupts;
@@ -103,79 +105,86 @@ async fn main(_spawner: Spawner) {
     // Initialize line buffer for NMEA data
     let mut line_buf = uart::UartLineBuffer::new();
 
+    // Initialize fix accumulator for event-driven GPS processing
+    let mut fix_accumulator = FixAccumulator::new();
+
     info!("System ready. Starting GPS processing...");
 
-    // Main processing loop (1 Hz)
+    // Main event-driven loop
+    // GPS timestamp drives the loop - no Timer::after needed
     loop {
-        // Drain all sentences from current GPS burst before sleeping
-        // GPS modules typically send RMC+GSA+GGA in a burst (~200ms)
-        loop {
-            match uart::read_nmea_sentence_async(&mut uart, &mut line_buf).await {
-                Ok(Some(sentence)) => {
-                    debug!("NMEA: {}", sentence);
+        match uart::read_nmea_sentence_async(&mut uart, &mut line_buf).await {
+            Ok(Some(sentence)) => {
+                debug!("NMEA: {}", sentence);
 
-                    // Parse NMEA sentence
-                    if let Some(gps) = state.nmea.parse_sentence(sentence) {
-                        debug!("GPS: lat={}, lon={}, fix={}", gps.lat, gps.lon, gps.has_fix);
+                // Update accumulator with this sentence
+                if fix_accumulator.update(sentence) {
+                    // Check if we should emit a fix (timestamp changed)
+                    if fix_accumulator.should_emit() {
+                        // Build GPS fix from accumulated sentences
+                        if let Some((gps, _quality)) = fix_accumulator.build() {
+                            debug!("GPS: lat={}, lon={}, fix={}", gps.lat, gps.lon, gps.has_fix);
 
-                        // Process GPS through full pipeline
-                        if let Some(arrival) = state.process_gps(&gps) {
-                            // Emit arrival event via UART
-                            match uart::write_arrival_event_async(&mut uart, &arrival).await {
-                                Ok(()) => {
-                                    info!("Emitted arrival event for stop {}", arrival.stop_idx);
+                            // Process GPS through full pipeline
+                            if let Some(arrival) = state.process_gps(&gps) {
+                                // Emit arrival event via UART
+                                match uart::write_arrival_event_async(&mut uart, &arrival).await {
+                                    Ok(()) => {
+                                        info!("Emitted arrival event for stop {}", arrival.stop_idx);
+                                    }
+                                    Err(e) => {
+                                        defmt::warn!("Failed to write arrival event: {:?}", e);
+                                    }
                                 }
-                                Err(e) => {
-                                    defmt::warn!("Failed to write arrival event: {:?}", e);
+                            }
+
+                            // Persist state if stop index changed and rate limit allows
+                            // This runs once per GPS fix (timestamp change)
+                            if let Some(current_stop) = state.current_stop_index() {
+                                if state.should_persist(current_stop) {
+                                    let ps = shared::PersistedState::new(state.kalman.s_cm, current_stop);
+                                    match persist::save(&mut flash, &ps).await {
+                                        Ok(()) => {
+                                            info!(
+                                                "Persisted state: stop={}, progress={}cm",
+                                                current_stop, state.kalman.s_cm
+                                            );
+                                            state.mark_persisted(current_stop);
+                                        }
+                                        Err(()) => {
+                                            defmt::warn!("Failed to persist state to flash");
+                                            // S4 fix: increment on failure to prevent retry loop
+                                            state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
+                                        }
+                                    }
+                                } else {
+                                    // Increment tick counter for rate limiting
+                                    state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
                                 }
                             }
                         }
-                    }
 
-                    // Reset buffer for next sentence
-                    line_buf.reset();
+                        // Reset accumulator for next second
+                        fix_accumulator.reset();
+                    }
                 }
-                Ok(None) => {
-                    // FIFO empty, burst complete
-                    break;
-                }
-                Err(uart::UartError::Timeout) => {
-                    defmt::warn!("UART timeout, GPS may be disconnected");
-                    break;
-                }
-                Err(e) => {
-                    defmt::warn!("UART read error: {:?}", e);
-                    line_buf.reset();
-                    break;
-                }
+
+                // Reset buffer for next sentence
+                line_buf.reset();
+            }
+            Ok(None) => {
+                // FIFO empty, wait for next sentence
+                continue;
+            }
+            Err(uart::UartError::Timeout) => {
+                defmt::warn!("UART timeout, GPS may be disconnected");
+                continue;
+            }
+            Err(e) => {
+                defmt::warn!("UART read error: {:?}", e);
+                line_buf.reset();
+                continue;
             }
         }
-
-        // Persist state if stop index changed and rate limit allows
-        if let Some(current_stop) = state.current_stop_index() {
-            if state.should_persist(current_stop) {
-                let ps = shared::PersistedState::new(state.kalman.s_cm, current_stop);
-                match persist::save(&mut flash, &ps).await {
-                    Ok(()) => {
-                        info!(
-                            "Persisted state: stop={}, progress={}cm",
-                            current_stop, state.kalman.s_cm
-                        );
-                        state.mark_persisted(current_stop);
-                    }
-                    Err(()) => {
-                        defmt::warn!("Failed to persist state to flash");
-                        // S4 fix: increment on failure to prevent retry loop
-                        state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
-                    }
-                }
-            } else {
-                // Increment tick counter for rate limiting
-                state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
-            }
-        }
-
-        // Rate limiting: 1 Hz processing
-        Timer::after(Duration::from_secs(1)).await;
     }
 }
