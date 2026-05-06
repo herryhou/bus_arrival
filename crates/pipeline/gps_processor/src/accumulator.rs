@@ -250,18 +250,18 @@ fn verify_checksum(sentence: &str) -> bool {
 pub fn parse_lat(deg_min: &str, ns: &str) -> Option<f64> {
     let dm: f64 = deg_min.parse().ok()?;
     #[cfg(feature = "std")]
-    let degrees = dm.trunc() + (dm % 100.0) / 60.0;
+    let degrees = (dm / 100.0).trunc() + (dm % 100.0) / 60.0;
     #[cfg(not(feature = "std"))]
-    let degrees = libm::truncf(dm as f32) as f64 + ((dm % 100.0) as f32 / 60.0) as f64;
+    let degrees = libm::truncf(dm as f32 / 100.0) as f64 + ((dm % 100.0) as f32 / 60.0) as f64;
     Some(if ns == "N" { degrees } else { -degrees })
 }
 
 pub fn parse_lon(deg_min: &str, ew: &str) -> Option<f64> {
     let dm: f64 = deg_min.parse().ok()?;
     #[cfg(feature = "std")]
-    let degrees = dm.trunc() + (dm % 100.0) / 60.0;
+    let degrees = (dm / 100.0).trunc() + (dm % 100.0) / 60.0;
     #[cfg(not(feature = "std"))]
-    let degrees = libm::truncf(dm as f32) as f64 + ((dm % 100.0) as f32 / 60.0) as f64;
+    let degrees = libm::truncf(dm as f32 / 100.0) as f64 + ((dm % 100.0) as f32 / 60.0) as f64;
     Some(if ew == "E" { degrees } else { -degrees })
 }
 
