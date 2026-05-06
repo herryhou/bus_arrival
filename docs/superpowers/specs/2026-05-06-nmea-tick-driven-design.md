@@ -1,8 +1,8 @@
-# NMEA Tick-Driven Architecture Design
+# NMEA Timestamp-Driven Architecture Design
 
 **Date:** 2026-05-06
 **Author:** Claude Opus 4.6
-**Status:** Design
+**Status:** Design (Revised v2 - Addressed critical review feedback)
 
 ## Problem Statement
 
@@ -17,15 +17,17 @@ The current GPS processing system implicitly assumes "each parsed NMEA sentence 
 
 The system lacks an explicit time model. NMEA sentences are treated as discrete events rather than parts of a single temporal snapshot.
 
-## Solution: Tick-Driven Architecture
+## Solution: Timestamp-Driven Architecture
 
-Split GPS processing into two stages:
+**Core principle:** GPS timestamp is the only authority. NMEA sentences are fragments of a single temporal snapshot, not discrete events.
 
-1. **Accumulation Stage:** Parse all NMEA sentences in the burst, merge complementary data into a single fix
-2. **Tick Stage:** Run `process_gps()` exactly once per second with the complete fix
+- Accumulate NMEA sentences across read boundaries
+- Emit exactly once per GPS timestamp change
+- No artificial timer - GPS time drives the loop
 
 ```
-RMC + GGA + GSA → FixAccumulator → One GpsPoint → process_gps()
+on_sentence(sentence) → acc.update()
+                       → acc.should_emit()? → state.tick()
 ```
 
 ## FixAccumulator Design
@@ -41,7 +43,13 @@ struct FixAccumulator {
     heading: Option<HeadCdeg>,
     hdop: Option<u16>,
     has_fix: bool,
-    last_emitted_timestamp: Option<u64>,
+    last_emitted_timestamp: Option<u64>,  // Internal emission tracking
+}
+
+enum FixQuality {
+    Full,        // RMC + GGA (or GSA): position + motion + quality
+    PositionOnly,// GGA only: position + quality, no motion
+    MotionOnly,  // RMC only: position + motion, no quality
 }
 ```
 
@@ -49,10 +57,18 @@ struct FixAccumulator {
 
 - `new()` - Initialize empty accumulator
 - `update(&mut self, sentence: &str) -> bool` - Accept any NMEA sentence in any order
-- `is_complete(&self) -> bool` - Check if minimum required fields are present
-- `build(&self) -> Option<GpsPoint>` - Produce complete GpsPoint
-- `reset(&mut self)` - Clear state for new second
-- `is_new_second(&self, timestamp: u64) -> bool` - Detect timestamp change
+- `should_emit(&mut self) -> bool` - Check if timestamp changed, updates last_emitted
+- `build(&self) -> Option<(GpsPoint, FixQuality)>` - Produce fix with quality indicator
+- `reset(&mut self)` - Clear state after emission (only when emitting)
+
+### Completeness Criteria
+
+A fix is complete when it has:
+- `has_fix == true`
+- Valid latitude and longitude
+- Valid timestamp
+
+Quality tier determined by which fields are present.
 
 ### Data Sources
 
@@ -62,74 +78,84 @@ struct FixAccumulator {
 | GGA | lat/lon, HDOP, fix quality |
 | GSA | HDOP |
 
-### Completeness Criteria
-
-A fix is complete when it has:
-- `has_fix == true`
-- Valid latitude and longitude
-- Valid timestamp
-
 ### Robustness Guarantees
 
 - **Order-independent:** Accepts sentences in any sequence
-- **Partial data OK:** RMC-only or GGA-only produces valid fix
+- **Partial data OK:** RMC-only or GGA-only produces valid fix (with appropriate quality tag)
 - **Missing sentences tolerated:** Works even if GSA is skipped
-- **HDOP optional:** Uses default (999) if not provided
+- **Split bursts handled:** Accumulates across multiple reads if UART fragments burst
+- **No dangerous defaults:** Missing fields remain None, letting estimation layer decide fallback
 
 ## Main Loop Integration
 
+**Critical:** No artificial timer. GPS timestamp change drives emission.
+
 ```rust
 let mut fix_accumulator = FixAccumulator::new();
-let mut last_emitted_timestamp: Option<u64> = None;
 
 loop {
-    // Stage 1: Accumulate all sentences in burst
-    loop {
-        match read_nmea_sentence_async(&mut uart, &mut line_buf).await {
-            Ok(Some(sentence)) => {
-                fix_accumulator.update(sentence);
-                line_buf.reset();
-            }
-            Ok(None) => break, // FIFO empty, burst complete
-            Err(e) => { /* handle error */ break; }
-        }
-    }
+    match read_nmea_sentence_async(&mut uart, &mut line_buf).await {
+        Ok(Some(sentence)) => {
+            fix_accumulator.update(sentence);
+            line_buf.reset();
 
-    // Stage 2: Process once per second (tick-driven)
-    if let Some(timestamp) = fix_accumulator.timestamp {
-        if last_emitted_timestamp != Some(timestamp) {
-            if let Some(gps) = fix_accumulator.build() {
-                // ONE process_gps() call per second
-                if let Some(arrival) = state.process_gps(&gps) {
-                    // emit arrival
+            // Timestamp change is the ONLY trigger
+            if fix_accumulator.should_emit() {
+                if let Some((gps, quality)) = fix_accumulator.build() {
+                    // Exactly ONE process_gps() call per GPS second
+                    if let Some(arrival) = state.process_gps(&gps) {
+                        emit_arrival_event(&mut uart, &arrival).await;
+                    }
                 }
+                // Only reset after emission, preserving partial data
+                fix_accumulator.reset();
             }
-            last_emitted_timestamp = Some(timestamp);
+        }
+        Ok(None) => {
+            // UART idle - wait for next sentence
+            // DO NOT process or reset - accumulator preserves state
+            continue;
+        }
+        Err(e) => {
+            // Handle error - accumulator preserves state
+            handle_uart_error(e);
         }
     }
 
-    fix_accumulator.reset();
-    Timer::after(Duration::from_secs(1)).await;
+    // Persist state (rate-limited, unrelated to GPS timing)
+    if should_persist(&state) {
+        persist_state(&mut flash, &state).await;
+    }
 }
 ```
+
+**Key changes:**
+- Removed `Timer::after(1s)` - GPS time is authoritative
+- Removed two-stage "drain then process" pattern
+- Emission happens immediately on timestamp change
+- Reset only when emitting, preserving partial burst data
+- No reliance on "FIFO empty = burst complete"
 
 ## Edge Case Handling
 
 | Scenario | Behavior |
 |----------|----------|
-| GPS outage (no sentences) | timestamp is None, no processing, counter resets |
-| Only GGA arrives | Builds valid fix (position + HDOP), heading/speed default |
-| Only RMC arrives | Builds valid fix (position + speed + heading), HDOP defaults |
+| GPS outage (no sentences) | `should_emit()` false, no processing, state preserved |
+| Only GGA arrives | Builds `PositionOnly` fix, speed/heading are None |
+| Only RMC arrives | Builds `MotionOnly` fix, HDOP is None |
 | Checksum failures | Sentence rejected, accumulator unchanged |
-| Same timestamp (burst) | `is_new_second()` false, skips until next second |
+| Same timestamp (burst) | `should_emit()` false, continues accumulating |
 | Timestamp rollover (midnight) | `Option<u64>` comparison handles None → Some transition |
-| All sentences missing | `is_complete()` false, no processing this cycle |
+| Split burst across reads | Accumulator preserves partial data until complete |
+| Timestamp jump (lost second) | Emits once for new timestamp, Kalman/DR handle Δt |
+| All sentences missing | `build()` returns None, no processing |
 
-### Default Values for Missing Fields
+### Data Quality Handling
 
-- `speed`: 0 cm/s
-- `heading`: i16::MIN (sentinel, handled by downstream logic)
-- `hdop`: 999 (worst quality)
+Missing fields remain `None` - estimation layer decides fallback:
+- `speed: None` - Kalman uses last valid velocity or DR
+- `heading: None` - Map matching uses relaxed heading constraint
+- `hdop: None` - Detection uses worst-case probability weights
 
 ## Testing Strategy
 
@@ -139,6 +165,33 @@ loop {
 - Missing sentences
 - Checksum failures
 - Timestamp rollover
+- `should_emit()` behavior with same/different timestamps
+- `build()` returns appropriate `FixQuality` tag
+
+### Critical Integration Tests
+
+**Split burst test:**
+```
+read1: RMC at 12:00:01
+read2: (delay, UART idle)
+read3: GGA at 12:00:01
+read4: GSA at 12:00:01
+read5: RMC at 12:00:02  → triggers emission of 12:00:01 fix
+```
+Verify: exactly ONE tick for 12:00:01, not partial emissions
+
+**Timestamp jump test:**
+```
+12:00:01 → emit
+12:00:03 → emit (12:00:02 was lost)
+```
+Verify: exactly one tick per received timestamp, Kalman Δt handles jump
+
+**Burst ordering test:**
+```
+GGA → RMC → GSA (out of order)
+```
+Verify: accumulator handles correctly, produces Full quality fix
 
 ### Integration Tests
 - Real NMEA bursts from test data (`tpF805_normal_nmea.txt`)
@@ -152,29 +205,45 @@ loop {
 
 ## Files to Modify
 
-1. **`crates/pipeline/gps_processor/src/nmea.rs`**
+1. **`crates/shared/src/types.rs`** (or where `GpsPoint` is defined)
+   - Change `speed`, `heading`, `hdop` to `Option<T>` types
+   - Add `FixQuality` enum
+
+2. **`crates/pipeline/gps_processor/src/nmea.rs`**
    - Add `FixAccumulator` struct and implementation
-   - Add accumulation mode methods
+   - Add `FixQuality` enum
+   - Modify existing code to handle optional fields
 
-2. **`crates/pico2-firmware/src/main.rs`**
+3. **`crates/pico2-firmware/src/main.rs`**
+   - Remove `Timer::after(1s)` 
    - Replace direct `parse_sentence()` → `process_gps()` flow
-   - Add accumulator and timestamp tracking
-   - Implement two-stage (accumulate → tick) loop
+   - Add `FixAccumulator` with event-driven emission
+   - Remove two-stage "drain FIFO" loop
 
-3. **Tests**
+4. **`crates/pipeline/gps_processor/src/kalman.rs`** and **`detection/`**
+   - Update to handle `Option<T>` fields in `GpsPoint`
+   - Provide appropriate fallbacks for missing data
+
+5. **Tests**
    - Add accumulator unit tests in `nmea.rs`
-   - Add integration test using existing NMEA test data
+   - Add split burst integration test
+   - Add timestamp jump integration test
+   - Update existing tests for `Option<T>` fields
 
 ## Impact
 
-- **Correct Δt = 1s:** Kalman + DR + FSM obey spec
-- **Accurate dwell_time:** Increments once per second
-- **No duplicate events:** FSM runs once per tick
-- **Reduced compute:** Pipeline runs once per second instead of 2-3x
-- **Better data quality:** Combines RMC (motion) + GGA (accuracy) for superior Kalman input
+- **Correct Δt = 1s:** GPS timestamp is authoritative, no timer drift
+- **Accurate dwell_time:** Increments once per GPS second
+- **No duplicate events:** FSM runs exactly once per timestamp
+- **Reduced compute:** Pipeline runs once per second, not 2-3x
+- **Better data quality:** Combines RMC + GGA for superior Kalman input
+- **Explicit quality tiers:** Downstream code knows data completeness
+- **Handles split bursts:** Accumulates across UART read boundaries
+- **No dangerous defaults:** Missing fields are explicit, not synthetic
 
 ## Scope
 
-- ~200 lines new code
-- Minimal refactoring
-- Isolated change, low risk
+- ~300 lines new code
+- Moderate refactoring (GpsPoint field changes affect Kalman, detection)
+- Well-bounded change with clear contract (FixQuality enum)
+- Requires updating estimation fallback logic for Option fields
