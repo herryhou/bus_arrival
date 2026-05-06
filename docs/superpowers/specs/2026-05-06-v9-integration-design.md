@@ -79,15 +79,24 @@ Complete the v9.0 integration by:
 
 Two distinct recovery paths with different semantics:
 
+**Recovery Path Matrix:**
+
+| Trigger | Mode | Function | Search Direction | Called From |
+|---------|------|----------|------------------|-------------|
+| Timeout (>30s off-route) | Recovering | `recovery::recover(RecoveryInput)` | Bidirectional ±10 stops | `SystemState::attempt_recovery()` |
+| GPS jump (sudden large displacement) | Normal | `detection::recovery::find_stop_index()` | Bidirectional, all stops | `SystemState::tick()` after jump detected |
+| Off-route snap (re-entry with snap=true) | Normal → Normal | `find_forward_closest_stop_index()` | Forward-only from last_idx | `SystemState::tick()` when snap detected |
+| Re-acquisition (after OffRoute without snap) | Normal | `detection::recovery::find_stop_index()` | Bidirectional ±10 stops | `SystemState::tick()` when `needs_recovery_on_reacquisition` set |
+
 **1. Timeout Recovery (OffRoute → Recovering mode):**
 - Triggered: Lost for >30 seconds
 - Function: `recovery::recover(RecoveryInput)`
 - Semantics: Fallback best-effort search
 - Search: Bidirectional ±10 stops from hint
 
-**2. Reactive Recovery (GPS jump / snap):**
+**2. Reactive Recovery (GPS jump / snap / re-acquisition):**
 - Triggered: Sudden position jump or off-route re-entry
-- Function: Direct call to `detection::recovery::find_stop_index()`
+- Function: Direct call to `detection::recovery::find_stop_index()` or forward search
 - Semantics: Fast reactive fix with fresh GPS
 - Search: Jump = bidirectional, Snap = forward-only
 
@@ -145,10 +154,16 @@ pub struct SystemState<'a> {
     // === NEW: GPS jump recovery tracking ===
     last_valid_s_cm: DistCm,
     last_gps_timestamp: u64,
+    needs_recovery_on_reacquisition: bool,
 
     // === NEW: Snap cooldown ===
     just_snapped_ticks: u8,
 }
+```
+
+**Memory constraint (compile-time verified):**
+```rust
+const _: () = assert!(size_of::<SystemState>() <= 4096, "SystemState exceeds 4KB SRAM budget");
 ```
 
 **New methods to implement:**
@@ -175,6 +190,33 @@ pub fn current_stop_index(&self) -> Option<u8>
 fn run_detection(&mut self, est: &EstimationOutput, s_cm: DistCm, timestamp: u64) -> Option<ArrivalEvent>
 ```
 
+**`run_detection()` implementation steps:**
+
+1. Find active stops via `detection::find_active_stops(signals, route_data)`
+2. For each active stop:
+   - Get stop and stop_state
+   - Get next_stop for adaptive weights
+   - Compute probability via `compute_arrival_probability_adaptive()`
+   - Update FSM via `stop_state.update()` → `StopEvent`
+   - Check `should_announce()` → return `ArrivalEvent::Announce` if true
+   - Return `ArrivalEvent::Arrived` or `ArrivalEvent::Departure` if event
+3. Return `None` if no events
+
+**Async persistence interface:**
+
+```rust
+/// Return value from tick() - separates sync logic from async persistence
+pub struct TickResult {
+    /// Arrival/departure/announce event if any
+    pub event: Option<ArrivalEvent>,
+    /// Persist request if stop index changed and rate limit allows
+    pub persist_request: Option<shared::PersistedState>,
+}
+
+/// Main tick function - returns TickResult for async handling in main()
+pub fn tick(&mut self, gps: &GpsPoint, est_state: &mut EstimationState) -> TickResult
+```
+
 ## Data Flow
 
 **Per GPS tick:**
@@ -182,7 +224,7 @@ fn run_detection(&mut self, est: &EstimationOutput, s_cm: DistCm, timestamp: u64
 ```
 1. main() receives NMEA
    └─> Accumulate → GpsPoint
-       └─> SystemState::tick(gps, &mut EstimationState)
+       └─> SystemState::tick(gps, &mut EstimationState) → TickResult
 
 2. SystemState::tick():
    ├─> Estimation.estimate() → EstimationOutput
@@ -194,10 +236,14 @@ fn run_detection(&mut self, est: &EstimationOutput, s_cm: DistCm, timestamp: u64
    │   ├─> Check GPS jump → find_stop_index() if needed
    │   ├─> Check snap → forward_closest_stop() if needed
    │   └─> run_detection() → FSM → ArrivalEvent
-   └─> Return Option<ArrivalEvent>
+   ├─> Check persistence → build PersistedState if needed
+   └─> Return TickResult { event, persist_request }
 
-3. main() emits ArrivalEvent via UART
-4. main() persists state if needed
+3. main() handles TickResult:
+   ├─> If event: uart::write_arrival_event_async(event)
+   └─> If persist_request: persist::save(persist_request).await
+
+4. main() calls mark_persisted() after successful save
 ```
 
 **Invariants:**
@@ -210,11 +256,13 @@ fn run_detection(&mut self, est: &EstimationOutput, s_cm: DistCm, timestamp: u64
 
 ### Phase 1: Prepare SystemState
 
-1. Add new fields to `SystemState`
+1. Add new fields to `SystemState` (stop_states, warmup counters, recovery tracking, needs_recovery_on_reacquisition)
 2. Implement helper methods (warmup, stop search, persistence)
-3. Implement `run_detection()` with full FSM logic
+3. Implement `run_detection()` with full FSM logic (5-step process documented above)
 4. Integrate GPS jump and snap handling into `tick()`
 5. Add `first_fix` handling and persisted state application
+6. Change `tick()` return type to `TickResult` for async persistence
+7. Add compile-time size check: `assert!(size_of::<SystemState>() <= 4096)`
 
 ### Phase 2: Port and Extend Tests
 
@@ -229,10 +277,22 @@ fn run_detection(&mut self, est: &EstimationOutput, s_cm: DistCm, timestamp: u64
 ### Phase 3: Switch and Delete
 
 1. Update `main.rs` to use `SystemState` + `EstimationState`
-2. Update `lib.rs` re-exports
-3. Delete `state.rs` entirely
-4. Run full test suite
-5. Flash and test on hardware
+2. Update main loop to handle `TickResult`:
+   ```rust
+   let result = control.tick(&gps, &mut est_state);
+   if let Some(event) = result.event {
+       uart::write_arrival_event_async(&mut uart, &event).await;
+   }
+   if let Some(ps) = result.persist_request {
+       persist::save(&mut flash, &ps).await;
+       control.mark_persisted(ps.last_stop_index);
+   }
+   ```
+3. Update `lib.rs` re-exports (remove state::State)
+4. Delete `state.rs` entirely
+5. Run full test suite
+6. Verify memory usage with `cargo size --bin pico2-firmware`
+7. Flash and test on hardware
 
 ### Phase 4: Cleanup
 
@@ -283,24 +343,58 @@ cargo test
 # Trace validation
 cargo run --bin trace_validator
 
+# Generate golden files for regression testing
+make golden
+
 # Hardware test
 elf2flash && flash && monitor
 ```
+
+### Golden File Generation
+
+Add to `Makefile`:
+
+```makefile
+# Generate golden trace files for regression testing
+golden:
+	@echo "Generating golden traces..."
+	cargo run --bin trace_validator -- --generate-golden
+	@echo "Golden files updated in test_data/golden/"
+```
+
+This target:
+- Runs the firmware on test NMEA files
+- Captures output trace.jsonl
+- Saves to `test_data/golden/` for regression comparison
 
 ## Risk Mitigation
 
 | Risk | Mitigation |
 |------|------------|
-| Breaking working detection | Comprehensive test coverage before deletion |
-| Missing edge cases | Port ALL existing tests, add architecture tests |
-| Memory regression | SRAM budget verification in tests |
+| Breaking working detection | Port ALL existing tests before deleting state::State |
+| Missing edge cases | Add architecture tests for isolation/determinism |
+| Memory regression | Compile-time `assert!(size_of::<SystemState>() <= 4096)`, verify with `cargo size` |
+| Async persistence mismatch | `TickResult` struct separates sync logic from async save |
 | Hardware bugs | Real-world testing after host tests pass |
+| Persistence after reboot | Test power cycle recovery explicitly |
 
 ## Success Criteria
 
+**Functional:**
 1. All existing tests pass with `SystemState`
-2. New architecture tests pass
-3. Trace validation matches reference
+2. New architecture tests pass (isolation, determinism, single transition)
+3. Trace validation matches reference (golden file comparison)
 4. Hardware testing produces correct arrivals
-5. `state::State` is deleted
-6. Tech report accurately describes implementation
+5. Persistence works after reboot (state survives power cycle)
+6. `state::State` is deleted
+7. Tech report accurately describes implementation
+
+**Performance:**
+8. Memory usage ≤ current (verify with `cargo size --bin pico2-firmware`)
+9. No performance regression (CPU < 8% @ 150MHz, 1Hz GPS)
+10. Compile-time size check passes (`assert!(size_of::<SystemState>() <= 4096)`)
+
+**Compatibility:**
+11. Backward compatible with existing `route_data.bin` format
+12. No changes to NMEA input format
+13. No changes to UART arrival event output format
