@@ -25,10 +25,10 @@ fn test_pipeline_with_route_data() {
 
     // Initialize pipeline state
     use shared::{KalmanState, DrState};
-    use gps_processor::nmea::NmeaState;
+    use gps_processor::FixAccumulator;
     use detection::state_machine::StopState;
 
-    let mut nmea = NmeaState::new();
+    let mut nmea_acc = FixAccumulator::new();
     let _kalman = KalmanState::new();
     let _dr = DrState::new();
 
@@ -44,9 +44,13 @@ fn test_pipeline_with_route_data() {
     // Process NMEA sentences
     for line in reader.lines() {
         let line = line.expect("Failed to read line");
-        if let Some(_gps) = nmea.parse_sentence(&line) {
-            // TODO: Complete pipeline processing
-            // For now, just verify we can parse
+        if nmea_acc.update(&line) {
+            if nmea_acc.should_emit() {
+                if let Some((_gps, _fix_quality)) = nmea_acc.build() {
+                    // TODO: Complete pipeline processing
+                    // For now, just verify we can parse
+                }
+            }
         }
     }
 

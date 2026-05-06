@@ -139,9 +139,9 @@ fn test_snap_prevents_h1_recovery() {
         timestamp: 1000,
         lat: 20.0,
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
     let result = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
@@ -152,9 +152,9 @@ fn test_snap_prevents_h1_recovery() {
         timestamp: 1001,
         lat: 20.0,  // Still at origin lat/lon - map matching will project to route
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
     // Actually, let me use a different approach - simulate movement by relying on
@@ -175,9 +175,9 @@ fn test_snap_prevents_h1_recovery() {
             timestamp: 1000 + i,
             lat: 20.0005, // ~60m north of route
             lon: 120.0,
-            heading_cdeg: 9000,
-            speed_cms: 500,
-            hdop_x10: 10,
+            heading_cdeg: Some(9000),
+            speed_cms: Some(500),
+            hdop_x10: Some(10),
             has_fix: true,
         };
         let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
@@ -195,9 +195,9 @@ fn test_snap_prevents_h1_recovery() {
         timestamp: 1007,
         lat: 20.0, // Back on route
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -211,9 +211,9 @@ fn test_snap_prevents_h1_recovery() {
         timestamp: 1008,
         lat: 20.0, // Still on route
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -251,9 +251,9 @@ fn test_snap_prevents_reacquisition_recovery() {
         timestamp: 1000,
         lat: 20.0,
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
     let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
@@ -264,9 +264,9 @@ fn test_snap_prevents_reacquisition_recovery() {
             timestamp: 1000 + i,
             lat: 20.0005, // ~60m north of route
             lon: 120.0,
-            heading_cdeg: 9000,
-            speed_cms: 500,
-            hdop_x10: 10,
+            heading_cdeg: Some(9000),
+            speed_cms: Some(500),
+            hdop_x10: Some(10),
             has_fix: true,
         };
         let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
@@ -280,9 +280,9 @@ fn test_snap_prevents_reacquisition_recovery() {
         timestamp: 1006,
         lat: 20.0, // Back on route
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -296,9 +296,9 @@ fn test_snap_prevents_reacquisition_recovery() {
         timestamp: 1007,
         lat: 20.0, // Still on route
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -331,9 +331,9 @@ fn test_forward_stop_selection_at_boundary() {
         timestamp: 1000,
         lat: 20.0,
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
     let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
@@ -344,9 +344,9 @@ fn test_forward_stop_selection_at_boundary() {
             timestamp: 1000 + i,
             lat: 20.0005, // ~60m north of route
             lon: 120.0,
-            heading_cdeg: 9000,
-            speed_cms: 500,
-            hdop_x10: 10,
+            heading_cdeg: Some(9000),
+            speed_cms: Some(500),
+            hdop_x10: Some(10),
             has_fix: true,
         };
         let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
@@ -357,9 +357,9 @@ fn test_forward_stop_selection_at_boundary() {
         timestamp: 1006,
         lat: 20.0, // Back on route
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -373,9 +373,9 @@ fn test_forward_stop_selection_at_boundary() {
         timestamp: 1007,
         lat: 20.0, // Still on route
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -407,9 +407,9 @@ fn test_snap_cooldown_expires() {
         timestamp: 1000,
         lat: 20.0,
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
     let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
@@ -419,9 +419,9 @@ fn test_snap_cooldown_expires() {
         timestamp: 1001,
         lat: 20.00015,
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
     let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
@@ -432,9 +432,9 @@ fn test_snap_cooldown_expires() {
             timestamp: 1000 + i,
             lat: 20.0015,
             lon: 120.0015,
-            heading_cdeg: 9000,
-            speed_cms: 500,
-            hdop_x10: 10,
+            heading_cdeg: Some(9000),
+            speed_cms: Some(500),
+            hdop_x10: Some(10),
             has_fix: true,
         };
         let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
@@ -445,9 +445,9 @@ fn test_snap_cooldown_expires() {
         timestamp: 1007,
         lat: 20.003, // 300m
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -462,9 +462,9 @@ fn test_snap_cooldown_expires() {
         timestamp: 1008,
         lat: 20.0031, // 301m
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -479,9 +479,9 @@ fn test_snap_cooldown_expires() {
         timestamp: 1009,
         lat: 20.0032, // 302m
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -496,9 +496,9 @@ fn test_snap_cooldown_expires() {
         timestamp: 1010,
         lat: 20.0033, // 303m
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -532,9 +532,9 @@ fn test_geometry_fsm_reset() {
         timestamp: 1000,
         lat: 20.0,
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
     let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
@@ -545,9 +545,9 @@ fn test_geometry_fsm_reset() {
             timestamp: 1000 + i,
             lat: 20.0005, // ~60m north of route
             lon: 120.0,
-            heading_cdeg: 9000,
-            speed_cms: 500,
-            hdop_x10: 10,
+            heading_cdeg: Some(9000),
+            speed_cms: Some(500),
+            hdop_x10: Some(10),
             has_fix: true,
         };
         let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
@@ -558,9 +558,9 @@ fn test_geometry_fsm_reset() {
         timestamp: 1006,
         lat: 20.0, // Back on route
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -570,9 +570,9 @@ fn test_geometry_fsm_reset() {
         timestamp: 1007,
         lat: 20.0, // Still on route
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
