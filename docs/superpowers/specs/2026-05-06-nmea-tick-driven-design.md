@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-06
 **Author:** Claude Opus 4.6
-**Status:** Design (Revised v2 - Addressed critical review feedback)
+**Status:** Design (Revised v3 - Production-ready, addressed all risks)
 
 ## Problem Statement
 
@@ -57,9 +57,20 @@ enum FixQuality {
 
 - `new()` - Initialize empty accumulator
 - `update(&mut self, sentence: &str) -> bool` - Accept any NMEA sentence in any order
-- `should_emit(&mut self) -> bool` - Check if timestamp changed, updates last_emitted
+- `should_emit(&mut self) -> bool` - Check if timestamp changed (emits **previous** snapshot), updates last_emitted
 - `build(&self) -> Option<(GpsPoint, FixQuality)>` - Produce fix with quality indicator
 - `reset(&mut self)` - Clear state after emission (only when emitting)
+
+### Emission Semantics
+
+**Critical:** `should_emit()` emits the **previous** snapshot when a **new** timestamp arrives.
+
+```
+RMC(t=01) + GGA(t=01) → accumulate
+RMC(t=02) arrives → should_emit() true → emit (t=01) snapshot → reset
+```
+
+**First fix edge case:** Do NOT emit on first timestamp. Only emit after seeing second timestamp (requires `last_emitted_timestamp.is_some()`).
 
 ### Completeness Criteria
 
@@ -85,6 +96,8 @@ Quality tier determined by which fields are present.
 - **Missing sentences tolerated:** Works even if GSA is skipped
 - **Split bursts handled:** Accumulates across multiple reads if UART fragments burst
 - **No dangerous defaults:** Missing fields remain None, letting estimation layer decide fallback
+- **GPS silence behavior:** No new timestamp → no emission → system freezes (DR handles outages internally via `ProcessResult::DrOutage`)
+- **Timestamp source:** Primarily RMC; GGA provides timestamp as fallback if RMC missing
 
 ## Main Loop Integration
 
@@ -140,6 +153,7 @@ loop {
 
 | Scenario | Behavior |
 |----------|----------|
+| First fix (startup) | `should_emit()` false (no prior timestamp), accumulates until second timestamp |
 | GPS outage (no sentences) | `should_emit()` false, no processing, state preserved |
 | Only GGA arrives | Builds `PositionOnly` fix, speed/heading are None |
 | Only RMC arrives | Builds `MotionOnly` fix, HDOP is None |
@@ -149,6 +163,8 @@ loop {
 | Split burst across reads | Accumulator preserves partial data until complete |
 | Timestamp jump (lost second) | Emits once for new timestamp, Kalman/DR handle Δt |
 | All sentences missing | `build()` returns None, no processing |
+| RMC missing, GGA present | Uses GGA timestamp, emits on next timestamp change |
+| Long GPS silence | No emission, system freezes (DR handles internally) |
 
 ### Data Quality Handling
 
@@ -193,6 +209,14 @@ GGA → RMC → GSA (out of order)
 ```
 Verify: accumulator handles correctly, produces Full quality fix
 
+**RMC missing test:**
+```
+t=01: RMC + GGA → emit (t=01) on t=02
+t=02: GGA only → emit (t=02) on t=03
+t=03: RMC arrives → emit (t=03) on t=04
+```
+Verify: emits once per timestamp, no stall when RMC missing
+
 ### Integration Tests
 - Real NMEA bursts from test data (`tpF805_normal_nmea.txt`)
 - Verify `process_gps()` called exactly once per second
@@ -213,9 +237,10 @@ Verify: accumulator handles correctly, produces Full quality fix
    - Add `FixAccumulator` struct and implementation
    - Add `FixQuality` enum
    - Modify existing code to handle optional fields
+   - **Performance:** Fast path for `FixQuality::Full` (all fields Some) to minimize branching
 
 3. **`crates/pico2-firmware/src/main.rs`**
-   - Remove `Timer::after(1s)` 
+   - Remove `Timer::after(1s)`
    - Replace direct `parse_sentence()` → `process_gps()` flow
    - Add `FixAccumulator` with event-driven emission
    - Remove two-stage "drain FIFO" loop
@@ -223,11 +248,13 @@ Verify: accumulator handles correctly, produces Full quality fix
 4. **`crates/pipeline/gps_processor/src/kalman.rs`** and **`detection/`**
    - Update to handle `Option<T>` fields in `GpsPoint`
    - Provide appropriate fallbacks for missing data
+   - **Performance:** Fast path for complete fixes, fallback only when needed
 
 5. **Tests**
    - Add accumulator unit tests in `nmea.rs`
    - Add split burst integration test
    - Add timestamp jump integration test
+   - Add RMC missing test
    - Update existing tests for `Option<T>` fields
 
 ## Impact
