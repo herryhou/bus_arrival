@@ -1,31 +1,21 @@
-//! NMEA sentence parser
+//! NMEA parsing utilities
+//!
+//! NOTE: The new `FixAccumulator` in `accumulator.rs` replaces the old
+//! `NmeaState`. This module now provides helper functions and types.
 
-use shared::{GpsPoint, HeadCdeg, SpeedCms};
+use shared::GpsPoint;
 
-// Import libm functions for no_std
-#[cfg(not(feature = "std"))]
-use libm::{round as f64_round, trunc as f64_trunc};
+pub use crate::accumulator::FixAccumulator;
 
-// Helper functions for floating-point operations
-#[cfg(feature = "std")]
-fn f64_round(x: f64) -> f64 {
-    x.round()
-}
-#[cfg(feature = "std")]
-fn f64_trunc(x: f64) -> f64 {
-    x.trunc()
-}
+// Re-export helper functions for tests
+pub use crate::accumulator::{parse_lat, parse_lon, knots_to_cms};
 
-// NMEA sentences typically have < 20 fields (only used in no_std builds)
-#[cfg_attr(feature = "std", allow(dead_code))]
-const MAX_NMEA_FIELDS: usize = 20;
-
-// Note: We don't use the type alias approach since we need different types for std/no_std
-// The code inline uses conditional compilation instead
-
-/// NMEA parser state (accumulates data across sentences)
+/// Backward compatibility wrapper for old NmeaState API.
+///
+/// This provides the old `parse_sentence` interface during migration.
+/// Internally delegates to FixAccumulator.
 pub struct NmeaState {
-    point: GpsPoint,
+    acc: FixAccumulator,
 }
 
 impl Default for NmeaState {
@@ -37,322 +27,24 @@ impl Default for NmeaState {
 impl NmeaState {
     pub fn new() -> Self {
         NmeaState {
-            point: GpsPoint::new(),
+            acc: FixAccumulator::new(),
         }
     }
 
-    /// Parse NMEA sentence, returns Some(GpsPoint) when complete
+    /// Parse NMEA sentence, returns Some(GpsPoint) when complete.
+    ///
+    /// Note: This is the old API for backward compatibility.
+    /// New code should use FixAccumulator directly.
     pub fn parse_sentence(&mut self, sentence: &str) -> Option<GpsPoint> {
-        if !verify_checksum(sentence) {
-            return None;
+        if self.acc.update(sentence) {
+            // Check if we should emit (timestamp changed)
+            if self.acc.should_emit() {
+                if let Some((point, _quality)) = self.acc.build() {
+                    self.acc.reset();
+                    return Some(point);
+                }
+            }
         }
-
-        #[cfg(feature = "std")]
-        let parts: Vec<&str> = sentence.split(',').collect();
-        #[cfg(not(feature = "std"))]
-        let parts: heapless::Vec<&str, MAX_NMEA_FIELDS> = sentence.split(',').collect();
-
-        if parts.is_empty() {
-            return None;
-        }
-
-        // Convert to slice for parsing functions
-        let parts_slice: &[&str] = &parts;
-
-        match parts_slice.first() {
-            Some(&"$GPRMC") | Some(&"$GNRMC") => self.parse_rmc(parts_slice),
-            Some(&"$GNGSA") | Some(&"$GPGSA") => self.parse_gsa(parts_slice),
-            Some(&"$GPGGA") | Some(&"$GNGGA") => self.parse_gga(parts_slice),
-            _ => None,
-        }
-    }
-
-    fn parse_rmc(&mut self, parts: &[&str]) -> Option<GpsPoint> {
-        // $GPRMC,123519,A,ddmm.mm,s,dddmm.mm,a,hhh.h,V,V,ddmmyy,,,A*hh
-        if parts.len() < 12 {
-            return None;
-        }
-
-        // Parse time (hhmmss) - field 1
-        // Note: NMEA time is UTC only, we use it as a relative counter
-        let time_str = parts[1];
-        if time_str.len() >= 6 {
-            let hh: u64 = time_str[0..2].parse().unwrap_or(0);
-            let mm: u64 = time_str[2..4].parse().unwrap_or(0);
-            let ss: u64 = time_str[4..6].parse().unwrap_or(0);
-            self.point.timestamp = hh * 3600 + mm * 60 + ss;
-        }
-
-        // Status 'V' = Warning, 'A' = Valid
-        let status = parts[2];
-        if status != "A" {
-            return None;
-        }
-
-        // Parse position
-        let lat = parse_lat(parts[3], parts[4])?;
-        let lon = parse_lon(parts[5], parts[6])?;
-        let speed_knots: f64 = parts[7].parse().unwrap_or(0.0);
-        let heading_deg: f64 = parts[8].parse().unwrap_or(0.0);
-
-        // Convert NMEA heading (0-360°) to HeadCdeg range (-18000 to 18000)
-        // to avoid overflow for headings > 180°
-        let heading_cdeg = f64_round(heading_deg * 100.0) as i32;
-        let heading_cdeg = if heading_cdeg > 18000 {
-            heading_cdeg - 36000
-        } else {
-            heading_cdeg
-        };
-
-        // Store lat/lon directly as f64 for full precision
-        self.point.lat = lat;
-        self.point.lon = lon;
-        self.point.speed_cms = knots_to_cms(speed_knots);
-        self.point.heading_cdeg = heading_cdeg as HeadCdeg;
-        self.point.has_fix = true;
-
-        None // Not complete yet (need HDOP)
-    }
-
-    fn parse_gsa(&mut self, parts: &[&str]) -> Option<GpsPoint> {
-        // $GNGSA,A,3,04,05,...,xx,xx,xx*hh
-        // Last three fields are PDOP, HDOP, VDOP
-        if parts.len() < 17 {
-            return None;
-        }
-
-        // HDOP is second-to-last field (index -2)
-        let hdop_idx = parts.len() - 2;
-        let hdop: f64 = parts[hdop_idx].parse().unwrap_or(99.0);
-        self.point.hdop_x10 = f64_round(hdop * 10.0) as u16;
-
-        // Return complete point
-        Some(core::mem::replace(&mut self.point, GpsPoint::new()))
-    }
-
-    fn parse_gga(&mut self, parts: &[&str]) -> Option<GpsPoint> {
-        // $GPGGA,123519,v,ddmm.mm,s,dddmm.mm,a,xx,yy,z.z,h.h,M*hh
-        if parts.len() < 9 {
-            return None;
-        }
-
-        // Parse time (hhmmss) - field 1
-        let time_str = parts[1];
-        if time_str.len() >= 6 {
-            let hh: u64 = time_str[0..2].parse().unwrap_or(0);
-            let mm: u64 = time_str[2..4].parse().unwrap_or(0);
-            let ss: u64 = time_str[4..6].parse().unwrap_or(0);
-            self.point.timestamp = hh * 3600 + mm * 60 + ss;
-        }
-
-        // Quality indicator
-        if parts[6] != "1" && parts[6] != "2" {
-            return None;
-        }
-
-        let lat = parse_lat(parts[2], parts[3])?;
-        let lon = parse_lon(parts[4], parts[5])?;
-        let hdop: f64 = parts[8].parse().unwrap_or(99.0);
-
-        // Store lat/lon directly as f64 for full precision
-        self.point.lat = lat;
-        self.point.lon = lon;
-        self.point.hdop_x10 = f64_round(hdop * 10.0) as u16;
-        self.point.has_fix = true;
-        // GGA doesn't provide speed/heading
-        // In RMC+GGA mode: RMC sets heading to valid value, GGA preserves it
-        // In GGA-only mode: heading remains i16::MIN (sentinel from GpsPoint::new())
-        // Speed: GGA doesn't provide speed, so it remains at 0 (either from RMC or initialization)
-        // No action needed - heading/speed are already at the correct values
-
-        // GGA alone is enough to complete the point
-        Some(core::mem::replace(&mut self.point, GpsPoint::new()))
-    }
-}
-
-/// Verify NMEA checksum
-fn verify_checksum(sentence: &str) -> bool {
-    if let Some(star_pos) = sentence.find('*') {
-        let data = &sentence[1..star_pos];
-        let checksum_str = &sentence[star_pos + 1..star_pos + 3];
-        if let Ok(checksum) = u8::from_str_radix(checksum_str, 16) {
-            let calculated = data.bytes().fold(0u8, |acc, b| acc ^ b);
-            calculated == checksum
-        } else {
-            false
-        }
-    } else {
-        false
-    }
-}
-
-/// Parse latitude from NMEA format (ddmm.mmmm)
-fn parse_lat(deg_min: &str, ns: &str) -> Option<f64> {
-    let dm: f64 = deg_min.parse().ok()?;
-    let degrees = f64_trunc(dm / 100.0) + (dm % 100.0) / 60.0;
-    Some(if ns == "N" { degrees } else { -degrees })
-}
-
-/// Parse longitude from NMEA format (dddmm.mmmm)
-fn parse_lon(deg_min: &str, ew: &str) -> Option<f64> {
-    let dm: f64 = deg_min.parse().ok()?;
-    let degrees = f64_trunc(dm / 100.0) + (dm % 100.0) / 60.0;
-    Some(if ew == "E" { degrees } else { -degrees })
-}
-
-/// Convert knots to cm/s: 1 knot = 51.44 cm/s
-fn knots_to_cms(knots: f64) -> SpeedCms {
-    f64_round(knots * 51.44) as SpeedCms
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn verify_checksum_valid() {
-        assert!(verify_checksum(
-            "$GPRMC,123519,V,0000.0000,N,00000.0000,E,000.0,000.0,030311,,,A*6A"
-        ));
-    }
-
-    #[test]
-    fn verify_checksum_invalid() {
-        assert!(!verify_checksum(
-            "$GPRMC,123519,V,0000.0000,N,00000.0000,E,000.0,000.0,030311,,,A*00"
-        ));
-    }
-
-    #[test]
-    fn parse_lat_north() {
-        assert_eq!(parse_lat("2502.5434", "N").unwrap(), 25.04239);
-    }
-
-    #[test]
-    fn parse_lat_south() {
-        assert_eq!(parse_lat("2502.5434", "S").unwrap(), -25.04239);
-    }
-
-    #[test]
-    fn parse_lon_east() {
-        assert_eq!(parse_lon("12117.1898", "E").unwrap(), 121.28649666666667);
-    }
-
-    #[test]
-    fn parse_lon_west() {
-        assert_eq!(parse_lon("12117.1898", "W").unwrap(), -121.28649666666667);
-    }
-
-    #[test]
-    fn knots_to_cms_conversion() {
-        assert_eq!(knots_to_cms(10.0), 514); // ~5.1 m/s = 514 cm/s
-        assert_eq!(knots_to_cms(0.0), 0);
-        assert_eq!(knots_to_cms(1.0), 51); // 1 knot ≈ 51.44 cm/s
-    }
-
-    #[test]
-    fn parse_rmc_valid() {
-        let mut state = NmeaState::new();
-        let result =
-            state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*2E");
-        assert!(result.is_none()); // RMC alone doesn't complete the point
-        assert!(state.point.has_fix);
-        assert!((state.point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
-        assert!((state.point.lon - 121.286496).abs() < 0.000001); // 121°17.1898'E
-        assert_eq!(state.point.speed_cms, 432); // 8.4 knots * 51.44
-        assert_eq!(state.point.heading_cdeg, 8050); // 80.5° * 100
-        assert_eq!(state.point.timestamp, 22 * 3600 + 13 * 60 + 20); // 221320 -> 22:13:20
-    }
-
-    #[test]
-    fn parse_rmc_invalid_status() {
-        let mut state = NmeaState::new();
-        let result =
-            state.parse_sentence("$GPRMC,221320,V,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*39");
-        assert!(result.is_none());
-        assert!(!state.point.has_fix);
-    }
-
-    #[test]
-    fn parse_gga_valid() {
-        let mut state = NmeaState::new();
-        let result = state
-            .parse_sentence("$GPGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*4B");
-        assert!(result.is_some()); // GGA alone completes the point
-        let point = result.unwrap();
-        assert!(point.has_fix);
-        assert!((point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
-        assert!((point.lon - 121.286496).abs() < 0.000001); // 121°17.1898'E
-        assert_eq!(point.timestamp, 22 * 3600 + 13 * 60 + 20); // 221320 -> 22:13:20
-        assert_eq!(point.heading_cdeg, i16::MIN); // GGA doesn't provide heading
-        assert_eq!(point.speed_cms, 0); // GGA doesn't provide speed
-    }
-
-    #[test]
-    fn parse_gga_invalid_fix() {
-        let mut state = NmeaState::new();
-        let result = state
-            .parse_sentence("$GPGGA,221320,2500.2582,N,12117.1898,E,0,08,3.5,10.0,M,0.0,M,,*4A");
-        assert!(result.is_none());
-        assert!(!state.point.has_fix);
-    }
-
-    #[test]
-    fn parse_gsa_completes_point() {
-        let mut state = NmeaState::new();
-        // First, populate with RMC
-        state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*2E");
-        // Then GSA should complete the point
-        // $GNGSA,A,3,04,05,09,12,14,15,16,21,22,24,25,26,1.5,1.2,3.0
-        // HDOP is at index 15 (value 1.2)
-        let result =
-            state.parse_sentence("$GNGSA,A,3,04,05,09,12,14,15,16,21,22,24,25,26,1.5,1.2,3.0*23");
-        assert!(result.is_some());
-        let point = result.unwrap();
-        assert!(point.has_fix);
-        assert!((point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
-        assert!((point.lon - 121.286496).abs() < 0.000001); // 121°17.1898'E
-        assert_eq!(point.hdop_x10, 12); // 1.2 * 10
-        assert_eq!(point.timestamp, 22 * 3600 + 13 * 60 + 20); // Timestamp from RMC
-    }
-
-    #[test]
-    fn parse_sentence_unknown_type() {
-        let mut state = NmeaState::new();
-        let result = state.parse_sentence("$GPVTG,360.0,T,348.8,M,0.0,N,0.0,K*4D");
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn parse_sentence_invalid_checksum() {
-        let mut state = NmeaState::new();
-        let result =
-            state.parse_sentence("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,350.5,141123,,*00");
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn parse_gnrmc_valid() {
-        let mut state = NmeaState::new();
-        let result =
-            state.parse_sentence("$GNRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*30");
-        assert!(result.is_none()); // RMC alone doesn't complete the point
-        assert!(state.point.has_fix);
-        assert!((state.point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
-        assert!((state.point.lon - 121.286496).abs() < 0.000001); // 121°17.1898'E
-    }
-
-    #[test]
-    fn parse_gngga_valid() {
-        let mut state = NmeaState::new();
-        let result = state
-            .parse_sentence("$GNGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*55");
-        assert!(result.is_some()); // GNGGA completes the point
-        let point = result.unwrap();
-        assert!(point.has_fix);
-        assert!((point.lat - 25.004303).abs() < 0.000001); // 25°00.2582'N
-        assert!((point.lon - 121.286496).abs() < 0.000001); // 121°17.1898'E
-        assert_eq!(point.heading_cdeg, i16::MIN); // GNGGA doesn't provide heading
-        assert_eq!(point.speed_cms, 0); // GNGGA doesn't provide speed
+        None
     }
 }

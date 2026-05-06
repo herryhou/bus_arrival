@@ -232,7 +232,7 @@ fn verify_checksum(sentence: &str) -> bool {
     false
 }
 
-fn parse_lat(deg_min: &str, ns: &str) -> Option<f64> {
+pub fn parse_lat(deg_min: &str, ns: &str) -> Option<f64> {
     let dm: f64 = deg_min.parse().ok()?;
     #[cfg(feature = "std")]
     let degrees = dm.trunc() + (dm % 100.0) / 60.0;
@@ -241,7 +241,7 @@ fn parse_lat(deg_min: &str, ns: &str) -> Option<f64> {
     Some(if ns == "N" { degrees } else { -degrees })
 }
 
-fn parse_lon(deg_min: &str, ew: &str) -> Option<f64> {
+pub fn parse_lon(deg_min: &str, ew: &str) -> Option<f64> {
     let dm: f64 = deg_min.parse().ok()?;
     #[cfg(feature = "std")]
     let degrees = dm.trunc() + (dm % 100.0) / 60.0;
@@ -250,7 +250,7 @@ fn parse_lon(deg_min: &str, ew: &str) -> Option<f64> {
     Some(if ew == "E" { degrees } else { -degrees })
 }
 
-fn knots_to_cms(knots: f64) -> SpeedCms {
+pub fn knots_to_cms(knots: f64) -> SpeedCms {
     (knots * 51.44) as SpeedCms
 }
 

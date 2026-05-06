@@ -14,4 +14,5 @@ pub mod output;
 
 // Re-export commonly used types
 pub use kalman::{process_gps_update, ProcessResult, SIGMA_GPS_CM, V_MAX_CMS};
-pub use nmea::NmeaState;
+pub use accumulator::FixAccumulator;
+pub use accumulator::FixAccumulator as NmeaState; // Backward compatibility
