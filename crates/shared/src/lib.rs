@@ -189,9 +189,9 @@ pub struct GpsPoint {
     pub timestamp: u64, // seconds since epoch
     pub lat: f64, // Latitude in degrees (full precision)
     pub lon: f64, // Longitude in degrees (full precision)
-    pub heading_cdeg: HeadCdeg, // Heading in 0.01° units
-    pub speed_cms: SpeedCms, // Speed in cm/s
-    pub hdop_x10: u16, // HDOP * 10 (e.g., 15 = 1.5)
+    pub heading_cdeg: Option<HeadCdeg>, // Heading in 0.01° units
+    pub speed_cms: Option<SpeedCms>, // Speed in cm/s
+    pub hdop_x10: Option<u16>, // HDOP * 10 (e.g., 15 = 1.5)
     pub has_fix: bool,
 }
 
@@ -207,9 +207,9 @@ impl GpsPoint {
             timestamp: 0,
             lat: 0.0,
             lon: 0.0,
-            heading_cdeg: i16::MIN, // Sentinel value for "heading not available"
-            speed_cms: 0,
-            hdop_x10: 0,
+            heading_cdeg: None, // Heading not available
+            speed_cms: None, // Speed not available
+            hdop_x10: None, // HDOP not available
             has_fix: false,
         }
     }
