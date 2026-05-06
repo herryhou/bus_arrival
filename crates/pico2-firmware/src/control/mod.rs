@@ -43,6 +43,8 @@ pub struct SystemState<'a> {
     pub last_s_cm: DistCm,
     /// Counter for backward jump events (GPS health monitoring)
     pub backward_jump_count: u32,
+    /// Whether we've received the first valid GPS fix (for cold-start initialization)
+    has_received_first_fix: bool,
 }
 
 impl<'a> SystemState<'a> {
@@ -62,6 +64,7 @@ impl<'a> SystemState<'a> {
             ticks_since_persist: 0,
             last_s_cm: 0,
             backward_jump_count: 0,
+            has_received_first_fix: false,
         }
     }
 
@@ -201,7 +204,7 @@ impl<'a> SystemState<'a> {
         let input = EstimationInput {
             gps: gps.clone(),
             route_data: self.route_data,
-            is_first_fix: false,  // TODO: track first fix
+            is_first_fix: !self.has_received_first_fix,
         };
         let est = crate::estimation::estimate(input, est_state);
 
@@ -209,6 +212,11 @@ impl<'a> SystemState<'a> {
         if !est.has_fix {
             // TODO: handle outage
             return None;
+        }
+
+        // Mark first fix as received after successful GPS fix
+        if est.has_fix {
+            self.has_received_first_fix = true;
         }
 
         // STEP 1.5: Enforce monotonic invariant
