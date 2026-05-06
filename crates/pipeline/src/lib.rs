@@ -41,7 +41,6 @@ use std::path::Path;
 use std::io::BufRead;
 
 // Re-export from sub-crates
-pub use gps_processor::nmea::NmeaState;
 pub use detection::state_machine::{StopState, StopEvent};
 
 
@@ -146,8 +145,6 @@ pub struct Pipeline;
 
 /// Localization state (Phase 2: GPS processing)
 pub struct LocalizationState<'a> {
-    /// NMEA parser
-    pub nmea: NmeaState,
     /// Kalman filter state
     kalman: KalmanState,
     /// Dead-reckoning state
@@ -161,7 +158,6 @@ pub struct LocalizationState<'a> {
 impl<'a> LocalizationState<'a> {
     pub fn new(_route_data: &RouteData) -> Self {
         Self {
-            nmea: NmeaState::new(),
             kalman: KalmanState::new(),
             dr: DrState::new(),
             route_data: std::marker::PhantomData,
@@ -187,14 +183,14 @@ impl<'a> LocalizationState<'a> {
             gps_processor::kalman::ProcessResult::Valid { signals, v_cms, seg_idx, snapped: _ } => {
                 let shared::PositionSignals { z_gps_cm, s_cm } = signals;
                 let divergence_cm = z_gps_cm - s_cm;
-                let hdop = if gps.hdop_x10 > 0 { Some(gps.hdop_x10 as f32 / 10.0) } else { None };
+                let hdop = gps.hdop_x10.filter(|&v| v > 0).map(|v| v as f32 / 10.0);
                 Some(gps::GpsRecord::new(
                     gps.timestamp,
                     gps.lat,
                     gps.lon,
                     s_cm,
                     v_cms,
-                    Some(gps.heading_cdeg),
+                    gps.heading_cdeg,
                     "valid",
                 ).with_diagnostics(
                     Some(seg_idx as u16),
@@ -213,7 +209,7 @@ impl<'a> LocalizationState<'a> {
                     gps.lon,
                     s_cm,
                     v_cms,
-                    Some(gps.heading_cdeg),  // CRITICAL: Preserve heading even in DR mode
+                    gps.heading_cdeg,  // CRITICAL: Preserve heading even in DR mode
                     "dr_outage",
                 ).with_diagnostics(
                     None,
@@ -524,19 +520,28 @@ impl Pipeline {
         // Initialize detection state
         let mut det_state = DetectionState::new(route_data);
 
+        // Initialize NMEA accumulator
+        let mut nmea_acc = gps_processor::FixAccumulator::new();
+
         // Process NMEA sentences
         for line in reader.lines() {
             let line = line.map_err(PipelineError::IoError)?;
 
-            if let Some(gps) = loc_state.nmea.parse_sentence(&line) {
-                // Phase 2: Localization (Kalman + Map Matching)
-                if let Some(gps_record) = loc_state.process_gps(&gps, route_data) {
-                    // Phase 3: Arrival Detection
-                    det_state.process_gps_record(&gps_record, route_data, &mut result);
+            // Update accumulator with NMEA sentence
+            if nmea_acc.update(&line) {
+                // Check if we have a complete fix
+                if nmea_acc.should_emit() {
+                    if let Some((gps, _fix_quality)) = nmea_acc.build() {
+                        // Phase 2: Localization (Kalman + Map Matching)
+                        if let Some(gps_record) = loc_state.process_gps(&gps, route_data) {
+                            // Phase 3: Arrival Detection
+                            det_state.process_gps_record(&gps_record, route_data, &mut result);
 
-                    // Add trace record (after detection so we have stop states)
-                    #[cfg(feature = "std")]
-                    result.add_trace_record(&gps_record, &det_state, route_data);
+                            // Add trace record (after detection so we have stop states)
+                            #[cfg(feature = "std")]
+                            result.add_trace_record(&gps_record, &det_state, route_data);
+                        }
+                    }
                 }
             }
         }
