@@ -169,6 +169,18 @@ pub struct GridOrigin {
     pub y0_cm: DistCm,
 }
 
+/// Quality level of a GPS fix based on which NMEA sentences contributed data.
+///
+/// - Full: RMC + GGA/GSA - has position, motion, and quality metrics
+/// - PositionOnly: GGA only - has position and quality, no motion data
+/// - MotionOnly: RMC only - has position and motion, no quality metrics
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixQuality {
+    Full,
+    PositionOnly,
+    MotionOnly,
+}
+
 /// Parsed GPS data from NMEA sentences.
 /// lat/lon use f64 for full precision (map matching requires ~1m accuracy).
 /// Other fields use integer types for no-FPU compatibility.
