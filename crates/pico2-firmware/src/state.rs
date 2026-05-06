@@ -72,7 +72,6 @@ const WARMUP_TIMEOUT_TICKS: u8 = 10;
 /// Dead-reckoning outages ([`ProcessResult::DrOutage`]) do NOT reset counters
 /// because DR mode maintains valid state estimates.
 pub struct State<'a> {
-    // pub nmea: gps_processor::nmea::NmeaState,  // TODO: Remove NmeaState field (task #7)
     pub kalman: KalmanState,
     pub dr: DrState,
     pub stop_states: heapless::Vec<detection::state_machine::StopState, 256>,
@@ -116,7 +115,6 @@ pub struct State<'a> {
 impl<'a> State<'a> {
     pub fn new(route_data: &'a RouteData<'a>, persisted: Option<shared::PersistedState>) -> Self {
         use detection::state_machine::StopState;
-        // use gps_processor::nmea::NmeaState;  // TODO: Remove NmeaState (task #7)
 
         let stop_count = route_data.stop_count;
         let mut stop_states = heapless::Vec::new();
@@ -129,7 +127,6 @@ impl<'a> State<'a> {
         }
 
         Self {
-            // nmea: NmeaState::new(),  // TODO: Remove NmeaState (task #7)
             kalman: KalmanState::new(),
             dr: DrState::new(),
             stop_states,
