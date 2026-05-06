@@ -74,9 +74,9 @@ fn test_off_route_confirms_after_5_ticks() {
         timestamp: 1000,
         lat: 20.0,  // 20°N (matches origin)
         lon: 120.0, // 120°E (matches origin)
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -91,9 +91,9 @@ fn test_off_route_confirms_after_5_ticks() {
             timestamp: 1000 + i,
             lat: 20.0005, // ~60m north of route (1° ≈ 111km, so 0.0005° ≈ 55.5m)
             lon: 120.0,
-            heading_cdeg: 9000,
-            speed_cms: 500,
-            hdop_x10: 10,
+            heading_cdeg: Some(9000),
+            speed_cms: Some(500),
+            hdop_x10: Some(10),
             has_fix: true,
         };
 
@@ -198,9 +198,9 @@ fn test_off_route_disabled_during_warmup() {
             timestamp: 1000 + i,
             lat: 20.0005, // ~60m north of route
             lon: 120.0,
-            heading_cdeg: 9000,
-            speed_cms: 500,
-            hdop_x10: 10,
+            heading_cdeg: Some(9000),
+            speed_cms: Some(500),
+            hdop_x10: Some(10),
             has_fix: true,
         };
 
@@ -288,9 +288,9 @@ fn test_off_route_clears_after_2_good_ticks() {
         timestamp: 1000,
         lat: 20.0,  // 20°N (on route)
         lon: 120.0, // 120°E (on route)
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
     let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
@@ -301,9 +301,9 @@ fn test_off_route_clears_after_2_good_ticks() {
             timestamp: 1000 + i,
             lat: 20.0005, // ~60m north of route
             lon: 120.0,
-            heading_cdeg: 9000,
-            speed_cms: 500,
-            hdop_x10: 10,
+            heading_cdeg: Some(9000),
+            speed_cms: Some(500),
+            hdop_x10: Some(10),
             has_fix: true,
         };
         let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
@@ -316,9 +316,9 @@ fn test_off_route_clears_after_2_good_ticks() {
             timestamp: 1000 + i,
             lat: 20.0,  // Back on route
             lon: 120.0,
-            heading_cdeg: 9000,
-            speed_cms: 500,
-            hdop_x10: 10,
+            heading_cdeg: Some(9000),
+            speed_cms: Some(500),
+            hdop_x10: Some(10),
             has_fix: true,
         };
         let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
@@ -407,9 +407,9 @@ fn test_off_route_hysteresis_partial_clear() {
         timestamp: 1000,
         lat: 20.0,  // 20°N (on route)
         lon: 120.0, // 120°E (on route)
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
     let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
@@ -420,9 +420,9 @@ fn test_off_route_hysteresis_partial_clear() {
             timestamp: 1000 + i,
             lat: 20.0005, // ~60m north of route
             lon: 120.0,
-            heading_cdeg: 9000,
-            speed_cms: 500,
-            hdop_x10: 10,
+            heading_cdeg: Some(9000),
+            speed_cms: Some(500),
+            hdop_x10: Some(10),
             has_fix: true,
         };
         let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
@@ -434,9 +434,9 @@ fn test_off_route_hysteresis_partial_clear() {
         timestamp: 1005,
         lat: 20.0,  // Back on route
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
     let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1005, false, 0);
@@ -450,9 +450,9 @@ fn test_off_route_hysteresis_partial_clear() {
         timestamp: 1006,
         lat: 20.0005, // ~60m north of route again
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1006, false, 0);
@@ -518,9 +518,9 @@ fn test_off_route_counter_resets_on_outage() {
         timestamp: 1000,
         lat: 20.0,  // 20°N (on route)
         lon: 120.0, // 120°E (on route)
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
     let _ = process_gps_update(&mut state, &mut dr, &init_gps, &route_data, 0, true, 0);
@@ -531,9 +531,9 @@ fn test_off_route_counter_resets_on_outage() {
             timestamp: 1000 + i,
             lat: 20.0005, // ~60m north of route
             lon: 120.0,
-            heading_cdeg: 9000,
-            speed_cms: 500,
-            hdop_x10: 10,
+            heading_cdeg: Some(9000),
+            speed_cms: Some(500),
+            hdop_x10: Some(10),
             has_fix: true,
         };
         let _ = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, false, 0);
@@ -546,9 +546,9 @@ fn test_off_route_counter_resets_on_outage() {
         timestamp: 1004,
         lat: 20.0005,
         lon: 120.0,
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: false,  // NO FIX
     };
     let _ = process_gps_update(&mut state, &mut dr, &outage_gps, &route_data, 1004, false, 0);

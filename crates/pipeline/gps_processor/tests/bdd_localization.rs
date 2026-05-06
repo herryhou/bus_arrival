@@ -278,8 +278,8 @@ fn scenario_hdop_adaptive_smoothing(route_data: &RouteData, start_x: i32, start_
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y);
     gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
-    gps.speed_cms = 1000;
-    gps.hdop_x10 = 10; // Accurate
+    gps.speed_cms = Some(1000);
+    gps.hdop_x10 = Some(10); // Accurate
     process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true, 0);
 
     // When: GPS update at 20m with high noise (HDOP=5.0)
@@ -287,7 +287,7 @@ fn scenario_hdop_adaptive_smoothing(route_data: &RouteData, start_x: i32, start_
     // Raw position: 2000cm
     gps.timestamp += 1;
     gps.lat = lat_from_y(start_y + 2000);
-    gps.hdop_x10 = 50; // Noisy (Ks = 26 instead of 77)
+    gps.hdop_x10 = Some(50); // Noisy (Ks = 26 instead of 77)
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false, 0);
 
     // Then: Progress should stay closer to predicted than raw (M3: blended velocity)
@@ -313,7 +313,7 @@ fn scenario_extended_gps_outage(route_data: &RouteData, start_x: i32, start_y: i
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y);
     gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
-    gps.speed_cms = 1000;
+    gps.speed_cms = Some(1000);
     process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true, 0);
 
     // When: GPS signal is lost for 11 seconds
@@ -374,8 +374,8 @@ fn scenario_heading_penalty_overlapping_routes(route_data: &RouteData, start_x: 
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y + 1000); // 10m north
     gps.lon = lon_from_x(start_x + 500, route_data.lat_avg_deg); // 5m east
-    gps.heading_cdeg = 18000; // Moving SOUTH
-    gps.speed_cms = 1000;
+    gps.heading_cdeg = Some(18000); // Moving SOUTH
+    gps.speed_cms = Some(1000);
 
     // When: Processing the update
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true, 0);
@@ -497,8 +497,8 @@ fn scenario_normal_forward_movement(route_data: &RouteData, start_x: i32, start_
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y);
     gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
-    gps.heading_cdeg = 0;
-    gps.speed_cms = 1000; // 10m/s
+    gps.heading_cdeg = Some(0);
+    gps.speed_cms = Some(1000); // 10m/s
 
     // When: Processing first fix
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true, 0);
@@ -607,7 +607,7 @@ fn scenario_handle_gps_outage_with_dr(route_data: &RouteData, start_x: i32, star
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y);
     gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
-    gps.speed_cms = 1000;
+    gps.speed_cms = Some(1000);
     process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true, 0);
 
     // Mock speed into state/dr
@@ -664,8 +664,8 @@ fn scenario_l_shaped_turn(route_data: &RouteData, start_x: i32, start_y: i32) {
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y);
     gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
-    gps.heading_cdeg = 9000; // East
-    gps.speed_cms = 500; // 5 m/s
+    gps.heading_cdeg = Some(9000); // East
+    gps.speed_cms = Some(500); // 5 m/s
 
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true, 0);
     if let ProcessResult::Valid {
@@ -707,7 +707,7 @@ fn scenario_l_shaped_turn(route_data: &RouteData, start_x: i32, start_y: i32) {
     gps.timestamp += 5;
     gps.lat = lat_from_y(start_y + 2500); // 25m North from corner
     gps.lon = lon_from_x(start_x + 5000, route_data.lat_avg_deg); // At corner x
-    gps.heading_cdeg = 0; // North now
+    gps.heading_cdeg = Some(0); // North now
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 2, false, 0);
 
     // Then: Map matcher should identify segment 1 (North)
@@ -736,8 +736,8 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y);
     gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
-    gps.heading_cdeg = 9000; // East
-    gps.speed_cms = 500;
+    gps.heading_cdeg = Some(9000); // East
+    gps.speed_cms = Some(500);
 
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true, 0);
     if let ProcessResult::Valid { signals, .. } = result {
@@ -751,7 +751,7 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
     gps.timestamp += 10;
     gps.lat = lat_from_y(start_y);
     gps.lon = lon_from_x(start_x + 5000, route_data.lat_avg_deg);
-    gps.heading_cdeg = 0; // North
+    gps.heading_cdeg = Some(0); // North
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false, 0);
 
     if let ProcessResult::Valid {
@@ -779,7 +779,7 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
     gps.timestamp += 10;
     gps.lat = lat_from_y(start_y + 5000);
     gps.lon = lon_from_x(start_x + 5000, route_data.lat_avg_deg);
-    gps.heading_cdeg = -9000; // West
+    gps.heading_cdeg = Some(-9000); // West
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 2, false, 0);
 
     if let ProcessResult::Valid {
@@ -806,7 +806,7 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
     gps.timestamp += 10;
     gps.lat = lat_from_y(start_y + 5000);
     gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
-    gps.heading_cdeg = -18000; // South
+    gps.heading_cdeg = Some(-18000); // South
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 3, false, 0);
 
     // Then: Progress should indicate 3/4 around the loop, not jump back to 0
@@ -839,7 +839,7 @@ fn scenario_loop_closure(route_data: &RouteData, start_x: i32, start_y: i32) {
     gps.timestamp += 10;
     gps.lat = lat_from_y(start_y);
     gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
-    gps.heading_cdeg = 9000; // East again
+    gps.heading_cdeg = Some(9000); // East again
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 4, false, 0);
 
     // Then: With the new 50m monotonicity threshold, the large backward jump
@@ -877,8 +877,8 @@ fn scenario_large_backward_jump_rejection(route_data: &RouteData, start_x: i32, 
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y + 8000);
     gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
-    gps.heading_cdeg = 0; // North
-    gps.speed_cms = 1000;
+    gps.heading_cdeg = Some(0); // North
+    gps.speed_cms = Some(1000);
 
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true, 0);
     if let ProcessResult::Valid { signals, .. } = result {
@@ -895,8 +895,8 @@ fn scenario_large_backward_jump_rejection(route_data: &RouteData, start_x: i32, 
     // Should trigger DR outage.
     gps.timestamp += 70; // 70 seconds gives enough time for the speed constraint
     gps.lat = lat_from_y(start_y + 1000); // Jumped back to 10m
-    gps.heading_cdeg = 18000; // South (opposite direction)
-    gps.speed_cms = 1000;
+    gps.heading_cdeg = Some(18000); // South (opposite direction)
+    gps.speed_cms = Some(1000);
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false, 0);
 
     // Then: Should trigger DR outage (exceeds 50m monotonicity tolerance)
@@ -933,22 +933,22 @@ fn scenario_loop_closure_full_route_completion() {
     gps.timestamp = 1000;
     gps.lat = lat_from_y(c_start_y);
     gps.lon = lon_from_x(c_start_x, c_route_data.lat_avg_deg);
-    gps.heading_cdeg = 9000;
-    gps.speed_cms = 500;
+    gps.heading_cdeg = Some(9000);
+    gps.speed_cms = Some(500);
     process_gps_update(&mut state, &mut dr, &gps, &c_route_data, 0, true, 0);
 
     // Move to 3/4 progress (skip intermediate steps for brevity)
     gps.timestamp += 30;
     gps.lat = lat_from_y(c_start_y + 5000);
     gps.lon = lon_from_x(c_start_x, c_route_data.lat_avg_deg);
-    gps.heading_cdeg = -18000;
+    gps.heading_cdeg = Some(-18000);
     process_gps_update(&mut state, &mut dr, &gps, &c_route_data, 1, false, 0);
 
     // Complete the loop
     gps.timestamp += 10;
     gps.lat = lat_from_y(c_start_y);
     gps.lon = lon_from_x(c_start_x, c_route_data.lat_avg_deg);
-    gps.heading_cdeg = 9000;
+    gps.heading_cdeg = Some(9000);
     let result = process_gps_update(&mut state, &mut dr, &gps, &c_route_data, 2, false, 0);
 
     // Expected: Progress should clamp to route length (20000)

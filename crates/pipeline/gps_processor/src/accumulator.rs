@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn test_new_accumulator_is_empty() {
-        let acc = FixAccumulator::new();
+        let mut acc = FixAccumulator::new();
         assert!(!acc.should_emit());
         assert!(acc.build().is_none());
     }
@@ -326,7 +326,7 @@ mod tests {
         acc.update("$GPGGA,221320,2500.2582,N,12117.1898,E,1,08,3.5,10.0,M,0.0,M,,*4B");
         acc.update("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*2E");
 
-        let (gps, quality) = acc.build().unwrap();
+        let (_gps, quality) = acc.build().unwrap();
         assert_eq!(quality, FixQuality::Full);
     }
 

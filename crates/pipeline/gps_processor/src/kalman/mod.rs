@@ -108,8 +108,8 @@ pub fn process_gps_update(
     let (seg_idx, match_d2) = crate::map_match::find_best_segment_restricted(
         gps_x,
         gps_y,
-        gps.heading_cdeg,
-        gps.speed_cms,
+        gps.heading_cdeg.unwrap_or(i16::MIN),
+        gps.speed_cms.unwrap_or(0),
         route_data,
         state.last_seg_idx,
         use_relaxed_heading,
@@ -163,8 +163,8 @@ pub fn process_gps_update(
                     let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only_with_min_max_s(
                         gps_x,
                         gps_y,
-                        gps.heading_cdeg,
-                        gps.speed_cms,
+                        gps.heading_cdeg.unwrap_or(i16::MIN),
+                        gps.speed_cms.unwrap_or(0),
                         route_data,
                         use_relaxed_heading,
                         frozen_s, // Constrain to segments >= frozen position
@@ -182,7 +182,7 @@ pub fn process_gps_update(
                         state.frozen_s_cm = None;
                         state.off_route_suspect_ticks = 0;
                         // Blend v_cms using EMA instead of hard assignment (M3 fix)
-                        let v_gps = gps.speed_cms.clamp(0, V_MAX_CMS);
+                        let v_gps = gps.speed_cms.unwrap_or(0).clamp(0, V_MAX_CMS);
                         state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
                         state.last_seg_idx = new_seg_idx;
                         dr.last_gps_time = Some(gps.timestamp);
@@ -236,7 +236,7 @@ pub fn process_gps_update(
         state.s_cm = z_raw;
 
         // Blend v_cms using EMA instead of hard assignment (M3 fix)
-        let v_gps = gps.speed_cms.clamp(0, V_MAX_CMS);
+        let v_gps = gps.speed_cms.unwrap_or(0).clamp(0, V_MAX_CMS);
         state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
         state.last_seg_idx = seg_idx;
         dr.last_gps_time = Some(gps.timestamp);
@@ -298,14 +298,14 @@ pub fn process_gps_update(
 
         // Soft resync for velocity: v_resync = v_DR + (2/10)*(v_gps - v_DR)
         // Using same conservative 2/10 gain for velocity during recovery
-        state.v_cms = state.v_cms + 2 * (gps.speed_cms - state.v_cms) / 10;
+        state.v_cms = state.v_cms + 2 * (gps.speed_cms.unwrap_or(0) - state.v_cms) / 10;
         state.v_cms = state.v_cms.max(0);
 
         // Clear recovery flag after applying soft-resync
         dr.in_recovery = false;
     } else {
         // Normal Kalman update
-        state.update_adaptive(z_raw, gps.speed_cms, gps.hdop_x10);
+        state.update_adaptive(z_raw, gps.speed_cms.unwrap_or(0), gps.hdop_x10.unwrap_or(9990));
     }
     state.last_seg_idx = seg_idx;
 
@@ -320,7 +320,7 @@ pub fn process_gps_update(
     // Per spec Section 11.1: v_filtered(t) = v_filtered(t-1) + 3*(v_gps - v_filtered(t-1))/10
     dr.last_gps_time = Some(gps.timestamp);
     dr.last_valid_s = state.s_cm;
-    dr.filtered_v = update_dr_ema(dr.filtered_v, gps.speed_cms);
+    dr.filtered_v = update_dr_ema(dr.filtered_v, gps.speed_cms.unwrap_or(0));
 
     ProcessResult::Valid {
         signals,

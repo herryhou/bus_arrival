@@ -98,8 +98,8 @@ fn test_active_stops_when_in_corridor() {
     gps.timestamp = 1000;
     gps.lat = lat_from_y(start_y + 1000);
     gps.lon = lon_from_x(start_x, route_data.lat_avg_deg);
-    gps.heading_cdeg = 0;
-    gps.speed_cms = 1000;
+    gps.heading_cdeg = Some(0);
+    gps.speed_cms = Some(1000);
 
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 0, true, 0);
     if let ProcessResult::Valid { signals, .. } = result {
