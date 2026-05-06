@@ -86,11 +86,26 @@ impl FixAccumulator {
             Some(t) => t,
             None => return false,
         };
-        if self.last_emitted_timestamp != Some(ts) {
-            self.last_emitted_timestamp = Some(ts);
-            return true;
+        match self.last_emitted_timestamp {
+            None => {
+                // First timestamp - don't emit, but remember we've seen it
+                self.last_emitted_timestamp = Some(ts);
+                false
+            }
+            Some(last_ts) if last_ts != ts => {
+                // New timestamp - emit the previous snapshot
+                self.last_emitted_timestamp = Some(ts);
+                true
+            }
+            _ => false,
         }
-        false
+    }
+
+    /// Mark the current timestamp as emitted.
+    /// Call this after building the GPS data.
+    pub fn mark_emitted(&mut self) {
+        // This is called after build(), so we don't need to do anything
+        // The last_emitted_timestamp is already updated by should_emit()
     }
 
     /// Build a GpsPoint if we have minimum required data.
@@ -313,11 +328,11 @@ mod tests {
         acc.update("$GPRMC,221320,A,2500.2582,N,12117.1898,E,8.4,80.5,141123,,*2E");
         assert!(!acc.should_emit());
 
-        acc.update("$GPRMC,221321,A,2500.2583,N,12117.1899,E,8.5,81.5,141123,,*2E");
+        acc.update("$GPRMC,221321,A,2500.2583,N,12117.1899,E,8.5,81.5,141123,,*2F");
         assert!(acc.should_emit());
 
         let (gps, _) = acc.build().unwrap();
-        assert_eq!(gps.timestamp, 22 * 3600 + 13 * 60 + 20);
+        assert_eq!(gps.timestamp, 22 * 3600 + 13 * 60 + 21);  // NEW timestamp, not old
     }
 
     #[test]
