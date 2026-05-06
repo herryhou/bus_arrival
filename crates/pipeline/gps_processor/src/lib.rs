@@ -3,6 +3,7 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod accumulator;
 pub mod kalman;
 pub mod map_match;
 pub mod nmea;
