@@ -48,6 +48,12 @@
   - Position projection
   - Re-acquisition detection
 
+- **`specs/12-gps_processing.md`** - GPS Processing (Timestamp-Driven)
+  - NMEA sentence accumulation
+  - Timestamp-driven emission
+  - Fix quality classification
+  - Split burst handling
+
 ### Phase 3: Arrival Detection
 - **`specs/04-stop_corridors.md`** - Stop corridor filtering
   - Dynamic corridor sizing
@@ -92,6 +98,7 @@
 | Off-route behavior changes | 00-constraints, 08-off_route_detection |
 | Binary format changes | 00-constraints, 10-spatial_index |
 | GPS outage handling | 00-constraints, 03-dead_reckoning |
+| GPS processing issues | 00-constraints, 12-gps_processing |
 | State transition issues | 00-constraints, 06-state_machine |
 | Stop index problems | 00-constraints, 07-stop_recovery |
 | Route preprocessing | 00-constraints, 09-preprocessing |
