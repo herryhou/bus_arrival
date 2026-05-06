@@ -165,9 +165,9 @@ fn test_warmup_with_state_instance() {
         lat: 22.5,
         lon: 114.0,
         timestamp: base_timestamp,
-        speed_cms: 556,     // ~20 km/h in cm/s
-        heading_cdeg: 9000, // 90.00 degrees
-        hdop_x10: 15,       // 1.5 HDOP
+        speed_cms: Some(556),     // ~20 km/h in cm/s
+        heading_cdeg: Some(9000), // 90.00 degrees
+        hdop_x10: Some(15),       // 1.5 HDOP
         has_fix: true,
     };
     let result1 = state.process_gps(&gps1);
@@ -187,9 +187,9 @@ fn test_warmup_with_state_instance() {
             lat: 22.5 + (i as f64) * 0.0001, // Slight position change
             lon: 114.0 + (i as f64) * 0.0001,
             timestamp: base_timestamp + (i as u64),
-            speed_cms: 556,
-            heading_cdeg: 9000,
-            hdop_x10: 15,
+            speed_cms: Some(556),
+            heading_cdeg: Some(9000),
+            hdop_x10: Some(15),
             has_fix: true,
         };
         let result = state.process_gps(&gps);
@@ -208,9 +208,9 @@ fn test_warmup_with_state_instance() {
         lat: 22.5 + 0.0004,
         lon: 114.0 + 0.0004,
         timestamp: base_timestamp + 4,
-        speed_cms: 556,
-        heading_cdeg: 9000,
-        hdop_x10: 15,
+        speed_cms: Some(556),
+        heading_cdeg: Some(9000),
+        hdop_x10: Some(15),
         has_fix: true,
     };
     let result5 = state.process_gps(&gps5);

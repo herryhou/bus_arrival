@@ -87,9 +87,9 @@ fn test_detour_reentry_progress_jump() {
         lat: 24.9943,
         lon: 121.2956,
         timestamp: base_timestamp,
-        speed_cms: 0,
-        heading_cdeg: 9000,
-        hdop_x10: 35,
+        speed_cms: Some(0),
+        heading_cdeg: Some(9000),
+        hdop_x10: Some(35),
         has_fix: true,
     };
 
@@ -109,9 +109,9 @@ fn test_detour_reentry_progress_jump() {
         lat: 24.9921,
         lon: 121.2956,
         timestamp: base_timestamp + 70, // 70 seconds later
-        speed_cms: 600,                  // ~6 m/s during detour
-        heading_cdeg: 18000,             // Heading south during detour
-        hdop_x10: 35,
+        speed_cms: Some(600),                  // ~6 m/s during detour
+        heading_cdeg: Some(18000),             // Heading south during detour
+        hdop_x10: Some(35),
         has_fix: true,
     };
 
@@ -139,9 +139,9 @@ fn test_detour_reentry_progress_jump() {
         lat: 24.9921,
         lon: 121.3011,
         timestamp: base_timestamp + 120, // 50 seconds after detour start
-        speed_cms: 600,
-        heading_cdeg: 9000,              // Heading east after re-entry
-        hdop_x10: 35,
+        speed_cms: Some(600),
+        heading_cdeg: Some(9000),              // Heading east after re-entry
+        hdop_x10: Some(35),
         has_fix: true,
     };
 
@@ -221,9 +221,9 @@ fn test_detour_multiple_reentries() {
         lat: 24.9943,
         lon: 121.2956,
         timestamp: base_timestamp,
-        speed_cms: 0,
-        heading_cdeg: 9000,
-        hdop_x10: 35,
+        speed_cms: Some(0),
+        heading_cdeg: Some(9000),
+        hdop_x10: Some(35),
         has_fix: true,
     };
 
@@ -242,9 +242,9 @@ fn test_detour_multiple_reentries() {
             lat: 24.9921 + (cycle as f64 * 0.001),
             lon: 121.2956 + (cycle as f64 * 0.001),
             timestamp: base_timestamp + 100 + cycle as u64 * 200,
-            speed_cms: 600,
-            heading_cdeg: 18000,
-            hdop_x10: 35,
+            speed_cms: Some(600),
+            heading_cdeg: Some(18000),
+            hdop_x10: Some(35),
             has_fix: true,
         };
         state.process_gps(&gps_detour);
@@ -254,9 +254,9 @@ fn test_detour_multiple_reentries() {
             lat: 24.9921 + (cycle as f64 * 0.001) + 0.001,
             lon: 121.3011 + (cycle as f64 * 0.001),
             timestamp: base_timestamp + 150 + cycle as u64 * 200,
-            speed_cms: 600,
-            heading_cdeg: 9000,
-            hdop_x10: 35,
+            speed_cms: Some(600),
+            heading_cdeg: Some(9000),
+            hdop_x10: Some(35),
             has_fix: true,
         };
 
@@ -306,9 +306,9 @@ fn test_detour_arrival_detection() {
         lat: 24.9943,
         lon: 121.2956,
         timestamp: base_timestamp,
-        speed_cms: 0,
-        heading_cdeg: 9000,
-        hdop_x10: 35,
+        speed_cms: Some(0),
+        heading_cdeg: Some(9000),
+        hdop_x10: Some(35),
         has_fix: true,
     };
 
@@ -323,9 +323,9 @@ fn test_detour_arrival_detection() {
         lat: 24.9921,
         lon: 121.2956,
         timestamp: base_timestamp + 70,
-        speed_cms: 600,
-        heading_cdeg: 18000,
-        hdop_x10: 35,
+        speed_cms: Some(600),
+        heading_cdeg: Some(18000),
+        hdop_x10: Some(35),
         has_fix: true,
     };
     state.process_gps(&gps_detour);
@@ -335,9 +335,9 @@ fn test_detour_arrival_detection() {
         lat: 24.9921,
         lon: 121.3011,
         timestamp: base_timestamp + 120,
-        speed_cms: 0, // Stop at stop 6
-        heading_cdeg: 9000,
-        hdop_x10: 35,
+        speed_cms: Some(0), // Stop at stop 6
+        heading_cdeg: Some(9000),
+        hdop_x10: Some(35),
         has_fix: true,
     };
 

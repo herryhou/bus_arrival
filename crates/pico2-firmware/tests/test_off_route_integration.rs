@@ -413,9 +413,9 @@ fn create_gps_point_with_time(
         timestamp: timestamp + tick_offset + tick_index,
         lat: 20.0,          // 20°N (on route at origin)
         lon: 120.0,         // 120°E (on route at origin)
-        heading_cdeg: 9000, // East (90 degrees)
-        speed_cms,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000), // East (90 degrees)
+        speed_cms: Some(speed_cms),
+        hdop_x10: Some(10),
         has_fix: true,
     }
 }
@@ -427,9 +427,9 @@ fn create_gps_point_far_from_route(timestamp: u64, tick_index: u64) -> GpsPoint 
         timestamp: timestamp + tick_index,
         lat: 20.0005, // ~60m north of route (1° ≈ 111km, so 0.0005° ≈ 55.5m)
         lon: 120.0,   // Still at 120°E
-        heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     }
 }
@@ -552,9 +552,9 @@ fn gps_on_route_at_x(timestamp: u64, x_cm: i32, speed_cms: i32) -> GpsPoint {
         timestamp,
         lat: FIXED_ORIGIN_LAT_DEG,
         lon,
-        heading_cdeg: 9000,
-        speed_cms,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(speed_cms),
+        hdop_x10: Some(10),
         has_fix: true,
     }
 }
@@ -568,9 +568,9 @@ fn gps_off_route_at_x(timestamp: u64, x_cm: i32, speed_cms: i32) -> GpsPoint {
         timestamp,
         lat,
         lon,
-        heading_cdeg: 9000,
-        speed_cms,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(speed_cms),
+        hdop_x10: Some(10),
         has_fix: true,
     }
 }
@@ -581,9 +581,9 @@ fn gps_no_fix(timestamp: u64) -> GpsPoint {
         timestamp,
         lat: FIXED_ORIGIN_LAT_DEG,
         lon: FIXED_ORIGIN_LON_DEG,
-        heading_cdeg: 0,
-        speed_cms: 0,
-        hdop_x10: 0,
+        heading_cdeg: Some(0),
+        speed_cms: Some(0),
+        hdop_x10: Some(0),
         has_fix: false,
     }
 }
@@ -682,7 +682,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "first_fix",
             point: ScriptPoint::OnRoute {
                 x_cm: 0,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: false,
@@ -694,7 +694,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "warmup_1",
             point: ScriptPoint::OnRoute {
                 x_cm: 0,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: false,
@@ -706,7 +706,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "warmup_2",
             point: ScriptPoint::OnRoute {
                 x_cm: 0,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: false,
@@ -718,7 +718,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "warmup_3",
             point: ScriptPoint::OnRoute {
                 x_cm: 0,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: false,
@@ -730,7 +730,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "suspect_1",
             point: ScriptPoint::OffRoute {
                 x_cm: 0,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: true,  // M1: SuspectOffRoute sets recovery flag
@@ -742,7 +742,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "suspect_2",
             point: ScriptPoint::OffRoute {
                 x_cm: 0,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: true,  // M1: SuspectOffRoute sets recovery flag
@@ -754,7 +754,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "suspect_3",
             point: ScriptPoint::OffRoute {
                 x_cm: 0,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: true,  // M1: SuspectOffRoute sets recovery flag
@@ -766,7 +766,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "suspect_4",
             point: ScriptPoint::OffRoute {
                 x_cm: 0,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: true,  // M1: SuspectOffRoute sets recovery flag
@@ -778,7 +778,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "off_route_confirmed",
             point: ScriptPoint::OffRoute {
                 x_cm: 0,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: true,
@@ -790,7 +790,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "off_route_persisting",
             point: ScriptPoint::OffRoute {
                 x_cm: 0,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: true,
@@ -802,7 +802,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "reacquire_good_1",
             point: ScriptPoint::OnRoute {
                 x_cm: 1000,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: true,
@@ -814,7 +814,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "reacquire_good_2",
             point: ScriptPoint::OnRoute {
                 x_cm: 1000,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: false,
@@ -826,7 +826,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "normal_after_recovery",
             point: ScriptPoint::OnRoute {
                 x_cm: 1500,
-                speed_cms: 500,
+                speed_cms: Some(500),
             },
             expect_event: None,
             expect_recovery_flag: false,
@@ -1188,8 +1188,8 @@ fn test_m12_recovery_works_without_section_4_5() {
             lat: 20.0,
             lon: 120.0,
             heading_cdeg: 9000,
-            speed_cms: 500, // 5 m/s forward
-            hdop_x10: 10,
+            speed_cms: Some(500), // 5 m/s forward
+            hdop_x10: Some(10),
             has_fix: true,
         };
         let _ = state.process_gps(&gps);
@@ -1233,8 +1233,8 @@ fn test_m12_recovery_works_without_section_4_5() {
         lat: 20.0,
         lon: 120.0,
         heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 
@@ -1244,8 +1244,8 @@ fn test_m12_recovery_works_without_section_4_5() {
         lat: 20.0,
         lon: 120.0,
         heading_cdeg: 9000,
-        speed_cms: 500,
-        hdop_x10: 10,
+        speed_cms: Some(500),
+        hdop_x10: Some(10),
         has_fix: true,
     };
 

@@ -34,9 +34,9 @@ fn test_full_recovery_flow() {
         lat: 22.5,
         lon: 114.0,
         timestamp: base_timestamp,
-        speed_cms: 556,
-        heading_cdeg: 9000,
-        hdop_x10: 15,
+        speed_cms: Some(556),
+        heading_cdeg: Some(9000),
+        hdop_x10: Some(15),
         has_fix: true,
     };
 
@@ -51,9 +51,9 @@ fn test_full_recovery_flow() {
         lat: 22.525, // ~2.8 km north (roughly 280000 cm)
         lon: 114.0,
         timestamp: base_timestamp + 4,
-        speed_cms: 556,
-        heading_cdeg: 9000,
-        hdop_x10: 15,
+        speed_cms: Some(556),
+        heading_cdeg: Some(9000),
+        hdop_x10: Some(15),
         has_fix: true,
     };
 
@@ -111,9 +111,9 @@ fn test_no_recovery_for_small_movement() {
         lat: 22.5,
         lon: 114.0,
         timestamp: base_timestamp,
-        speed_cms: 556,
-        heading_cdeg: 9000,
-        hdop_x10: 15,
+        speed_cms: Some(556),
+        heading_cdeg: Some(9000),
+        hdop_x10: Some(15),
         has_fix: true,
     };
 
@@ -126,9 +126,9 @@ fn test_no_recovery_for_small_movement() {
         lat: 22.5001, // ~11 m north
         lon: 114.0,
         timestamp: base_timestamp + 4,
-        speed_cms: 556,
-        heading_cdeg: 9000,
-        hdop_x10: 15,
+        speed_cms: Some(556),
+        heading_cdeg: Some(9000),
+        hdop_x10: Some(15),
         has_fix: true,
     };
 

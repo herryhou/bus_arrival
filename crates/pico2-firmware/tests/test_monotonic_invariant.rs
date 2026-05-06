@@ -85,9 +85,9 @@ fn gps_on_route_at_x(timestamp: u64, x_cm: i32, speed_cms: i32) -> GpsPoint {
         timestamp,
         lat: FIXED_ORIGIN_LAT_DEG,
         lon,
-        heading_cdeg: 9000,
-        speed_cms,
-        hdop_x10: 10,
+        heading_cdeg: Some(9000),
+        speed_cms: Some(speed_cms),
+        hdop_x10: Some(10),
         has_fix: true,
     }
 }
@@ -251,9 +251,9 @@ fn test_recovering_mode_allows_backward() {
             lat: lat_off,
             lon: FIXED_ORIGIN_LON_DEG,
             timestamp: base_timestamp + 25 + i as u64,
-            speed_cms: 500,
+            speed_cms: Some(500),
             heading_cdeg: 9000,
-            hdop_x10: 10,
+            hdop_x10: Some(10),
             has_fix: true,
         };
         state.tick(&gps_off, &mut est_state);

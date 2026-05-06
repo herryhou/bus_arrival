@@ -17,10 +17,10 @@ fn make_gps(
         timestamp,
         lat,
         lon,
-        heading_cdeg,
-        speed_cms,
+        heading_cdeg: Some(heading_cdeg),
+        speed_cms: Some(speed_cms),
         has_fix,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     }
 }
 
@@ -50,11 +50,11 @@ fn test_warmup_counter_increments_after_first_fix() {
     let gps1 = shared::GpsPoint {
         lat: 0.0,               // 0° (equator) - far from route
         lon: 0.0,               // 0° (prime meridian) - far from route
-        heading_cdeg: i16::MIN, // GGA-only mode
-        speed_cms: 500,
+        heading_cdeg: None,  // i16::MIN equivalent for Option, // GGA-only mode
+        speed_cms: Some(500),
         timestamp: 1000,
         has_fix: true,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     };
 
     let _result = state.process_gps(&gps1);
@@ -152,11 +152,11 @@ fn test_warmup_prevents_arrival_detection() {
     let gps_init = shared::GpsPoint {
         lat: 0.0, // Far from route
         lon: 0.0,
-        heading_cdeg: i16::MIN,
-        speed_cms: 500,
+        heading_cdeg: None,  // i16::MIN equivalent for Option,
+        speed_cms: Some(500),
         timestamp: 1000,
         has_fix: true,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     };
     state.process_gps(&gps_init);
 
@@ -294,11 +294,11 @@ fn test_warmup_not_reset_on_dr_outage() {
     let gps_init = shared::GpsPoint {
         lat: 0.0,
         lon: 0.0,
-        heading_cdeg: i16::MIN,
-        speed_cms: 500,
+        heading_cdeg: None,  // i16::MIN equivalent for Option,
+        speed_cms: Some(500),
         timestamp: 1000,
         has_fix: true,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     };
     state.process_gps(&gps_init);
 

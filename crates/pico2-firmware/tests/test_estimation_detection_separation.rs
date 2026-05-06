@@ -108,11 +108,11 @@ fn test_first_fix_initializes_both_total_counters() {
     let gps = shared::GpsPoint {
         lat: 0.0,
         lon: 0.0,
-        heading_cdeg: i16::MIN,
-        speed_cms: 500,
+        heading_cdeg: None,  // i16::MIN equivalent for Option,
+        speed_cms: Some(500),
         timestamp: 1000,
         has_fix: true,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     };
     state.process_gps(&gps);
 
@@ -137,11 +137,11 @@ fn test_just_reset_initializes_both_total_counters() {
     let gps1 = shared::GpsPoint {
         lat: 0.0,
         lon: 0.0,
-        heading_cdeg: i16::MIN,
-        speed_cms: 500,
+        heading_cdeg: None,  // i16::MIN equivalent for Option,
+        speed_cms: Some(500),
         timestamp: 1000,
         has_fix: true,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     };
     state.process_gps(&gps1);
 
@@ -187,11 +187,11 @@ fn test_valid_gps_increments_both_counters_independently() {
     let gps1 = shared::GpsPoint {
         lat: 0.0,
         lon: 0.0,
-        heading_cdeg: i16::MIN,
-        speed_cms: 500,
+        heading_cdeg: None,  // i16::MIN equivalent for Option,
+        speed_cms: Some(500),
         timestamp: 1000,
         has_fix: true,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     };
     state.process_gps(&gps1);
 
@@ -248,11 +248,11 @@ fn test_detection_blocked_until_ready() {
     let gps1 = shared::GpsPoint {
         lat: 0.0,
         lon: 0.0,
-        heading_cdeg: i16::MIN,
-        speed_cms: 500,
+        heading_cdeg: None,  // i16::MIN equivalent for Option,
+        speed_cms: Some(500),
         timestamp: 1000,
         has_fix: true,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     };
     state.process_gps(&gps1);
 
@@ -288,11 +288,11 @@ fn test_rejected_gps_increments_totals_only() {
     let gps1 = shared::GpsPoint {
         lat: 0.0,
         lon: 0.0,
-        heading_cdeg: i16::MIN,
-        speed_cms: 500,
+        heading_cdeg: None,  // i16::MIN equivalent for Option,
+        speed_cms: Some(500),
         timestamp: 1000,
         has_fix: true,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     };
     state.process_gps(&gps1);
 
@@ -318,11 +318,11 @@ fn test_outage_resets_all_counters() {
     let gps1 = shared::GpsPoint {
         lat: 0.0,
         lon: 0.0,
-        heading_cdeg: i16::MIN,
-        speed_cms: 500,
+        heading_cdeg: None,  // i16::MIN equivalent for Option,
+        speed_cms: Some(500),
         timestamp: 1000,
         has_fix: true,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     };
     state.process_gps(&gps1);
 
@@ -371,11 +371,11 @@ fn test_dr_outage_increments_totals_only() {
     let gps1 = shared::GpsPoint {
         lat: 0.0,
         lon: 0.0,
-        heading_cdeg: i16::MIN,
-        speed_cms: 500,
+        heading_cdeg: None,  // i16::MIN equivalent for Option,
+        speed_cms: Some(500),
         timestamp: 1000,
         has_fix: true,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     };
     state.process_gps(&gps1);
 
@@ -402,11 +402,11 @@ fn test_estimation_detection_independent_timeout() {
     let gps1 = shared::GpsPoint {
         lat: 0.0,
         lon: 0.0,
-        heading_cdeg: i16::MIN,
-        speed_cms: 500,
+        heading_cdeg: None,  // i16::MIN equivalent for Option,
+        speed_cms: Some(500),
         timestamp: 1000,
         has_fix: true,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     };
     state.process_gps(&gps1);
 
@@ -484,11 +484,11 @@ fn test_heading_filter_uses_estimation_not_detection() {
     let gps1 = shared::GpsPoint {
         lat: 0.0,
         lon: 0.0,
-        heading_cdeg: i16::MIN,
-        speed_cms: 500,
+        heading_cdeg: None,  // i16::MIN equivalent for Option,
+        speed_cms: Some(500),
         timestamp: 1000,
         has_fix: true,
-        hdop_x10: 10,
+        hdop_x10: Some(10),
     };
     state.process_gps(&gps1);
 

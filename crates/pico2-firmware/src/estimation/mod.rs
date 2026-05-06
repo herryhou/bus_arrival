@@ -90,8 +90,8 @@ pub fn estimate(
     let (seg_idx, match_d2) = map_match::find_best_segment_restricted(
         gps_x,
         gps_y,
-        input.gps.heading_cdeg,
-        input.gps.speed_cms,
+        input.gps.heading_cdeg.unwrap_or(i16::MIN),
+        input.gps.speed_cms.unwrap_or(0),
         input.route_data,
         state.kalman.last_seg_idx,
         use_relaxed_heading,
@@ -106,7 +106,7 @@ pub fn estimate(
     let (s_cm, v_cms) = if input.is_first_fix {
         // First fix: initialize Kalman
         state.kalman.s_cm = z_raw;
-        let v_gps = input.gps.speed_cms.clamp(0, 1667);
+        let v_gps = input.gps.speed_cms.unwrap_or(0).clamp(0, 1667);
         state.kalman.v_cms = state.kalman.v_cms + 3 * (v_gps - state.kalman.v_cms) / 10;
         state.kalman.last_seg_idx = seg_idx;
 
@@ -117,20 +117,21 @@ pub fn estimate(
         (z_raw, state.kalman.v_cms)
     } else {
         // Normal Kalman update
-        let hdop_x10 = input.gps.hdop_x10;
-        state.kalman.update_adaptive(z_raw, input.gps.speed_cms, hdop_x10);
+        let hdop_x10 = input.gps.hdop_x10.unwrap_or(9990);
+        let speed_cms = input.gps.speed_cms.unwrap_or(0);
+        state.kalman.update_adaptive(z_raw, speed_cms, hdop_x10);
         state.kalman.last_seg_idx = seg_idx;
 
         // Update DR state
         state.dr.last_gps_time = Some(input.gps.timestamp);
-        state.dr.filtered_v = update_dr_ema(state.dr.filtered_v, input.gps.speed_cms);
+        state.dr.filtered_v = update_dr_ema(state.dr.filtered_v, speed_cms);
 
         (state.kalman.s_cm, state.kalman.v_cms)
     };
 
     // 5. Calculate confidence
     let confidence = calculate_confidence(
-        input.gps.hdop_x10,
+        input.gps.hdop_x10.unwrap_or(9990),
         false,  // Not in outage (we have fix)
         match_d2,
     );
