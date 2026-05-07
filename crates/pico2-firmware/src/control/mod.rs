@@ -465,9 +465,21 @@ impl<'a> SystemState<'a> {
         match self.mode {
             SystemMode::Normal => {
                 // Check: divergence > 50m for 5 ticks
-                if mode::check_normal_to_offroute(est.divergence_d2, &mut self.off_route_suspect_ticks) {
-                    self.transition_to_offroute(&est, gps.timestamp);
-                    return TickResult { event: None, persist_request: None };  // Suppress detection during transition
+                // Set freeze time and recovery flag on first suspect tick
+                if est.divergence_d2 > mode::OFF_ROUTE_D2_THRESHOLD {
+                    if self.off_route_suspect_ticks == 0 {
+                        // First tick of suspect phase - set freeze time and recovery flag immediately
+                        self.off_route_since = Some(gps.timestamp);
+                        self.needs_recovery_on_reacquisition = true;
+                    }
+                    self.off_route_suspect_ticks += 1;
+                    if self.off_route_suspect_ticks >= 5 {
+                        self.transition_to_offroute(&est, gps.timestamp);
+                        return TickResult { event: None, persist_request: None };  // Suppress detection during transition
+                    }
+                } else {
+                    // Good divergence - reset suspect counter
+                    self.off_route_suspect_ticks = 0;
                 }
             }
             SystemMode::OffRoute => {
