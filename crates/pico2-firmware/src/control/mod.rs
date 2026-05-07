@@ -169,6 +169,48 @@ impl<'a> SystemState<'a> {
         best_idx
     }
 
+    /// Returns true if state should be persisted this tick.
+    /// Writes when stop index changes, but no more than once per 60 seconds.
+    pub fn should_persist(&self, current_stop: u8) -> bool {
+        // Don't persist if position is frozen (off-route or suspect)
+        if self.mode == SystemMode::OffRoute || self.mode == SystemMode::Recovering {
+            return false;
+        }
+
+        // Don't persist if in suspect state (may be about to go off-route)
+        if self.off_route_suspect_ticks > 0 {
+            return false;
+        }
+
+        // Only persist when stop index actually changes
+        if current_stop == self.last_persisted_stop {
+            return false;
+        }
+
+        // Rate limit: no more than once per 60 seconds (60 ticks at 1Hz)
+        if self.ticks_since_persist < 60 {
+            return false;
+        }
+
+        true
+    }
+
+    /// Mark state as persisted, resetting the rate-limit counter.
+    pub fn mark_persisted(&mut self, stop_index: u8) {
+        self.last_persisted_stop = stop_index;
+        self.ticks_since_persist = 0;
+    }
+
+    /// Get the current stop index from last_stop_index.
+    /// Returns None if not yet initialized.
+    pub fn current_stop_index(&self) -> Option<u8> {
+        if !self.has_received_first_fix {
+            None
+        } else {
+            Some(self.last_stop_index)
+        }
+    }
+
     /// Transition to OffRoute mode
     fn transition_to_offroute(&mut self, est: &EstimationOutput, now: u64) {
         self.mode = SystemMode::OffRoute;
@@ -593,6 +635,53 @@ mod tests {
         // Test forward search from index 5
         let idx = state.find_forward_closest_stop_index(5000, 5);
         assert!(idx >= 5, "Should only return stops at or after index 5");
+    }
+
+    #[test]
+    fn test_persistence_helpers() {
+        use shared::binfile::{RouteData, MAGIC, VERSION};
+        use shared::binfile::crc32;
+
+        // Create minimal valid RouteData buffer
+        let mut buffer = [0u8; 128];
+
+        // Write magic
+        buffer[0..4].copy_from_slice(&MAGIC.to_le_bytes());
+        // Write version
+        buffer[4..6].copy_from_slice(&VERSION.to_le_bytes());
+        // Write node_count (0)
+        buffer[6..8].copy_from_slice(&0u16.to_le_bytes());
+        // Write stop_count (0)
+        buffer[8] = 0;
+        // padding at [9..12] is already 0
+        // origin x0_cm, y0_cm at [12..20] is already 0
+        // lat_avg_deg at [20..28] is already 0 (f64)
+
+        // Compute and write CRC32 at end
+        let crc = crc32(&buffer[..124]);
+        buffer[124..128].copy_from_slice(&crc.to_le_bytes());
+
+        let route_data = RouteData::load(&buffer).expect("Failed to load minimal route data");
+        let mut state = SystemState::new(&route_data, None);
+
+        // Initially should not persist (no first fix)
+        assert!(!state.should_persist(0));
+
+        // After first fix, current_stop_index returns Some
+        state.has_received_first_fix = true;
+        assert!(state.current_stop_index().is_some());
+
+        // Test rate limiting
+        state.last_persisted_stop = 0;
+        state.ticks_since_persist = 0;
+        assert!(!state.should_persist(1), "Should rate limit");
+
+        state.ticks_since_persist = 60;
+        assert!(state.should_persist(1), "Should allow after 60 ticks");
+
+        state.mark_persisted(1);
+        assert_eq!(state.last_persisted_stop, 1);
+        assert_eq!(state.ticks_since_persist, 0);
     }
 }
 
