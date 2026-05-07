@@ -501,12 +501,17 @@ impl<'a> SystemState<'a> {
             let next_stop = next_stop_value.as_ref();
 
             // Compute arrival probability with adaptive weights
+            let gps_status = if est.has_fix {
+                crate::detection::GpsStatus::Valid
+            } else {
+                crate::detection::GpsStatus::DrOutage
+            };
             let probability = crate::detection::compute_arrival_probability_adaptive(
                 signals,
                 est.v_cms,
                 &stop,
                 stop_state.dwell_time_s,
-                crate::detection::GpsStatus::Valid, // TODO: derive from est output
+                gps_status,
                 next_stop,
             );
 
@@ -526,7 +531,7 @@ impl<'a> SystemState<'a> {
                     stop_idx: stop_idx as u8,
                     s_cm,
                     v_cms: est.v_cms,
-                    probability: 0,
+                    probability,
                     event_type: shared::ArrivalEventType::Announce,
                 });
             }
