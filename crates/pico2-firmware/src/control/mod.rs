@@ -141,6 +141,47 @@ impl<'a> SystemState<'a> {
         !self.has_received_first_fix || !self.estimation_ready()
     }
 
+    /// Find closest stop index to current position
+    pub fn find_closest_stop_index(&self, s_cm: DistCm) -> u8 {
+        let mut closest_idx = 0;
+        let mut closest_dist = i32::MAX;
+
+        for i in 0..self.route_data.stop_count {
+            if let Some(stop) = self.route_data.get_stop(i) {
+                let dist = (s_cm - stop.progress_cm).abs();
+                if dist < closest_dist {
+                    closest_dist = dist;
+                    closest_idx = i;
+                }
+            }
+        }
+
+        closest_idx as u8
+    }
+
+    /// Find closest stop index in forward direction only
+    ///
+    /// Searches from last_idx to end of route only. This prevents
+    /// selecting stops behind the current position, which is important
+    /// after off-route snap re-entry.
+    pub fn find_forward_closest_stop_index(&self, s_cm: DistCm, last_idx: u8) -> u8 {
+        let mut best_idx = last_idx;
+        let mut best_dist = i32::MAX;
+
+        // Only search forward: from last_idx to end of route
+        for i in last_idx as usize..self.route_data.stop_count {
+            if let Some(stop) = self.route_data.get_stop(i) {
+                let dist = (s_cm - stop.progress_cm).abs();
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_idx = i as u8;
+                }
+            }
+        }
+
+        best_idx
+    }
+
     /// Transition to OffRoute mode
     fn transition_to_offroute(&mut self, est: &EstimationOutput, now: u64) {
         self.mode = SystemMode::OffRoute;
@@ -520,6 +561,70 @@ mod tests {
         println!("NOTE: 256 StopStates at ~20 bytes each = ~5120 bytes > 4KB budget");
         // This test documents the current size issue
         // The 4KB budget cannot be met with 256 StopStates
+    }
+
+    #[test]
+    fn test_find_closest_stop_index() {
+        use shared::binfile::{RouteData, MAGIC, VERSION};
+        use shared::binfile::crc32;
+
+        // Create minimal valid RouteData buffer with 1 stop
+        let mut buffer = [0u8; 128];
+
+        // Write magic
+        buffer[0..4].copy_from_slice(&MAGIC.to_le_bytes());
+        // Write version
+        buffer[4..6].copy_from_slice(&VERSION.to_le_bytes());
+        // Write node_count (0)
+        buffer[6..8].copy_from_slice(&0u16.to_le_bytes());
+        // Write stop_count (1)
+        buffer[8] = 1;
+        // padding at [9..12] is already 0
+        // origin x0_cm, y0_cm at [12..20] is already 0
+        // lat_avg_deg at [20..28] is already 0 (f64)
+
+        // Compute and write CRC32 at end
+        let crc = crc32(&buffer[..124]);
+        buffer[124..128].copy_from_slice(&crc.to_le_bytes());
+
+        let route_data = RouteData::load(&buffer).expect("Failed to load minimal route data");
+        let state = SystemState::new(&route_data, None);
+
+        // Test that method returns a valid index
+        let idx = state.find_closest_stop_index(5000);
+        assert!(idx < route_data.stop_count as u8, "Index {} should be less than stop_count {}", idx, route_data.stop_count);
+    }
+
+    #[test]
+    fn test_find_forward_closest_stop_index() {
+        use shared::binfile::{RouteData, MAGIC, VERSION};
+        use shared::binfile::crc32;
+
+        // Create minimal valid RouteData buffer
+        let mut buffer = [0u8; 128];
+
+        // Write magic
+        buffer[0..4].copy_from_slice(&MAGIC.to_le_bytes());
+        // Write version
+        buffer[4..6].copy_from_slice(&VERSION.to_le_bytes());
+        // Write node_count (0)
+        buffer[6..8].copy_from_slice(&0u16.to_le_bytes());
+        // Write stop_count (0)
+        buffer[8] = 0;
+        // padding at [9..12] is already 0
+        // origin x0_cm, y0_cm at [12..20] is already 0
+        // lat_avg_deg at [20..28] is already 0 (f64)
+
+        // Compute and write CRC32 at end
+        let crc = crc32(&buffer[..124]);
+        buffer[124..128].copy_from_slice(&crc.to_le_bytes());
+
+        let route_data = RouteData::load(&buffer).expect("Failed to load minimal route data");
+        let state = SystemState::new(&route_data, None);
+
+        // Test forward search from index 5
+        let idx = state.find_forward_closest_stop_index(5000, 5);
+        assert!(idx >= 5, "Should only return stops at or after index 5");
     }
 }
 
