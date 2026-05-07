@@ -5,6 +5,7 @@ use common::load_test_asset_bytes;
 use shared::binfile::{BusError, RouteData};
 
 #[test]
+#[ignore = "Test requires ty225_debug.bin which needs to be generated from ty225_route.json and ty225_stops.json"]
 fn test_debug_ty225_bin_stops() {
     let data = load_test_asset_bytes("ty225_debug.bin");
     let route_data = match RouteData::load(&data) {

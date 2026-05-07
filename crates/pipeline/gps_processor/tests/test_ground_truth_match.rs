@@ -7,6 +7,7 @@ use common::load_test_asset_bytes;
 use shared::binfile::{BusError, RouteData};
 
 #[test]
+#[ignore = "Debug test requiring external files: ground_truth.json and ty225.jsonl"]
 fn test_ground_truth_alignment() {
     let data = load_test_asset_bytes("ty225.bin");
     let route_data = match RouteData::load(&data) {

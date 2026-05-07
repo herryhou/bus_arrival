@@ -5,6 +5,7 @@ use common::load_test_asset_bytes;
 use shared::binfile::{BusError, RouteData};
 
 #[test]
+#[ignore = "Test requires ty225_loop_stop.bin which needs special route data (ty225_loop_stop_route.json, ty225_loop_stop_stops.json)"]
 fn test_loop_closure_stop() {
     let data = load_test_asset_bytes("ty225_loop_stop.bin");
     let route_data = match RouteData::load(&data) {

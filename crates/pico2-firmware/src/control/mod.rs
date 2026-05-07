@@ -283,7 +283,7 @@ impl<'a> SystemState<'a> {
         self.off_route_since = None;
         self.off_route_clear_ticks = 0;
         self.off_route_suspect_ticks = 0;
-        // Keep needs_recovery_on_reacquisition set (it was set when entering OffRoute)
+        self.needs_recovery_on_reacquisition = false;
     }
 
     /// Transition to Recovering mode
@@ -301,6 +301,8 @@ impl<'a> SystemState<'a> {
         self.recovering_since = None;
         self.recovery_failed = false;
         self.last_s_cm = s_cm;
+        self.needs_recovery_on_reacquisition = false;
+        self.off_route_since = None;
 
         // TODO: Reset stop states when detection layer is integrated
     }
