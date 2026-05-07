@@ -349,7 +349,7 @@ impl<'a> SystemState<'a> {
     /// - Recovery ONLY runs in Recovering mode
     /// - frozen_s_cm only accessed in OffRoute/Recovering modes
     /// - Only ONE transition executes per tick
-    pub fn tick(&mut self, gps: &GpsPoint, est_state: &mut crate::estimation::EstimationState) -> Option<ArrivalEvent> {
+    pub fn tick(&mut self, gps: &GpsPoint, est_state: &mut crate::estimation::EstimationState) -> TickResult {
         // STEP 1: Isolated estimation
         let input = EstimationInput {
             gps: gps.clone(),
@@ -361,7 +361,7 @@ impl<'a> SystemState<'a> {
         // Handle GPS outage
         if !est.has_fix {
             // TODO: handle outage
-            return None;
+            return TickResult { event: None, persist_request: None };
         }
 
         // Mark first fix as received after successful GPS fix
@@ -392,7 +392,7 @@ impl<'a> SystemState<'a> {
                 // Check: divergence > 50m for 5 ticks
                 if mode::check_normal_to_offroute(est.divergence_d2, &mut self.off_route_suspect_ticks) {
                     self.transition_to_offroute(&est, gps.timestamp);
-                    return None;  // Suppress detection during transition
+                    return TickResult { event: None, persist_request: None };  // Suppress detection during transition
                 }
             }
             SystemMode::OffRoute => {
@@ -411,11 +411,11 @@ impl<'a> SystemState<'a> {
                     }
                     TransitionAction::ToNormal => {
                         self.transition_offroute_to_normal();
-                        return None;  // Will resume detection next tick
+                        return TickResult { event: None, persist_request: None };  // Will resume detection next tick
                     }
                     TransitionAction::Stay => {
                         // Stay in OffRoute
-                        return None;
+                        return TickResult { event: None, persist_request: None };
                     }
                 }
             }
@@ -458,16 +458,27 @@ impl<'a> SystemState<'a> {
                 self.recovery_success(idx, s_cm_for_detection);
                 // Continue to detection
             } else {
-                return None;  // Recovery failed, stay in Recovering
+                return TickResult { event: None, persist_request: None };  // Recovery failed, stay in Recovering
             }
         }
 
         // STEP 4: Detection (ONLY in Normal mode)
-        if self.mode == SystemMode::Normal {
-            return self.run_detection(&est, s_cm_for_detection, gps.timestamp);
-        }
+        let event = if self.mode == SystemMode::Normal {
+            self.run_detection(&est, s_cm_for_detection, gps.timestamp)
+        } else {
+            None
+        };
 
-        None
+        // STEP 5: Check persistence
+        let persist_request = if self.mode == SystemMode::Normal {
+            self.current_stop_index()
+                .filter(|&idx| self.should_persist(idx))
+                .map(|idx| shared::PersistedState::new(s_cm_for_detection, idx))
+        } else {
+            None
+        };
+
+        TickResult { event, persist_request }
     }
 
     /// Run arrival detection (Normal mode only)
