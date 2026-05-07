@@ -472,7 +472,6 @@ impl<'a> SystemState<'a> {
 
     /// Run arrival detection (Normal mode only)
     fn run_detection(&mut self, est: &EstimationOutput, s_cm: DistCm, timestamp: u64) -> Option<ArrivalEvent> {
-        use crate::detection;
         use shared::PositionSignals;
 
         // Create position signals for detection
@@ -481,14 +480,81 @@ impl<'a> SystemState<'a> {
             s_cm: est.s_cm,
         };
 
-        // Find active stops (corridor filter)
-        let active_indices = detection::find_active_stops(signals, self.route_data);
+        // Step 1: Find active stops (corridor filter)
+        let active_indices = crate::detection::find_active_stops(signals, self.route_data);
 
-        // TODO: Implement detection FSM when stop_states are integrated
-        // For now, return None to indicate no events
-        let _ = active_indices;
-        let _ = s_cm;
-        let _ = timestamp;
+        // Step 2: For each active stop, compute probability and update FSM
+        for stop_idx in active_indices {
+            if stop_idx >= self.stop_states.len() {
+                continue;
+            }
+
+            let stop = match self.route_data.get_stop(stop_idx) {
+                Some(s) => s,
+                None => continue,
+            };
+            let stop_state = &mut self.stop_states[stop_idx];
+
+            // Get next sequential stop for adaptive weights
+            let next_stop_idx = stop_idx.checked_add(1);
+            let next_stop_value = next_stop_idx.and_then(|idx| self.route_data.get_stop(idx));
+            let next_stop = next_stop_value.as_ref();
+
+            // Compute arrival probability with adaptive weights
+            let probability = crate::detection::compute_arrival_probability_adaptive(
+                signals,
+                est.v_cms,
+                &stop,
+                stop_state.dwell_time_s,
+                crate::detection::GpsStatus::Valid, // TODO: derive from est output
+                next_stop,
+            );
+
+            // Update state machine FIRST (v8.4: FSM transition before announce check)
+            let event = stop_state.update(
+                s_cm,
+                est.v_cms,
+                stop.progress_cm,
+                stop.corridor_start_cm,
+                probability,
+            );
+
+            // THEN check for announcement trigger
+            if stop_state.should_announce(s_cm, stop.corridor_start_cm) {
+                return Some(ArrivalEvent {
+                    time: timestamp,
+                    stop_idx: stop_idx as u8,
+                    s_cm,
+                    v_cms: est.v_cms,
+                    probability: 0,
+                    event_type: shared::ArrivalEventType::Announce,
+                });
+            }
+
+            match event {
+                detection::state_machine::StopEvent::Arrived => {
+                    return Some(ArrivalEvent {
+                        time: timestamp,
+                        stop_idx: stop_idx as u8,
+                        s_cm,
+                        v_cms: est.v_cms,
+                        probability,
+                        event_type: shared::ArrivalEventType::Arrival,
+                    });
+                }
+                detection::state_machine::StopEvent::Departed => {
+                    return Some(ArrivalEvent {
+                        time: timestamp,
+                        stop_idx: stop_idx as u8,
+                        s_cm,
+                        v_cms: est.v_cms,
+                        probability,
+                        event_type: shared::ArrivalEventType::Departure,
+                    });
+                }
+                detection::state_machine::StopEvent::None => {}
+            }
+        }
 
         None
     }
