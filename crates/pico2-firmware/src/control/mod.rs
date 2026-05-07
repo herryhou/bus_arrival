@@ -126,6 +126,21 @@ impl<'a> SystemState<'a> {
         }
     }
 
+    /// Check if estimation is ready (affects heading filter, Kalman)
+    pub fn estimation_ready(&self) -> bool {
+        self.estimation_ready_ticks >= 3 || self.estimation_total_ticks >= 10
+    }
+
+    /// Check if detection is enabled (independent of estimation)
+    pub fn detection_ready(&self) -> bool {
+        self.detection_enabled_ticks >= 3 || self.detection_total_ticks >= 10
+    }
+
+    /// Check if heading filter should be disabled
+    pub fn disable_heading_filter(&self) -> bool {
+        !self.has_received_first_fix || !self.estimation_ready()
+    }
+
     /// Transition to OffRoute mode
     fn transition_to_offroute(&mut self, est: &EstimationOutput, now: u64) {
         self.mode = SystemMode::OffRoute;
@@ -421,6 +436,49 @@ pub fn enforce_monotonic(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_warmup_methods() {
+        use shared::binfile::RouteData;
+        use shared::{RouteNode, SpatialGrid, FIXED_ORIGIN_LAT_DEG};
+
+        // Create minimal valid route data
+        let nodes = vec![
+            RouteNode {
+                x_cm: 0,
+                y_cm: 0,
+                cum_dist_cm: 0,
+                seg_len_mm: 100000,
+                dx_cm: 10000,
+                dy_cm: 0,
+                heading_cdeg: 9000,
+                _pad: 0,
+            }
+        ];
+
+        // Create a simple grid
+        let grid = SpatialGrid {
+            cells: vec![vec![0]],
+            grid_size_cm: 10000,
+            cols: 1,
+            rows: 1,
+            x0_cm: 0,
+            y0_cm: 0,
+        };
+
+        // Pack route data
+        let mut buffer = Vec::new();
+        shared::binfile::pack_route_data(&nodes, &[], &grid, FIXED_ORIGIN_LAT_DEG, &mut buffer)
+            .expect("Failed to pack test route data");
+
+        let leaked_buffer = Box::leak(buffer.into_boxed_slice());
+        let route_data = RouteData::load(leaked_buffer).expect("Failed to load route data");
+        let state = SystemState::new(&route_data, None);
+
+        assert!(!state.estimation_ready(), "Should not be ready initially");
+        assert!(!state.detection_ready(), "Detection should not be ready");
+        assert!(state.disable_heading_filter(), "Should disable filter before first fix");
+    }
 
     #[test]
     fn test_enforce_monotonic_normal_forward() {
