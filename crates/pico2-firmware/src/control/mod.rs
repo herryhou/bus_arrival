@@ -252,6 +252,17 @@ impl<'a> SystemState<'a> {
         }
     }
 
+    /// Apply persisted stop index by marking all prior stops as Departed.
+    fn apply_persisted_stop_index(&mut self, stop_index: u8) {
+        use shared::FsmState;
+
+        for i in 0..stop_index.min(self.stop_states.len() as u8) as usize {
+            self.stop_states[i].fsm_state = FsmState::Departed;
+            self.stop_states[i].announced = true;
+        }
+        self.last_stop_index = stop_index;
+    }
+
     /// Transition to OffRoute mode
     fn transition_to_offroute(&mut self, est: &EstimationOutput, now: u64) {
         self.mode = SystemMode::OffRoute;
@@ -369,6 +380,35 @@ impl<'a> SystemState<'a> {
         // Mark first fix as received after successful GPS fix
         if est.has_fix {
             self.has_received_first_fix = true;
+        }
+
+        // STEP 1.3: Apply persisted state on first fix if valid
+        if self.has_received_first_fix && self.pending_persisted.is_some() {
+            if let Some(ps) = self.pending_persisted.take() {
+                // Check 500m threshold from spec
+                let delta_cm = if est.s_cm >= ps.last_progress_cm {
+                    est.s_cm - ps.last_progress_cm
+                } else {
+                    ps.last_progress_cm - est.s_cm
+                };
+
+                if delta_cm <= 50_000 {
+                    // Within 500m: trust persisted stop index
+                    self.apply_persisted_stop_index(ps.last_stop_index);
+                    #[cfg(feature = "firmware")]
+                    defmt::info!(
+                        "Applied persisted state: stop={}, delta={}cm",
+                        ps.last_stop_index,
+                        delta_cm
+                    );
+                } else {
+                    #[cfg(feature = "firmware")]
+                    defmt::warn!(
+                        "Persisted state too stale: delta={}cm > 500m, ignoring",
+                        delta_cm
+                    );
+                }
+            }
         }
 
         // STEP 1.25: Warmup counter updates
