@@ -3,7 +3,7 @@
 //! Tests the full integration of off-route detection with the State machine,
 //! including position freezing and recovery re-acquisition.
 
-use pico2_firmware::state::State;
+use pico2_firmware::{SystemState, estimation::EstimationState};
 use shared::{binfile::RouteData, ArrivalEventType, GpsPoint, Stop};
 use shared::{FsmState, EARTH_R_CM, FIXED_ORIGIN_LAT_DEG, FIXED_ORIGIN_LON_DEG};
 
@@ -12,21 +12,22 @@ const FIXED_ORIGIN_LAT_RAD: f64 = FIXED_ORIGIN_LAT_DEG.to_radians();
 #[test]
 fn test_off_route_freezes_position_until_reacquisition_clears() {
     let route_data = create_test_route_data();
-    let mut state = State::new(&route_data, None);
+    let mut state = SystemState::new(&route_data, None);
+    let mut est_state = EstimationState::new();
     let base_timestamp = 10_000;
 
     for i in 0..4 {
         let gps = gps_on_route_at_x(base_timestamp + i, 0, 500);
-        let event = state.process_gps(&gps);
+        let event = state.tick(&gps, &mut est_state).event;
         assert!(event.is_none(), "Warmup tick {} should not emit events", i);
     }
 
-    let frozen_before = state.last_valid_s_cm();
+    let frozen_before = state.last_valid_s_cm;
     assert_eq!(frozen_before, 0, "Warmup should establish route origin position");
 
     for i in 0..4 {
         let gps = gps_off_route_at_x(base_timestamp + 4 + i, 0, 500);
-        let event = state.process_gps(&gps);
+        let event = state.tick(&gps, &mut est_state).event;
 
         assert!(
             event.is_none(),
@@ -34,69 +35,69 @@ fn test_off_route_freezes_position_until_reacquisition_clears() {
             i + 1
         );
         assert_eq!(
-            state.last_valid_s_cm(),
+            state.last_valid_s_cm,
             frozen_before,
             "Suspect tick {} should keep last_valid_s_cm frozen",
             i + 1
         );
         assert!(
-            state.off_route_freeze_time().is_some(),
+            state.off_route_since.is_some(),
             "Suspect tick {} should set freeze time immediately",
             i + 1
         );
         // M1: SuspectOffRoute sets recovery flag to ensure snap on re-entry
         assert!(
-            state.needs_recovery_on_reacquisition(),
+            state.needs_recovery_on_reacquisition,
             "Suspect tick {} should set recovery flag for re-entry snap",
             i + 1
         );
     }
 
-    let off_route_event = state.process_gps(&gps_off_route_at_x(base_timestamp + 8, 0, 500));
+    let off_route_event = state.tick(&gps_off_route_at_x(base_timestamp + 8, 0, 500), &mut est_state).event;
     assert!(
         off_route_event.is_none(),
         "Confirmed off-route tick should suppress arrival events"
     );
     assert_eq!(
-        state.last_valid_s_cm(),
+        state.last_valid_s_cm,
         frozen_before,
         "Confirmed off-route should keep last_valid_s_cm frozen"
     );
     assert!(
-        state.needs_recovery_on_reacquisition(),
+        state.needs_recovery_on_reacquisition,
         "Confirmed off-route should arm reacquisition recovery"
     );
 
-    let first_good = state.process_gps(&gps_on_route_at_x(base_timestamp + 9, 500, 500));
+    let first_good = state.tick(&gps_on_route_at_x(base_timestamp + 9, 500, 500), &mut est_state).event;
     assert!(
         first_good.is_none(),
         "First good reacquisition tick should still suppress events"
     );
     assert_eq!(
-        state.last_valid_s_cm(),
+        state.last_valid_s_cm,
         frozen_before,
         "First good reacquisition tick should still keep position frozen"
     );
     assert!(
-        state.needs_recovery_on_reacquisition(),
+        state.needs_recovery_on_reacquisition,
         "First good reacquisition tick should keep recovery armed"
     );
 
-    let second_good = state.process_gps(&gps_on_route_at_x(base_timestamp + 10, 500, 500));
+    let second_good = state.tick(&gps_on_route_at_x(base_timestamp + 10, 500, 500), &mut est_state).event;
     assert!(
         second_good.is_none(),
         "Second good reacquisition tick should clear hysteresis without emitting events"
     );
     assert!(
-        state.last_valid_s_cm() > frozen_before,
+        state.last_valid_s_cm > frozen_before,
         "Second good reacquisition tick should unfreeze and advance position"
     );
     assert!(
-        !state.needs_recovery_on_reacquisition(),
+        !state.needs_recovery_on_reacquisition,
         "Second good reacquisition tick should clear recovery flag"
     );
     assert!(
-        state.off_route_freeze_time().is_none(),
+        state.off_route_since.is_none(),
         "Freeze time should be cleared after reacquisition"
     );
 }
@@ -104,17 +105,18 @@ fn test_off_route_freezes_position_until_reacquisition_clears() {
 #[test]
 fn test_reacquisition_does_not_duplicate_or_advance_stop_state() {
     let route_data = create_test_route_with_recovery_stops();
-    let mut state = State::new(&route_data, None);
+    let mut state = SystemState::new(&route_data, None);
+    let mut est_state = EstimationState::new();
     let base_timestamp = 20_000;
 
     for i in 0..4 {
         let gps = gps_on_route_at_x(base_timestamp + i, 0, 500);
-        let _ = state.process_gps(&gps);
+        let _ = state.tick(&gps, &mut est_state).event;
     }
 
     let mut saw_stop_0_announce = false;
     for i in 0..3 {
-        let event = state.process_gps(&gps_on_route_at_x(base_timestamp + 4 + i, 2_500, 500));
+        let event = state.tick(&gps_on_route_at_x(base_timestamp + 4 + i, 2_500, 500), &mut est_state).event;
         if let Some(event) = event {
             saw_stop_0_announce |=
                 event.stop_idx == 0 && event.event_type == ArrivalEventType::Announce;
@@ -125,7 +127,7 @@ fn test_reacquisition_does_not_duplicate_or_advance_stop_state() {
         saw_stop_0_announce,
         "Pre-off-route movement should announce stop 0 at least once"
     );
-    assert_eq!(state.last_known_stop_index(), 0, "Bus should start near stop 0");
+    assert_eq!(state.last_stop_index, 0, "Bus should start near stop 0");
     assert!(
         matches!(
             state.stop_states[0].fsm_state,
@@ -136,7 +138,7 @@ fn test_reacquisition_does_not_duplicate_or_advance_stop_state() {
 
     for i in 0..5 {
         let gps = gps_off_route_at_x(base_timestamp + 7 + i, 2_500, 500);
-        let event = state.process_gps(&gps);
+        let event = state.tick(&gps, &mut est_state).event;
         assert!(
             event.is_none(),
             "Off-route tick {} should suppress arrivals while frozen",
@@ -145,19 +147,19 @@ fn test_reacquisition_does_not_duplicate_or_advance_stop_state() {
     }
 
     assert!(
-        state.needs_recovery_on_reacquisition(),
+        state.needs_recovery_on_reacquisition,
         "Confirmed off-route should arm recovery"
     );
 
-    let first_good = state.process_gps(&gps_on_route_at_x(base_timestamp + 12, 2_500, 500));
-    let second_good = state.process_gps(&gps_on_route_at_x(base_timestamp + 13, 2_500, 500));
+    let first_good = state.tick(&gps_on_route_at_x(base_timestamp + 12, 2_500, 500), &mut est_state).event;
+    let second_good = state.tick(&gps_on_route_at_x(base_timestamp + 13, 2_500, 500), &mut est_state).event;
 
     assert!(
         first_good.is_none() && second_good.is_none(),
         "Reacquisition near the same stop should not emit duplicate announcements"
     );
     assert_eq!(
-        state.last_known_stop_index(),
+        state.last_stop_index,
         0,
         "Reacquisition near the same location should not spuriously advance to the next stop"
     );
@@ -183,11 +185,11 @@ fn test_reacquisition_does_not_duplicate_or_advance_stop_state() {
         "Reacquisition should not create a duplicate announce marker for the current stop"
     );
     assert!(
-        !state.needs_recovery_on_reacquisition(),
+        !state.needs_recovery_on_reacquisition,
         "Recovery flag should clear after reacquisition succeeds"
     );
     assert!(
-        state.off_route_freeze_time().is_none(),
+        state.off_route_since.is_none(),
         "Freeze time should be cleared after recovery"
     );
 }
@@ -195,19 +197,21 @@ fn test_reacquisition_does_not_duplicate_or_advance_stop_state() {
 #[test]
 fn test_off_route_suppresses_announce_until_recovery_clears() {
     let route_data = create_test_route_with_stop_data();
-    let mut control = State::new(&route_data, None);
-    let mut off_route_state = State::new(&route_data, None);
+    let mut control = SystemState::new(&route_data, None);
+    let mut control_est = EstimationState::new();
+    let mut off_route_state = SystemState::new(&route_data, None);
+    let mut off_route_est = EstimationState::new();
     let base_timestamp = 30_000;
     let mut control_announce = None;
 
     for i in 0..4 {
         let gps = gps_on_route_at_x(base_timestamp + i, 0, 500);
-        let _ = control.process_gps(&gps);
-        let _ = off_route_state.process_gps(&gps);
+        let _ = control.tick(&gps, &mut control_est).event;
+        let _ = off_route_state.tick(&gps, &mut off_route_est).event;
     }
 
     for i in 0..3 {
-        let event = control.process_gps(&gps_on_route_at_x(base_timestamp + 4 + i, 3_000, 500));
+        let event = control.tick(&gps_on_route_at_x(base_timestamp + 4 + i, 3_000, 500), &mut control_est).event;
         if control_announce.is_none() {
             control_announce = event;
         }
@@ -222,7 +226,7 @@ fn test_off_route_suppresses_announce_until_recovery_clears() {
     assert_eq!(control_event.stop_idx, 0, "Control path should announce stop 0");
 
     for i in 0..5 {
-        let event = off_route_state.process_gps(&gps_off_route_at_x(base_timestamp + 4 + i, 0, 500));
+        let event = off_route_state.tick(&gps_off_route_at_x(base_timestamp + 4 + i, 0, 500), &mut off_route_est).event;
         assert!(
             event.is_none(),
             "Off-route tick {} should suppress announcements while frozen",
@@ -231,19 +235,19 @@ fn test_off_route_suppresses_announce_until_recovery_clears() {
     }
 
     let first_good =
-        off_route_state.process_gps(&gps_on_route_at_x(base_timestamp + 9, 3_000, 500));
+        off_route_state.tick(&gps_on_route_at_x(base_timestamp + 9, 3_000, 500), &mut off_route_est).event;
     assert!(
         first_good.is_none(),
         "First good tick should still suppress announcement until hysteresis clears"
     );
     assert!(
-        off_route_state.needs_recovery_on_reacquisition(),
+        off_route_state.needs_recovery_on_reacquisition,
         "Recovery should still be armed after only one good tick"
     );
 
     let mut resumed_announce = None;
     for i in 0..3 {
-        let event = off_route_state.process_gps(&gps_on_route_at_x(base_timestamp + 10 + i, 3_000, 500));
+        let event = off_route_state.tick(&gps_on_route_at_x(base_timestamp + 10 + i, 3_000, 500), &mut off_route_est).event;
         if resumed_announce.is_none() {
             resumed_announce = event;
         }
@@ -262,7 +266,7 @@ fn test_off_route_suppresses_announce_until_recovery_clears() {
         "Recovered path should announce the same stop once freezing clears"
     );
     assert!(
-        !off_route_state.needs_recovery_on_reacquisition(),
+        !off_route_state.needs_recovery_on_reacquisition,
         "Recovery flag should clear after the second good tick"
     );
 }
@@ -270,18 +274,19 @@ fn test_off_route_suppresses_announce_until_recovery_clears() {
 #[test]
 fn test_reacquisition_can_progress_to_next_stop_without_duplicate_prior_announce() {
     let route_data = create_test_route_with_recovery_stops();
-    let mut state = State::new(&route_data, None);
+    let mut state = SystemState::new(&route_data, None);
+    let mut est_state = EstimationState::new();
     let base_timestamp = 40_000;
     let mut saw_stop_0_announce = false;
     let mut saw_stop_1_announce = false;
 
     for i in 0..4 {
         let gps = gps_on_route_at_x(base_timestamp + i, 0, 500);
-        let _ = state.process_gps(&gps);
+        let _ = state.tick(&gps, &mut est_state).event;
     }
 
     for i in 0..3 {
-        let event = state.process_gps(&gps_on_route_at_x(base_timestamp + 4 + i, 2_500, 500));
+        let event = state.tick(&gps_on_route_at_x(base_timestamp + 4 + i, 2_500, 500), &mut est_state).event;
         if let Some(event) = event {
             saw_stop_0_announce |=
                 event.stop_idx == 0 && event.event_type == ArrivalEventType::Announce;
@@ -294,7 +299,7 @@ fn test_reacquisition_can_progress_to_next_stop_without_duplicate_prior_announce
     );
 
     for i in 0..5 {
-        let event = state.process_gps(&gps_off_route_at_x(base_timestamp + 7 + i, 2_500, 500));
+        let event = state.tick(&gps_off_route_at_x(base_timestamp + 7 + i, 2_500, 500), &mut est_state).event;
         assert!(
             event.is_none(),
             "Off-route tick {} should suppress arrivals while frozen",
@@ -303,12 +308,12 @@ fn test_reacquisition_can_progress_to_next_stop_without_duplicate_prior_announce
     }
 
     assert!(
-        state.needs_recovery_on_reacquisition(),
+        state.needs_recovery_on_reacquisition,
         "Off-route episode should arm recovery before progressing to the next stop"
     );
 
     for i in 0..8 {
-        let event = state.process_gps(&gps_on_route_at_x(base_timestamp + 12 + i, 6_500, 500));
+        let event = state.tick(&gps_on_route_at_x(base_timestamp + 12 + i, 6_500, 500), &mut est_state).event;
         if let Some(event) = event {
             assert!(
                 !(event.stop_idx == 0 && event.event_type == ArrivalEventType::Announce),
@@ -325,7 +330,7 @@ fn test_reacquisition_can_progress_to_next_stop_without_duplicate_prior_announce
         "Progressing well ahead after recovery should eventually announce stop 1"
     );
     assert_eq!(
-        state.last_known_stop_index(),
+        state.last_stop_index,
         1,
         "Post-recovery forward progress should advance the active stop index"
     );
@@ -675,14 +680,15 @@ fn test_off_route_table_driven_state_contract() {
     const STOP_INDEX: usize = 0;
 
     let route_data = create_test_route_with_stop_data();
-    let mut state = State::new(&route_data, None);
+    let mut state = SystemState::new(&route_data, None);
+    let mut est_state = EstimationState::new();
 
     let script = [
         TickExpectation {
             name: "first_fix",
             point: ScriptPoint::OnRoute {
                 x_cm: 0,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: false,
@@ -694,7 +700,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "warmup_1",
             point: ScriptPoint::OnRoute {
                 x_cm: 0,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: false,
@@ -706,7 +712,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "warmup_2",
             point: ScriptPoint::OnRoute {
                 x_cm: 0,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: false,
@@ -718,7 +724,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "warmup_3",
             point: ScriptPoint::OnRoute {
                 x_cm: 0,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: false,
@@ -730,7 +736,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "suspect_1",
             point: ScriptPoint::OffRoute {
                 x_cm: 0,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: true,  // M1: SuspectOffRoute sets recovery flag
@@ -742,7 +748,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "suspect_2",
             point: ScriptPoint::OffRoute {
                 x_cm: 0,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: true,  // M1: SuspectOffRoute sets recovery flag
@@ -754,7 +760,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "suspect_3",
             point: ScriptPoint::OffRoute {
                 x_cm: 0,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: true,  // M1: SuspectOffRoute sets recovery flag
@@ -766,7 +772,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "suspect_4",
             point: ScriptPoint::OffRoute {
                 x_cm: 0,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: true,  // M1: SuspectOffRoute sets recovery flag
@@ -778,7 +784,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "off_route_confirmed",
             point: ScriptPoint::OffRoute {
                 x_cm: 0,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: true,
@@ -790,7 +796,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "off_route_persisting",
             point: ScriptPoint::OffRoute {
                 x_cm: 0,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: true,
@@ -802,7 +808,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "reacquire_good_1",
             point: ScriptPoint::OnRoute {
                 x_cm: 1000,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: true,
@@ -814,7 +820,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "reacquire_good_2",
             point: ScriptPoint::OnRoute {
                 x_cm: 1000,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: false,
@@ -826,7 +832,7 @@ fn test_off_route_table_driven_state_contract() {
             name: "normal_after_recovery",
             point: ScriptPoint::OnRoute {
                 x_cm: 1500,
-                speed_cms: Some(500),
+                speed_cms: 500,
             },
             expect_event: None,
             expect_recovery_flag: false,
@@ -841,12 +847,12 @@ fn test_off_route_table_driven_state_contract() {
     for (offset, tick) in script.iter().enumerate() {
         let timestamp = BASE_TIME + offset as u64;
         let gps = gps_from_script_point(timestamp, tick.point);
-        let last_valid_before = state.last_valid_s_cm();
+        let last_valid_before = state.last_valid_s_cm;
 
-        let event = state.process_gps(&gps);
+        let event = state.tick(&gps, &mut est_state).event;
         let event_type = event.map(|value| value.event_type);
-        let last_valid_after = state.last_valid_s_cm();
-        let freeze_time = state.off_route_freeze_time();
+        let last_valid_after = state.last_valid_s_cm;
+        let freeze_time = state.off_route_since;
 
         assert_eq!(
             event_type, tick.expect_event,
@@ -854,7 +860,7 @@ fn test_off_route_table_driven_state_contract() {
             tick.name
         );
         assert_eq!(
-            state.needs_recovery_on_reacquisition(),
+            state.needs_recovery_on_reacquisition,
             tick.expect_recovery_flag,
             "{}: unexpected recovery flag",
             tick.name
@@ -917,13 +923,14 @@ fn test_full_off_route_cycle() {
             return;
         }
     };
-    let mut state = State::new(&route_data, None);
+    let mut state = SystemState::new(&route_data, None);
+    let mut est_state = EstimationState::new();
 
     // Phase 1: Normal operation - establish position
     // Process warmup ticks to establish position
     for i in 0..4 {
         let gps1 = create_gps_point_with_time(1000, 0, 500, i);
-        let event1 = state.process_gps(&gps1);
+        let event1 = state.tick(&gps1, &mut est_state).event;
         // No arrival events during warmup
         assert!(
             event1.is_none(),
@@ -931,7 +938,7 @@ fn test_full_off_route_cycle() {
         );
     }
 
-    let initial_s = state.last_valid_s_cm();
+    let initial_s = state.last_valid_s_cm;
     assert!(initial_s >= 0, "Should have a valid position after warmup");
     println!("Position after warmup: {} cm", initial_s);
 
@@ -941,7 +948,7 @@ fn test_full_off_route_cycle() {
 
     for i in 1..=6 {
         let gps_off = create_gps_point_far_from_route(50000, i);
-        let _event = state.process_gps(&gps_off);
+        let _event = state.tick(&gps_off, &mut est_state).event;
 
         match i {
             1..=4 => {
@@ -949,12 +956,12 @@ fn test_full_off_route_cycle() {
                 // Position IS frozen immediately (Bug 5 fix)
                 // M1: SuspectOffRoute sets recovery flag for re-entry snap
                 assert!(
-                    state.needs_recovery_on_reacquisition(),
+                    state.needs_recovery_on_reacquisition,
                     "Tick {} SHOULD need recovery (M1 SuspectOffRoute)",
                     i
                 );
                 assert!(
-                    state.off_route_freeze_time().is_some(),
+                    state.off_route_since.is_some(),
                     "Tick {} SHOULD have freeze time (position frozen immediately)",
                     i
                 );
@@ -964,27 +971,27 @@ fn test_full_off_route_cycle() {
                 // The GPS processor will return ProcessResult::OffRoute
                 // which sets needs_recovery_on_reacquisition
                 assert!(
-                    state.needs_recovery_on_reacquisition(),
+                    state.needs_recovery_on_reacquisition,
                     "Tick 5 SHOULD need recovery (off-route triggered)"
                 );
                 assert!(
-                    state.off_route_freeze_time().is_some(),
+                    state.off_route_since.is_some(),
                     "Tick 5 SHOULD have freeze time set"
                 );
                 off_route_triggered = true;
                 println!(
                     "Off-route triggered at tick 5, freeze time: {:?}",
-                    state.off_route_freeze_time()
+                    state.off_route_since
                 );
             }
             6 => {
                 // Still in off-route state
                 assert!(
-                    state.needs_recovery_on_reacquisition(),
+                    state.needs_recovery_on_reacquisition,
                     "Tick 6 should still need recovery"
                 );
                 assert!(
-                    state.off_route_freeze_time().is_some(),
+                    state.off_route_since.is_some(),
                     "Tick 6 should still have freeze time"
                 );
             }
@@ -1000,29 +1007,29 @@ fn test_full_off_route_cycle() {
 
     // First good tick back on route - still in suspect state (needs 2 good ticks)
     let gps_back_1 = create_gps_point_with_time(50000, 7, 500, 0);
-    let _event2 = state.process_gps(&gps_back_1);
+    let _event2 = state.tick(&gps_back_1, &mut est_state).event;
 
     // Still in suspect state after 1 good tick
     assert!(
-        state.needs_recovery_on_reacquisition(),
+        state.needs_recovery_on_reacquisition,
         "After 1st good GPS, still need recovery (hysteresis not cleared)"
     );
     assert!(
-        state.off_route_freeze_time().is_some(),
+        state.off_route_since.is_some(),
         "After 1st good GPS, freeze time should still be set"
     );
 
     // Second good tick - this should clear hysteresis and trigger recovery
     let gps_back_2 = create_gps_point_with_time(50000, 8, 500, 0);
-    let _event3 = state.process_gps(&gps_back_2);
+    let _event3 = state.tick(&gps_back_2, &mut est_state).event;
 
     // Verify recovery ran and cleared the off-route state
     assert!(
-        !state.needs_recovery_on_reacquisition(),
+        !state.needs_recovery_on_reacquisition,
         "After 2nd good GPS, recovery should have cleared the flag"
     );
     assert!(
-        state.off_route_freeze_time().is_none(),
+        state.off_route_since.is_none(),
         "After 2nd good GPS, freeze time should be cleared"
     );
 
@@ -1031,16 +1038,16 @@ fn test_full_off_route_cycle() {
     // Process 2 more good ticks to ensure stable operation
     for i in 9..=10 {
         let gps_good = create_gps_point_with_time(50000, i, 500, 0);
-        let _event = state.process_gps(&gps_good);
+        let _event = state.tick(&gps_good, &mut est_state).event;
 
         // Should remain in normal operation after recovery cleared
         assert!(
-            !state.needs_recovery_on_reacquisition(),
+            !state.needs_recovery_on_reacquisition,
             "Tick {} should not need recovery (back to normal)",
             i
         );
         assert!(
-            state.off_route_freeze_time().is_none(),
+            state.off_route_since.is_none(),
             "Tick {} should not have freeze time (back to normal)",
             i
         );
@@ -1048,20 +1055,20 @@ fn test_full_off_route_cycle() {
 
     // Phase 4: Verify normal operation resumes
     let gps_normal = create_gps_point_with_time(2000, 0, 500, 0);
-    let _event3 = state.process_gps(&gps_normal);
+    let _event3 = state.tick(&gps_normal, &mut est_state).event;
 
     // Should process normally without any off-route state
     assert!(
-        !state.needs_recovery_on_reacquisition(),
+        !state.needs_recovery_on_reacquisition,
         "Should be in normal operation"
     );
     assert!(
-        state.off_route_freeze_time().is_none(),
+        state.off_route_since.is_none(),
         "Should not have freeze time in normal operation"
     );
 
     // Verify we have a valid position
-    let final_s = state.last_valid_s_cm();
+    let final_s = state.last_valid_s_cm;
     println!("Final position: {} cm", final_s);
     assert!(
         final_s >= 0,
@@ -1093,22 +1100,23 @@ fn test_off_route_freeze_time_set_once() {
             return;
         }
     };
-    let mut state = State::new(&route_data, None);
+    let mut state = SystemState::new(&route_data, None);
+    let mut est_state = EstimationState::new();
 
     // Establish position through warmup
     for i in 0..4 {
         let gps = create_gps_point_with_time(1000, 0, 500, i);
-        let _ = state.process_gps(&gps);
+        let _ = state.tick(&gps, &mut est_state).event;
     }
 
     // Trigger off-route - this should set freeze_time on tick 5
     for i in 1..=5 {
         let gps_off = create_gps_point_far_from_route(50000, i);
-        let _ = state.process_gps(&gps_off);
+        let _ = state.tick(&gps_off, &mut est_state).event;
     }
 
     // Verify freeze time is set
-    let freeze_time_tick_5 = state.off_route_freeze_time();
+    let freeze_time_tick_5 = state.off_route_since;
     assert!(
         freeze_time_tick_5.is_some(),
         "Freeze time should be set on tick 5"
@@ -1118,10 +1126,10 @@ fn test_off_route_freeze_time_set_once() {
     // Process MORE OffRoute ticks (tick 6, 7, 8)
     for i in 6..=8 {
         let gps_off = create_gps_point_far_from_route(50000, i);
-        let _ = state.process_gps(&gps_off);
+        let _ = state.tick(&gps_off, &mut est_state).event;
 
         // Verify freeze time has NOT changed
-        let current_freeze_time = state.off_route_freeze_time();
+        let current_freeze_time = state.off_route_since;
         assert_eq!(
             current_freeze_time,
             Some(original_freeze_time),
@@ -1167,15 +1175,16 @@ fn test_m12_recovery_works_without_section_4_5() {
     // Uses a longer test route (1km) to trigger §4.5's 50m jump threshold
 
     let route_data = create_long_test_route_data();
-    let mut state = State::new(&route_data, None);
+    let mut state = SystemState::new(&route_data, None);
+    let mut est_state = EstimationState::new();
 
     // Phase 1: Establish position at beginning of route (s ≈ 0)
     for i in 0..4 {
         let gps = create_gps_point_with_time(1000, 0, 500, i);
-        let _ = state.process_gps(&gps);
+        let _ = state.tick(&gps, &mut est_state).event;
     }
 
-    let initial_stop = state.last_known_stop_index();
+    let initial_stop = state.last_stop_index;
     println!("Initial stop index: {}", initial_stop);
 
     // Phase 2: Move forward to s ≈ 100m (along the route)
@@ -1187,16 +1196,16 @@ fn test_m12_recovery_works_without_section_4_5() {
             timestamp: 1000 + 4 + i,
             lat: 20.0,
             lon: 120.0,
-            heading_cdeg: 9000,
+            heading_cdeg: Some(9000),
             speed_cms: Some(500), // 5 m/s forward
             hdop_x10: Some(10),
             has_fix: true,
         };
-        let _ = state.process_gps(&gps);
+        let _ = state.tick(&gps, &mut est_state).event;
     }
 
-    let position_before_off_route = state.last_valid_s_cm();
-    let stop_before_off_route = state.last_known_stop_index();
+    let position_before_off_route = state.last_valid_s_cm;
+    let stop_before_off_route = state.last_stop_index;
     println!(
         "Position before off-route: {} cm, stop: {}",
         position_before_off_route, stop_before_off_route
@@ -1207,16 +1216,16 @@ fn test_m12_recovery_works_without_section_4_5() {
     let off_route_start_timestamp = 1000 + 4 + 20;
     for i in 1..=6 {
         let gps_off = create_gps_point_far_from_route(off_route_start_timestamp, i);
-        let _ = state.process_gps(&gps_off);
+        let _ = state.tick(&gps_off, &mut est_state).event;
     }
 
     // Verify off-route was triggered
     assert!(
-        state.needs_recovery_on_reacquisition(),
+        state.needs_recovery_on_reacquisition,
         "Off-route should be triggered, setting recovery flag"
     );
     assert!(
-        state.off_route_freeze_time().is_some(),
+        state.off_route_since.is_some(),
         "Freeze time should be set"
     );
 
@@ -1232,7 +1241,7 @@ fn test_m12_recovery_works_without_section_4_5() {
         timestamp: detour_return_timestamp,
         lat: 20.0,
         lon: 120.0,
-        heading_cdeg: 9000,
+        heading_cdeg: Some(9000),
         speed_cms: Some(500),
         hdop_x10: Some(10),
         has_fix: true,
@@ -1243,29 +1252,29 @@ fn test_m12_recovery_works_without_section_4_5() {
         timestamp: detour_return_timestamp + 1,
         lat: 20.0,
         lon: 120.0,
-        heading_cdeg: 9000,
+        heading_cdeg: Some(9000),
         speed_cms: Some(500),
         hdop_x10: Some(10),
         has_fix: true,
     };
 
     // Process both good ticks - second tick should trigger recovery
-    let _event1 = state.process_gps(&gps_return_1);
-    let _event2 = state.process_gps(&gps_return_2);
+    let _event1 = state.tick(&gps_return_1, &mut est_state).event;
+    let _event2 = state.tick(&gps_return_2, &mut est_state).event;
 
     // Verify recovery completed (M12 should handle this without §4.5)
     assert!(
-        !state.needs_recovery_on_reacquisition(),
+        !state.needs_recovery_on_reacquisition,
         "Recovery should have cleared the flag after 2 good ticks"
     );
     assert!(
-        state.off_route_freeze_time().is_none(),
+        state.off_route_since.is_none(),
         "Freeze time should be cleared after recovery"
     );
 
     // Verify we have a valid position after recovery
-    let position_after_recovery = state.last_valid_s_cm();
-    let stop_after_recovery = state.last_known_stop_index();
+    let position_after_recovery = state.last_valid_s_cm;
+    let stop_after_recovery = state.last_stop_index;
 
     println!(
         "Position after recovery: {} cm, stop: {}",
@@ -1286,11 +1295,11 @@ fn test_m12_recovery_works_without_section_4_5() {
     // Process more GPS to ensure stable operation
     for i in 1..=3 {
         let gps_good = create_gps_point_with_time(50200, 0, 500, i);
-        let _ = state.process_gps(&gps_good);
+        let _ = state.tick(&gps_good, &mut est_state).event;
 
         // Should remain stable without re-triggering recovery
         assert!(
-            !state.needs_recovery_on_reacquisition(),
+            !state.needs_recovery_on_reacquisition,
             "Should not re-trigger recovery (stable operation)"
         );
     }
@@ -1317,20 +1326,21 @@ fn test_off_route_then_long_gps_outage_then_recovery() {
     // would surface most clearly.
 
     let route_data = create_test_route_with_recovery_stops();
-    let mut state = State::new(&route_data, None);
+    let mut state = SystemState::new(&route_data, None);
+    let mut est_state = EstimationState::new();
     let base_timestamp = 50_000;
 
     // Phase 1: Establish position and approach stop 0
     for i in 0..4 {
         let gps = gps_on_route_at_x(base_timestamp + i, 0, 500);
-        let _ = state.process_gps(&gps);
+        let _ = state.tick(&gps, &mut est_state).event;
     }
 
     // Move to near stop 0 and trigger announcement
     let mut stop_0_announced = false;
     for i in 0..3 {
         let gps = gps_on_route_at_x(base_timestamp + 4 + i, 2_500, 500);
-        if let Some(event) = state.process_gps(&gps) {
+        if let Some(event) = state.tick(&gps, &mut est_state).event {
             if event.stop_idx == 0 && event.event_type == ArrivalEventType::Announce {
                 stop_0_announced = true;
             }
@@ -1342,13 +1352,13 @@ fn test_off_route_then_long_gps_outage_then_recovery() {
         "Stop 0 should be announced before off-route episode"
     );
 
-    let position_before_off_route = state.last_valid_s_cm();
-    let _freeze_time_before = state.off_route_freeze_time();
+    let position_before_off_route = state.last_valid_s_cm;
+    let _freeze_time_before = state.off_route_since;
 
     // Phase 2: Go off-route (position freeze)
     for i in 0..5 {
         let gps = gps_off_route_at_x(base_timestamp + 7 + i, 2_500, 500);
-        let event = state.process_gps(&gps);
+        let event = state.tick(&gps, &mut est_state).event;
 
         assert!(
             event.is_none(),
@@ -1356,24 +1366,24 @@ fn test_off_route_then_long_gps_outage_then_recovery() {
             i + 1
         );
         assert!(
-            state.off_route_freeze_time().is_some(),
+            state.off_route_since.is_some(),
             "Off-route tick {} should set freeze time",
             i + 1
         );
     }
 
     // Verify off-route is confirmed and position is frozen
-    let freeze_time_after_off_route = state.off_route_freeze_time();
+    let freeze_time_after_off_route = state.off_route_since;
     assert!(
         freeze_time_after_off_route.is_some(),
         "Off-route should have freeze time set"
     );
     assert!(
-        state.needs_recovery_on_reacquisition(),
+        state.needs_recovery_on_reacquisition,
         "Off-route should be confirmed"
     );
     assert_eq!(
-        state.last_valid_s_cm(),
+        state.last_valid_s_cm,
         position_before_off_route,
         "Position should remain frozen during off-route"
     );
@@ -1387,7 +1397,7 @@ fn test_off_route_then_long_gps_outage_then_recovery() {
     let outage_duration_ticks = 12;
     for i in 0..outage_duration_ticks {
         let gps = gps_no_fix(base_timestamp + 12 + i);
-        let event = state.process_gps(&gps);
+        let event = state.tick(&gps, &mut est_state).event;
 
         // During GPS outage:
         // - For first 10 ticks: DR mode, detection continues, events may be emitted
@@ -1407,7 +1417,7 @@ fn test_off_route_then_long_gps_outage_then_recovery() {
 
         // During outage, dead-reckoning advances position based on last known speed
         // This is expected behavior - the system continues tracking using DR
-        let position_during_outage = state.last_valid_s_cm();
+        let position_during_outage = state.last_valid_s_cm;
         assert!(
             position_during_outage >= position_before_off_route,
             "Position should advance or stay same during DR-based outage (tick {})",
@@ -1420,7 +1430,7 @@ fn test_off_route_then_long_gps_outage_then_recovery() {
         if i == 0 {
             // First outage tick clears the freeze time
             assert!(
-                state.off_route_freeze_time().is_none(),
+                state.off_route_since.is_none(),
                 "GPS outage should clear off-route freeze time (current system behavior)"
             );
         }
@@ -1432,14 +1442,14 @@ fn test_off_route_then_long_gps_outage_then_recovery() {
 
     // After long outage (>10s), warmup was reset
     // First fix after outage requires warmup to complete
-    let _position_after_outage = state.last_valid_s_cm();
+    let _position_after_outage = state.last_valid_s_cm;
 
     // Process warmup ticks after GPS fix
     // With new independent counters, detection becomes ready after 3 ticks
     // First fix (just_reset) + 2 warmup ticks = 3 total ticks, detection ready
     for i in 0..2 {
         let gps = gps_on_route_at_x(first_fix_timestamp + i, 4_000, 500);
-        let event = state.process_gps(&gps);
+        let event = state.tick(&gps, &mut est_state).event;
 
         // During warmup, no events should be emitted
         assert!(
@@ -1451,15 +1461,15 @@ fn test_off_route_then_long_gps_outage_then_recovery() {
 
     // Now warmup is complete (detection_ready returns true)
     // Position may have changed due to new GPS fix at different location
-    let _position_after_warmup = state.last_valid_s_cm();
+    let _position_after_warmup = state.last_valid_s_cm;
 
     // Process a few more ticks to allow position to stabilize
     for i in 0..3 {
         let gps = gps_on_route_at_x(first_fix_timestamp + 4 + i, 4_500 + (i as i32 * 500), 500);
-        let _ = state.process_gps(&gps);
+        let _ = state.tick(&gps, &mut est_state).event;
     }
 
-    let position_after_recovery = state.last_valid_s_cm();
+    let position_after_recovery = state.last_valid_s_cm;
 
     // Position should be different from where we started
     // (it may have advanced during DR, then been reset by new GPS fix)
@@ -1469,7 +1479,7 @@ fn test_off_route_then_long_gps_outage_then_recovery() {
     );
 
     // Position should advance after recovery
-    let position_after_recovery = state.last_valid_s_cm();
+    let position_after_recovery = state.last_valid_s_cm;
     assert!(
         position_after_recovery > position_before_off_route,
         "Position should advance after recovery completes"
@@ -1480,7 +1490,7 @@ fn test_off_route_then_long_gps_outage_then_recovery() {
     let mut saw_duplicate_announce = false;
     for i in 0..5 {
         let gps = gps_on_route_at_x(first_fix_timestamp + 1 + i as u64, 4_500 + (i as i32 * 500), 500);
-        if let Some(event) = state.process_gps(&gps) {
+        if let Some(event) = state.tick(&gps, &mut est_state).event {
             // Should NOT re-announce stop 0
             if event.stop_idx == 0 && event.event_type == ArrivalEventType::Announce {
                 saw_duplicate_announce = true;

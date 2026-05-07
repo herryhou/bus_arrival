@@ -65,9 +65,12 @@ pub struct SystemState<'a> {
     just_reset: bool,
 
     // === NEW: GPS jump recovery tracking ===
-    last_valid_s_cm: DistCm,
-    last_gps_timestamp: u64,
-    needs_recovery_on_reacquisition: bool,
+    /// Last valid GPS position (for GPS jump detection, testing)
+    pub last_valid_s_cm: DistCm,
+    /// Last GPS timestamp (for GPS jump detection)
+    pub last_gps_timestamp: u64,
+    /// Whether re-acquisition recovery is needed (for off-route re-entry)
+    pub needs_recovery_on_reacquisition: bool,
 
     // === NEW: Snap cooldown ===
     just_snapped_ticks: u8,
@@ -269,6 +272,8 @@ impl<'a> SystemState<'a> {
         self.frozen_s_cm = Some(est.s_cm);
         self.off_route_clear_ticks = 0;
         self.off_route_since = Some(now);
+        // Set flag for re-acquisition recovery when we return to route without snap
+        self.needs_recovery_on_reacquisition = true;
     }
 
     /// Transition to Normal mode (direct from OffRoute)
@@ -278,8 +283,7 @@ impl<'a> SystemState<'a> {
         self.off_route_since = None;
         self.off_route_clear_ticks = 0;
         self.off_route_suspect_ticks = 0;
-        // Set flag for re-acquisition recovery when we get GPS fix without snap
-        self.needs_recovery_on_reacquisition = true;
+        // Keep needs_recovery_on_reacquisition set (it was set when entering OffRoute)
     }
 
     /// Transition to Recovering mode
