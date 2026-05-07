@@ -31,6 +31,8 @@ pub struct SystemState<'a> {
     pub recovering_since: Option<u64>,
     /// Recovery failed flag (set after timeout, suppresses announcements)
     pub recovery_failed: bool,
+    /// Flag indicating recovery should run on next valid GPS after off-route
+    pub needs_recovery_on_reacquisition: bool,
     /// Route data reference (immutable, XIP-friendly)
     pub route_data: &'a RouteData<'a>,
     /// Pending persisted state from flash
@@ -58,6 +60,7 @@ impl<'a> SystemState<'a> {
             off_route_since: None,
             recovering_since: None,
             recovery_failed: false,
+            needs_recovery_on_reacquisition: false,
             route_data,
             pending_persisted: persisted,
             last_persisted_stop: persisted.map(|p| p.last_stop_index).unwrap_or(0),
@@ -99,6 +102,8 @@ impl<'a> SystemState<'a> {
         self.off_route_since = None;
         self.off_route_clear_ticks = 0;
         self.off_route_suspect_ticks = 0;
+        // Set flag for re-acquisition recovery when we get GPS fix without snap
+        self.needs_recovery_on_reacquisition = true;
     }
 
     /// Transition to Recovering mode
