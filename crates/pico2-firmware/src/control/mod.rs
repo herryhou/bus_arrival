@@ -371,6 +371,34 @@ impl<'a> SystemState<'a> {
             self.has_received_first_fix = true;
         }
 
+        // STEP 1.25: Warmup counter updates
+        if self.just_reset {
+            // After warmup reset (e.g., GPS outage), first tick counts as first fix
+            self.just_reset = false;
+            self.estimation_total_ticks = 1;
+            self.detection_total_ticks = 1;
+            return TickResult { event: None, persist_request: None };
+        }
+
+        // Increment total time counters
+        self.estimation_total_ticks = self.estimation_total_ticks.saturating_add(1);
+        self.detection_total_ticks = self.detection_total_ticks.saturating_add(1);
+
+        // Update estimation readiness (until ready)
+        if !self.estimation_ready() {
+            self.estimation_ready_ticks += 1;
+        }
+
+        // Update detection readiness (until ready, independent of estimation)
+        if !self.detection_ready() {
+            self.detection_enabled_ticks += 1;
+        }
+
+        // Block detection unless ready
+        if !self.detection_ready() {
+            return TickResult { event: None, persist_request: None };
+        }
+
         // STEP 1.5: Enforce monotonic invariant
         // CRITICAL: Use current_position() to get mode-specific position
         // Normal → est.s_cm, Recovering → est.z_gps_cm, OffRoute → frozen_s_cm
