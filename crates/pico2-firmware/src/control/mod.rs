@@ -267,6 +267,8 @@ impl<'a> SystemState<'a> {
         self.off_route_since = None;
         self.off_route_clear_ticks = 0;
         self.off_route_suspect_ticks = 0;
+        // Set flag for re-acquisition recovery when we get GPS fix without snap
+        self.needs_recovery_on_reacquisition = true;
     }
 
     /// Transition to Recovering mode
@@ -524,6 +526,63 @@ impl<'a> SystemState<'a> {
             self.last_gps_timestamp = gps.timestamp;
         }
 
+
+        // STEP 3.6: Handle snap from off-route re-entry
+        if est.snapped && self.mode == SystemMode::Normal {
+            // 1. Find forward closest stop (prevents backward selection)
+            let new_idx = self.find_forward_closest_stop_index(est.s_cm, self.last_stop_index);
+            self.last_stop_index = new_idx;
+
+            // 2. Reset stop states using same logic as recovery
+            self.reset_stop_states_after_recovery(new_idx as usize, est.s_cm);
+
+            // 3. Clear all recovery triggers
+            self.needs_recovery_on_reacquisition = false;
+            self.frozen_s_cm = None;
+            self.off_route_since = None;
+            self.last_valid_s_cm = est.s_cm;
+            self.last_gps_timestamp = gps.timestamp;
+
+            // 4. Set 2-second cooldown
+            self.just_snapped_ticks = 2;
+        }
+
+        // STEP 3.7: Check for re-acquisition recovery (after OffRoute without snap)
+        if !est.snapped && !in_snap_cooldown && self.needs_recovery_on_reacquisition && self.mode == SystemMode::Normal {
+            self.needs_recovery_on_reacquisition = false;
+
+            // Calculate elapsed time since freeze
+            let elapsed_seconds = self.off_route_since
+                .map(|t| gps.timestamp.saturating_sub(t))
+                .unwrap_or(1);
+
+            // Run recovery to find correct stop index
+            let mut stops_vec = heapless::Vec::<shared::Stop, 256>::new();
+            for i in 0..self.route_data.stop_count {
+                if let Some(stop) = self.route_data.get_stop(i) {
+                    let _ = stops_vec.push(stop);
+                }
+            }
+
+            if let Some(recovered_idx) = detection::recovery::find_stop_index(
+                est.s_cm,
+                est_state.dr.filtered_v,
+                elapsed_seconds,
+                &stops_vec,
+                self.last_stop_index,
+                &None,  // No freeze context in Normal mode (re-acquisition recovery)
+            ) {
+                #[cfg(feature = "firmware")]
+                defmt::info!("Re-acquisition recovered stop index: {}", recovered_idx);
+                self.last_stop_index = recovered_idx as u8;
+                self.reset_stop_states_after_recovery(recovered_idx, est.s_cm);
+            }
+
+            // Clear freeze time and context after re-acquisition recovery
+            self.off_route_since = None;
+            self.frozen_s_cm = None;
+        }
+
         // STEP 4: Detection (ONLY in Normal mode)
         let event = if self.mode == SystemMode::Normal {
             self.run_detection(&est, s_cm_for_detection, gps.timestamp)
@@ -539,6 +598,11 @@ impl<'a> SystemState<'a> {
         } else {
             None
         };
+
+        // Decrement snap cooldown
+        if self.just_snapped_ticks > 0 {
+            self.just_snapped_ticks = self.just_snapped_ticks.saturating_sub(1);
+        }
 
         TickResult { event, persist_request }
     }
