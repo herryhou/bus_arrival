@@ -54,6 +54,8 @@ pub struct EstimationOutput {
     pub confidence: u8,
     /// Whether GPS has valid fix
     pub has_fix: bool,
+    /// Whether position snapped from off-route re-entry
+    pub snapped: bool,
 }
 
 /// Isolated estimation pipeline
@@ -145,6 +147,7 @@ pub fn estimate(
         divergence_d2: match_d2,
         confidence,
         has_fix: true,
+        snapped: false,
     }
 }
 
@@ -160,6 +163,7 @@ fn handle_outage(state: &mut EstimationState, timestamp: u64) -> EstimationOutpu
             divergence_d2: 0,
             confidence: 0,
             has_fix: false,
+            snapped: false,
         },
     };
 
@@ -172,6 +176,7 @@ fn handle_outage(state: &mut EstimationState, timestamp: u64) -> EstimationOutpu
             divergence_d2: 0,
             confidence: 0,
             has_fix: false,
+            snapped: false,
         };
     }
 
@@ -191,6 +196,7 @@ fn handle_outage(state: &mut EstimationState, timestamp: u64) -> EstimationOutpu
         divergence_d2: 0,
         confidence: 0,
         has_fix: false,
+        snapped: false,
     }
 }
 
