@@ -143,20 +143,7 @@ impl<'a> SystemState<'a> {
 
     /// Find closest stop index to current position
     pub fn find_closest_stop_index(&self, s_cm: DistCm) -> u8 {
-        let mut closest_idx = 0;
-        let mut closest_dist = i32::MAX;
-
-        for i in 0..self.route_data.stop_count {
-            if let Some(stop) = self.route_data.get_stop(i) {
-                let dist = (s_cm - stop.progress_cm).abs();
-                if dist < closest_dist {
-                    closest_dist = dist;
-                    closest_idx = i;
-                }
-            }
-        }
-
-        closest_idx as u8
+        timeout::find_closest_stop_index(s_cm, self.route_data.stop_count as u8, |i| self.route_data.get_stop(i as usize))
     }
 
     /// Find closest stop index in forward direction only
@@ -218,24 +205,6 @@ impl<'a> SystemState<'a> {
         // TODO: Reset stop states when detection layer is integrated
     }
 
-    /// Find closest stop index (for recovery timeout fallback)
-    fn find_closest_stop_index_internal(&self, s_cm: DistCm) -> u8 {
-        let mut closest_idx = 0;
-        let mut closest_dist = i32::MAX;
-
-        for i in 0..self.route_data.stop_count {
-            if let Some(stop) = self.route_data.get_stop(i) {
-                let dist = (s_cm - stop.progress_cm).abs();
-                if dist < closest_dist {
-                    closest_dist = dist;
-                    closest_idx = i;
-                }
-            }
-        }
-
-        closest_idx as u8
-    }
-
     /// Collect stops into heapless Vec (for recovery input)
     fn collect_stops(&self) -> heapless::Vec<shared::Stop, 256> {
         let mut stops = heapless::Vec::new();
@@ -252,7 +221,7 @@ impl<'a> SystemState<'a> {
         // Check timeout first
         if check_recovering_timeout(self.mode, self.recovering_since, now) {
             // Fallback to geometric search
-            let best_idx = self.find_closest_stop_index_internal(est.s_cm);
+            let best_idx = self.find_closest_stop_index(est.s_cm);
 
             self.recovery_failed = true;
             self.mode = SystemMode::Normal;
@@ -555,12 +524,11 @@ mod tests {
 
     #[test]
     fn test_systemstate_size() {
-        use std::mem::size_of;
+        use core::mem::size_of;
         let size = size_of::<SystemState>();
-        println!("SystemState size: {} bytes ({} KB)", size, size / 1024);
-        println!("NOTE: 256 StopStates at ~20 bytes each = ~5120 bytes > 4KB budget");
         // This test documents the current size issue
         // The 4KB budget cannot be met with 256 StopStates
+        let _ = size; // Suppress unused warning
     }
 
     #[test]
