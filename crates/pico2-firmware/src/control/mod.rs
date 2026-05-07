@@ -415,12 +415,28 @@ impl<'a> SystemState<'a> {
             }
         }
 
+        // STEP 1.5: Enforce monotonic invariant
+        // CRITICAL: Use current_position() to get mode-specific position
+        // Normal → est.s_cm, Recovering → est.z_gps_cm, OffRoute → frozen_s_cm
+        let s_raw = self.current_position(&est);
+        let (s_cm_for_detection, did_jump) = if self.last_s_cm == 0 {
+            // First fix: skip check, initialize directly
+            (s_raw, false)
+        } else {
+            enforce_monotonic(s_raw, self.last_s_cm, self.mode)
+        };
+        if did_jump {
+            self.backward_jump_count += 1;
+        }
+        self.last_s_cm = s_cm_for_detection;
+
         // STEP 1.25: Warmup counter updates
         if self.just_reset {
             // After warmup reset (e.g., GPS outage), first tick counts as first fix
             self.just_reset = false;
             self.estimation_total_ticks = 1;
             self.detection_total_ticks = 1;
+            // Position is already updated above, just block detection
             return TickResult { event: None, persist_request: None };
         }
 
@@ -438,25 +454,10 @@ impl<'a> SystemState<'a> {
             self.detection_enabled_ticks += 1;
         }
 
-        // Block detection unless ready
+        // Block detection unless ready (but position tracking continues above)
         if !self.detection_ready() {
             return TickResult { event: None, persist_request: None };
         }
-
-        // STEP 1.5: Enforce monotonic invariant
-        // CRITICAL: Use current_position() to get mode-specific position
-        // Normal → est.s_cm, Recovering → est.z_gps_cm, OffRoute → frozen_s_cm
-        let s_raw = self.current_position(&est);
-        let (s_cm_for_detection, did_jump) = if self.last_s_cm == 0 {
-            // First fix: skip check, initialize directly
-            (s_raw, false)
-        } else {
-            enforce_monotonic(s_raw, self.last_s_cm, self.mode)
-        };
-        if did_jump {
-            self.backward_jump_count += 1;
-        }
-        self.last_s_cm = s_cm_for_detection;
 
         // STEP 2: State machine transitions (unified triggers)
         let old_mode = self.mode;
