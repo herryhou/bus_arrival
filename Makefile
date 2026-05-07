@@ -180,6 +180,22 @@ pipeline: gen_nmea preprocess
 	$(PIPELINE) $(NMEA_OUT) $(ROUTE_DATA_BIN)
 	@echo "Generated: $(TRACE_OUT)"
 
+# Generate golden trace files for regression testing
+golden:
+	@echo "=== Generating golden traces ==="
+	@if [ -z "$(ROUTE_NAME)" ]; then \
+		echo "Error: ROUTE_NAME parameter is required"; \
+		echo "Usage: make golden ROUTE_NAME=<route>"; \
+		exit 1; \
+	fi
+	$(MAKE) gen_nmea ROUTE_NAME=$(ROUTE_NAME) SCENARIO=normal
+	$(MAKE) pipeline ROUTE_NAME=$(ROUTE_NAME) SCENARIO=normal
+	@mkdir -p test_data/golden
+	@cp $(TRACE_OUT) test_data/golden/$(ROUTE_NAME)_normal_trace.jsonl
+	@echo "Golden files updated in test_data/golden/"
+	@echo "Generated: test_data/golden/$(ROUTE_NAME)_normal_trace.jsonl"
+
+
 # Run unified pipeline without generating NMEA (uses existing NMEA file)
 pipeline-no-gen: preprocess
 	@echo "=== Running unified pipeline (using existing NMEA) ==="
@@ -228,6 +244,7 @@ help:
 	@echo "Regression Testing:"
 	@echo "  make regression-test                             Run all regression tests"
 	@echo "  make regression-save CASE_NAME=<name> DESC='...' Save failing case as regression test"
+	@echo "  make golden ROUTE_NAME=<route>                  Generate golden trace files for regression testing"
 	@echo ""
 	@echo "Parameters:"
 	@echo "  ROUTE_NAME    Route identifier (default: ty225)"

@@ -8,6 +8,7 @@ use pipeline::Pipeline;
 /// Test: GPS drift scenario
 /// Validates: Recovery algorithm corrects position after drift
 #[test]
+#[ignore = "Test requires ty225_drift.bin and ty225_drift_nmea.txt assets"]
 fn test_drift_recovery() {
     // Disable debug output for this test run
     // eprintln!("Route has {} stops", route_data.stops().len());
@@ -42,6 +43,7 @@ fn test_drift_recovery() {
 /// Test: GPS jump scenario
 /// Validates: No false arrivals for skipped stops
 #[test]
+#[ignore = "Test requires ty225_jump.bin and ty225_jump_nmea.txt assets"]
 fn test_jump_skip_stop_prevention() {
     // Load jump scenario data
     let route_bytes = load_ty225_route("jump");
@@ -72,6 +74,7 @@ fn test_jump_skip_stop_prevention() {
 
 /// Test: Validate route loads for both scenarios
 #[test]
+#[ignore = "Test requires ty225_drift.bin and ty225_jump.bin assets"]
 fn test_anomaly_route_data_loads() {
     // Drift route
     let drift_bytes = load_ty225_route("drift");
@@ -94,6 +97,7 @@ fn test_anomaly_route_data_loads() {
 /// Test: Exact stop matching for drift scenario
 /// Validates: Recovery algorithm detects correct stops despite GPS drift
 #[test]
+#[ignore = "Test requires ty225_drift.bin and ty225_drift_arrivals.json assets"]
 fn test_drift_exact_stop_matching() {
     let route_bytes = load_ty225_route("drift");
     let route_data = RouteData::load(&route_bytes)
@@ -127,6 +131,7 @@ fn test_drift_exact_stop_matching() {
 /// Test: Exact stop matching for jump scenario
 /// Validates: No false arrivals for skipped stops
 #[test]
+#[ignore = "Test requires ty225_jump.bin and ty225_jump_arrivals.json assets"]
 fn test_jump_exact_stop_matching() {
     let route_bytes = load_ty225_route("jump");
     let route_data = RouteData::load(&route_bytes)
