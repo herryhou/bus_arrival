@@ -20,11 +20,11 @@ use embassy_rp::flash::Flash;
 use embassy_rp::uart::{BufferedInterruptHandler, BufferedUart, Config as UartConfig};
 
 // Module declarations
-mod detection;
+mod control;
+mod estimation;
 mod lut;
 mod persist;
 mod recovery_trigger;
-mod state;
 mod uart;
 
 // Note: embassy-rp doesn't require external bootloader
@@ -99,8 +99,9 @@ async fn main(_spawner: Spawner) {
         info!("No valid persisted state, cold start");
     }
 
-    // Initialize state with route data reference
-    let mut state = state::State::new(&route_data, persisted);
+    // Initialize control and estimation layers
+    let mut control = control::SystemState::new(&route_data, persisted);
+    let mut est_state = estimation::EstimationState::new();
 
     // Initialize line buffer for NMEA data
     let mut line_buf = uart::UartLineBuffer::new();
@@ -126,8 +127,10 @@ async fn main(_spawner: Spawner) {
                             debug!("GPS: lat={}, lon={}, fix={}", gps.lat, gps.lon, gps.has_fix);
 
                             // Process GPS through full pipeline
-                            if let Some(arrival) = state.process_gps(&gps) {
-                                // Emit arrival event via UART
+                            let result = control.tick(&gps, &mut est_state);
+                            
+                            // Emit arrival event via UART
+                            if let Some(arrival) = result.event {
                                 match uart::write_arrival_event_async(&mut uart, &arrival).await {
                                     Ok(()) => {
                                         info!("Emitted arrival event for stop {}", arrival.stop_idx);
@@ -140,27 +143,24 @@ async fn main(_spawner: Spawner) {
 
                             // Persist state if stop index changed and rate limit allows
                             // This runs once per GPS fix (timestamp change)
-                            if let Some(current_stop) = state.current_stop_index() {
-                                if state.should_persist(current_stop) {
-                                    let ps = shared::PersistedState::new(state.kalman.s_cm, current_stop);
-                                    match persist::save(&mut flash, &ps).await {
-                                        Ok(()) => {
-                                            info!(
-                                                "Persisted state: stop={}, progress={}cm",
-                                                current_stop, state.kalman.s_cm
-                                            );
-                                            state.mark_persisted(current_stop);
-                                        }
-                                        Err(()) => {
-                                            defmt::warn!("Failed to persist state to flash");
-                                            // S4 fix: increment on failure to prevent retry loop
-                                            state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
-                                        }
+                            if let Some(ps) = result.persist_request {
+                                match persist::save(&mut flash, &ps).await {
+                                    Ok(()) => {
+                                        info!(
+                                            "Persisted state: stop={}, progress={}cm",
+                                            ps.last_stop_index, ps.last_progress_cm
+                                        );
+                                        control.mark_persisted(ps.last_stop_index);
                                     }
-                                } else {
-                                    // Increment tick counter for rate limiting
-                                    state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
+                                    Err(()) => {
+                                        defmt::warn!("Failed to persist state to flash");
+                                        // S4 fix: increment on failure to prevent retry loop
+                                        control.ticks_since_persist = control.ticks_since_persist.saturating_add(1);
+                                    }
                                 }
+                            } else {
+                                // Increment tick counter for rate limiting
+                                control.ticks_since_persist = control.ticks_since_persist.saturating_add(1);
                             }
                         }
 
