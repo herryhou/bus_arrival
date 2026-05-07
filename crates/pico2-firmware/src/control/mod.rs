@@ -201,6 +201,47 @@ impl<'a> SystemState<'a> {
         self.ticks_since_persist = 0;
     }
 
+    /// Reset all stop states to Idle after recovery
+    fn reset_stop_states_after_recovery(&mut self, recovered_idx: usize, current_s_cm: DistCm) {
+        use detection::state_machine::StopState;
+        use shared::FsmState;
+
+        let recovered_was_announced = self
+            .stop_states
+            .get(recovered_idx)
+            .map(|state| state.announced || state.last_announced_stop == recovered_idx as u8)
+            .unwrap_or(false);
+
+        // Reset all stop states by recreating them
+        for i in 0..self.stop_states.len() {
+            self.stop_states[i] = StopState::new(i as u8);
+        }
+
+        // Stops before the recovered stop are treated as already passed.
+        // Preserve their announcement bookkeeping so recovery cannot re-announce them.
+        for i in 0..recovered_idx.min(self.stop_states.len()) {
+            self.stop_states[i].fsm_state = FsmState::Departed;
+            self.stop_states[i].announced = true;
+            self.stop_states[i].last_announced_stop = i as u8;
+        }
+
+        // Mark recovered stop as Approaching if within corridor
+        if let Some(stop) = self.route_data.get_stop(recovered_idx) {
+            if let Some(state) = self.stop_states.get_mut(recovered_idx) {
+                if recovered_was_announced {
+                    state.announced = true;
+                    state.last_announced_stop = recovered_idx as u8;
+                }
+
+                if current_s_cm >= stop.corridor_start_cm
+                    && current_s_cm <= stop.corridor_end_cm
+                {
+                    state.fsm_state = FsmState::Approaching;
+                }
+            }
+        }
+    }
+
     /// Get the current stop index from last_stop_index.
     /// Returns None if not yet initialized.
     pub fn current_stop_index(&self) -> Option<u8> {
