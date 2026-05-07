@@ -439,40 +439,30 @@ mod tests {
 
     #[test]
     fn test_warmup_methods() {
-        use shared::binfile::RouteData;
-        use shared::{RouteNode, SpatialGrid, FIXED_ORIGIN_LAT_DEG};
+        use shared::binfile::{RouteData, MAGIC, VERSION};
+        use shared::binfile::crc32;
 
-        // Create minimal valid route data
-        let nodes = vec![
-            RouteNode {
-                x_cm: 0,
-                y_cm: 0,
-                cum_dist_cm: 0,
-                seg_len_mm: 100000,
-                dx_cm: 10000,
-                dy_cm: 0,
-                heading_cdeg: 9000,
-                _pad: 0,
-            }
-        ];
+        // Create minimal valid RouteData buffer
+        // Header: magic(4) + version(2) + node_count(2) + stop_count(1) + padding(3) + origin(8) + lat_avg(8) = 28 bytes
+        let mut buffer = [0u8; 128];
 
-        // Create a simple grid
-        let grid = SpatialGrid {
-            cells: vec![vec![0]],
-            grid_size_cm: 10000,
-            cols: 1,
-            rows: 1,
-            x0_cm: 0,
-            y0_cm: 0,
-        };
+        // Write magic
+        buffer[0..4].copy_from_slice(&MAGIC.to_le_bytes());
+        // Write version
+        buffer[4..6].copy_from_slice(&VERSION.to_le_bytes());
+        // Write node_count (0)
+        buffer[6..8].copy_from_slice(&0u16.to_le_bytes());
+        // Write stop_count (0)
+        buffer[8] = 0;
+        // padding at [9..12] is already 0
+        // origin x0_cm, y0_cm at [12..20] is already 0
+        // lat_avg_deg at [20..28] is already 0 (f64)
 
-        // Pack route data
-        let mut buffer = Vec::new();
-        shared::binfile::pack_route_data(&nodes, &[], &grid, FIXED_ORIGIN_LAT_DEG, &mut buffer)
-            .expect("Failed to pack test route data");
+        // Compute and write CRC32 at end
+        let crc = crc32(&buffer[..124]);
+        buffer[124..128].copy_from_slice(&crc.to_le_bytes());
 
-        let leaked_buffer = Box::leak(buffer.into_boxed_slice());
-        let route_data = RouteData::load(leaked_buffer).expect("Failed to load route data");
+        let route_data = RouteData::load(&buffer).expect("Failed to load minimal route data");
         let state = SystemState::new(&route_data, None);
 
         assert!(!state.estimation_ready(), "Should not be ready initially");
