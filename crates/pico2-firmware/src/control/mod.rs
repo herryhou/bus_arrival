@@ -462,6 +462,68 @@ impl<'a> SystemState<'a> {
             }
         }
 
+        // STEP 3.5: Check for GPS jump requiring recovery (H1)
+        let in_snap_cooldown = self.just_snapped_ticks > 0;
+        let prev_s_cm = self.last_valid_s_cm;
+        // Skip recovery on first fix - last_valid_s_cm is still 0 (initial value)
+        if self.mode == SystemMode::Normal && !self.just_reset && self.has_received_first_fix {
+            let s_raw = self.current_position(&est);
+            if !in_snap_cooldown && crate::recovery_trigger::should_trigger_recovery(s_raw, prev_s_cm) {
+                #[cfg(feature = "firmware")]
+                defmt::warn!(
+                    "GPS jump detected: s={}→{}, triggering recovery",
+                    prev_s_cm,
+                    s_raw
+                );
+
+                // Calculate time delta since last GPS fix (in seconds)
+                let dt_since_last_fix = if self.last_gps_timestamp > 0 {
+                    gps.timestamp.saturating_sub(self.last_gps_timestamp)
+                } else {
+                    1 // Default to 1 second on first fix or after outage
+                };
+
+                // Collect stops into a heapless::Vec for recovery module
+                let mut stops_vec = heapless::Vec::<shared::Stop, 256>::new();
+                for i in 0..self.route_data.stop_count {
+                    if let Some(stop) = self.route_data.get_stop(i) {
+                        if stops_vec.push(stop).is_err() {
+                            #[cfg(feature = "firmware")]
+                            defmt::warn!("Too many stops for recovery buffer");
+                            break;
+                        }
+                    }
+                }
+
+                if let Some(recovered_idx) = detection::recovery::find_stop_index(
+                    s_raw,
+                    est_state.dr.filtered_v,
+                    dt_since_last_fix,
+                    &stops_vec,
+                    self.last_stop_index,
+                    &None,  // No freeze context in Normal mode (GPS jump recovery)
+                ) {
+                    #[cfg(feature = "firmware")]
+                    defmt::info!("Recovery found stop index: {}", recovered_idx);
+                    self.last_stop_index = recovered_idx as u8;
+                    self.reset_stop_states_after_recovery(recovered_idx, s_raw);
+                } else {
+                    #[cfg(feature = "firmware")]
+                    defmt::warn!("Recovery failed: no valid stop found");
+                }
+
+                // Update tracking
+                self.last_valid_s_cm = s_raw;
+                self.last_gps_timestamp = gps.timestamp;
+            }
+        }
+
+        // Update position tracking if no jump occurred
+        if !crate::recovery_trigger::should_trigger_recovery(self.current_position(&est), self.last_valid_s_cm) {
+            self.last_valid_s_cm = self.current_position(&est);
+            self.last_gps_timestamp = gps.timestamp;
+        }
+
         // STEP 4: Detection (ONLY in Normal mode)
         let event = if self.mode == SystemMode::Normal {
             self.run_detection(&est, s_cm_for_detection, gps.timestamp)
