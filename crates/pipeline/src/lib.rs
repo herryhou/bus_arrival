@@ -150,23 +150,20 @@ pub enum PipelineError {
 pub struct Pipeline;
 
 /// Localization state (Phase 2: GPS processing)
-pub struct LocalizationState<'a> {
+pub struct LocalizationState {
     /// Kalman filter state
     kalman: KalmanState,
     /// Dead-reckoning state
     dr: DrState,
-    /// Route data reference
-    route_data: std::marker::PhantomData<&'a ()>,
     /// First fix flag
     is_first_fix: bool,
 }
 
-impl<'a> LocalizationState<'a> {
+impl LocalizationState {
     pub fn new(_route_data: &RouteData) -> Self {
         Self {
             kalman: KalmanState::new(),
             dr: DrState::new(),
-            route_data: std::marker::PhantomData,
             is_first_fix: true,
         }
     }
