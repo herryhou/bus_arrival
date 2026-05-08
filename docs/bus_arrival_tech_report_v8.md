@@ -1859,152 +1859,114 @@ static GLOBAL_STOP_INDEX: AtomicU32 = AtomicU32::new(0);
 
 ---
 
-## 22. 二層架構設計（v9.0 新增）
+## 22. 三層架構設計（v9.0 清晰邊界重構）
 
 ### 22.1 設計動機
 
-v9.0 版本將嵌入式韌體重構為明確的二層架構，解決以下問題：
+v9.0 版本將嵌入式韌體重構為明確的三層架構，實現清晰組件邊界，解決以下問題：
 
-1. **關注點混合**：原架構中，GPS 處理、狀態管理、恢復邏輯混雜在同一模組
-2. **測試困難**：無法獨立測試估計邏輯（需同時測試狀態機）
+1. **關注點混合**：原架構中，NMEA 解析、GPS 處理、狀態管理、恢復邏輯混雜在同一模組
+2. **測試困難**：無法獨立測試各層邏輯（需同時測試狀態機）
 3. **觸發不一致**：部分模式轉換使用內部狀態，部分使用估計信號
-4. **恢復邏輯隱式**：恢復作為內聯邏輯散佈於各處，難以驗證
+4. **邊界模糊**：組件間隱式依賴，難以獨立驗證
 
 **重構目標：**
-- 估計層：純函數，相同 GPS → 相同輸出
-- 控制層：狀態機，統一觸發源
-- 恢復模組：純函數，明確輸入/輸出
+- **解析層（Parser Layer）**：NMEA → GpsPoint，純狀態更新
+- **估計層（Estimation Layer）**：隔離的 GPS → 位置管線，無控制層存取權
+- **控制層（Control Layer）**：ModeMachine + SystemState，統一觸發源
+
+**核心設計原則：**
+- **隔離性**：估計層無法存取模式、站點索引、凍結位置
+- **單一轉換**：ModeMachine 強制每個 tick 最多一次模式轉換
+- **明確邊界**：每個組件都有定義良好的輸入/輸出契約
+- **可測試性**：組件可獨立測試
 
 ---
 
 ### 22.2 架構總覽
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Control Layer                            │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │ SystemState  │  │ SystemMode   │  │   tick()     │     │
-│  │              │  │  (Normal/    │  │ orchestrator │     │
-│  │ - mode       │  │   OffRoute/  │  │              │     │
-│  │ - frozen_s_cm│  │   Recovering)│  │ 1. estimate()│     │
-│  │ - last_stop  │  └──────────────┘  │ 2. transitions│     │
-│  └──────────────┘                    │ 3. recover()  │     │
-│         ▲                             │ 4. detection()│     │
-│         │                             └──────────────┘     │
-│         │                                    │              │
-└─────────┼────────────────────────────────────┼──────────────┘
-          │                                    │
-          │ EstimationOutput                   │ EstimationInput
-          │ (z_gps_cm, s_cm,                   │ (gps, route_data)
-          │  v_cms, divergence_d2)             │
-          │                                    │
-┌─────────┴────────────────────────────────────┴──────────────┐
-│                  Estimation Layer                           │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │ KalmanState  │  │   DrState    │  │  estimate()  │     │
-│  │              │  │              │  │              │     │
-│  │ - s_cm       │  │ - filtered_v │  │ • Map match  │     │
-│  │ - v_cms      │  │ - last_gps   │  │ • Kalman     │     │
-│  │ - last_seg   │  │ - in_recovery│  │ • DR         │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                      Control Layer                              │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────┐ │
+│  │   SystemState    │  │   ModeMachine    │  │    tick()    │ │
+│  │                  │  │  (pure state     │  │  orchestrator│ │
+│  │ - mode           │  │   machine)       │  │              │ │
+│  │ - frozen_s_cm    │  │                  │  │ 1. parser()  │ │
+│  │ - last_stop_idx  │  │ - mode           │  │ 2. estimate()│ │
+│  │ - route_data     │  │ - suspect_ticks  │  │ 3. mode()    │ │
+│  └──────────────────┘  │ - clear_ticks    │  │ 4. recover() │ │
+│         ▲             └──────────────────┘  │ 5. detect()  │ │
+│         │                                    └──────────────┘ │
+└─────────┼──────────────────────────────────────────────────────┘
+          │
+          │ GpsPoint
+          │
+┌─────────┴───────────────────────────────────────────────────────┐
+│                    Parser Layer                                 │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  NmeaParser                                              │  │
+│  │  • feed_sentence(sentence) → Option<GpsPoint>            │  │
+│  │  • Accumulates RMC + GGA → emits on timestamp change     │  │
+│  │  • Pure state update (no side effects)                   │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+          │
+          │ EstimationInput                        EstimationOutput
+          │ (gps, route_data, is_first_fix)        (z_gps_cm, s_cm,
+          │                                         v_cms, divergence_d2)
+          │
+┌─────────┴───────────────────────────────────────────────────────┐
+│                  Estimation Layer (Isolated)                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐ │
+│  │ KalmanState  │  │   DrState    │  │    estimate()        │ │
+│  │              │  │              │  │                      │ │
+│  │ - s_cm       │  │ - filtered_v │  │ • Map matching       │ │
+│  │ - v_cms      │  │ - last_gps   │  │ • Kalman filter      │ │
+│  │ - last_seg   │  │ - in_recovery│  │ • Dead-reckoning     │ │
+│  └──────────────┘  └──────────────┘  └──────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
           │
           │ RecoveryInput
-          │ (s_cm, v_cms, dt, stops, hint, frozen, window)
+          │ (z_gps_cm, v_cms, dt, stops, hint, frozen, window)
           │
-┌─────────┴──────────────────────────────────────────────────┐
-│                  Recovery Module                           │
-│  ┌──────────────────────────────────────────────────────┐ │
-│  │  recover() : pure function                           │ │
-│  │  • Search: hint_idx ± 10 stops (O(20))              │ │
-│  │  • Spatial anchor penalty (off-route recovery)      │ │
-│  │  • Velocity constraint (no impossible jumps)        │ │
-│  └──────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+┌─────────┴───────────────────────────────────────────────────────┐
+│                  Recovery Module (Pure Function)                 │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  recover(input) → Option<usize>                         │  │
+│  │  • Search: hint_idx ± window stops                       │  │
+│  │  • Spatial anchor penalty (off-route recovery)          │  │
+│  │  • Velocity constraint (no impossible jumps)            │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### 22.3 控制層（Control Layer）
+### 22.3 解析層（Parser Layer）
 
-#### 22.3.1 SystemState 結構
+#### 22.3.1 NmeaParser 組件
 
 ```rust
-pub struct SystemState<'a> {
-    /// Current operational mode
-    pub mode: SystemMode,
-    /// Last confirmed stop index (for recovery hint)
-    pub last_stop_index: u8,
-    /// Frozen position during OffRoute/Recovering (None in Normal mode)
-    pub frozen_s_cm: Option<DistCm>,
-    /// Hysteresis counter for OffRoute → Normal transition
-    pub off_route_clear_ticks: u8,
-    /// Hysteresis counter for Normal → OffRoute transition
-    pub off_route_suspect_ticks: u8,
-    /// Timestamp when OffRoute was entered
-    pub off_route_since: Option<u64>,
-    /// Timestamp when Recovering was entered
-    pub recovering_since: Option<u64>,
-    /// Recovery failed flag
-    pub recovery_failed: bool,
-    /// Route data reference (immutable, XIP-friendly)
-    pub route_data: &'a RouteData<'a>,
+pub struct NmeaParser {
+    accumulator: FixAccumulator,
+}
+
+impl NmeaParser {
+    /// Feed a complete NMEA sentence (without trailing \r\n)
+    pub fn feed_sentence(&mut self, sentence: &str) -> Option<GpsPoint>;
 }
 ```
 
-#### 22.3.2 SystemMode 枚舉
+**邊界契約：**
+- **輸入：** 原始 NMEA 字串（不含 `\r\n`）
+- **輸出：** `Some(GpsPoint)` 當累積足夠句子（時間戳變化），`None` 否則
+- **副作用：** 僅更新內部 accumulator 狀態
 
-```rust
-pub enum SystemMode {
-    /// Normal operation: GPS on-route, detection active
-    Normal,
-    /// Off-route detected: position frozen, detection suppressed
-    OffRoute,
-    /// Recovery in progress: searching for correct stop
-    Recovering,
-}
-```
-
-#### 22.3.3 統一觸發系統
-
-所有模式轉換僅使用估計信號：
-
-| 轉換 | 觸發條件 | 遲滯 |
-|------|----------|------|
-| Normal → OffRoute | `divergence_d2 > 25_000_000` (500 m²) | 5 ticks |
-| OffRoute → Normal | `divergence_d2 ≤ 25_000_000` | 2 ticks |
-| OffRoute → Recovering | `\|z_gps_cm - frozen_s_cm\| > 5_000` (50 m) | Immediate |
-| Recovering → Normal | Recovery success or timeout | - |
-
-**關鍵不變量：**
-- 每個 tick 最多一次模式轉換
-- `frozen_s_cm` 僅在 OffRoute/Recovering 模式存在
-- 恢復僅在 Recovering 模式執行
-- 偵測僅在 Normal 模式執行
-
-#### 22.3.4 tick() 協調器
-
-```rust
-pub fn tick(&mut self, gps: &GpsPoint, est_state: &mut EstimationState) -> Option<ArrivalEvent> {
-    // STEP 1: Isolated estimation
-    let est = estimate(input, est_state);
-
-    // STEP 2: State machine transitions (unified triggers)
-    // ... single transition per tick ...
-
-    // STEP 3: Recovery (ONLY in Recovering mode)
-    if self.mode == SystemMode::Recovering {
-        // ... attempt recovery ...
-    }
-
-    // STEP 4: Detection (ONLY in Normal mode)
-    if self.mode == SystemMode::Normal {
-        return self.run_detection(&est, gps.timestamp);
-    }
-
-    None
-}
-```
+**確定性保證：**
+- 純狀態更新：相同輸入序列 → 相同輸出序列
+- 無外部依賴：不需要 UART、GPIO、或控制層狀態
+- 可獨立測試：可直接用 NMEA 字串測試
 
 ---
 
@@ -2014,27 +1976,45 @@ pub fn tick(&mut self, gps: &GpsPoint, est_state: &mut EstimationState) -> Optio
 
 估計層遵守嚴格的隔離契約：
 
-**不存取：**
-- `mode`（控制層狀態）
-- `last_stop_index`（控制層狀態）
-- `frozen_s_cm`（控制層狀態）
+**不存取（強制無法存取）：**
+- ❌ `mode`（控制層狀態）
+- ❌ `last_stop_index`（控制層狀態）
+- ❌ `frozen_s_cm`（控制層狀態）
 
 **不觸發：**
-- 模式轉換
-- 恢復邏輯
-- 任何控制層行為
+- ❌ 模式轉換
+- ❌ 恢復邏輯
+- ❌ 任何控制層行為
 
-#### 22.4.2 EstimationOutput
+#### 22.4.2 EstimationInput
+
+```rust
+pub struct EstimationInput<'a> {
+    /// Raw GPS data (from NMEA parser)
+    pub gps: GpsPoint,
+    /// Route geometry reference (immutable, XIP flash)
+    pub route_data: &'a RouteData<'a>,
+    /// True for first GPS fix (enables relaxed heading)
+    pub is_first_fix: bool,
+}
+```
+
+**不包含（強制無法包含）：**
+- ❌ `mode: SystemMode`
+- ❌ `last_stop_index: u8`
+- ❌ `frozen_s_cm: Option<DistCm>`
+
+#### 22.4.3 EstimationOutput
 
 ```rust
 pub struct EstimationOutput {
-    /// Raw GPS projection onto route (for F1 probability)
+    /// Raw GPS projection onto route (for F1 probability, recovery)
     pub z_gps_cm: DistCm,
     /// Kalman-filtered position (primary position in Normal mode)
     pub s_cm: DistCm,
     /// Filtered velocity (cm/s)
     pub v_cms: SpeedCms,
-    /// Divergence from route (squared distance from map matching)
+    /// Divergence from route (squared distance, for mode transitions)
     pub divergence_d2: Dist2,
     /// Confidence signal (0-255, higher is better)
     pub confidence: u8,
@@ -2043,12 +2023,12 @@ pub struct EstimationOutput {
 }
 ```
 
-#### 22.4.3 確定性保證
+#### 22.4.4 確定性保證
 
 相同 GPS 輸入 → 相同 `EstimationOutput`（無副作用）
 
 ```
-GPS(t) + route_data + EstimationState(t)
+EstimationInput + EstimationState(t)
     ↓ estimate()
 EstimationOutput(t)
 ```
@@ -2057,9 +2037,116 @@ EstimationOutput(t)
 
 ---
 
-### 22.5 恢復模組（Recovery Module）
+### 22.5 控制層（Control Layer）
 
-#### 22.5.1 純函數設計
+#### 22.5.1 ModeMachine 組件
+
+```rust
+pub struct ModeMachine {
+    mode: SystemMode,
+    off_route_suspect_ticks: u8,
+    off_route_clear_ticks: u8,
+}
+
+impl ModeMachine {
+    /// Pure state machine transition function
+    pub fn update(&mut self, input: ModeInput) -> ModeOutput;
+}
+```
+
+**ModeInput（僅模式轉換所需）：**
+```rust
+pub struct ModeInput {
+    pub divergence_d2: Dist2,        // For transition triggers
+    pub has_gps_fix: bool,           // For outage handling
+    pub frozen_s_cm: Option<DistCm>,  // For displacement calc
+    pub current_z_gps_cm: DistCm,    // For displacement calc
+}
+```
+
+**不包含（強制無法包含）：**
+- ❌ 路線資料
+- ❌ 站點索引
+- ❌ Kalman 狀態
+
+**ModeOutput（控制層所需資訊）：**
+```rust
+pub struct ModeOutput {
+    pub mode: SystemMode,           // Next mode
+    pub action: ModeAction,         // Action to take
+    pub detection_enabled: bool,    // Detection gating
+}
+```
+
+#### 22.5.2 SystemState 結構
+
+```rust
+pub struct SystemState<'a> {
+    /// Mode machine (owns mode and hysteresis counters)
+    pub mode_machine: ModeMachine,
+    /// Last confirmed stop index (for recovery hint)
+    pub last_stop_index: u8,
+    /// Frozen position during OffRoute/Recovering (None in Normal)
+    pub frozen_s_cm: Option<DistCm>,
+    /// Route data reference (immutable, XIP-friendly)
+    pub route_data: &'a RouteData<'a>,
+}
+```
+
+#### 22.5.3 統一觸發系統
+
+所有模式轉換僅使用估計信號：
+
+| 轉換 | 觸發條件 | 遲滯 |
+|------|----------|------|
+| Normal → OffRoute | `divergence_d2 > 25_000_000` (50m²) | 5 ticks |
+| OffRoute → Normal | `divergence_d2 ≤ 25_000_000` + 小位移 | 2 ticks |
+| OffRoute → Recovering | `divergence_d2 ≤ 25_000_000` + 大位移 | 2 ticks |
+| Recovering → Normal | 恢復成功 | Immediate |
+
+**關鍵不變量：**
+- 每個 tick 最多一次模式轉換（ModeMachine 強制執行）
+- `frozen_s_cm` 僅在 OffRoute/Recovering 模式存在
+- 恢復僅在 Recovering 模式執行
+- 偵測僅在 Normal 模式執行
+
+#### 22.5.4 tick() 協調器
+
+```rust
+pub fn tick(&mut self, gps: Option<GpsPoint>, est_state: &mut EstimationState) -> Option<ArrivalEvent> {
+    // STEP 1: Isolated estimation (no access to mode)
+    let est = estimate(est_input, est_state);
+
+    // STEP 2: Mode machine transitions (single transition enforced)
+    let mode_out = self.mode_machine.update(mode_input);
+
+    // STEP 3: Handle mode actions
+    match mode_out.action {
+        ModeAction::FreezePosition => { /* ... */ }
+        ModeAction::BeginRecovery => { /* ... */ }
+        ModeAction::ResumeNormal => { /* ... */ }
+        ModeAction::None => {}
+    }
+
+    // STEP 4: Recovery (ONLY in Recovering mode)
+    if self.mode == SystemMode::Recovering {
+        // ... attempt recovery ...
+    }
+
+    // STEP 5: Detection (ONLY when enabled)
+    if mode_out.detection_enabled {
+        return self.run_detection(&est);
+    }
+
+    None
+}
+```
+
+---
+
+### 22.6 恢復模組（Recovery Module）
+
+#### 22.6.1 純函數設計
 
 ```rust
 pub fn recover(input: RecoveryInput) -> Option<usize>
@@ -2068,13 +2155,13 @@ pub fn recover(input: RecoveryInput) -> Option<usize>
 **輸入：**
 ```rust
 pub struct RecoveryInput<'a> {
-    pub s_cm: DistCm,           // Current GPS position
-    pub v_cms: SpeedCms,        // Current velocity
-    pub dt_seconds: u64,        // Time since off-route
-    pub stops: StopsSlice<'a>,  // All stops
-    pub hint_idx: u8,           // Last confirmed stop
-    pub frozen_s_cm: Option<DistCm>,  // Frozen position
-    pub search_window: usize,   // ±N stops to search
+    pub z_gps_cm: DistCm,           // Current GPS position
+    pub v_cms: SpeedCms,            // Current velocity
+    pub dt_seconds: u64,            // Time since off-route
+    pub stops: &'a [Stop],          // All stops
+    pub hint_idx: u8,               // Last confirmed stop
+    pub frozen_s_cm: Option<DistCm>, // Frozen position
+    pub search_window: usize,       // ±N stops to search
 }
 ```
 
@@ -2082,7 +2169,7 @@ pub struct RecoveryInput<'a> {
 - `Some(idx)`：恢復成功，返回站點索引
 - `None`：恢復失敗，繼續搜尋
 
-#### 22.5.2 搜尋策略
+#### 22.6.2 搜尋策略
 
 **空間錨點懲罰：**
 ```
@@ -2100,7 +2187,7 @@ if v_cms > v_max * 1.5:
     reject(stop_i)  # Physically impossible
 ```
 
-#### 22.5.3 逾時回退
+#### 22.6.3 逾時回退
 
 30 秒逾時後，使用幾何搜尋：
 
@@ -2113,9 +2200,9 @@ fn find_closest_stop_index(s_cm: DistCm) -> u8 {
 
 ---
 
-### 22.6 空間契約（Spatial Contract）
+### 22.7 空間契約（Spatial Contract）
 
-#### 22.6.1 雙空間設計
+#### 22.7.1 雙空間設計
 
 到站概率模型有意使用兩個空間座標：
 
@@ -2124,7 +2211,7 @@ fn find_closest_stop_index(s_cm: DistCm) -> u8 {
 | F1（距離） | 原始 GPS 空間 | `z_gps_cm` | 測量「GPS 距離站點多近？」 |
 | F3（進度） | 濾波路線空間 | `s_cm` | 測量「沿路線走了多遠？」 |
 
-#### 22.6.2 受控混合策略
+#### 22.7.2 受控混合策略
 
 當 `divergence > 2000 cm` 時，F1 從 `z_gps_cm` 切換至 `s_cm`：
 
@@ -2141,15 +2228,15 @@ let (d1_cm, use_fallback) = if divergence > 2000 {
 - 防止不良地圖匹配拖累概率
 - 閾值 (2000 cm = 20 m) 經實驗驗證
 
-#### 22.6.3 文檔契約
+#### 22.7.3 位置選擇契約
 
 `current_position()` 函數定義單一權威位置：
 
 ```rust
 pub fn current_position(&self, est: &EstimationOutput) -> DistCm {
-    match self.mode {
+    match self.mode_machine.mode() {
         SystemMode::Normal => est.s_cm,
-        SystemMode::OffRoute => self.frozen_s_cm,
+        SystemMode::OffRoute => self.frozen_s_cm.unwrap(),
         SystemMode::Recovering => est.z_gps_cm,
     }
 }
@@ -2162,30 +2249,48 @@ pub fn current_position(&self, est: &EstimationOutput) -> DistCm {
 
 ---
 
-### 22.7 測試與驗證
+### 22.8 測試與驗證
 
-#### 22.7.1 單元測試
+#### 22.8.1 單元測試
+
+**解析層：**
+- `test_feed_single_sentence_returns_none()`：單一句子不發射
+- `test_feed_new_timestamp_emits_previous_fix()`：時間戳變化觸發發射
+- `test_invalid_checksum_rejected()`：無效校驗和拒絕
 
 **估計層：**
 - `test_estimate_first_fix()`：首次 GPS 定位
 - `test_estimate_kalman_update()`：Kalman 濾波更新
 - `test_estimate_outage()`：GPS 斷訊處理
+- `test_dr_position_grows_linearly_not_quadratically()`：DR 線性增長
+
+**模式機：**
+- `test_new_machine_in_normal_mode()`：初始狀態
+- `test_normal_to_offroute_requires_5_ticks()`：遲滯確認
+- `test_offroute_to_normal_with_small_displacement()`：直接恢復
+- `test_offroute_to_recovering_with_large_displacement()`：恢復觸發
 
 **恢復模組：**
 - `test_recovery_success()`：正常恢復
 - `test_recovery_velocity_constraint()`：速度約束拒絕
 - `test_recovery_timeout()`：逾時回退
 
-#### 22.7.2 整合測試
+#### 22.8.2 邊界測試
 
-**狀態機：**
-- `test_normal_to_offroute()`：正常 → 脫離路線
-- `test_offroute_to_recovering()`：脫離路線 → 恢復中
-- `test_recovering_to_normal()`：恢復中 → 正常
+**編譯期檢查：**
+- `test_mode_input_excludes_route_data()`：ModeMachine 不包含路線資料
+- `test_mode_machine_is_pure()`：ModeMachine 無外部狀態存取
+- `test_estimation_input_excludes_control_state()`：EstimationInput 不包含控制狀態
+
+#### 22.8.3 整合測試
+
+**端到端測試：**
+- `test_full_pipeline_normal_operation()`：正常營運
+- `test_full_pipeline_off_route_cycle()`：脫離路線 → 恢復 → 正常
+- `test_full_pipeline_shortcut()`：捷徑處理
 - `test_single_transition_per_tick()`：單一轉換不變量
 
 ---
-
 ## 23. 測試案例與驗證
 
 ### 23.1 正常營運測試（ty225_normal）

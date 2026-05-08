@@ -1,67 +1,70 @@
-# Off-Route State Machine
+# Mode State Machine (v9.0 - Clear Boundaries)
 
 ## Overview
 
-The off-route detection state machine detects when GPS consistently doesn't match route geometry (distance > 50m for 5+ seconds), indicating either:
-- Urban canyon multipath causing GPS drift away from road
-- Physical deviation (detour, depot, wrong route loaded)
+The mode state machine detects when GPS consistently doesn't match route geometry (>50m for 5+ ticks), implementing hysteresis with position freezing. It manages three modes: Normal, OffRoute, and Recovering.
 
-**Limitation:** Cannot detect "along-route drift" where GPS stays on the road but advances faster than the bus. This requires external ground truth.
+**Architecture:** Part of the Control Layer in `crates/pico2-firmware/src/control/machine.rs`
 
 ## States
 
 ### Normal
 - GPS matches route within 50m
 - Position updates normally via Kalman filter
+- Arrival detection enabled
 - `off_route_suspect_ticks = 0`
 - `off_route_clear_ticks = 0`
-- `frozen_s_cm = None`
-- `off_route_freeze_time = None`
-
-### Suspect(N)
-- GPS has been >50m from route for N consecutive ticks (1-4)
-- Position is **frozen** at last known good location
-- `off_route_suspect_ticks = N` (1-4)
-- `off_route_clear_ticks = 0`
-- `frozen_s_cm = Some(last_valid_s)`
-- `off_route_freeze_time = Some(timestamp of first suspect tick)`
-- Returns `ProcessResult::DrOutage` to prevent position advance
 
 ### OffRoute
 - GPS has been >50m from route for 5+ consecutive ticks
-- Position remains frozen, recovery required
+- Position frozen at last known good location
+- Arrival detection disabled
 - `off_route_suspect_ticks >= 5`
 - `off_route_clear_ticks = 0`
-- `frozen_s_cm = Some(last_valid_s)`
-- `off_route_freeze_time = Some(timestamp of first suspect tick)`
-- Returns `ProcessResult::OffRoute` to trigger re-acquisition recovery
+
+### Recovering
+- Transitioned from OffRoute with large GPS displacement
+- Recovery search active to find correct stop index
+- Uses raw GPS position (not Kalman-filtered)
+- Arrival detection disabled
+
+## Component Boundary
+
+**Input (`ModeInput`):**
+- `divergence_d2`: Squared distance from route (for transition triggers)
+- `has_gps_fix`: Whether GPS has valid fix
+- `frozen_s_cm`: Frozen position (when in OffRoute mode, None in Normal)
+- `current_z_gps_cm`: Current raw GPS projection (for displacement calculation)
+
+**Output (`ModeOutput`):**
+- `mode`: Next mode after transition
+- `action`: Action to take (FreezePosition, BeginRecovery, ResumeNormal, None)
+- `detection_enabled`: Whether arrival detection should be enabled
+
+**Invariants:**
+- Does NOT contain route data
+- Does NOT contain stop indices
+- Does NOT contain Kalman state
+- Pure state machine: same input → same output (given internal state)
 
 ## State Transitions
 
 ```
-Normal → Suspect(1)
-    Guard: match_d2 > 25,000,000 (50m threshold)
-    Action: Freeze position immediately, record freeze_time
-
-Suspect(N) → Suspect(N+1)
-    Guard: match_d2 > 25,000,000 and N < 4
-    Action: Keep position frozen
-
-Suspect(4) → OffRoute
-    Guard: match_d2 > 25,000,000 (5th bad tick)
-    Action: Return OffRoute result, trigger recovery flag
-
-Suspect(N) → Normal
-    Guard: match_d2 ≤ 25,000,000 for 2 consecutive ticks
-    Action: Clear suspect counter, unfreeze position, clear freeze_time
+Normal → OffRoute
+    Guard: divergence_d2 > 25,000,000 (50m threshold) for 5 consecutive ticks
+    Action: FreezePosition, disable detection
 
 OffRoute → Normal
-    Guard: match_d2 ≤ 25,000,000 (first good tick after OffRoute)
-    Action: Trigger M12 recovery, clear freeze_time after recovery
+    Guard: divergence_d2 ≤ 25,000,000 for 2 consecutive ticks AND small displacement
+    Action: ResumeNormal, enable detection
 
-Any → Suspect(1) (via GPS outage)
-    Guard: GPS outage occurs
-    Action: Reset all counters, clear freeze_time
+OffRoute → Recovering
+    Guard: divergence_d2 ≤ 25,000,000 for 2 consecutive ticks AND large displacement
+    Action: BeginRecovery, trigger recovery search
+
+Recovering → Normal
+    Guard: Recovery succeeds (stop index found)
+    Action: ResumeNormal, enable detection
 ```
 
 ## Constants
@@ -71,76 +74,69 @@ Any → Suspect(1) (via GPS outage)
 | `OFF_ROUTE_D2_THRESHOLD` | 25,000,000 cm² | 50m distance threshold |
 | `OFF_ROUTE_CONFIRM_TICKS` | 5 | Ticks to confirm off-route |
 | `OFF_ROUTE_CLEAR_TICKS` | 2 | Ticks to clear off-route |
+| `RECOVERY_DISPLACEMENT_THRESHOLD` | 5000 cm | 50m displacement for recovery |
 
-## Interactions with Other Modules
+## Interactions with Other Components
 
-### Warmup (is_first_fix=true)
-- All off-route transitions are **disabled** during warmup
-- Prevents false positives during Kalman filter initialization
-- `off_route_suspect_ticks` never increments during warmup
+### Estimation Layer
+- Estimation layer provides `divergence_d2` and `z_gps_cm` via `EstimationOutput`
+- Estimation does NOT have access to mode (enforced by architecture)
+- Control layer uses estimation outputs to construct `ModeInput`
 
-### GPS Outage (has_fix=false)
-- Resets all off-route counters to 0
-- Clears `off_route_freeze_time`
-- Conservative: requires fresh off-route detection after outage
+### Control Layer
+- `SystemState` orchestrates the mode machine with estimation and recovery
+- `ModeMachine` owns ONLY mode and hysteresis counters
+- Position state (`frozen_s_cm`) is owned by `SystemState`, not `ModeMachine`
 
-### Speed Constraint Filter
-- Uses **frozen position** when in Suspect or OffRoute state
-- Prevents position advance during off-route episode
-- Formula: `current_s = frozen_s_cm.unwrap_or(s_cm)`
-
-### Monotonicity Filter
-- Uses **frozen position** when in Suspect or OffRoute state
-- Prevents backward position jumps during off-route episode
-- Formula: `current_s = frozen_s_cm.unwrap_or(s_cm)`
-
-### Re-acquisition Recovery (M12)
-- Triggered when returning from OffRoute to Normal
-- Uses `freeze_time` to calculate elapsed time for velocity constraint
-- M12 recovery scans all stops to find correct index
-- Clears `needs_recovery_on_reacquisition` flag after completion
-
-## ProcessResult Return Values
-
-| State | ProcessResult | Position Used |
-|-------|----------------|---------------|
-| Normal | `Valid { signals, v_cms, seg_idx }` | Kalman-filtered |
-| Suspect(N) | `DrOutage { s_cm, v_cms }` | Frozen position |
-| OffRoute | `OffRoute { last_valid_s, last_valid_v, freeze_time }` | Frozen position |
+### Recovery
+- Recovery is triggered by `ModeAction::BeginRecovery`
+- Recovery function is pure: `recover(RecoveryInput) -> Option<usize>`
+- Recovery uses `z_gps_cm` (raw GPS) not `s_cm` (Kalman-filtered)
 
 ## Key Implementation Details
 
-### Immediate Position Freezing
-Position is frozen **immediately** on first suspect tick (N=1), not when OffRoute is confirmed. This prevents position drift during the 5-tick confirmation period.
-
-### Accurate Freeze Time (Bug 5 Fix)
-`off_route_freeze_time` is set when position first freezes (tick 1), not when OffRoute is confirmed (tick 5). This ensures M12 recovery calculates accurate elapsed time for velocity constraint validation.
+### Pure State Machine
+The `ModeMachine` is a pure state machine with no side effects:
+- `update(ModeInput) -> ModeOutput` is deterministic
+- No access to external state (position, stops, route data)
+- Single transition per tick (enforced by design)
 
 ### Hysteresis Prevents Flapping
 The 5-tick confirmation and 2-tick clear thresholds prevent false positives from transient multipath while allowing fast re-acquisition.
 
-### No §4.5 Inline Recovery (Bug 2 Fix)
-Previous implementation had conflicting recovery mechanisms. Now M12 handles all post-off-route recovery scenarios with clean input (raw GPS projection, not pre-snapped).
+### Position Freezing
+Position is frozen **immediately** on first suspect tick (N=1), not when OffRoute is confirmed (tick 5). This prevents position drift during the confirmation period.
 
 ## Testing
 
-### Unit Tests (`test_off_route_detection.rs`)
-- `test_off_route_confirms_after_5_ticks` - Basic hysteresis
-- `test_off_route_disabled_during_warmup` - Warmup guard
-- `test_off_route_clears_after_2_good_ticks` - Clear hysteresis
-- `test_off_route_hysteresis_partial_clear` - Partial clear scenario
-- `test_off_route_counter_resets_on_outage` - Outage interaction
+### Unit Tests (`control/machine.rs`)
+- `test_new_machine_in_normal_mode` - Initial state
+- `test_normal_to_offroute_requires_5_ticks` - Hysteresis
+- `test_normal_to_offroute_resets_on_good_divergence` - Reset behavior
+- `test_offroute_to_normal_with_small_displacement` - Direct recovery
+- `test_offroute_to_recovering_with_large_displacement` - Recovery trigger
+- `test_detection_enabled_only_in_normal` - Detection gating
 
-### Integration Tests (`test_off_route_integration.rs`)
-- `test_off_route_freezes_position` - Basic position freezing
-- `test_re_acquisition_runs_recovery` - Recovery infrastructure
-- `test_full_off_route_cycle` - Complete off-route → recovery → normal cycle
-- `test_off_route_freeze_time_set_once` - Bug 1 regression test
-- `test_m12_recovery_works_without_section_4_5` - Bug 2 regression test
+### Boundary Tests
+- `test_mode_input_excludes_route_data` - Compile-time check for isolation
+- `test_mode_machine_is_pure` - Verifies no external state access
 
 ## Related Files
 
-- Implementation: `crates/pipeline/gps_processor/src/kalman.rs`
-- State machine: `crates/pico2-firmware/src/state.rs`
-- Types: `crates/shared/src/lib.rs`
-- Design: `docs/superpowers/specs/2026-04-25-off-route-refactoring-design.md`
+- **Implementation:** `crates/pico2-firmware/src/control/machine.rs`
+- **Mode definitions:** `crates/pico2-firmware/src/control/mode.rs`
+- **Control layer:** `crates/pico2-firmware/src/control/mod.rs`
+- **Design document:** `docs/clear_boundaries_refactoring_plan.md`
+
+## Migration from v8.x
+
+### Old Implementation (v8.x)
+- State managed in `state::State` with `ProcessResult` enum
+- Off-route logic mixed with Kalman filter in `kalman.rs`
+- Return values: `Valid`, `DrOutage`, `OffRoute`
+
+### New Implementation (v9.0)
+- Pure state machine in `control::machine::ModeMachine`
+- Clear input/output contracts via `ModeInput`/`ModeOutput`
+- Actions via `ModeAction` enum (None, FreezePosition, BeginRecovery, ResumeNormal)
+- Isolated from estimation layer (enforced by type system)

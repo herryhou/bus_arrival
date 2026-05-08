@@ -109,12 +109,33 @@ crates/
 
 ## Firmware (pico2-firmware)
 
-2-layer architecture:
-- **Control Layer:** SystemState manages Normal/OffRoute/Recovering modes via unified triggers (`divergence_d2`, `displacement`)
-- **Estimation Layer:** Isolated GPS → position pipeline (Kalman, DR/EMA), returns `EstimationOutput`
-- **Recovery:** Pure function, hint_idx ± 10 stops, spatial anchor penalty
+**3-layer architecture with clear component boundaries:**
 
-Principles: isolation (estimation has no control access), single transition per tick, recovery as first-class mode
+### Component Layers
+- **Parser Layer:** `NmeaParser` component (NMEA → GpsPoint)
+- **Estimation Layer:** `EstimationState` with isolated Kalman/DR pipeline
+- **Control Layer:** `SystemState` orchestrating `ModeMachine`, estimation, detection, recovery
+
+### Key Components
+- **NmeaParser:** `feed_sentence()` → `Option<GpsPoint>` (pure state update)
+- **ModeMachine:** `update(ModeInput)` → `ModeOutput` (pure state machine)
+- **Estimation:** `estimate(EstimationInput)` → `EstimationOutput` (isolated pipeline)
+- **Recovery:** `recover(RecoveryInput)` → `Option<usize>` (pure function)
+
+### Principles
+- **Isolation:** Estimation has no access to mode/stop state
+- **Single Transition:** ModeMachine enforces one transition per tick
+- **Explicit Boundaries:** Each component has well-defined inputs/outputs
+- **Testability:** Components can be tested in isolation
+
+### Mode System
+- **Normal:** Kalman-filtered position, arrival detection enabled
+- **OffRoute:** Position frozen, detection suppressed
+- **Recovering:** Raw GPS position, recovery search active
+
+### Entry Point
+- `main.rs` uses `SystemState::tick(gps, est_state)` → `Option<ArrivalEvent>`
+- Old `state::State` deprecated but still available
 
 ## Key Constraints
 

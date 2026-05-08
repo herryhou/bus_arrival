@@ -1,8 +1,10 @@
-# Off-Route Detection Specification (v8.9)
+# Off-Route Detection Specification (v9.0)
 
 ## Overview
 
-Detects when GPS consistently doesn't fit route geometry (>50 m for 5+ ticks). Implements hysteresis (5 to confirm, 2 to clear) with position freezing.
+Detects when GPS consistently doesn't fit route geometry (>50m for 5+ ticks). Implements hysteresis (5 to confirm, 2 to clear) with position freezing.
+
+**Architecture:** Implemented as `ModeMachine` in the Control Layer (`crates/pico2-firmware/src/control/machine.rs`)
 
 ## Purpose
 
@@ -20,49 +22,90 @@ Cannot detect "along-route drift" where GPS stays on the road but advances faste
 - [ ] **Threshold:** `OFF_ROUTE_D2_THRESHOLD = 25,000,000 cm²` (50 m)
 - [ ] **Confirm ticks:** 5 consecutive ticks (avoid false positives from multipath)
 - [ ] **Clear ticks:** 2 consecutive good ticks (fast re-acquisition)
-- [ ] **Position frozen immediately** when `suspect_ticks = 0`
+- [ ] **Position frozen immediately** when entering suspect state
 - [ ] **Arrival suppressed** during off-route episodes
 - [ ] **GPS jump recovery:** find nearest stop ahead of frozen position
 
-## State Transitions
+## Component Boundary
+
+### ModeMachine Input (`ModeInput`)
+
+```rust
+pub struct ModeInput {
+    /// Divergence from route (squared distance in cm²)
+    pub divergence_d2: Dist2,
+
+    /// Whether GPS has valid fix
+    pub has_gps_fix: bool,
+
+    /// Frozen position (when in OffRoute mode, None in Normal)
+    pub frozen_s_cm: Option<DistCm>,
+
+    /// Current raw GPS projection (for displacement calculation)
+    pub current_z_gps_cm: DistCm,
+}
+```
+
+**What's NOT included (enforcing isolation):**
+- ❌ Route data
+- ❌ Stop indices
+- ❌ Kalman state
+
+### ModeMachine Output (`ModeOutput`)
+
+```rust
+pub struct ModeOutput {
+    /// Next mode after this transition
+    pub mode: SystemMode,
+
+    /// Action to take (if any)
+    pub action: ModeAction,
+
+    /// Whether arrival detection should be enabled
+    pub detection_enabled: bool,
+}
+```
+
+## Mode Transitions
 
 ```
-Normal → Suspect (1st tick: d² > 50 m²)
-Suspect → Off-Route (5th consecutive tick)
-Off-Route → Normal (2 consecutive good ticks, d² ≤ 50 m²)
+Normal → OffRoute
+    Guard: divergence_d2 > 25,000,000 for 5 consecutive ticks
+    Action: FreezePosition, detection_enabled=false
+
+OffRoute → Normal
+    Guard: divergence_d2 ≤ 25,000,000 for 2 ticks AND displacement < 50m
+    Action: ResumeNormal, detection_enabled=true
+
+OffRoute → Recovering
+    Guard: divergence_d2 ≤ 25,000,000 for 2 ticks AND displacement ≥ 50m
+    Action: BeginRecovery, detection_enabled=false
+
+Recovering → Normal
+    Guard: Recovery succeeds (stop index found)
+    Action: ResumeNormal, detection_enabled=true
 ```
 
-### During Suspect State
+### During Normal Mode
 
-- Position frozen immediately (`frozen_s_cm` set)
-- Skip projection and filters to prevent `s_cm` advance
-- Return `DrOutage` with frozen position
-- Increment `off_route_suspect_ticks`
+- Kalman filter updates normally
+- Arrival detection enabled
+- `off_route_suspect_ticks = 0`
+- `off_route_clear_ticks = 0`
 
-### During Off-Route State
+### During OffRoute Mode
 
-- Return `OffRoute` result with last valid position
-- Suppress arrivals (detection layer must check `ProcessResult`)
-- Maintain frozen position
+- Position frozen (`frozen_s_cm` set by control layer)
+- Skip Kalman filter updates
+- Arrival detection disabled (`detection_enabled = false`)
+- Track clear ticks for transition back to Normal
 
-### Recovery to Normal
+### During Recovering Mode
 
-- After 2 consecutive good matches (`off_route_clear_ticks >= 2`)
-- Reset `off_route_suspect_ticks = 0`
-- Clear `frozen_s_cm = None`
-- Resume normal processing
-
-## GPS Jump Recovery
-
-When returning from off-route with a large GPS jump (>50 m):
-
-1. Check if GPS jumped more than 50m (5000 cm) from frozen position
-2. Find closest stop ahead of frozen position with constraints:
-   - Stop must be ahead of frozen position (`stop.progress_cm > frozen_s`)
-   - Distance within 200m (`dist < OFF_ROUTE_D2_THRESHOLD`)
-   - Velocity constraint: reachable given elapsed time
-3. If valid stop found, jump to it and set `in_recovery = true`
-4. If no valid stop, clear frozen state and continue normal processing
+- Recovery search active
+- Use raw GPS position (`z_gps_cm`), not Kalman-filtered
+- Arrival detection disabled
+- Transition to Normal when recovery succeeds
 
 ## Constants
 
@@ -76,75 +119,94 @@ const OFF_ROUTE_CONFIRM_TICKS: u8 = 5;
 /// Ticks to clear off-route (fast re-acquisition)
 const OFF_ROUTE_CLEAR_TICKS: u8 = 2;
 
-/// Jump recovery threshold (cm)
-const JUMP_RECOVERY_THRESHOLD: i64 = 5000;
-```
-
-## State Fields
-
-```rust
-pub struct KalmanState {
-    // ... other fields ...
-    /// Consecutive ticks with poor GPS match (off-route suspect counter)
-    pub off_route_suspect_ticks: u8,
-    /// Consecutive ticks with good GPS match (off-route clear counter)
-    pub off_route_clear_ticks: u8,
-    /// Frozen position when off-route is first suspected (for immediate position freezing)
-    pub frozen_s_cm: Option<DistCm>,
-}
-```
-
-## ProcessResult Variants
-
-```rust
-pub enum ProcessResult {
-    /// GPS is off-route — position frozen, awaiting re-acquisition
-    OffRoute {
-        last_valid_s: DistCm,
-        last_valid_v: SpeedCms,
-    },
-    /// Dead-reckoning mode (used during suspect state)
-    DrOutage {
-        s_cm: DistCm,
-        v_cms: SpeedCms,
-    },
-    // ... other variants ...
-}
+/// Recovery displacement threshold (cm) - 50m jump triggers recovery
+const RECOVERY_DISPLACEMENT_THRESHOLD: i32 = 5000;
 ```
 
 ## Integration Points
 
-### Detection Layer
+### Control Layer
 
-The detection layer must check `ProcessResult` and suppress arrivals during off-route:
+The control layer (`SystemState`) orchestrates mode transitions:
 
 ```rust
-match process_result {
-    ProcessResult::OffRoute { .. } => {
-        // Suppress arrivals, maintain current FSM state
+impl SystemState {
+    pub fn tick(&mut self, gps: Option<GpsPoint>, est_state: &mut EstimationState) -> Option<ArrivalEvent> {
+        // 1. Run estimation (isolated, no access to mode)
+        let est_output = estimate(est_input, est_state);
+
+        // 2. Construct mode input from estimation output
+        let mode_input = ModeInput {
+            divergence_d2: est_output.divergence_d2,
+            has_gps_fix: est_output.has_fix,
+            frozen_s_cm: self.frozen_s_cm,
+            current_z_gps_cm: est_output.z_gps_cm,
+        };
+
+        // 3. Update mode machine
+        let mode_output = self.mode_machine.update(mode_input);
+
+        // 4. Handle mode actions
+        match mode_output.action {
+            ModeAction::FreezePosition => {
+                self.frozen_s_cm = Some(est_output.s_cm);
+            }
+            ModeAction::BeginRecovery => {
+                // Trigger recovery
+            }
+            ModeAction::ResumeNormal => {
+                self.frozen_s_cm = None;
+            }
+            ModeAction::None => {}
+        }
+
+        // 5. Run detection if enabled
+        if mode_output.detection_enabled {
+            // ... arrival detection
+        }
+
+        None
     }
-    ProcessResult::Valid { signals, .. } => {
-        // Normal arrival detection
-    }
-    // ... other cases ...
 }
 ```
 
-### Map Matching
+### Estimation Layer
 
-Map matching must provide `match_d2` (squared distance) for off-route detection:
+The estimation layer provides divergence for mode detection:
 
 ```rust
-let (seg_idx, match_d2) = find_best_segment_restricted(
-    gps_x, gps_y, gps.heading_cdeg, gps.speed_cms,
-    route_data, state.last_seg_idx, use_relaxed_heading
-);
+pub struct EstimationOutput {
+    /// Raw GPS projection onto route (for recovery input)
+    pub z_gps_cm: DistCm,
 
-// Check off-route BEFORE projection
-if match_d2 > OFF_ROUTE_D2_THRESHOLD {
-    // Handle off-route detection
+    /// Kalman-filtered position (primary position in Normal mode)
+    pub s_cm: DistCm,
+
+    /// Filtered velocity (cm/s)
+    pub v_cms: SpeedCms,
+
+    /// Divergence from route (squared distance, for mode transitions)
+    pub divergence_d2: Dist2,
+
+    /// Confidence signal (0-255, higher is better)
+    pub confidence: u8,
+
+    /// Whether GPS has valid fix
+    pub has_fix: bool,
 }
 ```
+
+**Key:** Estimation does NOT have access to mode. The control layer constructs `ModeInput` from `EstimationOutput`.
+
+## GPS Jump Recovery
+
+When returning from off-route with a large GPS jump (>50m):
+
+1. Check displacement from frozen position
+2. If displacement ≥ 50m, trigger recovery mode
+3. Recovery function scans stops ahead of frozen position
+4. If valid stop found, update stop index and return to Normal
+5. If no valid stop, clear frozen state and continue
 
 ## Testing Considerations
 
@@ -164,8 +226,49 @@ if match_d2 > OFF_ROUTE_D2_THRESHOLD {
 - Large jumps without valid stops (continue normal processing)
 - Velocity constraint violations during recovery
 
+### Unit Tests
+
+Located in `crates/pico2-firmware/src/control/machine.rs`:
+
+- `test_new_machine_in_normal_mode` - Initial state verification
+- `test_normal_to_offroute_requires_5_ticks` - Hysteresis verification
+- `test_normal_to_offroute_resets_on_good_divergence` - Counter reset
+- `test_offroute_to_normal_with_small_displacement` - Direct recovery
+- `test_offroute_to_recovering_with_large_displacement` - Recovery trigger
+- `test_detection_enabled_only_in_normal` - Detection gating
+
+### Boundary Tests
+
+Compile-time checks enforcing architecture:
+
+- `test_mode_input_excludes_route_data` - Verifies no route data access
+- `test_mode_machine_is_pure` - Verifies isolation from external state
+
 ## Related Files
 
-- `crates/pipeline/gps_processor/src/kalman.rs` — Implementation
-- `crates/shared/src/lib.rs` — `KalmanState` with off-route fields
-- `docs/superpowers/specs/2026-04-14-off-route-detection-design.md` — Original design document
+- **Implementation:** `crates/pico2-firmware/src/control/machine.rs`
+- **Mode definitions:** `crates/pico2-firmware/src/control/mode.rs`
+- **Control layer:** `crates/pico2-firmware/src/control/mod.rs`
+- **Estimation layer:** `crates/pico2-firmware/src/estimation/mod.rs`
+- **Design document:** `docs/clear_boundaries_refactoring_plan.md`
+- **Architecture overview:** `docs/off_route_state_machine.md`
+
+## Migration from v8.x
+
+### Changes in v9.0
+
+| Aspect | v8.x | v9.0 |
+|--------|------|------|
+| Location | `kalman.rs` (mixed with estimation) | `control/machine.rs` (isolated) |
+| State | `KalmanState` fields | `ModeMachine` struct |
+| Input/Output | `ProcessResult` enum | `ModeInput`/`ModeOutput` structs |
+| Return values | `Valid`, `DrOutage`, `OffRoute` | `ModeAction` enum |
+| Isolation | Mixed with estimation | Enforced by type system |
+| Testability | Hard to test in isolation | Pure function, easily testable |
+
+### Key Improvements
+
+1. **Clear boundaries:** Mode machine is isolated from estimation
+2. **Explicit contracts:** `ModeInput` and `ModeOutput` define interfaces
+3. **Testability:** Pure state machine can be tested without estimation
+4. **Type safety:** Compile-time checks prevent architectural violations
