@@ -77,3 +77,5 @@ test_data/* copy*.*
 test_data/*.sim.json
 test_data/*_summary.md
 test_data/*.nmea
+# Added by code-review-graph
+.code-review-graph/

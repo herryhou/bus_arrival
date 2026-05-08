@@ -1,11 +1,11 @@
 //! Heading-constrained map matching
-#![allow(unexpected_cfgs)]
 
-// New modular structure (Task 1)
 pub mod heading;
+pub mod projection;
 
 // Re-exports for backward compatibility
 pub use heading::heading_eligible;
+pub use projection::{distance_to_segment_squared, project_to_route, segment_score};
 
 // ===== OLD CODE (to be migrated in later tasks) =====
 
@@ -427,89 +427,6 @@ pub fn find_best_segment_grid_only_with_min_s(
         min_s_cm,
         DistCm::MAX, // No upper bound
     )
-}
-
-/// Distance-squared from GPS point to segment (clamped projection).
-///
-/// Heading is intentionally absent.  Heading belongs in the eligibility
-/// filter (`heading_eligible`), not in the ranking score.  Mixing cm² and
-/// cdeg² into one scalar requires an arbitrary scale factor that cannot be
-/// derived from first principles.
-///
-/// The return type is `Dist2` (i64 cm²).
-pub fn segment_score(gps_x: DistCm, gps_y: DistCm, seg: &RouteNode) -> Dist2 {
-    distance_to_segment_squared(gps_x, gps_y, seg)
-}
-
-/// Distance squared from point to segment (clamped projection)
-/// v8.7: Computes len2 from seg_len_mm: (seg_len_mm / 10)^2
-fn distance_to_segment_squared(x: DistCm, y: DistCm, seg: &RouteNode) -> Dist2 {
-    let dx = x - seg.x_cm;
-    let dy = y - seg.y_cm;
-
-    // Compute len2_cm2 from seg_len_mm: (mm / 10)^2 = cm^2
-    let seg_len_cm = seg.seg_len_mm / 10;
-    let len2_cm2 = (seg_len_cm as i64) * (seg_len_cm as i64);
-
-    // t = dot(point - P[i], segment) / |segment|²
-    let t_num = dx as i64 * seg.dx_cm as i64 + dy as i64 * seg.dy_cm as i64;
-
-    if len2_cm2 == 0 {
-        return ((x - seg.x_cm) as i64).pow(2) + ((y - seg.y_cm) as i64).pow(2);
-    }
-
-    let t = if t_num < 0 {
-        0
-    } else if t_num > len2_cm2 {
-        len2_cm2
-    } else {
-        t_num
-    };
-
-    // Projected point
-    let px = seg.x_cm + ((t * seg.dx_cm as i64 / len2_cm2) as DistCm);
-    let py = seg.y_cm + ((t * seg.dy_cm as i64 / len2_cm2) as DistCm);
-
-    // Distance squared
-    ((x - px) as i64).pow(2) + ((y - py) as i64).pow(2)
-}
-
-/// Project GPS point onto segment → route progress
-/// v8.7: Uses seg_len_mm for length computation
-pub fn project_to_route(
-    gps_x: DistCm,
-    gps_y: DistCm,
-    seg_idx: usize,
-    route_data: &RouteData,
-) -> DistCm {
-    let seg = route_data.get_node(seg_idx).unwrap_or_else(|| {
-        // Fallback to first node if index is invalid
-        route_data.get_node(0).unwrap()
-    });
-
-    let dx = gps_x - seg.x_cm;
-    let dy = gps_y - seg.y_cm;
-    let t_num = dx as i64 * seg.dx_cm as i64 + dy as i64 * seg.dy_cm as i64;
-
-    // Compute len2_cm2 from seg_len_mm: (mm / 10)^2 = cm^2
-    let seg_len_cm = seg.seg_len_mm / 10;
-    let len2_cm2 = (seg_len_cm as i64) * (seg_len_cm as i64);
-
-    if len2_cm2 == 0 {
-        return seg.cum_dist_cm;
-    }
-
-    let t = if t_num < 0 {
-        0
-    } else if t_num > len2_cm2 {
-        len2_cm2
-    } else {
-        t_num
-    };
-
-    // z = cum_dist[i] + t × seg_len_cm / len2_cm2
-    let base = seg.cum_dist_cm;
-    base + ((t * seg_len_cm as i64 / len2_cm2) as DistCm)
 }
 
 /// Convert lat/lon to absolute cm coordinates with specified average latitude

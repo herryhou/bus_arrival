@@ -105,37 +105,51 @@ projection → (none, just shared types)
 ### Data Flow
 
 ```
-find_best_segment_restricted(gps_x, gps_y, heading, speed)
-        │
-        ▼
-┌──────────────────────────────────────┐
-│ Phase 1: Window search (best_eligible)│
-└──────────────────────────────────────┘
-        │
-        ├─────────────────┐
-        ▼                 ▼
-┌──────────────┐  ┌──────────────┐
-│ heading.rs   │  │ projection.rs│
-│ eligible?    │  │ distance²    │
-└──────────────┘  └──────────────┘
-        │                 │
-        └────────┬────────┘
-                 ▼
-        ┌─────────────────┐
-        │ Within threshold?│
-        │ YES │ NO         │
-        ▼     ▼            │
-   Return   ┌──────────────┘
-            │ Phase 2: Grid search
-            ▼
-       ┌──────────┐
-       │ heading  │
-       │ +        │
-       │projection│
-       └──────────┘
-            │
-            ▼
-       Return result
+
+┌─────────────────────────────────────────────────────────────┐
+│ find_best_segment_restricted(gps_x, gps_y, heading, speed) │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+        ┌──────────────────────────────────────┐
+        │ Phase 1: Window search (best_eligible)│
+        └──────────────────────────────────────┘
+                           │
+              ┌────────────┴────────────┐
+              ▼                         ▼
+    ┌──────────────────┐      ┌──────────────────┐
+    │ heading.rs       │      │ projection.rs    │
+    │ heading_eligible │      │ distance_to_seg  │
+    │ (is direction    │      │ _squared         │
+    │  plausible?)     │      │                  │
+    └──────────────────┘      └──────────────────┘
+              │                         │
+              └────────────┬────────────┘
+                           ▼
+              ┌─────────────────────────┐
+              │ Found eligible within   │
+              │ SIGMA_GPS_CM threshold? │
+              └─────────────────────────┘
+                     │ YES          │ NO
+                     ▼              ▼
+              ┌─────────┐    ┌─────────────────────
+              │ Return  │    │ Phase 2: Grid search │
+              │ result  │    │ (visit 3x3 cells)
+              └─────────┘    └─────────────────────┘
+                                    │
+                           ┌────────┴────────┐
+                           ▼                 ▼
+                   ┌──────────────┐  ┌──────────────┐
+                   │ heading.rs   │  │ projection.r
+                   │ (eligible?)  │  │ (distance)   │
+                   └──────────────┘  └─────────────
+                           │
+                           ▼
+              ┌─────────────────────────┐
+              │ Return best_eligible    │
+              │ or best_any (fallback)  │
+              └─────────────────────────┘
+
 ```
 
 ## Components
