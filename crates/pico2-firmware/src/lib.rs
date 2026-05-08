@@ -11,7 +11,6 @@ pub mod lut;
 pub mod parser;
 pub mod recovery;
 pub mod recovery_trigger;
-pub mod state;
 
 // Re-export key types for external use
 pub use control::{SystemMode, SystemState};
