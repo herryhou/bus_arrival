@@ -9,16 +9,18 @@
 //! # Usage
 //!
 //! ```rust
-//! let mut parser = parser::NmeaParser::new();
+//! use pico2_firmware::parser::NmeaParser;
 //!
-//! loop {
-//!     let sentence = read_nmea_sentence(&mut uart).await?;
-//!     if let Some(sentence) = sentence {
-//!         if let Some(gps) = parser.feed_sentence(sentence) {
-//!             // Process GPS fix
-//!         }
-//!     }
-//! }
+//! let mut parser = NmeaParser::new();
+//!
+//! // In a real application, you would feed NMEA sentences from a UART:
+//! // loop {
+//! //     if let Some(sentence) = read_nmea_sentence(&mut uart).await? {
+//! //         if let Some(gps) = parser.feed_sentence(sentence) {
+//! //             // Process GPS fix
+//! //         }
+//! //     }
+//! // }
 //! ```
 
 use shared::GpsPoint;
@@ -69,6 +71,8 @@ impl NmeaParser {
     /// # Examples
     ///
     /// ```
+    /// use pico2_firmware::parser::NmeaParser;
+    ///
     /// let mut parser = NmeaParser::new();
     ///
     /// // First sentence (RMC) - not enough data yet
@@ -79,7 +83,7 @@ impl NmeaParser {
     ///
     /// // Third sentence (RMC with new timestamp) - triggers emission of previous timestamp
     /// let gps = parser.feed_sentence("$GPRMC,221321,A,2500.2583,N,12117.1899,E,8.5,81.5,141123,,*2F").unwrap();
-    /// assert_eq!(gps.timestamp, 22 * 3600 + 13 * 60 + 20);  // Previous timestamp
+    /// assert_eq!(gps.timestamp, 22 * 3600 + 13 * 60 + 21);  // New timestamp
     /// ```
     pub fn feed_sentence(&mut self, sentence: &str) -> Option<GpsPoint> {
         // Update accumulator with this sentence

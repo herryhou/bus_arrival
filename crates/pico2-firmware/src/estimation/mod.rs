@@ -80,18 +80,6 @@ pub struct EstimationInput<'a> {
 
 impl<'a> EstimationInput<'a> {
     /// Create a new estimation input
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use pico2_firmware::estimation::EstimationInput;
-    ///
-    /// let input = EstimationInput {
-    ///     gps: gps_point,
-    ///     route_data: &route,
-    ///     is_first_fix: false,
-    /// };
-    /// ```
     pub fn new(gps: GpsPoint, route_data: &'a RouteData<'a>, is_first_fix: bool) -> Self {
         Self {
             gps,

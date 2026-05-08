@@ -43,6 +43,7 @@ impl ModeMachine {
     ///
     /// ```
     /// use pico2_firmware::control::machine::ModeMachine;
+    /// use pico2_firmware::control::mode::SystemMode;
     ///
     /// let machine = ModeMachine::new();
     /// assert_eq!(machine.mode(), SystemMode::Normal);
@@ -94,6 +95,9 @@ impl ModeMachine {
     /// # Examples
     ///
     /// ```
+    /// use pico2_firmware::control::machine::{ModeMachine, ModeInput};
+    /// use pico2_firmware::control::mode::SystemMode;
+    ///
     /// let mut machine = ModeMachine::new();
     ///
     /// let input = ModeInput {
