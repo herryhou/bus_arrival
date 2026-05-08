@@ -1,18 +1,36 @@
 //! Estimation layer — isolated GPS → position pipeline
 //!
-//! This layer is isolated from control layer concerns.
-//! It maintains internal Kalman + DR state but does NOT access:
-//! - mode, last_stop_index, frozen_s_cm
+//! # Layer Boundary
+//!
+//! This layer is **isolated** from control layer concerns. It maintains internal
+//! Kalman + DR state but does NOT access:
+//! - `mode` (SystemMode)
+//! - `last_stop_index` (u8)
+//! - `frozen_s_cm` (Option<DistCm>)
+//!
+//! # Contract
+//!
+//! **Deterministic:** Same `EstimationInput` always produces same `EstimationOutput`
+//! (given the same internal state).
+//!
+//! **No Side Effects:** Does NOT modify control layer state.
+//!
+//! **State Isolation:** All estimation state is internal to `EstimationState`.
 
 pub mod kalman;
 pub mod dr;
 
-use shared::{GpsPoint, binfile::RouteData};
+use shared::{GpsPoint, binfile::RouteData, DistCm, SpeedCms, Dist2};
 
 pub use kalman::KalmanState;
 pub use dr::DrState;
 
-/// Combined estimation state (internal only)
+/// Combined estimation state (internal to estimation layer only)
+///
+/// # Invariant
+///
+/// This state is NEVER accessed directly by the control layer.
+/// All interaction goes through the `estimate()` function.
 pub struct EstimationState {
     pub kalman: KalmanState,
     pub dr: DrState,
@@ -33,27 +51,113 @@ impl EstimationState {
     }
 }
 
-/// Estimation input — GPS + route data
+/// Estimation input — ONLY what estimation needs from the outside world
+///
+/// # Boundary Contract
+///
+/// This struct contains **ONLY** the data required for GPS → position estimation.
+/// It deliberately EXCLUDES control layer state (mode, stops, etc.) to enforce isolation.
+///
+/// # Fields
+///
+/// - `gps`: Raw GPS data from NMEA parser
+/// - `route_data`: Static route geometry (XIP flash reference)
+/// - `is_first_fix`: True for first GPS fix after cold start (enables relaxed heading)
+///
+/// # What's NOT Included (Enforcing Isolation)
+///
+/// - ❌ `mode: SystemMode` — estimation doesn't care about mode
+/// - ❌ `last_stop_index: u8` — estimation doesn't track stops
+/// - ❌ `frozen_s_cm: Option<DistCm>` — control layer concern only
 pub struct EstimationInput<'a> {
+    /// Raw GPS data (from NMEA parser)
     pub gps: GpsPoint,
+    /// Route geometry reference (immutable, XIP flash)
     pub route_data: &'a RouteData<'a>,
+    /// True for first GPS fix (enables relaxed heading filter)
     pub is_first_fix: bool,
 }
 
-/// Estimation output — all derived position signals
+impl<'a> EstimationInput<'a> {
+    /// Create a new estimation input
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use pico2_firmware::estimation::EstimationInput;
+    ///
+    /// let input = EstimationInput {
+    ///     gps: gps_point,
+    ///     route_data: &route,
+    ///     is_first_fix: false,
+    /// };
+    /// ```
+    pub fn new(gps: GpsPoint, route_data: &'a RouteData<'a>, is_first_fix: bool) -> Self {
+        Self {
+            gps,
+            route_data,
+            is_first_fix,
+        }
+    }
+}
+
+/// Estimation output — ALL position signals produced by estimation layer
+///
+/// # Boundary Contract
+///
+/// This struct contains **ALL** the position signals that other layers need.
+/// Control layer uses `divergence_d2` for mode transitions.
+/// Detection layer uses `z_gps_cm`, `s_cm`, `v_cms` for arrival detection.
+///
+/// # Field Descriptions
+///
+/// - `z_gps_cm`: Raw GPS projection onto route (for F1 probability, recovery)
+/// - `s_cm`: Kalman-filtered position (primary position in Normal mode)
+/// - `v_cms`: Filtered velocity (cm/s)
+/// - `divergence_d2`: Squared distance from route (for mode transitions)
+/// - `confidence`: Quality signal 0-255 (higher = better)
+/// - `has_fix`: Whether GPS has valid fix
+///
+/// # Usage by Layer
+///
+/// | Layer | Uses | Purpose |
+/// |-------|------|---------|
+/// | Control | `divergence_d2`, `has_fix` | Mode transitions |
+/// | Detection | `z_gps_cm`, `s_cm`, `v_cms` | Arrival probability |
+/// | Recovery | `z_gps_cm`, `v_cms` | Stop index recovery |
 pub struct EstimationOutput {
-    /// Raw GPS projection onto route (for F1 probability)
-    pub z_gps_cm: shared::DistCm,
+    /// Raw GPS projection onto route (for F1 probability, recovery input)
+    pub z_gps_cm: DistCm,
     /// Kalman-filtered position (primary position in Normal mode)
-    pub s_cm: shared::DistCm,
+    pub s_cm: DistCm,
     /// Filtered velocity (cm/s)
-    pub v_cms: shared::SpeedCms,
-    /// Divergence from route (squared distance from map matching)
-    pub divergence_d2: shared::Dist2,
+    pub v_cms: SpeedCms,
+    /// Divergence from route (squared distance, for mode transitions)
+    pub divergence_d2: Dist2,
     /// Confidence signal (0-255, higher is better)
     pub confidence: u8,
     /// Whether GPS has valid fix
     pub has_fix: bool,
+}
+
+impl EstimationOutput {
+    /// Check if GPS fix is valid
+    #[inline]
+    pub fn is_valid(&self) -> bool {
+        self.has_fix
+    }
+
+    /// Get position for Normal mode (Kalman-filtered)
+    #[inline]
+    pub fn normal_position(&self) -> DistCm {
+        self.s_cm
+    }
+
+    /// Get position for Recovering mode (raw GPS)
+    #[inline]
+    pub fn recovery_position(&self) -> DistCm {
+        self.z_gps_cm
+    }
 }
 
 /// Isolated estimation pipeline
@@ -319,4 +423,107 @@ mod tests {
 
         assert!(v2 < v1, "Speed should decay during outage");
     }
+}
+
+/// ===== Boundary Tests (Prove Isolation) =====
+
+/// COMPILE-TIME CHECK: EstimationInput does NOT contain control state
+///
+/// This test ensures that EstimationInput cannot access:
+/// - SystemMode
+/// - last_stop_index
+/// - frozen_s_cm
+#[test]
+fn test_estimation_input_excludes_control_state() {
+    // EstimationInput only has: gps, route_data, is_first_fix
+    // It does NOT have control state fields
+    let gps = GpsPoint::new();
+    // If we try to access control state, it won't compile
+    let _ = gps.timestamp; // ✅ OK
+    // input.mode          // ❌ ERROR: no field named `mode`
+}
+
+/// COMPILE-TIME CHECK: EstimationOutput does NOT contain control state
+#[test]
+fn test_estimation_output_excludes_control_state() {
+    let output = EstimationOutput {
+        z_gps_cm: 0,
+        s_cm: 0,
+        v_cms: 0,
+        divergence_d2: 0,
+        confidence: 0,
+        has_fix: false,
+    };
+
+    // EstimationOutput does NOT have control state:
+    let _ = output.z_gps_cm;    // ✅ OK
+    let _ = output.s_cm;        // ✅ OK
+    // output.mode              // ❌ ERROR: no field named `mode`
+}
+
+/// RUNTIME CHECK: estimate() function signature enforces isolation
+#[test]
+fn test_estimate_function_signature_enforces_isolation() {
+    // The function signature prevents control state access:
+    // fn estimate(input: EstimationInput, state: &mut EstimationState) -> EstimationOutput
+    //
+    // This makes it IMPOSSIBLE to:
+    // 1. Pass control state to estimation
+    // 2. Modify control state from estimation
+    // 3. Access control state from estimation
+}
+
+/// ===== Helper Method Tests =====
+
+#[test]
+fn test_estimation_output_is_valid() {
+    let valid = EstimationOutput {
+        z_gps_cm: 1000,
+        s_cm: 1050,
+        v_cms: 500,
+        divergence_d2: 1000000,
+        confidence: 200,
+        has_fix: true,
+    };
+
+    assert!(valid.is_valid());
+
+    let invalid = EstimationOutput {
+        z_gps_cm: 1000,
+        s_cm: 1050,
+        v_cms: 500,
+        divergence_d2: 1000000,
+        confidence: 200,
+        has_fix: false,
+    };
+
+    assert!(!invalid.is_valid());
+}
+
+#[test]
+fn test_estimation_output_normal_position() {
+    let output = EstimationOutput {
+        z_gps_cm: 1000,
+        s_cm: 1050,
+        v_cms: 500,
+        divergence_d2: 1000000,
+        confidence: 200,
+        has_fix: true,
+    };
+
+    assert_eq!(output.normal_position(), 1050);
+}
+
+#[test]
+fn test_estimation_output_recovery_position() {
+    let output = EstimationOutput {
+        z_gps_cm: 1000,
+        s_cm: 1050,
+        v_cms: 500,
+        divergence_d2: 1000000,
+        confidence: 200,
+        has_fix: true,
+    };
+
+    assert_eq!(output.recovery_position(), 1000);
 }

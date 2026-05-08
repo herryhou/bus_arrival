@@ -8,6 +8,7 @@ pub mod control;
 pub mod detection;
 pub mod estimation;
 pub mod lut;
+pub mod parser;
 pub mod recovery;
 pub mod recovery_trigger;
 pub mod state;

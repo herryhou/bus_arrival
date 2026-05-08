@@ -10,8 +10,10 @@ use panic_probe as _;
 // Embassy imports
 use embassy_executor::Spawner;
 
-// GPS processing imports
-use gps_processor::FixAccumulator;
+// GPS processing imports - using new component architecture
+use parser::NmeaParser;
+use control::SystemState;
+use estimation::EstimationState;
 
 // HAL imports
 use embassy_rp::bind_interrupts;
@@ -100,13 +102,14 @@ async fn main(_spawner: Spawner) {
     }
 
     // Initialize state with route data reference
-    let mut state = state::State::new(&route_data, persisted);
+    let mut state = SystemState::new(&route_data, persisted);
+    let mut est_state = estimation::EstimationState::new();
 
     // Initialize line buffer for NMEA data
     let mut line_buf = uart::UartLineBuffer::new();
 
-    // Initialize fix accumulator for event-driven GPS processing
-    let mut fix_accumulator = FixAccumulator::new();
+    // Initialize NMEA parser (new component architecture)
+    let mut parser = NmeaParser::new();
 
     info!("System ready. Starting GPS processing...");
 
@@ -117,55 +120,48 @@ async fn main(_spawner: Spawner) {
             Ok(Some(sentence)) => {
                 debug!("NMEA: {}", sentence);
 
-                // Update accumulator with this sentence
-                if fix_accumulator.update(sentence) {
-                    // Check if we should emit a fix (timestamp changed)
-                    if fix_accumulator.should_emit() {
-                        // Build GPS fix from accumulated sentences
-                        if let Some((gps, _quality)) = fix_accumulator.build() {
-                            debug!("GPS: lat={}, lon={}, fix={}", gps.lat, gps.lon, gps.has_fix);
+                // Feed sentence to parser (returns Some(GpsPoint) when ready)
+                if let Some(gps) = parser.feed_sentence(sentence) {
+                    debug!("GPS: lat={}, lon={}, fix={}", gps.lat, gps.lon, gps.has_fix);
 
-                            // Process GPS through full pipeline
-                            if let Some(arrival) = state.process_gps(&gps) {
-                                // Emit arrival event via UART
-                                match uart::write_arrival_event_async(&mut uart, &arrival).await {
-                                    Ok(()) => {
-                                        info!("Emitted arrival event for stop {}", arrival.stop_idx);
-                                    }
-                                    Err(e) => {
-                                        defmt::warn!("Failed to write arrival event: {:?}", e);
-                                    }
-                                }
+                    // Process GPS through full pipeline
+                    if let Some(arrival) = state.tick(&gps, &mut est_state) {
+                        // Emit arrival event via UART
+                        match uart::write_arrival_event_async(&mut uart, &arrival).await {
+                            Ok(()) => {
+                                info!("Emitted arrival event for stop {}", arrival.stop_idx);
                             }
+                            Err(e) => {
+                                defmt::warn!("Failed to write arrival event: {:?}", e);
+                            }
+                        }
+                    }
 
-                            // Persist state if stop index changed and rate limit allows
-                            // This runs once per GPS fix (timestamp change)
-                            if let Some(current_stop) = state.current_stop_index() {
-                                if state.should_persist(current_stop) {
-                                    let ps = shared::PersistedState::new(state.kalman.s_cm, current_stop);
-                                    match persist::save(&mut flash, &ps).await {
-                                        Ok(()) => {
-                                            info!(
-                                                "Persisted state: stop={}, progress={}cm",
-                                                current_stop, state.kalman.s_cm
-                                            );
-                                            state.mark_persisted(current_stop);
-                                        }
-                                        Err(()) => {
-                                            defmt::warn!("Failed to persist state to flash");
-                                            // S4 fix: increment on failure to prevent retry loop
-                                            state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
-                                        }
-                                    }
-                                } else {
-                                    // Increment tick counter for rate limiting
+                    // Persist state if stop index changed and rate limit allows
+                    // This runs once per GPS fix (timestamp change)
+                    if let Some(current_stop) = state.current_stop_index() {
+                        if state.should_persist(current_stop) {
+                            // Get current position from estimation state
+                            let s_cm = est_state.kalman.s_cm;
+                            let ps = shared::PersistedState::new(s_cm, current_stop);
+                            match persist::save(&mut flash, &ps).await {
+                                Ok(()) => {
+                                    info!(
+                                        "Persisted state: stop={}, progress={}cm",
+                                        current_stop, s_cm
+                                    );
+                                    state.mark_persisted(current_stop);
+                                }
+                                Err(()) => {
+                                    defmt::warn!("Failed to persist state to flash");
+                                    // S4 fix: increment on failure to prevent retry loop
                                     state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
                                 }
                             }
+                        } else {
+                            // Increment tick counter for rate limiting
+                            state.ticks_since_persist = state.ticks_since_persist.saturating_add(1);
                         }
-
-                        // Reset accumulator for next second
-                        fix_accumulator.reset();
                     }
                 }
 

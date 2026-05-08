@@ -935,7 +935,32 @@ print(f"Precision={precision:.3f}  Recall={recall:.3f}  F1={f1:.3f}")
 
 ---
 
-## 13. 開發里程碑與 Checklist
+## 13. 文檔放置規範
+
+### 13.1 文檔類型與位置
+
+所有設計文檔、計畫、架構圖應統一放置於 `docs/` 目錄：
+
+| 文檔類型 | 位置 | 範例 |
+|---------|------|------|
+| 架構設計 | `docs/` | `bus_arrival_tech_report_v8.md` |
+| 重構計畫 | `docs/` | `clear_boundaries_refactoring_plan.md` |
+| 技術筆記 | `docs/` | `stop_segment_mapping_tech_note.md` |
+| 規格文檔 | `docs/specs/` | 各模組詳細規格 |
+| 遷移指南 | `docs/` | `binary_format_migration_guide.md` |
+| 程式碼註解 | `crates/*/src/` | Rust 文檔註解 (`///` / `//!`) |
+
+### 13.2 命名慣例
+
+- 計畫文檔：`{feature}_refactoring_plan.md` 或 `{feature}_design.md`
+- 技術筆記：`{topic}_tech_note.md`
+- 遷移指南：`{version}_migration_guide.md`
+
+**原則**：如果文檔描述的是「設計意圖」或「實作計畫」，放在 `docs/`；如果描述的是「API 使用方式」，用 Rust 文檔註解放在程式碼中。
+
+---
+
+## 14. 開發里程碑與 Checklist
 
 ### 離線預處理（preprocessor crate）
 
