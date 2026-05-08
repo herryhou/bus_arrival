@@ -262,9 +262,9 @@ fn test_recovering_mode_allows_backward() {
     // After sustained off-route GPS, should transition to OffRoute
     // The system should handle this without crashing
     assert!(
-        state.mode() == pico2_firmware::SystemMode::Normal ||
-        state.mode() == pico2_firmware::SystemMode::OffRoute ||
-        state.mode() == pico2_firmware::SystemMode::Recovering,
+        state.mode == pico2_firmware::SystemMode::Normal ||
+        state.mode == pico2_firmware::SystemMode::OffRoute ||
+        state.mode == pico2_firmware::SystemMode::Recovering,
         "Mode should be valid"
     );
 

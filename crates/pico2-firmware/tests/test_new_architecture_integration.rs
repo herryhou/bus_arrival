@@ -98,6 +98,7 @@ mod tests {
 }
 
 // Helper functions for testing (would be implemented with actual data)
+#[allow(dead_code)]
 fn create_test_gps_point() -> GpsPoint {
     GpsPoint {
         timestamp: 123519,

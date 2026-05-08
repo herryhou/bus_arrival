@@ -447,6 +447,7 @@ fn test_estimation_output_excludes_control_state() {
         divergence_d2: 0,
         confidence: 0,
         has_fix: false,
+        snapped: false,
     };
 
     // EstimationOutput does NOT have control state:
@@ -478,6 +479,7 @@ fn test_estimation_output_is_valid() {
         divergence_d2: 1000000,
         confidence: 200,
         has_fix: true,
+        snapped: false,
     };
 
     assert!(valid.is_valid());
@@ -489,6 +491,7 @@ fn test_estimation_output_is_valid() {
         divergence_d2: 1000000,
         confidence: 200,
         has_fix: false,
+        snapped: false,
     };
 
     assert!(!invalid.is_valid());
@@ -503,6 +506,7 @@ fn test_estimation_output_normal_position() {
         divergence_d2: 1000000,
         confidence: 200,
         has_fix: true,
+        snapped: false,
     };
 
     assert_eq!(output.normal_position(), 1050);
@@ -517,6 +521,7 @@ fn test_estimation_output_recovery_position() {
         divergence_d2: 1000000,
         confidence: 200,
         has_fix: true,
+        snapped: false,
     };
 
     assert_eq!(output.recovery_position(), 1000);

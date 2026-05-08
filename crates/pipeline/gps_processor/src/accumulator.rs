@@ -5,6 +5,7 @@
 
 use shared::{FixQuality, GpsPoint, HeadCdeg, SpeedCms};
 
+#[allow(dead_code)]
 const MAX_NMEA_FIELDS: usize = 20;
 
 /// Accumulates NMEA sentences into a single GPS fix per timestamp.

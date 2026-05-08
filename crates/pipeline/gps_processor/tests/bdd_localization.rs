@@ -162,8 +162,8 @@ fn test_localization_behavioral_scenarios() {
     scenario_large_backward_jump_rejection(&route_data, start_x, start_y);
 
     // L-shaped route tests
-    let (l_buffer, l_start_x, l_start_y) = setup_l_shaped_route();
-    let l_route_data = RouteData::load(&l_buffer).expect("Failed to load L-shaped route");
+    let (l_buffer, _l_start_x, _l_start_y) = setup_l_shaped_route();
+    let _l_route_data = RouteData::load(&l_buffer).expect("Failed to load L-shaped route");
     // TODO: Fix L-shaped turn test - position not progressing as expected
     // scenario_l_shaped_turn(&l_route_data, l_start_x, l_start_y);
 
@@ -235,6 +235,7 @@ fn scenario_extended_gps_outage(route_data: &RouteData, start_x: i32, start_y: i
     }
 }
 
+#[allow(dead_code)]
 fn scenario_route_end_clamping(route_data: &RouteData, start_x: i32, start_y: i32) {
     let mut state = KalmanState::new();
     let mut dr = DrState::new();
@@ -563,6 +564,7 @@ fn scenario_handle_gps_outage_with_dr(route_data: &RouteData, start_x: i32, star
     }
 }
 
+#[allow(dead_code)]
 fn scenario_l_shaped_turn(route_data: &RouteData, start_x: i32, start_y: i32) {
     let mut state = KalmanState::new();
     let mut dr = DrState::new();

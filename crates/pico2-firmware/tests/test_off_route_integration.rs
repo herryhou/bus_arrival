@@ -168,6 +168,7 @@ fn create_test_route_data() -> RouteData<'static> {
 }
 
 /// Helper to create a GPS point on the route (at origin 120°E, 20°N)
+#[allow(dead_code)]
 fn create_gps_point_with_time(
     timestamp: u64,
     tick_offset: u64,
@@ -187,6 +188,7 @@ fn create_gps_point_with_time(
 
 /// Helper to create a GPS point far from the route (>50m)
 /// Uses latitude offset to move ~60m north of route
+#[allow(dead_code)]
 fn create_gps_point_far_from_route(timestamp: u64, tick_index: u64) -> GpsPoint {
     GpsPoint {
         timestamp: timestamp + tick_index,
@@ -200,6 +202,7 @@ fn create_gps_point_far_from_route(timestamp: u64, tick_index: u64) -> GpsPoint 
 }
 
 /// Helper to load the test route data
+#[allow(dead_code)]
 fn load_test_route_data() -> Option<RouteData<'static>> {
     Some(create_test_route_data())
 }
