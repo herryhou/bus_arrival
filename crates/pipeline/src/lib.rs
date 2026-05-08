@@ -20,6 +20,12 @@
 pub mod gps;
 pub mod serde;
 
+/// Detour re-entry jump threshold in centimeters.
+/// When a bus returns from off-route status with a forward jump greater than this,
+/// it indicates the bus has snapped back to the route after a detour.
+/// Stops behind the snap position should be skipped to prevent phantom arrivals.
+pub const DETOUR_JUMP_THRESHOLD_CM: i32 = 10000;
+
 use shared::binfile::RouteData;
 use shared::{DistCm, GpsPoint, KalmanState, DrState};
 use thiserror::Error;
@@ -315,7 +321,7 @@ impl DetectionState {
                 let just_reentered = self.off_route;
                 let large_forward_jump = if let Some(off_route_s) = self.off_route_last_s_cm {
                     // Large forward jump indicates detour re-entry snap
-                    record.s_cm > off_route_s + 10000 // >100m jump
+                    record.s_cm > off_route_s + DETOUR_JUMP_THRESHOLD_CM
                 } else {
                     false
                 };
