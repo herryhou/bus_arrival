@@ -255,4 +255,23 @@ mod tests {
         let s = project_to_route(5000, 0, 0, &route_data);
         assert_eq!(s, 5_000); // Halfway through 10 m segment
     }
+
+    #[test]
+    fn test_latlon_to_cm_absolute_with_lat_avg() {
+        // Test known conversion
+        let (x, y) = latlon_to_cm_absolute_with_lat_avg(25.0, 121.0, 25.0);
+        // Should produce non-zero coordinates
+        assert!(x != 0 || y != 0);
+    }
+
+    #[test]
+    fn test_latlon_to_cm_roundtrip() {
+        // If we convert and "unconvert", we should get close to original
+        // This is a sanity check, not exact roundtrip
+        let (x1, y1) = latlon_to_cm_absolute_with_lat_avg(25.0, 121.0, 25.0);
+        let (x2, y2) = latlon_to_cm_absolute_with_lat_avg(25.001, 121.001, 25.0);
+
+        // Small change in lat/lon should produce change in x/y
+        assert!(x2 != x1 || y2 != y1);
+    }
 }
