@@ -19,6 +19,7 @@
 
 pub mod gps;
 pub mod serde;
+pub mod filter;
 
 /// Detour re-entry jump threshold in centimeters.
 /// When a bus returns from off-route status with a forward jump greater than this,
