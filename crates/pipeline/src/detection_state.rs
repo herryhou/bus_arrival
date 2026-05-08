@@ -2,7 +2,7 @@
 
 use shared::{DistCm, PositionSignals};
 use shared::binfile::RouteData;
-use crate::{PipelineResult, ArrivalEvent, DepartureEvent, gps::GpsRecord, trace::StopTraceState, DETOUR_JUMP_THRESHOLD_CM};
+use crate::{PipelineResult, ArrivalEvent, DepartureEvent, gps::GpsRecord, trace::StopTraceState, DETOUR_JUMP_THRESHOLD_CM, filter};
 use detection::state_machine::{StopState, StopEvent};
 
 /// Detection state (Phase 3: Arrival detection)
@@ -90,13 +90,10 @@ impl DetectionState {
         }
 
         // Find active stops (corridor filter)
-        for (idx, stop) in stops.iter().enumerate() {
-            if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm
-                && !self.stop_states[idx].skip_on_reentry
-            {
-                self.active_indices.push(idx);
-            }
-        }
+        let skip_flags: Vec<bool> = self.stop_states.iter()
+            .map(|s| s.skip_on_reentry)
+            .collect();
+        self.active_indices = filter::active_stops(s_cm, stops, &skip_flags);
 
         // Process each active stop
         for idx in &self.active_indices {
