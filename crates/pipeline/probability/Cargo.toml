@@ -1,0 +1,12 @@
+[package]
+name = "pipeline-probability"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+shared = { path = "../../shared", default-features = false }
+detection = { path = "../detection", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+shared = { path = "../../shared", features = ["std"] }
+detection = { path = "../detection", features = ["std"] }
