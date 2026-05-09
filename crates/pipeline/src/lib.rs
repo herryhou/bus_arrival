@@ -29,6 +29,25 @@ pub use detection::trace::{TraceRecord, StopTraceState};
 #[derive(Debug)]
 pub struct TraceRecordWrapper(pub TraceRecord);
 
+#[cfg(feature = "std")]
+impl ::std::ops::Deref for TraceRecordWrapper {
+    type Target = TraceRecord;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[cfg(feature = "std")]
+impl ::serde::Serialize for TraceRecordWrapper {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ::serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
 /// Detour re-entry jump threshold in centimeters.
 /// When a bus returns from off-route status with a forward jump greater than this,
 /// it indicates the bus has snapped back to the route after a detour.
@@ -36,7 +55,7 @@ pub struct TraceRecordWrapper(pub TraceRecord);
 pub const DETOUR_JUMP_THRESHOLD_CM: i32 = 10000;
 
 use shared::binfile::RouteData;
-use shared::{DistCm, GpsPoint, KalmanState, DrState};
+use shared::{GpsPoint, KalmanState, DrState};
 use thiserror::Error;
 
 /// Serialize f64 with at most 6 decimal places
@@ -340,8 +359,6 @@ impl PipelineResult {
             stop_states,
             gps_jump: false,  // TODO: implement GPS jump detection
             recovery_idx: None, // TODO: implement recovery
-            status: String::new(), // TODO: Add status field to TraceRecord
-            off_route: false, // TODO: Add off_route field to TraceRecord
             // New fields
             segment_idx: record.segment_idx,
             heading_constraint_met: record.heading_constraint_met,

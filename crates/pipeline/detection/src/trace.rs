@@ -16,7 +16,7 @@ where
 }
 
 /// Trace record for debugging visualization
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct TraceRecord {
     /// Input: GPS timestamp (seconds since epoch)
     pub time: u64,
@@ -91,7 +91,7 @@ pub struct TraceRecord {
     pub next_stop: Option<(u8, Prob8)>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct StopTraceState {
     pub stop_idx: u8,
 

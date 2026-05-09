@@ -187,7 +187,7 @@ impl DetectionState {
                 stop_idx: idx as u8,
                 gps_distance_cm: z_gps_cm - stop.progress_cm,
                 progress_distance_cm: record.s_cm - stop.progress_cm,
-                fsm_state: format!("{:?}", stop_state.fsm_state),
+                fsm_state: stop_state.fsm_state,
                 dwell_time_s: stop_state.dwell_time_s,
                 probability,
                 features,

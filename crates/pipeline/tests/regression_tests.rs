@@ -90,7 +90,7 @@ fn test_skip_stop5_on_offroute_reentry() {
 
     for record in &result.trace_records {
         for state in &record.stop_states {
-            if matches!(state.fsm_state.as_str(), "Approaching" | "Arriving" | "AtStop") {
+            if matches!(state.fsm_state, shared::FsmState::Approaching | shared::FsmState::Arriving | shared::FsmState::AtStop) {
                 detected_stops.insert(state.stop_idx as usize);
             }
         }
