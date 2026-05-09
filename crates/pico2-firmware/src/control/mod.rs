@@ -551,7 +551,13 @@ impl<'a> SystemState<'a> {
             }
         }
 
-        // STEP 3.5: Check for GPS jump requiring recovery (H1)
+        // GPS Jump Recovery (H1)
+        // When GPS position jumps >200m in Normal mode, use recovery module
+        // to find correct stop index. RecoveryInput uses:
+        // - s_cm: current GPS position (jumped)
+        // - v_cms: filtered velocity from dead reckoning
+        // - dt_seconds: time since last valid GPS fix
+        // - frozen_s_cm: None (no position freeze in Normal mode)
         let in_snap_cooldown = self.just_snapped_ticks > 0;
         let prev_s_cm = self.last_valid_s_cm;
         // Skip recovery on first fix - last_valid_s_cm is still 0 (initial value)
@@ -637,7 +643,14 @@ impl<'a> SystemState<'a> {
             self.just_snapped_ticks = 2;
         }
 
-        // STEP 3.7: Check for re-acquisition recovery (after OffRoute without snap)
+        // Re-acquisition Recovery
+        // After returning from OffRoute without snap, use recovery module
+        // to find correct stop index based on elapsed time since freeze.
+        // RecoveryInput uses:
+        // - s_cm: Kalman-filtered position
+        // - v_cms: filtered velocity
+        // - dt_seconds: time since off_route_since
+        // - frozen_s_cm: None (freeze context cleared after off-route)
         if !est.snapped && !in_snap_cooldown && self.needs_recovery_on_reacquisition && self.mode == SystemMode::Normal {
             self.needs_recovery_on_reacquisition = false;
 
