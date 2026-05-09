@@ -63,3 +63,41 @@ impl GpsDiagnostics {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_diagnostics_builder() {
+        let diag = GpsDiagnostics::new()
+            .with_segment_idx(Some(5))
+            .with_heading_met(true)
+            .with_divergence_cm(100)
+            .with_hdop(Some(1.5))
+            .with_num_sats(Some(12))
+            .with_fix_type(Some("3D".to_string()))
+            .with_variance_cm2(50);
+
+        assert_eq!(diag.segment_idx, Some(5));
+        assert_eq!(diag.heading_met, true);
+        assert_eq!(diag.divergence_cm, 100);
+        assert_eq!(diag.hdop, Some(1.5));
+        assert_eq!(diag.num_sats, Some(12));
+        assert_eq!(diag.fix_type, Some("3D".to_string()));
+        assert_eq!(diag.variance_cm2, 50);
+    }
+
+    #[test]
+    fn test_diagnostics_default() {
+        let diag = GpsDiagnostics::new();
+
+        assert_eq!(diag.segment_idx, None);
+        assert_eq!(diag.heading_met, false);
+        assert_eq!(diag.divergence_cm, 0);
+        assert_eq!(diag.hdop, None);
+        assert_eq!(diag.num_sats, None);
+        assert_eq!(diag.fix_type, None);
+        assert_eq!(diag.variance_cm2, 0);
+    }
+}
