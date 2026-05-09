@@ -4,7 +4,7 @@
 //! Wraps the complete pipeline library.
 
 #[cfg(feature = "std")]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[cfg(feature = "std")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -125,8 +125,8 @@ fn print_help() {
 /// Generate trace output path from NMEA input path
 /// Example: test_data/ty225_normal_nmea.txt -> test_data/ty225_normal_trace.jsonl
 #[cfg(feature = "std")]
-fn generate_trace_path(nmea_path: &PathBuf) -> PathBuf {
-    let mut trace_path = nmea_path.clone();
+fn generate_trace_path(nmea_path: &Path) -> PathBuf {
+    let mut trace_path = nmea_path.to_path_buf();
 
     // Replace extension with _trace.jsonl
     let file_stem = trace_path.file_stem().unwrap_or_default();

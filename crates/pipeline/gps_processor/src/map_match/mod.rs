@@ -12,6 +12,7 @@ pub use search::{
     find_best_segment_grid_only_with_min_max_s,
     find_best_segment_grid_only_with_min_s,
     find_best_segment_restricted,
+    SRange,
 };
 
 use shared::DistCm;

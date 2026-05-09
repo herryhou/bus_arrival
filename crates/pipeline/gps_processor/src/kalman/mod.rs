@@ -160,6 +160,10 @@ pub fn process_gps_update(
                     // Calculate max_s constraint to prevent jumping too far forward
                     // Allow up to 5km forward (reasonable for GPS outage recovery)
                     let max_s = frozen_s + 500_000; // 5km forward
+                    let s_range = crate::map_match::SRange {
+                        min_s_cm: frozen_s, // Constrain to segments >= frozen position
+                        max_s_cm: max_s,    // Constrain to segments <= frozen position + 5km
+                    };
                     let (new_seg_idx, _new_match_d2) = crate::map_match::find_best_segment_grid_only_with_min_max_s(
                         gps_x,
                         gps_y,
@@ -167,8 +171,7 @@ pub fn process_gps_update(
                         gps.speed_cms.unwrap_or(0),
                         route_data,
                         use_relaxed_heading,
-                        frozen_s, // Constrain to segments >= frozen position
-                        max_s,    // Constrain to segments <= frozen position + 5km
+                        s_range,
                     );
 
                     // Project to route to get re-entry position

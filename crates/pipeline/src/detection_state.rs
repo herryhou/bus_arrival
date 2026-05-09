@@ -69,7 +69,7 @@ impl DetectionState {
             "valid" => {
                 let just_reentered = self.off_route;
                 let large_forward_jump = self.off_route_last_s_cm
-                    .map_or(false, |off_route_s| record.s_cm > off_route_s + 10000);
+                    .is_some_and(|off_route_s| record.s_cm > off_route_s + 10000);
 
                 self.off_route = false;
                 self.off_route_last_s_cm = None;

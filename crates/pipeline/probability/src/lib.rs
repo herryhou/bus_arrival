@@ -65,13 +65,19 @@ pub struct ProbabilityEngine {
     logistic_lut: [u8; 128],
 }
 
-impl ProbabilityEngine {
-    pub fn new() -> Self {
+impl Default for ProbabilityEngine {
+    fn default() -> Self {
         Self {
             last_result: None,
             gaussian_lut: GAUSSIAN_LUT,
             logistic_lut: LOGISTIC_LUT,
         }
+    }
+}
+
+impl ProbabilityEngine {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Compute arrival probability (cached)

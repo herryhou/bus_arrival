@@ -5,6 +5,13 @@ use crate::SIGMA_GPS_CM;
 use shared::binfile::RouteData;
 use shared::{Dist2, DistCm, HeadCdeg, SpeedCms};
 
+/// Route progress constraint (min/max s_cm)
+#[derive(Debug, Clone, Copy)]
+pub struct SRange {
+    pub min_s_cm: DistCm,
+    pub max_s_cm: DistCm,
+}
+
 /// Scan a range of segment indices, returning the best eligible and best any.
 ///
 /// When `is_first_fix` is true, the heading filter is disabled - all segments
@@ -285,11 +292,11 @@ pub fn find_best_segment_grid_only(
 /// This is used for off-route re-entry where the bus might be at a completely
 /// different part of the route than where it left off.
 ///
-/// The `min_s_cm` parameter constrains the search to only segments that
+/// The `s_range.min_s_cm` parameter constrains the search to only segments that
 /// project to positions >= min_s_cm. This prevents backward snaps and
 /// reduces the risk of snapping too far forward and skipping stops.
 ///
-/// The `max_s_cm` parameter constrains the search to only segments that
+/// The `s_range.max_s_cm` parameter constrains the search to only segments that
 /// project to positions <= max_s_cm. This prevents forward snaps that skip
 /// too many stops when the route has loops or crossing segments.
 pub fn find_best_segment_grid_only_with_min_max_s(
@@ -299,8 +306,7 @@ pub fn find_best_segment_grid_only_with_min_max_s(
     gps_speed: SpeedCms,
     route_data: &RouteData,
     is_first_fix: bool,
-    min_s_cm: DistCm,
-    max_s_cm: DistCm,
+    s_range: SRange,
 ) -> (usize, i64) {
     // Check bounding box first
     if gps_x < route_data.x0_cm || gps_y < route_data.y0_cm {
@@ -328,11 +334,11 @@ pub fn find_best_segment_grid_only_with_min_max_s(
             let _ = route_data.grid.visit_cell(nx as u32, ny as u32, |idx: u16| {
                 if let Some(seg) = route_data.get_node(idx as usize) {
                     // Skip segments that project to positions before min_s_cm
-                    if seg.cum_dist_cm < min_s_cm {
+                    if seg.cum_dist_cm < s_range.min_s_cm {
                         return;
                     }
                     // Skip segments that project to positions after max_s_cm
-                    if seg.cum_dist_cm > max_s_cm {
+                    if seg.cum_dist_cm > s_range.max_s_cm {
                         return;
                     }
 
@@ -386,8 +392,7 @@ pub fn find_best_segment_grid_only_with_min_s(
         gps_speed,
         route_data,
         is_first_fix,
-        min_s_cm,
-        DistCm::MAX, // No upper bound
+        SRange { min_s_cm, max_s_cm: DistCm::MAX },
     )
 }
 

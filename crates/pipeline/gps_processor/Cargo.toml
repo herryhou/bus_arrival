@@ -6,6 +6,7 @@ edition.workspace = true
 [features]
 default = []
 std = ["shared/std", "detection/std", "serde/derive", "serde_json"]
+firmware = []
 
 [dependencies]
 shared = { path = "../../shared", default-features = false }
