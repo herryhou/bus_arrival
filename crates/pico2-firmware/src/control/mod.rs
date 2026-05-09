@@ -1027,3 +1027,6 @@ mod tests {
 // TODO: Redesign to fit within 4KB budget (e.g., reduce StopState size, use fewer stops, or move to Flash)
 // Temporarily disabled to allow integration to proceed - size check will be addressed in follow-up
 // const _: () = assert!(size_of::<SystemState>() <= 4096, "SystemState exceeds 4KB SRAM budget");
+
+#[cfg(test)]
+mod recovery_integration_test;
