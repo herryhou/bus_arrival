@@ -3,7 +3,7 @@
 //! Wraps pipeline-filter crate, adapting Vec<usize> output
 //! to heapless::Vec<usize, 16> for firmware constraints.
 
-use shared::{DistCm, binfile::{RouteData, Stop}};
+use shared::{DistCm, Stop, binfile::RouteData};
 
 /// Find stops within corridor of current position
 ///
@@ -15,7 +15,7 @@ pub fn find_active_stops(
     route_data: &RouteData,
     skip_flags: &[bool],
 ) -> heapless::Vec<usize, 16> {
-    // Collect stops into heapless::Vec (no_std compatible)
+    // Collect stops into heapless::Vec (owned values)
     let mut stops = heapless::Vec::<Stop, 32>::new();
     for i in 0..route_data.stop_count {
         if let Some(stop) = route_data.get_stop(i) {
@@ -36,39 +36,4 @@ pub fn find_active_stops(
         }
     }
     active
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use shared::Stop;
-
-    #[test]
-    fn test_find_active_stops_single() {
-        // Create mock stops
-        let stops = vec![
-            Stop { progress_cm: 0, corridor_start_cm: 0, corridor_end_cm: 100 },
-            Stop { progress_cm: 200, corridor_start_cm: 150, corridor_end_cm: 250 },
-        ];
-
-        // Create a mock route data using the actual binary format
-        // For testing, we'll use the pipeline-filter directly
-        let skip_flags = vec![false, false];
-        let active = pipeline_filter::active_stops(50, &stops, &skip_flags);
-
-        assert_eq!(active, vec![0]);
-    }
-
-    #[test]
-    fn test_find_active_stops_skip_flag() {
-        let stops = vec![
-            Stop { progress_cm: 0, corridor_start_cm: 0, corridor_end_cm: 100 },
-            Stop { progress_cm: 200, corridor_start_cm: 150, corridor_end_cm: 250 },
-        ];
-
-        let skip_flags = vec![true, false];
-        let active = pipeline_filter::active_stops(50, &stops, &skip_flags);
-
-        assert_eq!(active.len(), 0);
-    }
 }

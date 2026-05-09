@@ -5,9 +5,10 @@
 //! # Crate Integration
 //!
 //! - `find_active_stops()` delegates to `pipeline-filter` crate
-//! - Probability computation via `pipeline-probability` crate (to be added)
+//! - Probability computation via `pipeline-probability` crate
 
 pub mod filter;
+pub mod probability;
 
 // ===== GPS Status =====
 
@@ -24,3 +25,4 @@ pub enum GpsStatus {
 
 // Re-export filter function for convenience
 pub use filter::find_active_stops;
+pub use probability::FirmwareProbabilityEngine;
