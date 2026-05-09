@@ -584,18 +584,21 @@ impl<'a> SystemState<'a> {
                     }
                 }
 
-                if let Some(recovered_idx) = detection::recovery::find_stop_index(
-                    s_raw,
-                    est_state.dr.filtered_v,
-                    dt_since_last_fix,
-                    &stops_vec,
-                    self.last_stop_index,
-                    &None,  // No freeze context in Normal mode (GPS jump recovery)
-                ) {
+                let recovery_input = crate::recovery::RecoveryInput {
+                    s_cm: s_raw,
+                    v_cms: est_state.dr.filtered_v,
+                    dt_seconds: dt_since_last_fix,
+                    stops: stops_vec,
+                    hint_idx: self.last_stop_index,
+                    frozen_s_cm: None,  // No frozen position in Normal mode
+                    search_window: 10,
+                };
+
+                if let Some(recovered_idx) = crate::recovery::recover(recovery_input) {
                     #[cfg(feature = "firmware")]
                     defmt::info!("Recovery found stop index: {}", recovered_idx);
-                    self.last_stop_index = recovered_idx as u8;
-                    self.reset_stop_states_after_recovery(recovered_idx, s_raw);
+                    self.last_stop_index = recovered_idx;
+                    self.reset_stop_states_after_recovery(recovered_idx as usize, s_raw);
                 } else {
                     #[cfg(feature = "firmware")]
                     defmt::warn!("Recovery failed: no valid stop found");
