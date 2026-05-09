@@ -349,13 +349,11 @@ impl DetectionState {
             }
         }
 
-        // Find active stops (corridor filter)
-        // Skip stops that were marked to skip on re-entry
-        for (idx, stop) in stops.iter().enumerate() {
-            if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm && !self.stop_states[idx].skip_on_reentry {
-                self.active_indices.push(idx);
-            }
-        }
+        // Find active stops using corridor filter
+        let skip_flags: Vec<bool> = self.stop_states.iter()
+            .map(|s| s.skip_on_reentry)
+            .collect();
+        self.active_indices = crate::filter::active_stops(s_cm, &stops, &skip_flags);
 
         // Process each active stop
         for idx in &self.active_indices {
