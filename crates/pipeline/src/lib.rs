@@ -22,6 +22,13 @@ pub mod serde;
 pub mod detection_state;
 pub mod localization;
 
+// Re-export trace types from detection crate
+#[cfg(feature = "std")]
+pub use detection::trace::{TraceRecord, StopTraceState};
+#[cfg(feature = "std")]
+#[derive(Debug)]
+pub struct TraceRecordWrapper(pub TraceRecord);
+
 /// Detour re-entry jump threshold in centimeters.
 /// When a bus returns from off-route status with a forward jump greater than this,
 /// it indicates the bus has snapped back to the route after a detour.
@@ -62,7 +69,7 @@ pub struct PipelineResult {
     pub departures: Vec<DepartureEvent>,
     /// Trace records
     #[cfg(feature = "std")]
-    pub trace_records: Vec<TraceRecord>,
+    pub trace_records: Vec<TraceRecordWrapper>,
 }
 
 /// Arrival event
@@ -71,66 +78,9 @@ pub type ArrivalEvent = shared::ArrivalEvent;
 /// Departure event
 pub type DepartureEvent = shared::DepartureEvent;
 
-/// Trace record for debugging
-#[cfg(feature = "std")]
-#[derive(Debug, Clone, ::serde::Serialize)]
-pub struct TraceRecord {
-    pub time: u64,
-    #[serde(serialize_with = "serialize_f64_6dec")]
-    pub lat: f64,
-    #[serde(serialize_with = "serialize_f64_6dec")]
-    pub lon: f64,
-    pub s_cm: i32,
-    pub v_cms: i32,
-    pub heading_cdeg: Option<i16>,
-    pub active_stops: Vec<u8>,
-    pub stop_states: Vec<StopTraceState>,
-    pub gps_jump: bool,
-    pub recovery_idx: Option<u8>,
-    pub status: String,
-    pub off_route: bool,
-    // === New: Map matching ===
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub segment_idx: Option<u16>,
-    pub heading_constraint_met: bool,
-    // === New: Divergence ===
-    pub divergence_cm: i32,
-    // === New: GPS quality ===
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hdop: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub num_sats: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fix_type: Option<String>,
-    // === New: Kalman state ===
-    pub variance_cm2: i32,
-    // === New: Corridor info ===
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub corridor_start_cm: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub corridor_end_cm: Option<i32>,
-    // === New: Next stop (outside corridor) ===
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_stop: Option<(u8, u8)>,
-}
 
-/// Stop state in trace
-#[cfg(feature = "std")]
-#[derive(Debug, Clone, ::serde::Serialize)]
-pub struct StopTraceState {
-    pub stop_idx: u8,
-    /// GPS distance to stop (cm) - based on raw GPS projection (z_gps_cm)
-    pub gps_distance_cm: i32,
-    /// Progress distance to stop (cm) - based on Kalman-filtered position (s_cm)
-    pub progress_distance_cm: i32,
-    pub fsm_state: String,
-    pub dwell_time_s: u16,
-    pub probability: u8,
-    pub features: detection::trace::FeatureScores,
-    pub just_arrived: bool,
-    /// Whether this stop should be skipped on off-route re-entry
-    pub skip_on_reentry: bool,
-}
+
+
 
 
 /// Pipeline errors
@@ -379,7 +329,7 @@ impl PipelineResult {
             None
         };
 
-        self.trace_records.push(TraceRecord {
+        self.trace_records.push(TraceRecordWrapper(TraceRecord {
             time: record.time,
             lat: record.lat,
             lon: record.lon,
@@ -390,8 +340,8 @@ impl PipelineResult {
             stop_states,
             gps_jump: false,  // TODO: implement GPS jump detection
             recovery_idx: None, // TODO: implement recovery
-            status: record.status.to_string(),
-            off_route: det_state.is_off_route(),
+            status: String::new(), // TODO: Add status field to TraceRecord
+            off_route: false, // TODO: Add off_route field to TraceRecord
             // New fields
             segment_idx: record.segment_idx,
             heading_constraint_met: record.heading_constraint_met,
@@ -403,6 +353,6 @@ impl PipelineResult {
             corridor_start_cm,
             corridor_end_cm,
             next_stop,
-        });
+        }));
     }
 }

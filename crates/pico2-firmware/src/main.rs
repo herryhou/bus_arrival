@@ -21,6 +21,7 @@ use embassy_rp::uart::{BufferedInterruptHandler, BufferedUart, Config as UartCon
 
 // Module declarations
 mod control;
+mod detection;
 mod estimation;
 mod lut;
 mod persist;

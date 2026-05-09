@@ -13,8 +13,6 @@ shared = { path = "../shared", default-features = false, features = ["serde"] }
 thiserror = "2.0"
 gps_processor = { path = "gps_processor" }
 detection = { path = "detection" }
-pipeline-filter = { path = "filter" }
-pipeline-probability = { path = "probability" }
 serde = { workspace = true, optional = true, features = ["derive"] }
 serde_json = { workspace = true, optional = true }
 serde-json-core = { version = "0.6", optional = true }

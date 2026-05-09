@@ -705,7 +705,8 @@ impl<'a> SystemState<'a> {
         };
 
         // Step 1: Find active stops (corridor filter)
-        let active_indices = crate::detection::find_active_stops(signals, self.route_data);
+        let skip_flags = &[false; 32]; // TODO: track skip flags per stop
+        let active_indices = crate::detection::find_active_stops(est.s_cm, self.route_data, skip_flags);
 
         // Step 2: For each active stop, compute probability and update FSM
         for stop_idx in active_indices {

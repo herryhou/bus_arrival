@@ -2,11 +2,8 @@
 
 use shared::{DistCm, PositionSignals};
 use shared::binfile::RouteData;
-use crate::{StopTraceState, PipelineResult, ArrivalEvent, DepartureEvent, gps::GpsRecord, DETOUR_JUMP_THRESHOLD_CM};
-use pipeline_filter as filter;
-use pipeline_probability::ProbabilityEngine;
+use crate::{PipelineResult, ArrivalEvent, DepartureEvent, gps::GpsRecord, StopTraceState};
 use detection::state_machine::{StopState, StopEvent};
-use detection::probability::GpsStatus;
 
 /// Detection state (Phase 3: Arrival detection)
 pub struct DetectionState {
@@ -22,8 +19,6 @@ pub struct DetectionState {
     off_route: bool,
     /// Track last position during off-route
     off_route_last_s_cm: Option<DistCm>,
-    /// Probability computation engine with caching
-    prob_engine: ProbabilityEngine,
 }
 
 impl DetectionState {
@@ -40,7 +35,6 @@ impl DetectionState {
             active_indices: Vec::new(),
             off_route: false,
             off_route_last_s_cm: None,
-            prob_engine: ProbabilityEngine::new(),
         }
     }
 
@@ -75,7 +69,7 @@ impl DetectionState {
             "valid" => {
                 let just_reentered = self.off_route;
                 let large_forward_jump = self.off_route_last_s_cm
-                    .map_or(false, |off_route_s| record.s_cm > off_route_s + DETOUR_JUMP_THRESHOLD_CM);
+                    .map_or(false, |off_route_s| record.s_cm > off_route_s + 10000);
 
                 self.off_route = false;
                 self.off_route_last_s_cm = None;
@@ -96,10 +90,13 @@ impl DetectionState {
         }
 
         // Find active stops (corridor filter)
-        let skip_flags: Vec<bool> = self.stop_states.iter()
-            .map(|s| s.skip_on_reentry)
-            .collect();
-        self.active_indices = filter::active_stops(s_cm, &stops, &skip_flags);
+        for (idx, stop) in stops.iter().enumerate() {
+            if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm
+                && !self.stop_states[idx].skip_on_reentry
+            {
+                self.active_indices.push(idx);
+            }
+        }
 
         // Process each active stop
         for idx in &self.active_indices {
@@ -108,20 +105,20 @@ impl DetectionState {
 
             let signals = PositionSignals::new(record.s_cm, record.s_cm);
             let gps_status = match record.status {
-                "valid" => GpsStatus::Valid,
-                "dr_outage" => GpsStatus::DrOutage,
-                "off_route" => GpsStatus::OffRoute,
-                _ => GpsStatus::Valid,
+                "valid" => detection::probability::GpsStatus::Valid,
+                "dr_outage" => detection::probability::GpsStatus::DrOutage,
+                "off_route" => detection::probability::GpsStatus::OffRoute,
+                _ => detection::probability::GpsStatus::Valid,
             };
-            let prob_result = self.prob_engine.compute(
-                record.time,
+            let probability = detection::probability::compute_arrival_probability(
                 signals,
                 v_cms,
                 stop,
                 stop_state.dwell_time_s,
                 gps_status,
+                detection::probability::gaussian_lut(),
+                detection::probability::logistic_lut(),
             );
-            let probability = prob_result.probability;
 
             let event = stop_state.update(
                 s_cm,
@@ -157,7 +154,7 @@ impl DetectionState {
     }
 
     /// Get trace information for the last processed GPS record
-    pub fn get_trace_info(&mut self, record: &GpsRecord, route_data: &RouteData) -> (Vec<u8>, Vec<StopTraceState>) {
+    pub fn get_trace_info(&self, record: &GpsRecord, route_data: &RouteData) -> (Vec<u8>, Vec<StopTraceState>) {
         let stops = route_data.stops();
 
         let active_stops: Vec<u8> = self.active_indices.iter().map(|i| *i as u8).collect();
@@ -169,21 +166,21 @@ impl DetectionState {
             let stop_state = &self.stop_states[idx];
 
             let signals = PositionSignals::new(record.s_cm, record.s_cm);
-            let gps_status = match record.status {
-                "valid" => GpsStatus::Valid,
-                "dr_outage" => GpsStatus::DrOutage,
-                "off_route" => GpsStatus::OffRoute,
-                _ => GpsStatus::Valid,
-            };
 
-            // Use cached probability computation (same as process_gps_record)
-            let prob_result = self.prob_engine.compute(
-                record.time,
+            let features = detection::probability::compute_feature_scores(
                 signals,
                 record.v_cms,
                 stop,
                 stop_state.dwell_time_s,
-                gps_status,
+                detection::probability::gaussian_lut(),
+                detection::probability::logistic_lut(),
+            );
+
+            let probability = detection::probability::compute_probability(
+                record.s_cm,
+                record.v_cms,
+                stop.progress_cm,
+                stop_state.dwell_time_s,
             );
 
             StopTraceState {
@@ -192,10 +189,9 @@ impl DetectionState {
                 progress_distance_cm: record.s_cm - stop.progress_cm,
                 fsm_state: format!("{:?}", stop_state.fsm_state),
                 dwell_time_s: stop_state.dwell_time_s,
-                probability: prob_result.probability,
-                features: prob_result.features.clone(),
+                probability,
+                features,
                 just_arrived: self.arrived_this_frame.contains(&(idx as u8)),
-                skip_on_reentry: stop_state.skip_on_reentry,
             }
         }).collect();
 
