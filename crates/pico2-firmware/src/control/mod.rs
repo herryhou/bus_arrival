@@ -654,18 +654,21 @@ impl<'a> SystemState<'a> {
                 }
             }
 
-            if let Some(recovered_idx) = detection::recovery::find_stop_index(
-                est.s_cm,
-                est_state.dr.filtered_v,
-                elapsed_seconds,
-                &stops_vec,
-                self.last_stop_index,
-                &None,  // No freeze context in Normal mode (re-acquisition recovery)
-            ) {
+            let recovery_input = crate::recovery::RecoveryInput {
+                s_cm: est.s_cm,
+                v_cms: est_state.dr.filtered_v,
+                dt_seconds: elapsed_seconds,
+                stops: stops_vec,
+                hint_idx: self.last_stop_index,
+                frozen_s_cm: None,  // No frozen position for re-acquisition
+                search_window: 10,
+            };
+
+            if let Some(recovered_idx) = crate::recovery::recover(recovery_input) {
                 #[cfg(feature = "firmware")]
                 defmt::info!("Re-acquisition recovered stop index: {}", recovered_idx);
-                self.last_stop_index = recovered_idx as u8;
-                self.reset_stop_states_after_recovery(recovered_idx, est.s_cm);
+                self.last_stop_index = recovered_idx;
+                self.reset_stop_states_after_recovery(recovered_idx as usize, est.s_cm);
             }
 
             // Clear freeze time and context after re-acquisition recovery
