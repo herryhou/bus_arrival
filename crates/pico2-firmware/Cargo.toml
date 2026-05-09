@@ -25,6 +25,8 @@ gps_processor = { path = "../pipeline/gps_processor", default-features = false, 
 ] }
 detection = { path = "../pipeline/detection", default-features = false, features = [
 ] }
+pipeline-filter = { path = "../pipeline/filter", default-features = false, features = [] }
+pipeline-probability = { path = "../pipeline/probability", default-features = false, features = [] }
 
 # Embassy RP (replaces rp2040-hal) - optional for host testing
 embassy-rp = { version = "0.10.0", default-features = false, features = [

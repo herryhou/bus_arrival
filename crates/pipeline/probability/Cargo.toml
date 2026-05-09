@@ -3,9 +3,13 @@ name = "pipeline-probability"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+std = ["detection/std", "shared/std"]
+
 [dependencies]
 shared = { path = "../../shared", default-features = false }
-detection = { path = "../detection", default-features = false, features = ["std"] }
+detection = { path = "../detection", default-features = false }
 
 [dev-dependencies]
 shared = { path = "../../shared", features = ["std"] }
