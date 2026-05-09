@@ -201,13 +201,11 @@ impl LocalizationState {
                     gps.heading_cdeg,
                     "valid",
                 ).with_diagnostics(
-                    Some(seg_idx as u16),
-                    true,  // heading constraint met (we got Valid result)
-                    divergence_cm,
-                    hdop,
-                    None,  // num_sats not available in GpsPoint
-                    None,  // fix_type not available in GpsPoint
-                    0,     // variance_cm2 not available in KalmanState
+                    localization::GpsDiagnostics::new()
+                        .with_segment_idx(Some(seg_idx as u16))
+                        .with_heading_met(true)
+                        .with_divergence_cm(divergence_cm)
+                        .with_hdop(hdop)
                 ))
             }
             gps_processor::kalman::ProcessResult::DrOutage { s_cm, v_cms } => {
@@ -220,13 +218,7 @@ impl LocalizationState {
                     gps.heading_cdeg,  // CRITICAL: Preserve heading even in DR mode
                     "dr_outage",
                 ).with_diagnostics(
-                    None,
-                    false,
-                    0,
-                    None,
-                    None,
-                    None,
-                    0,
+                    localization::GpsDiagnostics::new()
                 ))
             }
             gps_processor::kalman::ProcessResult::OffRoute { last_valid_s, last_valid_v, freeze_time: _ } => {
@@ -239,13 +231,7 @@ impl LocalizationState {
                     None,
                     "off_route",
                 ).with_diagnostics(
-                    None,  // off-route = no segment match
-                    false,
-                    0,
-                    None,
-                    None,
-                    None,
-                    0,
+                    localization::GpsDiagnostics::new()
                 ))
             }
             gps_processor::kalman::ProcessResult::SuspectOffRoute { .. } => None,

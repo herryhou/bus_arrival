@@ -67,25 +67,15 @@ impl GpsRecord {
         }
     }
 
-    /// Builder method to set diagnostic fields
-    #[allow(clippy::too_many_arguments)]
-    pub fn with_diagnostics(
-        mut self,
-        segment_idx: Option<u16>,
-        heading_constraint_met: bool,
-        divergence_cm: i32,
-        hdop: Option<f32>,
-        num_sats: Option<u8>,
-        fix_type: Option<String>,
-        variance_cm2: i32,
-    ) -> Self {
-        self.segment_idx = segment_idx;
-        self.heading_constraint_met = heading_constraint_met;
-        self.divergence_cm = divergence_cm;
-        self.hdop = hdop;
-        self.num_sats = num_sats;
-        self.fix_type = fix_type;
-        self.variance_cm2 = variance_cm2;
+    /// Builder method to set diagnostic fields from GpsDiagnostics struct
+    pub fn with_diagnostics(mut self, diag: crate::localization::GpsDiagnostics) -> Self {
+        self.segment_idx = diag.segment_idx;
+        self.heading_constraint_met = diag.heading_met;
+        self.divergence_cm = diag.divergence_cm;
+        self.hdop = diag.hdop;
+        self.num_sats = diag.num_sats;
+        self.fix_type = diag.fix_type;
+        self.variance_cm2 = diag.variance_cm2;
         self
     }
 }
