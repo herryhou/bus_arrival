@@ -19,8 +19,6 @@
 
 pub mod gps;
 pub mod serde;
-pub mod filter;
-pub mod probability;
 pub mod detection_state;
 pub mod localization;
 

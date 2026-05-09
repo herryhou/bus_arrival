@@ -2,7 +2,9 @@
 
 use shared::{DistCm, PositionSignals};
 use shared::binfile::RouteData;
-use crate::{StopTraceState, PipelineResult, ArrivalEvent, DepartureEvent, gps::GpsRecord, DETOUR_JUMP_THRESHOLD_CM, filter, probability::ProbabilityEngine};
+use crate::{StopTraceState, PipelineResult, ArrivalEvent, DepartureEvent, gps::GpsRecord, DETOUR_JUMP_THRESHOLD_CM};
+use pipeline_filter as filter;
+use pipeline_probability::ProbabilityEngine;
 use detection::state_machine::{StopState, StopEvent};
 use detection::probability::GpsStatus;
 
