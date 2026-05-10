@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Bus Arrival</string>
+    <string name="detection_screen_title">Detection</string>
+    <string name="history_screen_title">History</string>
+    <string name="config_screen_title">Configuration</string>
+    <string name="service_notification_title">Bus Arrival Detection</string>
+    <string name="service_notification_channel">Detection Service</string>
+    <string name="start_detection">Start Detection</string>
+    <string name="stop_detection">Stop Detection</string>
+    <string name="load_route">Load Route</string>
+    <string name="route_loaded">Route loaded: %s</string>
+    <string name="permission_required">Location permission required</string>
+    <string name="grant_permission">Grant Permission</string>
+</resources>
