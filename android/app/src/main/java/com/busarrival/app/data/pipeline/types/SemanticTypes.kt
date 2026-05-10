@@ -82,7 +82,7 @@ enum class HdopQuality(val ks: Int, val kv: Int = 77) {
 fun Double.toCm(): DistCm = (this * 100).toInt()
 fun Double.toMm(): Int = (this * 1000).toInt()
 fun Double.toCms(): SpeedCms = (this * 100).toInt()
-fun Double.toCdeg(): Short = (this * 100).toShort()
+fun Double.toCdeg(): Short = (this * 100).toInt().toShort()
 
 fun DistCm.toMeters(): Double = this / 100.0
 fun SpeedCms.toKmh(): Double = this * 3.6 / 100.0
@@ -92,9 +92,9 @@ fun HeadCdeg.toDegrees(): Double = this / 100.0
 fun headingDiffCdeg(a: HeadCdeg, b: HeadCdeg): HeadCdeg {
     val diff = abs(a - b).toInt() % 36000
     return if (diff > 18000) {
-        (36000 - diff).toShort()
+        (36000 - diff).toInt().toShort()
     } else {
-        diff.toShort()
+        diff.toInt().toShort()
     }
 }
 

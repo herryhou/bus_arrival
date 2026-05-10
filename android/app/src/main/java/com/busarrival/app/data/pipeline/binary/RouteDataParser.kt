@@ -64,7 +64,7 @@ object RouteDataParser {
         // Verify CRC32
         val crcStored = buffer.int
         val crcCalc = calculateCrc(bytes, 9) // Skip magic (4) + version (1) + crc (4)
-        require(crcCalc == crcStored.toLong()) { "CRC mismatch: expected $crcStored, got $crcCalc" }
+        require(crcCalc.toLong() == crcStored.toLong()) { "CRC mismatch: expected $crcStored, got $crcCalc" }
 
         // Read header
         val originLat = buffer.int
@@ -127,7 +127,7 @@ object RouteDataParser {
         val totalCells = rows * cols
 
         repeat(totalCells) {
-            val bitmask = buffer.long
+            val bitmask = buffer.long.toULong()
             val offsetCount = buffer.get().toInt() and 0xFF
 
             val offsets = mutableListOf<Int>()

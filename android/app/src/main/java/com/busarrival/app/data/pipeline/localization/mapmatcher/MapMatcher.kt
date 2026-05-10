@@ -167,7 +167,7 @@ object MapMatcher {
 
                 // Check bitmask segments
                 for (bit in 0..63) {
-                    if ((cell.bitmask and (1L shl bit)) != 0L) {
+                    if ((cell.bitmask and (1UL shl bit)) != 0UL) {
                         val segIdx = cellIdx * 64 + bit
                         if (segIdx >= nodes.size) break
 
@@ -277,7 +277,7 @@ object MapMatcher {
 
         if (len2 == 0L) {
             // Zero-length segment
-            return (vx * vx + vy * vy)
+            return (vx * vx + vy * vy).toLong()
         }
 
         // Clamped projection

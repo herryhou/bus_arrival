@@ -27,6 +27,11 @@
         android:theme="@style/Theme.BusArrival"
         tools:targetApi="31">
 
+        <!-- Google Maps API Key -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${MAPS_API_KEY}" />
+
         <activity
             android:name=".presentation.MainActivity"
             android:exported="true"
