@@ -75,3 +75,29 @@ data class GridCell(
     val bitmask: ULong,      // 64-bit bitmask for dense segments
     val offsets: List<Int>   // Sparse offsets for additional segments
 )
+
+/**
+ * Route metadata for storage manager.
+ */
+data class RouteMetadata(
+    val uuid: String,
+    val name: String,
+    val timestamp: Long,
+    val stopCount: Int,
+    val filePath: String
+)
+
+/**
+ * Detection parameters for probability model.
+ */
+data class DetectionParameters(
+    val distanceWeight: Int = 50,
+    val speedWeight: Int = 50,
+    val progressErrorWeight: Int = 50,
+    val dwellTimeWeight: Int = 50,
+    val corridorSize: Int = 0  // -80m to +40m range, 0 = default
+) {
+    companion object {
+        val defaults = DetectionParameters()
+    }
+}

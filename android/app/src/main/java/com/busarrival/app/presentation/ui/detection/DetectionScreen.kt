@@ -1,42 +1,37 @@
 package com.busarrival.app.presentation.ui.detection
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavHostController
-import com.busarrival.app.presentation.viewmodel.DetectionUiState
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.busarrival.app.presentation.ui.detection.components.MapView
+import com.busarrival.app.presentation.ui.detection.components.StatusPanel
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
-import com.busarrival.app.service.PipelineEvent
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun DetectionScreen(
-    navController: NavHostController,
-    viewModel: DetectionViewModel
+    viewModel: DetectionViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val events by viewModel.events.collectAsState()
+    val activeRoute by viewModel.activeRoute.collectAsState()
     val context = LocalContext.current
 
-    // Permission handling
     val locationPermissions = rememberMultiplePermissionsState(
         permissions = listOf(
             android.Manifest.permission.ACCESS_FINE_LOCATION,
@@ -44,81 +39,168 @@ fun DetectionScreen(
         )
     )
 
-    Scaffold { padding ->
+    if (!locationPermissions.allPermissionsGranted) {
+        PermissionRequestContent(onRequest = { locationPermissions.launchMultiplePermissionRequest() })
+    } else if (activeRoute == null) {
+        NoRouteContent()
+    } else {
+        Column(modifier = Modifier.fillMaxSize()) {
+            MapView(
+                routeData = activeRoute,
+                currentSCm = uiState.sCm,
+                isCameraFollowEnabled = uiState.isCameraFollowEnabled,
+                modifier = Modifier.weight(0.6f)
+            )
+
+            StatusPanel(
+                uiState = uiState,
+                events = events,
+                onStartStop = {
+                    if (uiState.isRunning) {
+                        viewModel.stopDetection()
+                    } else {
+                        viewModel.startDetection()
+                    }
+                },
+                onToggleCamera = { viewModel.toggleCameraFollow() },
+                modifier = Modifier
+                    .weight(0.4f)
+                    .fillMaxWidth()
+            )
+        }
+    }
+
+    uiState.error?.let { error ->
+        ErrorSnackbar(
+            error = error,
+            onDismiss = { viewModel.clearError() }
+        )
+    }
+}
+
+@Composable
+private fun PermissionRequestContent(onRequest: () -> Unit) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(32.dp)
         ) {
-            Text(text = "Bus Arrival Detection")
-            Spacer(modifier = Modifier.height(16.dp))
+            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+            val scale by infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = 1.1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1000),
+                    repeatMode = RepeatMode.Reverse
+                ), label = "scale"
+            )
 
-            if (!locationPermissions.allPermissionsGranted) {
-                Text(text = "Location permission required")
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = { locationPermissions.launchMultiplePermissionRequest() }) {
-                    Text("Grant Permission")
-                }
-            } else {
-                // Status
-                Text(text = "Status: ${if (uiState.isRunning) "Running" else "Stopped"}")
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(text = "Position: ${uiState.sCm} cm")
-                Text(text = "Velocity: ${uiState.vCms} cm/s")
+            Icon(
+                imageVector = Icons.Default.LocationOn,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(80.dp)
+                    .scale(scale),
+                tint = MaterialTheme.colorScheme.primary
+            )
 
-                Spacer(modifier = Modifier.height(32.dp))
+            Text(
+                text = "Location Permission Required",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
 
-                // Control button
-                Button(
-                    onClick = {
-                        if (uiState.isRunning) {
-                            viewModel.stopDetection()
-                        } else {
-                            viewModel.startDetection()
-                        }
-                    }
-                ) {
-                    Text(if (uiState.isRunning) "Stop Detection" else "Start Detection")
-                }
+            Text(
+                text = "The app needs location access to detect bus arrivals along the route.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
-                Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-                // Event log
-                if (events.isNotEmpty()) {
-                    Text(text = "Recent Events:")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        items(events.take(20)) { event ->
-                            EventItem(event)
-                        }
-                    }
-                }
+            Button(
+                onClick = onRequest,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Grant Permission")
             }
         }
     }
 }
 
 @Composable
-fun EventItem(event: PipelineEvent) {
-    Row(
-        modifier = Modifier.padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
+private fun NoRouteContent() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
     ) {
-        when (event) {
-            is PipelineEvent.Arrival -> {
-                Text(text = "Arrival at stop ${event.stopIndex} (p=${event.probability})")
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Map,
+                contentDescription = null,
+                modifier = Modifier.size(80.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
+
+            Text(
+                text = "No Route Loaded",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                text = "Please load a route in the Configuration tab first.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = { /* Navigate to config */ }
+            ) {
+                Text("Go to Configuration")
             }
-            is PipelineEvent.Departure -> {
-                Text(text = "Departure from stop ${event.stopIndex} (${event.dwellTimeS}s)")
+        }
+    }
+}
+
+@Composable
+private fun ErrorSnackbar(
+    error: String,
+    onDismiss: () -> Unit
+) {
+    Snackbar(
+        modifier = Modifier.padding(16.dp),
+        action = {
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss")
             }
-            is PipelineEvent.PositionUpdate -> {
-                Text(text = "Pos: ${event.sCm} cm, Vel: ${event.vCms} cm/s")
-            }
+        }
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Error,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(error)
         }
     }
 }

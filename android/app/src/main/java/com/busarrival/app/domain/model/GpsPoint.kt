@@ -32,6 +32,6 @@ data class GpsPoint(
 }
 
 // Extension functions for Location conversion
-private fun Double.toCdeg(): Short = (this * 100).toShort()
-private fun Float.toCdeg(): Short? = if (this >= 0) (this * 100).toShort() else null
+private fun Double.toCdeg(): Short = (this * 100).toInt().toShort()
+private fun Float.toCdeg(): Short? = if (this >= 0) (this * 100).toInt().toShort() else null
 private fun Float.toCms(): Int? = if (this >= 0) (this * 100).toInt() else null
