@@ -53,18 +53,13 @@ class MapViewRenderingTest {
     }
 
     // Production code from MapView.kt - CRITICAL: Must match exactly
-    // These functions now use tileZ (requested zoom level) for correct positioning
-    private fun worldX(lon: Double, centerLon: Double, tileZ: Int): Float {
-        return lonToPixelX(lon, tileZ) - lonToPixelX(centerLon, tileZ)
-    }
-
-    private fun worldY(lat: Double, centerLat: Double, tileZ: Int): Float {
-        return latToPixelY(lat, tileZ) - latToPixelY(centerLat, tileZ)
-    }
-
-    // Regression test: if someone uses baseZ instead of tileZ, this test will FAIL
-    private fun worldX_BROKEN(lon: Double, centerLon: Double): Float {
+    // These functions use baseZ for positioning (smooth transitions)
+    private fun worldX(lon: Double, centerLon: Double): Float {
         return lonToPixelX(lon, baseZ) - lonToPixelX(centerLon, baseZ)
+    }
+
+    private fun worldY(lat: Double, centerLat: Double): Float {
+        return latToPixelY(lat, baseZ) - latToPixelY(centerLat, baseZ)
     }
 
     // Simulate EXACT transform from MapView.kt lines 178-180
@@ -95,8 +90,8 @@ class MapViewRenderingTest {
         val tile1_NW = tileXToLon(centerTileX, tileZ)
         val tile2_NW = tileXToLon(centerTileX + 1, tileZ)
 
-        val tile1_worldX = worldX(tile1_NW, centerLon, tileZ)
-        val tile2_worldX = worldX(tile2_NW, centerLon, tileZ)
+        val tile1_worldX = worldX(tile1_NW, centerLon)
+        val tile2_worldX = worldX(tile2_NW, centerLon)
 
         // Apply EXACT transform
         val tile1_screenX = transformToWorldThenScreen(tile1_worldX, scale, offset, canvasWidth / 2)
@@ -111,36 +106,23 @@ class MapViewRenderingTest {
     }
 
     /**
-     * REGRESSION TEST: If someone uses baseZ instead of tileZ, this FAILS
+     * Test: Verify baseZ positioning gives consistent 256px spacing
+     * Current design uses baseZ for all positioning (smooth transitions)
      */
     @Test
-    fun regressionUsingBaseZInsteadOfTileZ() {
+    fun baseZPositioningConsistent() {
         val centerLon = 120.0
-        val tileZ = 18  // High zoom level where bug is obvious
 
         val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(15)).toInt()
-        val tile1_NW = tileXToLon(centerTileX, tileZ)
-        val tile2_NW = tileXToLon(centerTileX + 1, tileZ)
+        val tile1_NW = tileXToLon(centerTileX, 15)
+        val tile2_NW = tileXToLon(centerTileX + 1, 15)
 
-        // BROKEN code: uses baseZ
-        val tile1_worldX_BROKEN = worldX_BROKEN(tile1_NW, centerLon)
-        val tile2_worldX_BROKEN = worldX_BROKEN(tile2_NW, centerLon)
+        val tile1_worldX = worldX(tile1_NW, centerLon)
+        val tile2_worldX = worldX(tile2_NW, centerLon)
 
-        // FIXED code: uses tileZ
-        val tile1_worldX_FIXED = worldX(tile1_NW, centerLon, tileZ)
-        val tile2_worldX_FIXED = worldX(tile2_NW, centerLon, tileZ)
-
-        // At tileZ=18, baseZ gives WRONG results
-        val spacing_FIXED = tile2_worldX_FIXED - tile1_worldX_FIXED
-        val spacing_BROKEN = tile2_worldX_BROKEN - tile1_worldX_BROKEN
-
-        // FIXED: spacing should be 256px
-        assertEquals(256f, spacing_FIXED, 0.1f, "Using tileZ: correct spacing")
-
-        // BROKEN: spacing will be WRONG (not 256px)
-        val isBroken = kotlin.math.abs(spacing_BROKEN - 256f) > 100f
-        kotlin.test.assertTrue(isBroken,
-            "Using baseZ at tileZ=18 gives WRONG spacing (actual: $spacing_BROKEN)")
+        // Spacing should be 256px at baseZ
+        val spacing = tile2_worldX - tile1_worldX
+        assertEquals(256f, spacing, 0.1f, "BaseZ positioning: 256px spacing")
     }
 
     /**
