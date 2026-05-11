@@ -155,23 +155,21 @@ fun MapView(
 
                 val center = centerLatLon
 
-                // Always use baseZ for positioning to prevent jumps
-                val centerPixelX = lonToPixelX(center.lon, baseZ)
-                val centerPixelY = latToPixelY(center.lat, baseZ)
-
+                // Both tiles and route must use tileZ for consistent coordinate system
                 val centerTileX = lonToTileX(center.lon, tileZ)
-                val centerTileY = latToTileY(center.lat, tileZ)
+                val centerTileY = lonToTileY(center.lat, tileZ)
                 val tileSize = 256f
 
-                // Helper function to transform coordinates to screen space (must be defined before tile drawing)
+                // Helper function to transform coordinates to screen space
+                // MUST use tileZ to match tile positioning
                 fun toScreenX(lon: Double): Float {
-                    val pixelX = lonToPixelX(lon, baseZ) - centerPixelX + canvasWidth / 2
-                    return pixelX * scale + offset.x
+                    val worldX = lonToPixelX(lon, tileZ) - lonToPixelX(center.lon, tileZ)
+                    return worldX * scale + offset.x + canvasWidth / 2
                 }
 
                 fun toScreenY(lat: Double): Float {
-                    val pixelY = latToPixelY(lat, baseZ) - centerPixelY + canvasHeight / 2
-                    return pixelY * scale + offset.y
+                    val worldY = latToPixelY(lat, tileZ) - latToPixelY(center.lat, tileZ)
+                    return worldY * scale + offset.y + canvasHeight / 2
                 }
 
                 // Draw tiles with single outer transform (position in world space, let transform handle scale/offset)
