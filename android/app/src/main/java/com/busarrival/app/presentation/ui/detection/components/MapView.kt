@@ -157,7 +157,7 @@ fun MapView(
 
                 // Both tiles and route must use tileZ for consistent coordinate system
                 val centerTileX = lonToTileX(center.lon, tileZ)
-                val centerTileY = lonToTileY(center.lat, tileZ)
+                val centerTileY = latToTileY(center.lat, tileZ)
                 val tileSize = 256f
 
                 // Helper function to transform coordinates to screen space
