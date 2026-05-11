@@ -107,27 +107,9 @@ fun MapView(
         }
     }
 
-    // Dynamically load higher zoom tiles when zoom level changes (not on every scale change)
+    // Use fixed zoom level for tiles (baseZ=15), user scale handles all zoom
+    // This prevents jumps when crossing zoom level thresholds
     val baseZ = 15
-    val tileZ = remember(scale) {
-        (baseZ + (kotlin.math.ln(scale.toDouble()) / kotlin.math.ln(2.0)).toInt()).coerceIn(12, 18)
-    }
-
-    LaunchedEffect(tileZ) {
-        centerLatLon ?: return@LaunchedEffect
-
-        android.util.Log.d("MapView", "Zoom level changed to z=$tileZ (scale=$scale), loading tiles...")
-
-        // Load tiles for the new zoom level
-        val tiles = kotlin.runCatching {
-            loadTilesForZoom(centerLatLon, tileZ, tileDiskCache)
-        }.getOrNull()
-
-        if (!tiles.isNullOrEmpty()) {
-            viewModel.addTiles(tiles)
-            android.util.Log.d("MapView", "Loaded ${tiles.size} tiles for z=$tileZ")
-        }
-    }
 
     Box(
         modifier = modifier.fillMaxSize(),
@@ -155,20 +137,21 @@ fun MapView(
 
                 val center = centerLatLon
 
-                // Both tiles and route must use tileZ for consistent coordinate system
-                val centerTileX = lonToTileX(center.lon, tileZ)
-                val centerTileY = latToTileY(center.lat, tileZ)
+                // Use baseZ for everything (fixed coordinate system, no zoom jumps)
+                val centerPixelX = lonToPixelX(center.lon, baseZ)
+                val centerPixelY = latToPixelY(center.lat, baseZ)
+                val centerTileX = lonToTileX(center.lon, baseZ)
+                val centerTileY = latToTileY(center.lat, baseZ)
                 val tileSize = 256f
 
                 // Helper function to transform coordinates to screen space
-                // MUST use tileZ to match tile positioning
                 fun toScreenX(lon: Double): Float {
-                    val worldX = lonToPixelX(lon, tileZ) - lonToPixelX(center.lon, tileZ)
+                    val worldX = lonToPixelX(lon, baseZ) - centerPixelX
                     return worldX * scale + offset.x + canvasWidth / 2
                 }
 
                 fun toScreenY(lat: Double): Float {
-                    val worldY = latToPixelY(lat, tileZ) - latToPixelY(center.lat, tileZ)
+                    val worldY = latToPixelY(lat, baseZ) - centerPixelY
                     return worldY * scale + offset.y + canvasHeight / 2
                 }
 
@@ -177,20 +160,14 @@ fun MapView(
                     translate(left = offset.x + canvasWidth / 2, top = offset.y + canvasHeight / 2)
                     scale(scaleX = scale, scaleY = scale, pivot = Offset.Zero)
                 }) {
-                    // Position tiles in centered world space using tileZ for correct grid alignment
-                    // Each zoom level has its own tile grid, so we must use tileZ for positioning
-                    fun worldX(lon: Double): Float = lonToPixelX(lon, tileZ) - lonToPixelX(center.lon, tileZ)
-                    fun worldY(lat: Double): Float = latToPixelY(lat, tileZ) - latToPixelY(center.lat, tileZ)
+                    // Position tiles in centered world space using baseZ (fixed coordinate system)
+                    fun worldX(lon: Double): Float = lonToPixelX(lon, baseZ) - centerPixelX
+                    fun worldY(lat: Double): Float = latToPixelY(lat, baseZ) - centerPixelY
 
-                    // Load more tiles at higher zoom levels
-                    val tileRange = when (tileZ) {
-                        in 12..13 -> 3
-                        in 14..15 -> 3
-                        in 16..17 -> 4
-                        else -> 5
-                    }
+                    // Load tiles at fixed baseZ=15
+                    val tileRange = 3
 
-                    android.util.Log.d("MapView", "TILE RANGE: tileZ=$tileZ, tileRange=$tileRange, centerTileX=$centerTileX, centerTileY=$centerTileY, canvasW=$canvasWidth, canvasH=$canvasHeight")
+                    android.util.Log.d("MapView", "TILE RANGE: baseZ=$baseZ, tileRange=$tileRange, centerTileX=$centerTileX, centerTileY=$centerTileY, canvasW=$canvasWidth, canvasH=$canvasHeight")
 
                     var tilesDrawn = 0
                     var tilesMissing = 0
@@ -210,32 +187,13 @@ fun MapView(
                             if (tileY < minTileY) minTileY = tileY
                             if (tileY > maxTileY) maxTileY = tileY
 
-                            val key = "$tileZ/$tileX/$tileY"
+                            val key = "$baseZ/$tileX/$tileY"
 
-                            // Try to get tile at current zoom level
-                            var bitmap = tileCache[key]
-                            var actualTileZ = tileZ
-                            var actualTileX = tileX
-                            var actualTileY = tileY
+                            // Get tile at baseZ
+                            val bitmap = tileCache[key]
 
-                            // Fallback: try lower zoom levels if current not available
-                            if (bitmap == null && tileZ > 14) {
-                                var foundFallback = false
-                                for (fallbackZ in (tileZ - 1) downTo 14) {
-                                    if (foundFallback) break
-                                    val fallbackX = tileX / 2.0.pow(tileZ - fallbackZ).toInt()
-                                    val fallbackY = tileY / 2.0.pow(tileZ - fallbackZ).toInt()
-                                    val fallbackKey = "$fallbackZ/$fallbackX/$fallbackY"
-                                    tileCache[fallbackKey]?.let {
-                                        bitmap = it
-                                        actualTileZ = fallbackZ
-                                        actualTileX = fallbackX
-                                        actualTileY = fallbackY
-                                        android.util.Log.d("MapView", "Using fallback z=$fallbackZ for $key")
-                                        foundFallback = true
-                                    }
-                                }
-                            }
+                            // No fallback needed - we only use baseZ=15
+
 
                             if (bitmap == null) {
                                 tilesMissing++
@@ -245,9 +203,9 @@ fun MapView(
                             }
 
                             bitmap?.let {
-                                // Calculate position using REQUESTED tile coordinates (tileX, tileY at tileZ)
-                                val tileNW = tileXToLon(tileX, tileZ)
-                                val tileNE = tileYToLat(tileY, tileZ)
+                                // Calculate position using REQUESTED tile coordinates (tileX, tileY at baseZ)
+                                val tileNW = tileXToLon(tileX, baseZ)
+                                val tileNE = tileYToLat(tileY, baseZ)
 
                                 // Position in world space using baseZ (consistent for all tiles)
                                 val tileWorldX = worldX(tileNW)
@@ -262,31 +220,21 @@ fun MapView(
                                     val screenEndX = screenX + screenSize
                                     val screenEndY = screenY + screenSize
 
-                                    android.util.Log.d("MapView", "DRAW: $key -> actualZ=$actualTileZ, tileZ=$tileZ")
+                                    android.util.Log.d("MapView", "DRAW: $key")
                                     android.util.Log.d("MapView", "  worldX=$tileWorldX, worldY=$tileWorldY")
                                     android.util.Log.d("MapView", "  screen: x=$screenX, y=$screenY, size=$screenSize")
                                     android.util.Log.d("MapView", "  covers: x=[$screenX,$screenEndX], y=[$screenY,$screenEndY]")
                                 }
 
-                                // If using fallback tile, scale it to match requested zoom level
-                                if (actualTileZ != tileZ) {
-                                    val zoomScaleFactor = 2.0.pow(tileZ - actualTileZ).toFloat()
-                                    android.util.Log.d("MapView", "  FALLBACK: scaling by ${zoomScaleFactor}x")
-                                    withTransform({
-                                        scale(scaleX = zoomScaleFactor, scaleY = zoomScaleFactor, pivot = Offset(tileWorldX, tileWorldY))
-                                    }) {
-                                        drawImage(image = it, topLeft = Offset(tileWorldX, tileWorldY), alpha = 0.7f)
-                                    }
-                                } else {
-                                    drawImage(image = it, topLeft = Offset(tileWorldX, tileWorldY))
-                                }
+                                // Draw tile at calculated position
+                                drawImage(image = it, topLeft = Offset(tileWorldX, tileWorldY))
                             }
                         }
                     }
 
                     android.util.Log.d("MapView", "SUMMARY: tileRange=$tileRange, totalRequested=${(tileRange*2+1)*(tileRange*2+1)}, tilesDrawn=$tilesDrawn, tilesMissing=$tilesMissing")
                     android.util.Log.d("MapView", "BOUNDARIES: minTileX=$minTileX, maxTileX=$maxTileX, minTileY=$minTileY, maxTileY=$maxTileY")
-                    android.util.Log.d("MapView", "COORDINATES: minTileNW=${tileXToLon(minTileX, tileZ)}, maxTileNE=${tileYToLat(maxTileY, tileZ)}")
+                    android.util.Log.d("MapView", "COORDINATES: minTileNW=${tileXToLon(minTileX, baseZ)}, maxTileNE=${tileYToLat(maxTileY, baseZ)}")
                 } // End outer withTransform for tiles
 
                 // Draw route and markers in screen space (no scale transform on stroke width)
