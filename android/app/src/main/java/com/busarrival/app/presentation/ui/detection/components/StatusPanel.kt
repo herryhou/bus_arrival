@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -66,9 +69,9 @@ fun StatusPanel(
                 IconButton(onClick = onToggleCamera) {
                     Icon(
                         imageVector = if (uiState.isCameraFollowEnabled) {
-                            androidx.compose.material.icons.Icons.Filled.CenterFocusStrong
+                            Icons.Default.CheckCircle
                         } else {
-                            androidx.compose.material.icons.Icons.Filled.CenterFocusWeak
+                            Icons.Default.Place
                         },
                         contentDescription = "Toggle camera follow",
                         tint = if (uiState.isCameraFollowEnabled) {

@@ -3,7 +3,7 @@ package com.busarrival.app.service
 import com.busarrival.app.data.pipeline.types.GeoCdeg
 import com.busarrival.app.domain.model.RouteData
 import kotlin.math.cos
-import kotlin.math.toRadians
+import kotlin.math.sin
 
 /**
  * Convert between geographic coordinates and route grid coordinates.

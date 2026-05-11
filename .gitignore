@@ -127,3 +127,7 @@ android/obj/
 
 # Android generated resources
 android/app/src/main/res/drawable-/navigation.json
+# Android gradle wrapper
+android/gradle/
+android/gradlew
+android/gradlew.bat

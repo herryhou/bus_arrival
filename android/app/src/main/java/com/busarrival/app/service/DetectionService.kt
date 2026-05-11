@@ -25,7 +25,6 @@ import com.busarrival.app.domain.model.DepartureEvent
 import com.busarrival.app.domain.model.FsmState
 import com.busarrival.app.domain.model.KalmanState
 import com.busarrival.app.domain.model.StopState
-import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,20 +32,15 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Foreground service for GPS processing and arrival detection.
  * Full pipeline: Location → MapMatcher → Kalman → StateMachine → Events
  */
-@AndroidEntryPoint
 class DetectionService : Service() {
 
-    @Inject
-    lateinit var routeStorage: RouteStorageManager
-
-    @Inject
-    lateinit var preferences: DetectionPreferences
+    private lateinit var routeStorage: RouteStorageManager
+    private lateinit var preferences: DetectionPreferences
 
     private val serviceScope = CoroutineScope(Dispatchers.Default + Job())
     private val binder = LocalBinder()
@@ -71,6 +65,8 @@ class DetectionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        routeStorage = RouteStorageManager(this, com.google.gson.Gson())
+        preferences = DetectionPreferences(this)
         locationManager = LocationManager(this)
     }
 

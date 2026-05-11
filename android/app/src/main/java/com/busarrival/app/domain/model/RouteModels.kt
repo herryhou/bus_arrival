@@ -53,6 +53,8 @@ data class RouteData(
     val originLat: Int,      // Grid origin latitude
     val originLon: Int,      // Grid origin longitude
     val avgLat: Int,         // Average latitude for scale
+    val x0Cm: Int = 0,       // Grid origin X offset (cm)
+    val y0Cm: Int = 0,       // Grid origin Y offset (cm)
     val nodes: List<RouteNode>,
     val stops: List<Stop>,
     val grid: SpatialGrid

@@ -1,18 +1,17 @@
 package com.busarrival.app.presentation.viewmodel
 
+import android.app.Application
 import android.net.Uri
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.busarrival.app.data.preferences.DetectionPreferences
-import com.busarrival.app.data.storage.RouteMetadata
 import com.busarrival.app.data.storage.RouteStorageManager
 import com.busarrival.app.domain.model.DetectionParameters
-import dagger.hilt.android.lifecycle.HiltViewModel
+import com.busarrival.app.domain.model.RouteMetadata
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 data class ConfigUiState(
     val routes: List<RouteMetadata> = emptyList(),
@@ -22,11 +21,12 @@ data class ConfigUiState(
     val error: String? = null
 )
 
-@HiltViewModel
-class ConfigViewModel @Inject constructor(
-    private val routeStorage: RouteStorageManager,
-    private val preferences: DetectionPreferences
-) : ViewModel() {
+class ConfigViewModel(
+    application: Application
+) : AndroidViewModel(application) {
+    private val context = application.applicationContext
+    private val routeStorage = RouteStorageManager(context, com.google.gson.Gson())
+    private val preferences = DetectionPreferences(context)
 
     private val _uiState = MutableStateFlow(ConfigUiState())
     val uiState: StateFlow<ConfigUiState> = _uiState.asStateFlow()

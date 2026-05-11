@@ -7,24 +7,38 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import com.busarrival.app.presentation.ui.history.components.EventItem
 import com.busarrival.app.presentation.ui.history.components.FilterChips
 import com.busarrival.app.presentation.viewmodel.HistoryViewModel
 import kotlinx.coroutines.delay
 
+private class HistoryViewModelFactory(
+    private val application: android.app.Application
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        return HistoryViewModel(application) as T
+    }
+}
+
 @Composable
 fun HistoryScreen(
-    viewModel: HistoryViewModel = hiltViewModel()
+    viewModel: HistoryViewModel = viewModel(
+        factory = HistoryViewModelFactory(LocalContext.current.applicationContext as android.app.Application)
+    )
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
@@ -124,7 +138,7 @@ private fun EmptyEventsContent() {
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.History,
+                imageVector = Icons.Filled.List,
                 contentDescription = null,
                 modifier = Modifier.size(64.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)

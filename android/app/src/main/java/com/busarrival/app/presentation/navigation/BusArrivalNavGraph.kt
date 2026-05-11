@@ -2,14 +2,15 @@ package com.busarrival.app.presentation.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -23,17 +24,15 @@ import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 
 sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object Config : Screen("config", "Config", Icons.Default.Settings)
-    object Detection : Screen("detection", "Detect", Icons.Default.Map)
-    object History : Screen("history", "History", Icons.Default.History)
+    object Detection : Screen("detection", "Detect", Icons.Default.Place)
+    object History : Screen("history", "History", Icons.Default.List)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BusArrivalNavGraph(
-    viewModel: DetectionViewModel? = null
-) {
+fun BusArrivalNavGraph() {
     val navController = rememberNavController()
-    val uiState by viewModel?.uiState?.collectAsState()
+    val screens = listOf(Screen.Config, Screen.Detection, Screen.History)
 
     Scaffold(
         bottomBar = {
@@ -41,18 +40,10 @@ fun BusArrivalNavGraph(
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination
 
-                Screen.values().forEach { screen ->
+                screens.forEach { screen ->
                     NavigationBarItem(
                         icon = {
-                            BadgedBox(
-                                badge = {
-                                    if (screen == Screen.Detection && uiState?.isRunning == true) {
-                                        Badge()
-                                    }
-                                }
-                            ) {
-                                Icon(screen.icon, contentDescription = screen.title)
-                            }
+                            Icon(screen.icon, contentDescription = screen.title)
                         },
                         label = { Text(screen.title) },
                         selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
@@ -72,7 +63,7 @@ fun BusArrivalNavGraph(
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Screen.Config.route,  // Start at Config to load route first
+            startDestination = Screen.Config.route,
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Config.route) {

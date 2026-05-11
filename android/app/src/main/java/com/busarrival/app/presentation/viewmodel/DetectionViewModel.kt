@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -16,23 +18,20 @@ import com.busarrival.app.data.storage.RouteStorageManager
 import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.service.DetectionService
 import com.busarrival.app.service.PipelineEvent
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * ViewModel for detection screen.
  * Manages service connection, active route, and UI state.
  */
-@HiltViewModel
-class DetectionViewModel @Inject constructor(
-    application: Application,
-    private val preferences: DetectionPreferences,
-    private val routeStorage: RouteStorageManager
+class DetectionViewModel(
+    application: Application
 ) : AndroidViewModel(application) {
+    private val preferences = DetectionPreferences(application)
+    private val routeStorage = RouteStorageManager(application, com.google.gson.Gson())
 
     private val _uiState = MutableStateFlow(DetectionUiState())
     val uiState: StateFlow<DetectionUiState> = _uiState.asStateFlow()
@@ -42,6 +41,16 @@ class DetectionViewModel @Inject constructor(
 
     private val _activeRoute = MutableStateFlow<RouteData?>(null)
     val activeRoute: StateFlow<RouteData?> = _activeRoute.asStateFlow()
+
+    // Map state - persists across screen switches
+    private val _mapScale = MutableStateFlow(1f)
+    val mapScale: StateFlow<Float> = _mapScale.asStateFlow()
+
+    private val _mapOffset = MutableStateFlow(Offset.Zero)
+    val mapOffset: StateFlow<Offset> = _mapOffset.asStateFlow()
+
+    private val _tileCache = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
+    val tileCache: StateFlow<Map<String, ImageBitmap>> = _tileCache.asStateFlow()
 
     private var service: DetectionService? = null
 
@@ -76,9 +85,11 @@ class DetectionViewModel @Inject constructor(
      */
     private fun loadActiveRoute() {
         val activeUuid = preferences.activeRouteUuid
+        android.util.Log.d("DetectionViewModel", "Loading active route: $activeUuid")
         if (activeUuid != null) {
             val route = routeStorage.loadRoute(activeUuid)
             _activeRoute.value = route
+            android.util.Log.d("DetectionViewModel", "Route loaded: ${route != null}, nodes: ${route?.nodes?.size ?: 0}")
             if (route == null) {
                 _uiState.value = _uiState.value.copy(error = "Active route not found")
             }
@@ -171,6 +182,37 @@ class DetectionViewModel @Inject constructor(
      */
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
+    }
+
+    /**
+     * Update map scale.
+     */
+    fun updateMapScale(scale: Float) {
+        _mapScale.value = scale
+    }
+
+    /**
+     * Update map offset.
+     */
+    fun updateMapOffset(offset: Offset) {
+        _mapOffset.value = offset
+    }
+
+    /**
+     * Update map state (scale + offset).
+     */
+    fun updateMapState(scale: Float, offset: Offset) {
+        _mapScale.value = scale
+        _mapOffset.value = offset
+    }
+
+    /**
+     * Add tiles to cache.
+     */
+    fun addTiles(tiles: Map<String, ImageBitmap>) {
+        val current = _tileCache.value.toMutableMap()
+        current.putAll(tiles)
+        _tileCache.value = current
     }
 
     override fun onCleared() {

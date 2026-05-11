@@ -23,7 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.busarrival.app.data.storage.RouteMetadata
+import com.busarrival.app.domain.model.RouteMetadata
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale

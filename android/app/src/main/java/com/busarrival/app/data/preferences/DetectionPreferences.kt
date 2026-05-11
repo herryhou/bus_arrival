@@ -3,19 +3,12 @@ package com.busarrival.app.data.preferences
 import android.content.Context
 import android.content.SharedPreferences
 import com.busarrival.app.domain.model.DetectionParameters
-import dagger.hilt.android.qualifiers.ApplicationContext
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * SharedPreferences wrapper for detection settings.
  */
-@Singleton
-class DetectionPreferences @Inject constructor(
-    @ApplicationContext private val context: Context
-) {
-    private val prefs: SharedPreferences
-        get() = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+class DetectionPreferences(context: Context) {
+    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     companion object {
         private const val PREFS_NAME = "detection_prefs"

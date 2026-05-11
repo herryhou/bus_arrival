@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -19,10 +21,6 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
-
-        // Google Maps API key (from local.properties)
-        val mapsApiKey = project.findProperty("MAPS_API_KEY") ?: ""
-        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 
     signingConfigs {
@@ -30,13 +28,13 @@ android {
             // Load keystore properties from keystore.properties file
             val keystorePropertiesFile = rootProject.file("keystore.properties")
             if (keystorePropertiesFile.exists()) {
-                val keystoreProperties = java.util.Properties()
+                val keystoreProperties = Properties()
                 keystoreProperties.load(keystorePropertiesFile.inputStream())
 
-                storeFile = file(keystoreProperties["storeFile"] as String)
-                storePassword = keystoreProperties["storePassword"] as String
-                keyAlias = keystoreProperties["keyAlias"] as String
-                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
             } else {
                 // Fallback to debug signing for CI
                 storeFile = file("debug.keystore")
@@ -128,9 +126,8 @@ dependencies {
     // Location
     implementation("com.google.android.gms:play-services-location:21.1.0")
 
-    // Maps
-    implementation("com.google.android.gms:play-services-maps:18.2.0")
-    implementation("com.google.maps.android:maps-compose:4.3.0")
+    // OpenStreetMap (OSMDroid)
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
 
     // Room
     implementation("androidx.room:room-runtime:2.6.1")
@@ -139,6 +136,9 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // Gson
+    implementation("com.google.code.gson:gson:2.10.1")
 
     // Work Manager
     implementation("androidx.work:work-runtime-ktx:2.9.0")

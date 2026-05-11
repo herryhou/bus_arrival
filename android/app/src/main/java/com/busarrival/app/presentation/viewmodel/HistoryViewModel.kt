@@ -1,21 +1,21 @@
 package com.busarrival.app.presentation.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.busarrival.app.data.repository.DetectionRepository
 import com.busarrival.app.data.local.entity.ArrivalEntity
 import com.busarrival.app.data.local.entity.DepartureEntity
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
-import javax.inject.Inject
 
 enum class TimeFilter { Today, Week, All }
 
@@ -36,10 +36,10 @@ data class HistoryUiState(
     val isLoading: Boolean = false
 )
 
-@HiltViewModel
-class HistoryViewModel @Inject constructor(
-    private val repository: DetectionRepository
-) : ViewModel() {
+class HistoryViewModel(
+    application: Application
+) : AndroidViewModel(application) {
+    private val repository = DetectionRepository(application.applicationContext)
 
     private val _uiState = MutableStateFlow(HistoryUiState())
     val uiState: StateFlow<HistoryUiState> = _uiState.asStateFlow()
@@ -67,12 +67,13 @@ class HistoryViewModel @Inject constructor(
                 TimeFilter.All -> 0
             }
 
-            val arrivals = repository.getArrivalsByTimeRange(startTime, now)
-            val departures = repository.getDeparturesByTimeRange(startTime, now)
+            // Collect flows to get lists
+            val arrivalsList = repository.getArrivalsByTimeRange(startTime, now).first()
+            val departuresList = repository.getDeparturesByTimeRange(startTime, now).first()
 
             val events = mutableListOf<HistoryEventItem>()
 
-            arrivals.forEach { arrival ->
+            arrivalsList.forEach { arrival ->
                 events.add(
                     HistoryEventItem(
                         id = arrival.id,
@@ -84,7 +85,7 @@ class HistoryViewModel @Inject constructor(
                 )
             }
 
-            departures.forEach { departure ->
+            departuresList.forEach { departure ->
                 events.add(
                     HistoryEventItem(
                         id = departure.id,

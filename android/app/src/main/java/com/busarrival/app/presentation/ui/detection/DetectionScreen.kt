@@ -4,7 +4,10 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,17 +18,30 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import com.busarrival.app.presentation.ui.detection.components.MapView
 import com.busarrival.app.presentation.ui.detection.components.StatusPanel
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 
+private class DetectionViewModelFactory(
+    private val application: android.app.Application
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        return DetectionViewModel(application) as T
+    }
+}
+
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun DetectionScreen(
-    viewModel: DetectionViewModel = hiltViewModel()
+    viewModel: DetectionViewModel = viewModel(
+        factory = DetectionViewModelFactory(LocalContext.current.applicationContext as android.app.Application)
+    )
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val events by viewModel.events.collectAsState()
@@ -49,6 +65,7 @@ fun DetectionScreen(
                 routeData = activeRoute,
                 currentSCm = uiState.sCm,
                 isCameraFollowEnabled = uiState.isCameraFollowEnabled,
+                viewModel = viewModel,
                 modifier = Modifier.weight(0.6f)
             )
 
@@ -150,7 +167,7 @@ private fun NoRouteContent() {
             modifier = Modifier.padding(32.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.Map,
+                imageVector = Icons.Default.Place,
                 contentDescription = null,
                 modifier = Modifier.size(80.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
@@ -194,7 +211,7 @@ private fun ErrorSnackbar(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                imageVector = Icons.Default.Error,
+                imageVector = Icons.Default.Warning,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.error,
                 modifier = Modifier.size(20.dp)

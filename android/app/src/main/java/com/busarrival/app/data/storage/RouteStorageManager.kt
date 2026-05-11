@@ -7,22 +7,18 @@ import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.domain.model.RouteMetadata
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Manages route file storage and metadata.
  * Routes are copied from external storage to internal app storage.
  */
-@Singleton
-class RouteStorageManager @Inject constructor(
-    @ApplicationContext private val context: Context,
+class RouteStorageManager(
+    private val context: Context,
     private val gson: Gson
 ) {
     private val routesDir: File
@@ -61,6 +57,8 @@ class RouteStorageManager @Inject constructor(
 
             Result.success(uuid)
         } catch (e: Exception) {
+            android.util.Log.e("RouteStorageManager", "Failed to copy route: ${e.javaClass.simpleName}: ${e.message}")
+            e.printStackTrace()
             Result.failure(e)
         }
     }
