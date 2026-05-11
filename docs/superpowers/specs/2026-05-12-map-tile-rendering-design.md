@@ -119,14 +119,17 @@ withTransform({
 **All use tileZ (NOT baseZ)**:
 
 ```kotlin
-// Lon/lat → world pixels at CURRENT tileZ
-fun worldX(lon: Double, centerLon: Double, tileZ: Int): Float {
+// Top-level functions for testability (extracted from drawScope)
+private fun worldX(lon: Double, centerLon: Double, tileZ: Int): Float {
     return lonToPixelX(lon, tileZ) - lonToPixelX(centerLon, tileZ)
 }
 
-fun worldY(lat: Double, centerLat: Double, tileZ: Int): Float {
+private fun worldY(lat: Double, centerLat: Double, tileZ: Int): Float {
     return latToPixelY(lat, tileZ) - latToPixelY(centerLat, tileZ)
 }
+```
+
+**Implementation note**: These functions are currently local functions inside Canvas drawScope (MapView.kt:184-185). For testability, they must be extracted to top-level private functions. The drawScope then calls them with captured `center` and `tileZ` values.
 
 // OSM tile coordinate conversions (Web Mercator)
 private fun lonToPixelX(lon: Double, zoom: Int): Float {
@@ -326,6 +329,36 @@ val tileZ = remember(scale) {
 
 ## Timeline & Replay
 
+### Trace Storage Architecture
+
+**Current limitation**: `DetectionService` emits streaming events (`StateFlow<PipelineEvent?>`). No historical trace storage.
+
+**Required for replay**: Persistent trace storage.
+
+**Options**:
+
+A) **Database storage** (Room)
+- `TraceEntity`: timestamp, sCm, vCms, mode, stopIndex
+- `PipelineEventEntity`: type, timestamp, data
+- Pros: Queryable, survives app restart
+- Cons: Requires schema migration
+
+B) **File-based storage** (JSONL)
+- Trace saved as `trace_{uuid}_{date}.jsonl`
+- One line per event
+- Pros: Simple, exportable, debuggable
+- Cons: No random access, must load full trace
+
+C) **In-memory only** (current events list)
+- `_events` holds last 100 events
+- Pros: No persistence overhead
+- Cons: Lost on app restart, limited history
+
+**Recommendation**: **B) File-based storage** for Phase 2.
+- Matches existing `trace.jsonl` format from Rust pipeline
+- Simple to implement
+- Easy to export/share for debugging
+
 ### Replay State
 
 ```kotlin
@@ -334,7 +367,8 @@ data class ReplayState(
     val isPlaying: Boolean = false,   // Play/pause state
     val playbackSpeed: Float = 1f,    // 0.5x, 1x, 2x, 4x
     val traceDuration: Long = 0,      // Total trace length (ms)
-    val cameraFollowEnabled: Boolean = true
+    val cameraFollowEnabled: Boolean = true,
+    val traceFile: String? = null     // Currently loaded trace
 )
 ```
 
@@ -407,19 +441,49 @@ MapView (Composable)
 
 ## State Management
 
-### ViewModel State
+### Refactoring Current State
+
+**Current implementation** (DetectionViewModel.kt:46-53):
+```kotlin
+private val _mapScale = MutableStateFlow(1f)
+private val _mapOffset = MutableStateFlow(Offset.Zero)
+private val _tileCache = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
+```
+
+**Target design** — Consolidate into unified state objects:
+```kotlin
+data class MapState(
+    val centerLon: Double = 120.0,
+    val centerLat: Double = 20.0,
+    val tileZ: Int = 15,
+    val scale: Float = 1f,
+    val offset: Offset = Offset.Zero
+)
+
+data class ReplayState(
+    val currentTime: Long = 0,
+    val isPlaying: Boolean = false,
+    val playbackSpeed: Float = 1f,
+    val traceDuration: Long = 0,
+    val cameraFollowEnabled: Boolean = true
+)
+```
+
+**Rationale**: Unified state reduces recomposition scope and makes state transitions explicit.
+
+### ViewModel State (After Refactoring)
 
 ```kotlin
 class DetectionViewModel : ViewModel() {
-    // Map state
+    // Consolidated map state
     private val _mapState = MutableStateFlow(MapState())
     val mapState: StateFlow<MapState> = _mapState.asStateFlow()
 
-    // Replay state
+    // Replay state (new for Phase 2)
     private val _replayState = MutableStateFlow(ReplayState())
     val replayState: StateFlow<ReplayState> = _replayState.asStateFlow()
 
-    // Tile cache
+    // Tile cache (kept separate for memory management)
     private val _tileCache = MutableStateFlow(mapOf<String, ImageBitmap>())
     val tileCache: StateFlow<Map<String, ImageBitmap>> = _tileCache.asStateFlow()
 
@@ -434,18 +498,6 @@ class DetectionViewModel : ViewModel() {
     fun togglePlayback() { /* ... */ }
     fun setPlaybackSpeed(speed: Float) { /* ... */ }
 }
-```
-
-### MapState
-
-```kotlin
-data class MapState(
-    val centerLon: Double = 120.0,
-    val centerLat: Double = 20.0,
-    val tileZ: Int = 15,
-    val scale: Float = 1f,
-    val offset: Offset = Offset.Zero
-)
 ```
 
 ### State Flow
@@ -716,31 +768,43 @@ class ScreenshotTests {
 **Tasks**:
 1. ✅ Change `toScreenX/Y` to use `tileZ`
 2. ✅ Ensure `worldX/Y` use `tileZ`
-3. Fix gesture centroid handling
-4. Verify tiles stitch at all scales
+3. Extract `worldX/Y` to top-level private functions for testability
+   - Move from local functions in drawScope to module-level
+   - Add explicit parameters: `(lon, centerLon, tileZ)` and `(lat, centerLat, tileZ)`
+   - Update drawScope to call extracted functions
+4. Fix gesture centroid handling
+5. Verify tiles stitch at all scales
 
 **Verification**: Run `MapViewRenderingTest.kt` → all pass
 
 ### Phase 2: Timeline & Replay (2-3 days)
 
 **Tasks**:
-1. Add `ReplayState` to ViewModel
-2. Build timeline scrubber UI
-3. Wire scrub position → route marker update
-4. Add play/pause functionality
-5. Implement playback speed control
+1. Implement trace file storage (JSONL format)
+   - Save events during detection
+   - Load trace for replay
+   - List available traces
+2. Add `ReplayState` to ViewModel
+3. Build timeline scrubber UI
+4. Wire scrub position → route marker update
+5. Add play/pause functionality
+6. Implement playback speed control
 
 **Verification**: Scrub through trace → position marker follows
 
-### Phase 3: Layer Refactoring (2-3 days, optional)
+### Phase 3: State Refactoring + Layer Cleanup (2-3 days, optional)
 
 **Tasks**:
-1. Separate TileCanvas from VectorOverlay
-2. Move to Compose graphics API for overlays
-3. Add stop click handlers
-4. Implement tooltips
+1. Refactor ViewModel state management
+   - Consolidate `_mapScale`, `_mapOffset`, `_tileCache` into unified `MapState`
+   - Add `ReplayState` for timeline features
+   - Update all state consumers to use new structure
+2. Separate TileCanvas from VectorOverlay
+3. Move to Compose graphics API for overlays
+4. Add stop click handlers
+5. Implement tooltips
 
-**Verification**: Click stop → shows stop info
+**Verification**: Click stop → shows stop info, state updates correctly
 
 ### Phase 4: Polish (1-2 days)
 
