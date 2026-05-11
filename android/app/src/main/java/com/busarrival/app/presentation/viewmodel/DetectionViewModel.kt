@@ -215,6 +215,14 @@ class DetectionViewModel(
         _tileCache.value = current
     }
 
+    /**
+     * Clear tile cache (for testing/debugging).
+     */
+    fun clearTileCache() {
+        _tileCache.value = emptyMap()
+        android.util.Log.d("DetectionViewModel", "Tile cache cleared")
+    }
+
     override fun onCleared() {
         super.onCleared()
         service?.let {
