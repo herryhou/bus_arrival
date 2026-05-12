@@ -3,7 +3,6 @@ package com.busarrival.app.presentation.ui.detection.components
 import androidx.compose.ui.geometry.Offset
 import org.junit.Test
 import kotlin.test.assertEquals
-import kotlin.math.pow
 import com.busarrival.app.presentation.ui.detection.components.MapCoordinateUtils.*
 
 /**
@@ -19,19 +18,8 @@ class FallbackTileTest {
     private val POSITION_TOLERANCE = 0.1f
 
     // Test coordinates for Singapore region
-    private val TEST_LAT = 1.3521
-    private val TEST_LON = 103.8198
     private val CENTER_LAT = 1.3521
     private val CENTER_LON = 103.8198
-
-    /**
-     * Calculate zoom scale factor for fallback tiles.
-     * When rendering a tile from zoom level `actualTileZ` at viewport zoom `tileZ`,
-     * the fallback tile must be scaled by this factor.
-     */
-    private fun zoomScaleFactor(tileZ: Int, actualTileZ: Int): Float {
-        return 2.0.pow(tileZ - actualTileZ).toFloat()
-    }
 
     /**
      * Calculate screen coordinates for a tile's corner.
@@ -49,16 +37,15 @@ class FallbackTileTest {
         canvasWidth: Float,
         canvasHeight: Float
     ): Offset {
-        val worldX = worldX(tileXToLon(tileX, actualTileZ), centerLon, actualTileZ)
-        val worldY = worldY(tileYToLat(tileY, actualTileZ), centerLat, actualTileZ)
+        val scaleFactor = 2.0f.pow(tileZ - actualTileZ)
+        val tileLon = tileXToLon(tileX, actualTileZ)
+        val tileLat = tileYToLat(tileY, actualTileZ)
 
-        // Apply zoom scale factor for fallback tiles
-        val scaleFactor = zoomScaleFactor(tileZ, actualTileZ)
-        val scaledWorldX = worldX * scaleFactor
-        val scaledWorldY = worldY * scaleFactor
+        val worldX = worldX(tileLon, centerLon, actualTileZ) * scaleFactor
+        val worldY = worldY(tileLat, centerLat, actualTileZ) * scaleFactor
 
-        val screenX = scaledWorldX * scale + offset.x + canvasWidth / 2
-        val screenY = scaledWorldY * scale + offset.y + canvasHeight / 2
+        val screenX = worldX * scale + offset.x + canvasWidth / 2
+        val screenY = worldY * scale + offset.y + canvasHeight / 2
 
         return Offset(screenX, screenY)
     }
@@ -72,7 +59,7 @@ class FallbackTileTest {
         actualTileZ: Int,
         scale: Float
     ): Pair<Float, Float> {
-        val scaleFactor = zoomScaleFactor(tileZ, actualTileZ)
+        val scaleFactor = 2.0f.pow(tileZ - actualTileZ)
         val scaledTileSize = TILE_SIZE * scaleFactor
         return Pair(scaledTileSize * scale, scaledTileSize * scale)
     }
@@ -82,8 +69,8 @@ class FallbackTileTest {
         // Native tile at Z=17
         val tileZ = 17
         val actualTileZ = 17
-        val tileX = lonToTileX(TEST_LON, tileZ)
-        val tileY = latToTileY(TEST_LAT, tileZ)
+        val tileX = lonToTileX(CENTER_LON, tileZ)
+        val tileY = latToTileY(CENTER_LAT, tileZ)
 
         val scale = 1f
         val offset = Offset.Zero
@@ -100,8 +87,8 @@ class FallbackTileTest {
 
         // Fallback tile from Z=15 (should be scaled by 4x)
         val fallbackActualZ = 15
-        val fallbackTileX = lonToTileX(TEST_LON, fallbackActualZ)
-        val fallbackTileY = latToTileY(TEST_LAT, fallbackActualZ)
+        val fallbackTileX = lonToTileX(CENTER_LON, fallbackActualZ)
+        val fallbackTileY = latToTileY(CENTER_LAT, fallbackActualZ)
 
         val fallbackPosition = calculateTileScreenPosition(
             fallbackTileX, fallbackTileY, tileZ, fallbackActualZ,
@@ -134,8 +121,8 @@ class FallbackTileTest {
         val canvasHeight = 1000f
 
         // Test position
-        val testLon = TEST_LON
-        val testLat = TEST_LAT
+        val testLon = CENTER_LON
+        val testLat = CENTER_LAT
 
         // Native tile at Z=17
         val nativeZ = 17
@@ -190,8 +177,8 @@ class FallbackTileTest {
 
         // Native tile at Z=17
         val nativeZ = 17
-        val nativeTileX = lonToTileX(TEST_LON, nativeZ)
-        val nativeTileY = latToTileY(TEST_LAT, nativeZ)
+        val nativeTileX = lonToTileX(CENTER_LON, nativeZ)
+        val nativeTileY = latToTileY(CENTER_LAT, nativeZ)
 
         val (nativeWidth, nativeHeight) = calculateTileScreenDimensions(
             tileZ, nativeZ, scale
@@ -206,8 +193,8 @@ class FallbackTileTest {
 
         // Fallback tile from Z=15 covering the same area as 4x4 native tiles
         val fallbackZ = 15
-        val fallbackTileX = lonToTileX(TEST_LON, fallbackZ)
-        val fallbackTileY = latToTileY(TEST_LAT, fallbackZ)
+        val fallbackTileX = lonToTileX(CENTER_LON, fallbackZ)
+        val fallbackTileY = latToTileY(CENTER_LAT, fallbackZ)
 
         val (fallbackWidth, fallbackHeight) = calculateTileScreenDimensions(
             tileZ, fallbackZ, scale
@@ -243,19 +230,19 @@ class FallbackTileTest {
     @Test
     fun fallback_tile_scale_factor_calculation() {
         // Test zoom scale factor calculation for various fallback levels
-        assertEquals(1f, zoomScaleFactor(17, 17), 0.001f,
+        assertEquals(1f, 2.0f.pow(17 - 17), 0.001f,
             "Same zoom level should have scale factor of 1")
-        assertEquals(2f, zoomScaleFactor(17, 16), 0.001f,
+        assertEquals(2f, 2.0f.pow(17 - 16), 0.001f,
             "One level fallback should have scale factor of 2")
-        assertEquals(4f, zoomScaleFactor(17, 15), 0.001f,
+        assertEquals(4f, 2.0f.pow(17 - 15), 0.001f,
             "Two level fallback should have scale factor of 4")
-        assertEquals(8f, zoomScaleFactor(17, 14), 0.001f,
+        assertEquals(8f, 2.0f.pow(17 - 14), 0.001f,
             "Three level fallback should have scale factor of 8")
 
         // Test reverse (viewport at lower zoom than available tile)
-        assertEquals(0.5f, zoomScaleFactor(16, 17), 0.001f,
+        assertEquals(0.5f, 2.0f.pow(16 - 17), 0.001f,
             "One level higher should have scale factor of 0.5")
-        assertEquals(0.25f, zoomScaleFactor(15, 17), 0.001f,
+        assertEquals(0.25f, 2.0f.pow(15 - 17), 0.001f,
             "Two level higher should have scale factor of 0.25")
     }
 
@@ -284,5 +271,45 @@ class FallbackTileTest {
             "Fallback tile at scale 0.5 should be 2x native size")
         assertEquals(TILE_SIZE * 4f * 0.5f, height05, POSITION_TOLERANCE,
             "Fallback tile at scale 0.5 should be 2x native size")
+    }
+
+    @Test
+    fun fallback_tile_handles_edge_cases() {
+        val tileZ = 17
+        val scale = 1f
+        val offset = Offset.Zero
+        val canvasWidth = 1000f
+        val canvasHeight = 1000f
+
+        // Test with minimum zoom difference (should not cause division by zero)
+        val minDiffZ = 16
+        val minDiffTileX = lonToTileX(CENTER_LON, minDiffZ)
+        val minDiffTileY = latToTileY(CENTER_LAT, minDiffZ)
+
+        val minDiffPosition = calculateTileScreenPosition(
+            minDiffTileX, minDiffTileY, tileZ, minDiffZ,
+            CENTER_LAT, CENTER_LON, scale, offset, canvasWidth, canvasHeight
+        )
+
+        // Verify position is calculated without errors
+        assertEquals(500f, minDiffPosition.x, POSITION_TOLERANCE,
+            "Tile should be centered at canvas middle with no offset")
+        assertEquals(500f, minDiffPosition.y, POSITION_TOLERANCE,
+            "Tile should be centered at canvas middle with no offset")
+
+        // Test with extreme zoom difference (Z=17 vs Z=10)
+        val extremeDiffZ = 10
+        val extremeDiffTileX = lonToTileX(CENTER_LON, extremeDiffZ)
+        val extremeDiffTileY = latToTileY(CENTER_LAT, extremeDiffZ)
+
+        val (extremeWidth, extremeHeight) = calculateTileScreenDimensions(
+            tileZ, extremeDiffZ, scale
+        )
+
+        // Verify dimensions are calculated correctly for extreme scale
+        assertEquals(TILE_SIZE * 2.0f.pow(17 - 10), extremeWidth, POSITION_TOLERANCE,
+            "Extreme fallback tile width should be calculated correctly")
+        assertEquals(TILE_SIZE * 2.0f.pow(17 - 10), extremeHeight, POSITION_TOLERANCE,
+            "Extreme fallback tile height should be calculated correctly")
     }
 }
