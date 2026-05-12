@@ -28,24 +28,29 @@ class FallbackTileTest {
     private fun calculateTileScreenPosition(
         tileX: Int,
         tileY: Int,
-        tileZ: Int,
-        actualTileZ: Int,  // The zoom level of the tile we actually have
+        tileZ: Int,           // Requested zoom level
+        actualTileZ: Int,     // Actual zoom level of tile we have
         centerLat: Double,
         centerLon: Double,
         scale: Float,
         offset: Offset,
         canvasWidth: Float,
-        canvasHeight: Float
+        canvasHeight: Float,
+        baseZ: Int = 15       // Base zoom level for world coordinates
     ): Offset {
-        val scaleFactor = 2.0f.pow(tileZ - actualTileZ)
-        val tileLon = tileXToLon(tileX, actualTileZ)
-        val tileLat = tileYToLat(tileY, actualTileZ)
+        // CRITICAL: Derive geographic corners from REQUESTED tileZ, not actualTileZ
+        val tileLon = tileXToLon(tileX, tileZ)
+        val tileLat = tileYToLat(tileY, tileZ)
 
-        val worldX = worldX(tileLon, centerLon, actualTileZ) * scaleFactor
-        val worldY = worldY(tileLat, centerLat, actualTileZ) * scaleFactor
+        // Convert to baseZ world coordinates
+        val worldX = worldX(tileLon, centerLon, baseZ)
+        val worldY = worldY(tileLat, centerLat, baseZ)
 
-        val screenX = worldX * scale + offset.x + canvasWidth / 2
-        val screenY = worldY * scale + offset.y + canvasHeight / 2
+        // Apply composed scaling: native tile sizing + fallback compensation
+        val scaleFactor = 2.0f.pow(baseZ - actualTileZ)
+
+        val screenX = worldX * scaleFactor * scale + offset.x + canvasWidth / 2
+        val screenY = worldY * scaleFactor * scale + offset.y + canvasHeight / 2
 
         return Offset(screenX, screenY)
     }
