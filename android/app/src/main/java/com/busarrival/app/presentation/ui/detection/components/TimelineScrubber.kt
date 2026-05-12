@@ -8,8 +8,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.Camera
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Card
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -63,7 +63,7 @@ fun TimelineScrubber(
             IconButton(onClick = onPlayPause) {
                 Icon(
                     imageVector = if (replayState.isPlaying) {
-                        Icons.Default.Pause
+                        Icons.Default.Close
                     } else {
                         Icons.Default.PlayArrow
                     },
@@ -81,7 +81,7 @@ fun TimelineScrubber(
             // Camera follow toggle
             IconButton(onClick = onToggleCameraFollow) {
                 Icon(
-                    imageVector = Icons.Default.Camera,
+                    imageVector = Icons.Default.Check,
                     contentDescription = "Toggle camera follow",
                     tint = if (replayState.cameraFollowEnabled) {
                         MaterialTheme.colorScheme.primary
