@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.math.pow
+import com.busarrival.app.presentation.ui.detection.components.MapCoordinateUtils.*
 
 /**
  * Tests for fallback tile scaling and alignment.
