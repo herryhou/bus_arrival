@@ -11,8 +11,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -95,6 +97,24 @@ fun MapView(
         (baseZ + (kotlin.math.ln(scale.toDouble()) / kotlin.math.ln(2.0)).toInt()).coerceIn(12, 18)
     }
 
+    // Track previous tileZ to detect zoom boundary crossings
+    // When tileZ changes, adjust offset to prevent jumping
+    val prevTileZ = remember { mutableIntStateOf(tileZ) }
+    SideEffect {
+        if (prevTileZ.intValue != tileZ) {
+            val zDiff = tileZ - prevTileZ.intValue
+            if (zDiff != 0) {
+                // Adjust offset to compensate for coordinate system change
+                // When tileZ increases by 1, world coordinates double, so halve offset
+                // When tileZ decreases by 1, world coordinates halve, so double offset
+                val adjustment = 2.0f.pow(-zDiff)
+                viewModel.updateMapState(scale, offset * adjustment)
+                android.util.Log.d("MapView", "tileZ changed: ${prevTileZ.intValue} -> $tileZ, adjusting offset by $adjustment")
+            }
+            prevTileZ.intValue = tileZ
+        }
+    }
+
     // Single LaunchedEffect handles both initial preload and subsequent zoom/route changes
     // Keys on tileZ, centerLatLon, and cache state to avoid duplicate loading
     LaunchedEffect(tileZ, centerLatLon, tileCache.size) {
@@ -155,15 +175,14 @@ fun MapView(
                 val tileSize = 256f
 
                 // Helper function to transform coordinates to screen space (must be defined before tile drawing)
-                // Uses tileZ to match tile coordinate system for proper alignment at all zoom levels
-                // Transform MUST match tile transform: scale from origin, then translate by offset+center
+                // Uses baseZ for consistent coordinates across zoom levels (prevents jumping at scale boundaries)
                 fun toScreenX(lon: Double): Float {
-                    val worldX = lonToPixelX(lon, tileZ) - lonToPixelX(center.lon, tileZ)
+                    val worldX = lonToPixelX(lon, baseZ) - lonToPixelX(center.lon, baseZ)
                     return worldX * scale + offset.x + canvasWidth / 2
                 }
 
                 fun toScreenY(lat: Double): Float {
-                    val worldY = latToPixelY(lat, tileZ) - latToPixelY(center.lat, tileZ)
+                    val worldY = latToPixelY(lat, baseZ) - latToPixelY(center.lat, baseZ)
                     return worldY * scale + offset.y + canvasHeight / 2
                 }
 
@@ -241,9 +260,9 @@ fun MapView(
                                 val tileNW = tileXToLon(tileX, tileZ)
                                 val tileNE = tileYToLat(tileY, tileZ)
 
-                                // Position in world space using tileZ (consistent for all tiles)
-                                val tileWorldX = worldX(tileNW, center.lon, tileZ)
-                                val tileWorldY = worldY(tileNE, center.lat, tileZ)
+                                // Position in world space using baseZ for consistent coordinates
+                                val tileWorldX = worldX(tileNW, center.lon, baseZ)
+                                val tileWorldY = worldY(tileNE, center.lat, baseZ)
 
                                 tilesDrawn++
                                 if (tilesDrawn <= 5) { // Log first 5 drawn with full details
@@ -260,14 +279,22 @@ fun MapView(
                                     android.util.Log.d("MapView", "  covers: x=[$screenX,$screenEndX], y=[$screenY,$screenEndY]")
                                 }
 
-                                // If using fallback tile, scale it to match requested zoom level
-                                if (actualTileZ != tileZ) {
-                                    val zoomScaleFactor = 2.0.pow(tileZ - actualTileZ).toFloat()
-                                    android.util.Log.d("MapView", "  FALLBACK: scaling by ${zoomScaleFactor}x")
+                                // Scale tile to match zoom level difference between tileZ and baseZ
+                                val zoomScaleFactor = 2.0.pow(tileZ - baseZ).toFloat()
+                                // If using fallback tile, also scale by difference between requested and actual
+                                val fallbackScaleFactor = if (actualTileZ != tileZ) {
+                                    2.0.pow(tileZ - actualTileZ).toFloat()
+                                } else {
+                                    1f
+                                }
+                                val totalScale = zoomScaleFactor * fallbackScaleFactor
+
+                                if (totalScale != 1f) {
+                                    android.util.Log.d("MapView", "  SCALING: total=$totalScale (zoom=$zoomScaleFactor, fallback=$fallbackScaleFactor)")
                                     withTransform({
-                                        scale(scaleX = zoomScaleFactor, scaleY = zoomScaleFactor, pivot = Offset(tileWorldX, tileWorldY))
+                                        scale(scaleX = totalScale, scaleY = totalScale, pivot = Offset(tileWorldX, tileWorldY))
                                     }) {
-                                        drawImage(image = it, topLeft = Offset(tileWorldX, tileWorldY), alpha = 0.7f)
+                                        drawImage(image = it, topLeft = Offset(tileWorldX, tileWorldY), alpha = if (actualTileZ != tileZ) 0.7f else 1f)
                                     }
                                 } else {
                                     drawImage(image = it, topLeft = Offset(tileWorldX, tileWorldY))
@@ -296,16 +323,16 @@ fun MapView(
                     }
                 }
 
-                // Scale stroke width by zoom level (thinner at high zoom, thicker at low zoom)
-                val strokeWidth = 8f / scale.coerceAtLeast(0.5f)
+                // Constant stroke width (does not scale with zoom)
+                val strokeWidth = 8f
                 drawPath(
                     path = path,
                     color = Color.Blue,
                     style = Stroke(width = strokeWidth, pathEffect = null)
                 )
 
-                // Draw stops with scaled radius (interpolated along segments)
-                val stopRadius = 8f / scale.coerceAtLeast(0.5f)
+                // Draw stops with constant radius (interpolated along segments)
+                val stopRadius = 8f
                 routeData.stops.forEach { stop ->
                     val pos = routeData.interpolatePosition(stop.progressCm)
                     if (pos != null) {
@@ -335,7 +362,7 @@ fun MapView(
                         Color.Green // Live mode: green marker
                     }
 
-                    val markerRadius = 12f / scale.coerceAtLeast(0.5f)
+                    val markerRadius = 12f
                     drawCircle(
                         color = markerColor,
                         radius = markerRadius,
