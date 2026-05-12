@@ -29,14 +29,7 @@ import androidx.compose.ui.unit.dp
 import com.busarrival.app.data.cache.TileCache
 import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.domain.model.RouteNode
-import com.busarrival.app.presentation.ui.detection.components.latToPixelY
-import com.busarrival.app.presentation.ui.detection.components.latToTileY
-import com.busarrival.app.presentation.ui.detection.components.lonToPixelX
-import com.busarrival.app.presentation.ui.detection.components.lonToTileX
-import com.busarrival.app.presentation.ui.detection.components.tileXToLon
-import com.busarrival.app.presentation.ui.detection.components.tileYToLat
-import com.busarrival.app.presentation.ui.detection.components.worldX
-import com.busarrival.app.presentation.ui.detection.components.worldY
+// Coordinate functions from MapCoordinateUtils.kt (same package)
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
