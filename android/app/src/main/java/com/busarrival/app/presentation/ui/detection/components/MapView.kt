@@ -27,6 +27,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.busarrival.app.data.cache.TileCache
+import com.busarrival.app.domain.model.ReplayState
 import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.domain.model.RouteNode
 // Coordinate functions from MapCoordinateUtils.kt (same package)
@@ -67,6 +68,7 @@ fun MapView(
     routeData: RouteData?,
     currentSCm: Int,
     isCameraFollowEnabled: Boolean,
+    replayState: ReplayState = ReplayState(),
     viewModel: DetectionViewModel,
     modifier: Modifier = Modifier
 ) {
@@ -318,14 +320,23 @@ fun MapView(
                     }
                 }
 
-                // Draw current position
+                // Draw current position (live or replay)
+                // In replay mode, currentSCm is already updated by ViewModel's updateUiForPosition()
                 val currentNode = routeData.findNodeAtProgress(currentSCm)
                 if (currentNode != null) {
                     val ll = routeData.cmToLatLon(currentNode.xCm, currentNode.yCm)
                     val px = toScreenX(ll.lon)
                     val py = toScreenY(ll.lat)
+
+                    // Use different colors for live vs replay mode
+                    val markerColor = if (replayState.traceFile != null) {
+                        Color.Blue  // Replay mode: blue marker
+                    } else {
+                        Color.Green // Live mode: green marker
+                    }
+
                     drawCircle(
-                        color = Color.Green,
+                        color = markerColor,
                         radius = 12f,
                         center = Offset(px, py)
                     )
@@ -347,8 +358,9 @@ fun MapView(
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.Black
                 )
+                val modeLabel = if (replayState.traceFile != null) "REPLAY" else "LIVE"
                 Text(
-                    text = "Progress: ${currentSCm / 100}m | Zoom: ${"%.2f".format(scale)}x",
+                    text = "$modeLabel | Progress: ${currentSCm / 100}m | Zoom: ${"%.2f".format(scale)}x",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.Black
                 )

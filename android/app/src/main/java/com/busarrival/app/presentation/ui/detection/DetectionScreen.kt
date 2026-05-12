@@ -67,6 +67,7 @@ fun DetectionScreen(
                 routeData = activeRoute,
                 currentSCm = uiState.sCm,
                 isCameraFollowEnabled = uiState.isCameraFollowEnabled,
+                replayState = replayState,
                 viewModel = viewModel,
                 modifier = Modifier.weight(0.6f)
             )
