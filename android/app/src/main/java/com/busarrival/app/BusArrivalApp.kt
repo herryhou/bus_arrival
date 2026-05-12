@@ -4,12 +4,15 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import com.busarrival.app.data.trace.TraceStorageManager
+import com.google.gson.Gson
 
 class BusArrivalApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        TraceStorageManager.init(this, Gson())
     }
 
     private fun createNotificationChannel() {
