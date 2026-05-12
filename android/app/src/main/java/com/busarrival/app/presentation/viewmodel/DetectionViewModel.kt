@@ -165,9 +165,9 @@ class DetectionViewModel(
             return
         }
 
-        val intent = Intent(getApplication(), DetectionService::class.java)
-        getApplication().startService(intent)
-        getApplication().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        val intent = Intent(getApplication<Application>(), DetectionService::class.java)
+        getApplication<Application>().startService(intent)
+        getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
     /**
@@ -175,10 +175,10 @@ class DetectionViewModel(
      */
     fun stopDetection() {
         service?.let {
-            getApplication().unbindService(serviceConnection)
+            getApplication<Application>().unbindService(serviceConnection)
         }
         service = null
-        DetectionService.stopService(getApplication())
+        DetectionService.stopService(getApplication<Application>())
         _uiState.value = _uiState.value.copy(isRunning = false)
     }
 
@@ -427,9 +427,9 @@ class DetectionViewModel(
         // State machine: at stop if arrived after last departure, otherwise at next stop
         val currentStop = when {
             lastArrival == null && lastDeparture == null -> -1 // No stop events yet
-            lastDeparture == null -> lastArrival.stopIndex // Arrived, never departed
+            lastDeparture == null -> lastArrival?.stopIndex ?: -1 // Arrived, never departed
             lastArrival == null -> lastDeparture.stopIndex + 1 // Departed, never arrived
-            lastArrival.stopIndex > lastDeparture.stopIndex -> lastArrival.stopIndex // Arrived after departure
+            (lastArrival?.stopIndex ?: -1) > lastDeparture.stopIndex -> lastArrival?.stopIndex ?: -1 // Arrived after departure
             else -> lastDeparture.stopIndex + 1 // Departed after arrival
         }
         _uiState.value = _uiState.value.copy(currentStop = currentStop)
@@ -439,7 +439,7 @@ class DetectionViewModel(
         super.onCleared()
         playbackJob?.cancel()
         service?.let {
-            getApplication().unbindService(serviceConnection)
+            getApplication<Application>().unbindService(serviceConnection)
         }
     }
 }

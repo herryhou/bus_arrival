@@ -7,9 +7,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Camera
+import androidx.compose.material3.Card
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -80,7 +81,7 @@ fun TimelineScrubber(
             // Camera follow toggle
             IconButton(onClick = onToggleCameraFollow) {
                 Icon(
-                    imageVector = Icons.Default.CameraAlt,
+                    imageVector = Icons.Default.Camera,
                     contentDescription = "Toggle camera follow",
                     tint = if (replayState.cameraFollowEnabled) {
                         MaterialTheme.colorScheme.primary
@@ -172,7 +173,7 @@ private fun SpeedSelector(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     }
                 ),
-                contentPadding = androidx.compose.foundation.layout.padding(horizontal = 4.dp, vertical = 4.dp)
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 4.dp)
             ) {
                 Text(
                     text = "${speed}x",
