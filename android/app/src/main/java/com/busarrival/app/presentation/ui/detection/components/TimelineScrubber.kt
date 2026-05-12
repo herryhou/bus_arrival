@@ -34,6 +34,12 @@ import com.busarrival.app.domain.model.ReplayState
  * - Time display (current/total)
  * - Progress percentage
  */
+
+private const val SPEED_0_5X = 0.5f
+private const val SPEED_1X = 1f
+private const val SPEED_2X = 2f
+private const val SPEED_4X = 4f
+
 @Composable
 fun TimelineScrubber(
     replayState: ReplayState,
@@ -145,7 +151,7 @@ private fun SpeedSelector(
     currentSpeed: Float,
     onSpeedChange: (Float) -> Unit
 ) {
-    val speeds = listOf(0.5f, 1f, 2f, 4f)
+    val speeds = listOf(SPEED_0_5X, SPEED_1X, SPEED_2X, SPEED_4X)
 
     Row(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -154,7 +160,6 @@ private fun SpeedSelector(
         speeds.forEach { speed ->
             androidx.compose.material3.Button(
                 onClick = { onSpeedChange(speed) },
-                modifier = Modifier.width(if (currentSpeed == speed) 50.dp else 45.dp),
                 colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                     containerColor = if (currentSpeed == speed) {
                         MaterialTheme.colorScheme.primary

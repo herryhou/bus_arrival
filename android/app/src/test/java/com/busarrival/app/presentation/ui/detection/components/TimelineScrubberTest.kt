@@ -9,8 +9,8 @@ import kotlin.test.assertEquals
  */
 class TimelineScrubberTest {
 
-    // Access to private function via reflection or move to public
-    // For now, we'll test the logic inline
+    // Test the actual formatTime function from TimelineScrubber.kt
+    // Since it's private, we recreate the logic here for testing
     private fun formatTime(timeMs: Long): String {
         val totalSeconds = timeMs / 1000
         val hours = totalSeconds / 3600
@@ -55,7 +55,7 @@ class TimelineScrubberTest {
     }
 
     @Test
-    fun formatTime_multipleHours_returnsHoursMinutesSeconds() {
+    fun formatTime_lessThanOneHour_returnsMinutesSeconds() {
         val result = formatTime(2_745_000) // 45 minutes 45 seconds
         assertEquals("45:45", result)
     }
