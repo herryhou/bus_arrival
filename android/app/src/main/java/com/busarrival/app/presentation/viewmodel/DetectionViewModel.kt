@@ -15,6 +15,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.busarrival.app.data.preferences.DetectionPreferences
 import com.busarrival.app.data.storage.RouteStorageManager
+import com.busarrival.app.data.trace.TraceStorageManager
+import com.busarrival.app.domain.model.ReplayState
 import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.service.DetectionService
 import com.busarrival.app.service.PipelineEvent
@@ -22,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 
 /**
  * ViewModel for detection screen.
@@ -32,6 +35,7 @@ class DetectionViewModel(
 ) : AndroidViewModel(application) {
     private val preferences = DetectionPreferences(application)
     private val routeStorage = RouteStorageManager(application, com.google.gson.Gson())
+    private val gson = com.google.gson.Gson()
 
     private val _uiState = MutableStateFlow(DetectionUiState())
     val uiState: StateFlow<DetectionUiState> = _uiState.asStateFlow()
@@ -42,6 +46,10 @@ class DetectionViewModel(
     private val _activeRoute = MutableStateFlow<RouteData?>(null)
     val activeRoute: StateFlow<RouteData?> = _activeRoute.asStateFlow()
 
+    // Replay state for timeline/replay functionality
+    private val _replayState = MutableStateFlow(ReplayState())
+    val replayState: StateFlow<ReplayState> = _replayState.asStateFlow()
+
     // Map state - persists across screen switches
     private val _mapScale = MutableStateFlow(1f)
     val mapScale: StateFlow<Float> = _mapScale.asStateFlow()
@@ -51,6 +59,10 @@ class DetectionViewModel(
 
     private val _tileCache = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
     val tileCache: StateFlow<Map<String, ImageBitmap>> = _tileCache.asStateFlow()
+
+    // Playback state
+    private var playbackJob: Job? = null
+    private var replayEvents: List<PipelineEvent> = emptyList()
 
     private var service: DetectionService? = null
 
@@ -78,6 +90,8 @@ class DetectionViewModel(
 
     init {
         loadActiveRoute()
+        // Initialize TraceStorageManager
+        TraceStorageManager.init(getApplication(), gson)
     }
 
     /**
@@ -223,8 +237,203 @@ class DetectionViewModel(
         android.util.Log.d("DetectionViewModel", "Tile cache cleared")
     }
 
+    // ==================== Replay/Timeline Functions ====================
+
+    /**
+     * Load trace file and initialize replay state.
+     */
+    fun loadTrace(traceFile: String) {
+        viewModelScope.launch {
+            try {
+                val events = TraceStorageManager.loadTrace(traceFile)
+                replayEvents = events
+
+                // Estimate duration based on number of events
+                // Assuming 1 event per second (1Hz GPS), duration = event count * 1000ms
+                val duration = events.size * 1000L
+
+                _replayState.value = ReplayState(
+                    currentTime = 0,
+                    isPlaying = false,
+                    playbackSpeed = 1f,
+                    traceDuration = duration,
+                    cameraFollowEnabled = true,
+                    traceFile = traceFile
+                )
+
+                android.util.Log.d("DetectionViewModel", "Loaded trace: $traceFile, events: ${events.size}, duration: ${duration}ms")
+            } catch (e: Exception) {
+                android.util.Log.e("DetectionViewModel", "Failed to load trace: $traceFile", e)
+                _uiState.value = _uiState.value.copy(error = "Failed to load trace: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Toggle playback state.
+     */
+    fun playPause() {
+        val current = _replayState.value
+        if (current.isPlaying) {
+            // Pause playback
+            playbackJob?.cancel()
+            playbackJob = null
+            _replayState.value = current.copy(isPlaying = false)
+            android.util.Log.d("DetectionViewModel", "Playback paused at ${current.currentTime}ms")
+        } else {
+            // Start playback
+            if (replayEvents.isEmpty()) {
+                _uiState.value = _uiState.value.copy(error = "No trace loaded")
+                return
+            }
+
+            _replayState.value = current.copy(isPlaying = true)
+            startPlayback()
+            android.util.Log.d("DetectionViewModel", "Playback started from ${current.currentTime}ms")
+        }
+    }
+
+    /**
+     * Set playback speed.
+     * @param speed Speed multiplier (0.5x, 1x, 2x, 4x)
+     */
+    fun setPlaybackSpeed(speed: Float) {
+        _replayState.value = _replayState.value.copy(playbackSpeed = speed)
+        android.util.Log.d("DetectionViewModel", "Playback speed set to ${speed}x")
+
+        // Restart playback if currently playing to apply new speed
+        if (_replayState.value.isPlaying) {
+            playbackJob?.cancel()
+            startPlayback()
+        }
+    }
+
+    /**
+     * Seek to specific position in trace.
+     * @param position Position in milliseconds
+     */
+    fun seekTo(position: Long) {
+        val wasPlaying = _replayState.value.isPlaying
+
+        // Cancel current playback
+        playbackJob?.cancel()
+        playbackJob = null
+
+        // Update position
+        _replayState.value = _replayState.value.copy(
+            currentTime = position.coerceIn(0, _replayState.value.traceDuration),
+            isPlaying = false
+        )
+
+        // Update UI state to reflect position in trace
+        updateUiForPosition(position)
+
+        android.util.Log.d("DetectionViewModel", "Seeked to ${position}ms")
+
+        // Resume playback if it was playing
+        if (wasPlaying) {
+            _replayState.value = _replayState.value.copy(isPlaying = true)
+            startPlayback()
+        }
+    }
+
+    /**
+     * Toggle camera follow mode for replay.
+     */
+    fun toggleReplayCameraFollow() {
+        _replayState.value = _replayState.value.copy(
+            cameraFollowEnabled = !_replayState.value.cameraFollowEnabled
+        )
+        android.util.Log.d("DetectionViewModel", "Replay camera follow: ${_replayState.value.cameraFollowEnabled}")
+    }
+
+    /**
+     * Update current replay position (called during playback).
+     */
+    private fun updateReplayPosition(position: Long) {
+        _replayState.value = _replayState.value.copy(
+            currentTime = position.coerceIn(0, _replayState.value.traceDuration)
+        )
+        updateUiForPosition(position)
+    }
+
+    /**
+     * Start playback coroutine.
+     */
+    private fun startPlayback() {
+        playbackJob = viewModelScope.launch {
+            val startTime = _replayState.value.currentTime
+            val speed = _replayState.value.playbackSpeed
+            val targetDuration = _replayState.value.traceDuration
+
+            if (targetDuration <= 0) {
+                _uiState.value = _uiState.value.copy(error = "Invalid trace duration")
+                _replayState.value = _replayState.value.copy(isPlaying = false)
+                return@launch
+            }
+
+            val tickDelayMs = (50 / speed).toLong() // Update every 50ms adjusted for speed
+
+            while (_replayState.value.isPlaying && _replayState.value.currentTime < targetDuration) {
+                kotlinx.coroutines.delay(tickDelayMs)
+
+                val increment = (50 * speed).toLong() // Increment based on speed
+                val newPosition = _replayState.value.currentTime + increment
+                updateReplayPosition(newPosition)
+            }
+
+            // Playback finished
+            if (_replayState.value.currentTime >= targetDuration) {
+                _replayState.value = _replayState.value.copy(isPlaying = false)
+                android.util.Log.d("DetectionViewModel", "Playback finished at ${_replayState.value.currentTime}ms")
+            }
+        }
+    }
+
+    /**
+     * Update UI state for a given replay position.
+     * Finds the relevant PositionUpdate events and applies them to UI.
+     */
+    private fun updateUiForPosition(position: Long) {
+        // Find the most recent PositionUpdate before this position
+        val positionUpdates = replayEvents.filterIsInstance<PipelineEvent.PositionUpdate>()
+        val latestUpdate = positionUpdates.lastOrNull { event ->
+            // We need to match position to event index since we don't have timestamps in PositionUpdate
+            // For now, use a simple approach: map position to event index
+            val eventIndex = replayEvents.indexOf(event)
+            val targetIndex = (position.toFloat() / _replayState.value.traceDuration * replayEvents.size).toInt()
+            eventIndex <= targetIndex
+        }
+
+        latestUpdate?.let { event ->
+            _uiState.value = _uiState.value.copy(
+                sCm = event.sCm,
+                vCms = event.vCms,
+                mode = event.mode
+            )
+        }
+
+        // Find arrivals/departures at this position
+        val eventIndex = (position.toFloat() / _replayState.value.traceDuration * replayEvents.size).toInt()
+        val currentEvents = replayEvents.take(eventIndex)
+
+        val lastArrival = currentEvents.filterIsInstance<PipelineEvent.Arrival>().lastOrNull()
+        val lastDeparture = currentEvents.filterIsInstance<PipelineEvent.Departure>().lastOrNull()
+
+        // Update current stop based on last arrival/departure
+        when {
+            lastArrival != null && (lastDeparture == null || lastArrival.stopIndex > lastDeparture.stopIndex) -> {
+                _uiState.value = _uiState.value.copy(currentStop = lastArrival.stopIndex)
+            }
+            lastDeparture != null -> {
+                _uiState.value = _uiState.value.copy(currentStop = lastDeparture.stopIndex + 1)
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
+        playbackJob?.cancel()
         service?.let {
             getApplication<Application>().unbindService(serviceConnection)
         }
