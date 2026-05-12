@@ -1,5 +1,17 @@
 package com.busarrival.app.presentation.ui.detection.components
 
+/**
+ * Map view component with tile overlay and route rendering.
+ *
+ * Coordinate System:
+ * - All world coordinates use baseZ=15 as stable reference zoom level
+ * - offset, tileWorldX/Y, toScreenX/Y never change zoom
+ * - Tiles at zoom Z scale by 2^(baseZ - Z) when drawn in baseZ space
+ * - Fallback tiles compose scaling: 2^(baseZ - Z) * 2^(Z - F) = 2^(baseZ - F)
+ *
+ * This ensures geographic → screen conversion is stable across tileZ changes,
+ * preventing pan jumps when zooming past tile boundaries.
+ */
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
