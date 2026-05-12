@@ -60,11 +60,13 @@ class FallbackTileTest {
      * Returns Pair(width, height) in screen pixels.
      */
     private fun calculateTileScreenDimensions(
-        tileZ: Int,
-        actualTileZ: Int,
-        scale: Float
+        tileZ: Int,           // Requested zoom level
+        actualTileZ: Int,     // Actual zoom level of tile we have
+        scale: Float,
+        baseZ: Int = 15       // Base zoom level for world coordinates
     ): Pair<Float, Float> {
-        val scaleFactor = 2.0f.pow(tileZ - actualTileZ)
+        // Composed scaling: native tile sizing at baseZ + fallback compensation
+        val scaleFactor = 2.0f.pow(baseZ - actualTileZ)
         val scaledTileSize = TILE_SIZE * scaleFactor
         return Pair(scaledTileSize * scale, scaledTileSize * scale)
     }
