@@ -40,9 +40,9 @@ Missing invariants. The code migrated to `baseZ` world coordinates but left behi
     - Change `tileXToLon(tileX, actualTileZ)` → `tileXToLon(tileX, tileZ)`
     - Change `tileYToLat(tileY, actualTileZ)` → `tileYToLat(tileY, tileZ)`
   - `calculateTileScreenDimensions()`: Update to reflect composed scaling `2^(baseZ - actualTileZ)`
-  - Review embedded scale assumptions in test bodies (lines 102-112, 158-167, 226-228)
+  - **Update test expectations**: Test bodies assert old non-baseZ expectations (e.g., `nativeWidth * 4f` for Z=17/F=15). Must be updated to assert baseZ behavior (e.g., for Z=17/F=15 at baseZ=15: scale = 2^(15-15) = 1, so fallback tile same size as native Z=17 tile).
 - Match: Production code's baseZ coordinate system with composed fallback scaling
-- Effect: 4 failing assertions pass
+- Effect: 4 failing assertions pass after expectations are corrected
 
 ### Phase 2: Coordinate Invariants
 
@@ -60,7 +60,10 @@ Missing invariants. The code migrated to `baseZ` world coordinates but left behi
 
 **Invariant 3 - Fallback Positioning**
 - Fallback from actual zoom F used for requested zoom Z: total scale = `2^(baseZ - Z) * 2^(Z - F) = 2^(baseZ - F)`
-- Positioning: compute geographic bounds from requested Z, convert to baseZ world coordinates, apply composed scale
+- Positioning (three-step process):
+  1. Compute geographic bounds from requested tileZ grid (tileX, tileY at zoom Z)
+  2. Convert those bounds to baseZ world coordinates (using lon/lat → pixel at baseZ)
+  3. Scale the bitmap by total scale `2^(baseZ - actualTileZ)`
 - Ensures fallback tiles cover identical geographic area as native tiles
 - Example: baseZ=15, Z=17 request, F=15 fallback → total scale = `2^(15-15) = 1` (the requested-tile shrink factor 2^(15-17)=1/4 and fallback compensation 2^(17-15)=4 cancel exactly; the fallback bitmap is a baseZ tile covering a Z=17 cell's geographic bounds, so no extra bitmap scaling remains after composition)
 
