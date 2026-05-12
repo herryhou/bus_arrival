@@ -280,7 +280,7 @@ fun MapView(
                                 }
 
                                 // Scale tile to match zoom level difference between tileZ and baseZ
-                                val zoomScaleFactor = 2.0.pow(tileZ - baseZ).toFloat()
+                                val zoomScaleFactor = 2.0.pow(baseZ - tileZ).toFloat()
                                 // If using fallback tile, also scale by difference between requested and actual
                                 val fallbackScaleFactor = if (actualTileZ != tileZ) {
                                     2.0.pow(tileZ - actualTileZ).toFloat()
