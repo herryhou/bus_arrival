@@ -279,13 +279,14 @@ fun MapView(
 
                             bitmap?.let {
                                 // Calculate position using REQUESTED tile coordinates (tileX, tileY at tileZ)
+                                // Convert geographic to baseZ world space directly (not via worldX/Y helpers)
                                 val tileNW = tileXToLon(tileX, tileZ)
                                 val tileNE = tileYToLat(tileY, tileZ)
 
                                 // Position in baseZ world space for stable coordinates across zoom
-                                // Tile geographic bounds computed from requested tileZ, then converted to baseZ
-                                val tileWorldX = worldX(tileNW, center.lon, baseZ)
-                                val tileWorldY = worldY(tileNE, center.lat, baseZ)
+                                // MUST use lonToPixelX/latToPixelY with baseZ directly, NOT worldX/Y helpers
+                                val tileWorldX = lonToPixelX(tileNW, baseZ) - lonToPixelX(center.lon, baseZ)
+                                val tileWorldY = latToPixelY(tileNE, baseZ) - latToPixelY(center.lat, baseZ)
 
                                 if (BuildConfig.DEBUG) {
                                     assert(tileWorldX.isFinite() && tileWorldY.isFinite()) {
