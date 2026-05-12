@@ -29,21 +29,20 @@ import androidx.compose.ui.unit.dp
 import com.busarrival.app.data.cache.TileCache
 import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.domain.model.RouteNode
+import com.busarrival.app.presentation.ui.detection.components.latToPixelY
+import com.busarrival.app.presentation.ui.detection.components.latToTileY
+import com.busarrival.app.presentation.ui.detection.components.lonToPixelX
+import com.busarrival.app.presentation.ui.detection.components.lonToTileX
+import com.busarrival.app.presentation.ui.detection.components.tileXToLon
+import com.busarrival.app.presentation.ui.detection.components.tileYToLat
+import com.busarrival.app.presentation.ui.detection.components.worldX
+import com.busarrival.app.presentation.ui.detection.components.worldY
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.net.URL
 import kotlin.math.PI
-import kotlin.math.atan
-import kotlin.math.asinh
 import kotlin.math.cos
-import kotlin.math.exp
-import kotlin.math.ln
-import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.pow
-import kotlin.math.sin
-import kotlin.math.tan
 
 data class LatLon(val lat: Double, val lon: Double)
 
@@ -182,9 +181,6 @@ fun MapView(
                 }) {
                     // Position tiles in centered world space using tileZ for correct grid alignment
                     // Each zoom level has its own tile grid, so we must use tileZ for positioning
-                    fun worldX(lon: Double): Float = lonToPixelX(lon, tileZ) - lonToPixelX(center.lon, tileZ)
-                    fun worldY(lat: Double): Float = latToPixelY(lat, tileZ) - latToPixelY(center.lat, tileZ)
-
                     // Load more tiles at higher zoom levels
                     val tileRange = when (tileZ) {
                         in 12..13 -> 3
@@ -252,9 +248,9 @@ fun MapView(
                                 val tileNW = tileXToLon(tileX, tileZ)
                                 val tileNE = tileYToLat(tileY, tileZ)
 
-                                // Position in world space using baseZ (consistent for all tiles)
-                                val tileWorldX = worldX(tileNW)
-                                val tileWorldY = worldY(tileNE)
+                                // Position in world space using tileZ (consistent for all tiles)
+                                val tileWorldX = worldX(tileNW, center.lon, tileZ)
+                                val tileWorldY = worldY(tileNE, center.lat, tileZ)
 
                                 tilesDrawn++
                                 if (tilesDrawn <= 5) { // Log first 5 drawn with full details
