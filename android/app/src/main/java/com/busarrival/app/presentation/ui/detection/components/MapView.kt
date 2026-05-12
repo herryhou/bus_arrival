@@ -89,32 +89,20 @@ fun MapView(
             } else null
         }
     }
-
-    // Only preload tiles if cache is empty
-    LaunchedEffect(centerLatLon) {
-        android.util.Log.d("MapView", "LaunchedEffect triggered, centerLatLon=$centerLatLon, cacheSize=${tileCache.size}")
-        if (centerLatLon != null && tileCache.isEmpty()) {
-            android.util.Log.d("MapView", "Preloading tiles for center=$centerLatLon")
-            val tiles = preloadTilesSync(centerLatLon, tileDiskCache)
-            android.util.Log.d("MapView", "Preloaded ${tiles.size} tiles")
-            viewModel.addTiles(tiles)
-        }
-    }
-
     // Dynamically load higher zoom tiles when zoom level changes (not on every scale change)
     val baseZ = 15
     val tileZ = remember(scale) {
         (baseZ + (kotlin.math.ln(scale.toDouble()) / kotlin.math.ln(2.0)).toInt()).coerceIn(12, 18)
     }
 
-    // Load tiles when zoom level OR route center changes
-    // Key on both tileZ and centerLatLon to ensure tiles reload for new routes
-    LaunchedEffect(tileZ, centerLatLon) {
+    // Single LaunchedEffect handles both initial preload and subsequent zoom/route changes
+    // Keys on tileZ, centerLatLon, and cache state to avoid duplicate loading
+    LaunchedEffect(tileZ, centerLatLon, tileCache.size) {
         centerLatLon ?: return@LaunchedEffect
 
-        android.util.Log.d("MapView", "Loading tiles: z=$tileZ (scale=$scale), center=$centerLatLon")
+        android.util.Log.d("MapView", "Loading tiles: z=$tileZ (scale=$scale), center=$centerLatLon, cacheSize=${tileCache.size}")
 
-        // Load tiles for the new zoom level and/or route center
+        // Load tiles for the current zoom level and route center
         val tiles = kotlin.runCatching {
             loadTilesForZoom(centerLatLon, tileZ, tileDiskCache)
         }.getOrNull()

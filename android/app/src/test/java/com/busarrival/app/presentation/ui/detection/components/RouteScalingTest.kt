@@ -30,7 +30,7 @@ class RouteScalingTest {
      * Helper functions from MapCoordinateUtils
      */
     private fun lonToPixelX(lon: Double, zoom: Int): Float {
-        val x = (lon + 180.0) / 360.0 * pow(2.0, zoom)
+        val x = (lon + 180.0) / 360.0 * 2.0.pow(zoom)
         return (x * 256).toFloat()
     }
 
