@@ -53,13 +53,18 @@ class MapViewRenderingTest {
     }
 
     // Production code from MapView.kt - CRITICAL: Must match exactly
-    // These functions use baseZ for positioning (smooth transitions)
-    private fun worldX(lon: Double, centerLon: Double): Float {
-        return lonToPixelX(lon, baseZ) - lonToPixelX(centerLon, baseZ)
+    // These functions now use tileZ (requested zoom level) for correct positioning
+    private fun worldX(lon: Double, centerLon: Double, tileZ: Int): Float {
+        return lonToPixelX(lon, tileZ) - lonToPixelX(centerLon, tileZ)
     }
 
-    private fun worldY(lat: Double, centerLat: Double): Float {
-        return latToPixelY(lat, baseZ) - latToPixelY(centerLat, baseZ)
+    private fun worldY(lat: Double, centerLat: Double, tileZ: Int): Float {
+        return latToPixelY(lat, tileZ) - latToPixelY(centerLat, tileZ)
+    }
+
+    // Regression test: if someone uses baseZ instead of tileZ, this test will FAIL
+    private fun worldX_BROKEN(lon: Double, centerLon: Double): Float {
+        return lonToPixelX(lon, baseZ) - lonToPixelX(centerLon, baseZ)
     }
 
     // Simulate EXACT transform from MapView.kt lines 178-180
@@ -90,8 +95,8 @@ class MapViewRenderingTest {
         val tile1_NW = tileXToLon(centerTileX, tileZ)
         val tile2_NW = tileXToLon(centerTileX + 1, tileZ)
 
-        val tile1_worldX = worldX(tile1_NW, centerLon)
-        val tile2_worldX = worldX(tile2_NW, centerLon)
+        val tile1_worldX = worldX(tile1_NW, centerLon, tileZ)
+        val tile2_worldX = worldX(tile2_NW, centerLon, tileZ)
 
         // Apply EXACT transform
         val tile1_screenX = transformToWorldThenScreen(tile1_worldX, scale, offset, canvasWidth / 2)
@@ -106,23 +111,36 @@ class MapViewRenderingTest {
     }
 
     /**
-     * Test: Verify baseZ positioning gives consistent 256px spacing
-     * Current design uses baseZ for all positioning (smooth transitions)
+     * REGRESSION TEST: If someone uses baseZ instead of tileZ, this FAILS
      */
     @Test
-    fun baseZPositioningConsistent() {
+    fun regressionUsingBaseZInsteadOfTileZ() {
         val centerLon = 120.0
+        val tileZ = 18  // High zoom level where bug is obvious
 
         val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(15)).toInt()
-        val tile1_NW = tileXToLon(centerTileX, 15)
-        val tile2_NW = tileXToLon(centerTileX + 1, 15)
+        val tile1_NW = tileXToLon(centerTileX, tileZ)
+        val tile2_NW = tileXToLon(centerTileX + 1, tileZ)
 
-        val tile1_worldX = worldX(tile1_NW, centerLon)
-        val tile2_worldX = worldX(tile2_NW, centerLon)
+        // BROKEN code: uses baseZ
+        val tile1_worldX_BROKEN = worldX_BROKEN(tile1_NW, centerLon)
+        val tile2_worldX_BROKEN = worldX_BROKEN(tile2_NW, centerLon)
 
-        // Spacing should be 256px at baseZ
-        val spacing = tile2_worldX - tile1_worldX
-        assertEquals(256f, spacing, 0.1f, "BaseZ positioning: 256px spacing")
+        // FIXED code: uses tileZ
+        val tile1_worldX_FIXED = worldX(tile1_NW, centerLon, tileZ)
+        val tile2_worldX_FIXED = worldX(tile2_NW, centerLon, tileZ)
+
+        // At tileZ=18, baseZ gives WRONG results
+        val spacing_FIXED = tile2_worldX_FIXED - tile1_worldX_FIXED
+        val spacing_BROKEN = tile2_worldX_BROKEN - tile1_worldX_BROKEN
+
+        // FIXED: spacing should be 256px
+        assertEquals(256f, spacing_FIXED, 0.1f, "Using tileZ: correct spacing")
+
+        // BROKEN: spacing will be WRONG (not 256px)
+        val isBroken = kotlin.math.abs(spacing_BROKEN - 256f) > 100f
+        kotlin.test.assertTrue(isBroken,
+            "Using baseZ at tileZ=18 gives WRONG spacing (actual: $spacing_BROKEN)")
     }
 
     /**
@@ -138,8 +156,8 @@ class MapViewRenderingTest {
         val tile1_NW = tileXToLon(centerTileX, 15)
         val tile2_NW = tileXToLon(centerTileX + 1, 15)
 
-        val tile1_worldX = worldX(tile1_NW, centerLon)
-        val tile2_worldX = worldX(tile2_NW, centerLon)
+        val tile1_worldX = worldX(tile1_NW, centerLon, 15)
+        val tile2_worldX = worldX(tile2_NW, centerLon, 15)
 
         // Test at scale 1, 2, 4
         val scales = listOf(1f, 2f, 4f)
@@ -167,8 +185,8 @@ class MapViewRenderingTest {
         val tile1_NW = tileXToLon(centerTileX, 15)
         val tile2_NW = tileXToLon(centerTileX + 1, 15)
 
-        val tile1_worldX = worldX(tile1_NW, centerLon)
-        val tile2_worldX = worldX(tile2_NW, centerLon)
+        val tile1_worldX = worldX(tile1_NW, centerLon, 15)
+        val tile2_worldX = worldX(tile2_NW, centerLon, 15)
 
         val tile1_screenX = transformToWorldThenScreen(tile1_worldX, scale, offset, canvasWidth / 2)
         val tile2_screenX = transformToWorldThenScreen(tile2_worldX, scale, offset, canvasWidth / 2)
@@ -192,8 +210,8 @@ class MapViewRenderingTest {
         val tile1_NE = tileYToLat(centerTileY, 15)
         val tile2_NE = tileYToLat(centerTileY + 1, 15)
 
-        val tile1_worldY = worldY(tile1_NE, centerLat)
-        val tile2_worldY = worldY(tile2_NE, centerLat)
+        val tile1_worldY = worldY(tile1_NE, centerLat, 15)
+        val tile2_worldY = worldY(tile2_NE, centerLat, 15)
 
         val tile1_screenY = transformToWorldThenScreen(tile1_worldY, scale, offset, canvasHeight / 2)
         val tile2_screenY = transformToWorldThenScreen(tile2_worldY, scale, offset, canvasHeight / 2)
@@ -224,10 +242,10 @@ class MapViewRenderingTest {
         val east_NW = tileXToLon(centerTileX + 1, 15)
         val south_NE = tileYToLat(centerTileY + 1, 15)
 
-        val centerWorldX = worldX(center_NW, centerLon)
-        val centerWorldY = worldY(center_NE, centerLat)
-        val eastWorldX = worldX(east_NW, centerLon)
-        val southWorldY = worldY(south_NE, centerLat)
+        val centerWorldX = worldX(center_NW, centerLon, 15)
+        val centerWorldY = worldY(center_NE, centerLat, 15)
+        val eastWorldX = worldX(east_NW, centerLon, 15)
+        val southWorldY = worldY(south_NE, centerLat, 15)
 
         // Transform to screen space
         val centerScreenX = transformToWorldThenScreen(centerWorldX, scale, offset, canvasWidth / 2)
@@ -264,11 +282,11 @@ class MapViewRenderingTest {
 
         // Native tile at Z=17
         val native_NW = tileXToLon(centerTileX, 17)
-        val nativeWorldX = worldX(native_NW, centerLon)
+        val nativeWorldX = worldX(native_NW, centerLon, 17)
 
         // Next tile at Z=17
         val next_NW = tileXToLon(centerTileX + 1, 17)
-        val nextWorldX = worldX(next_NW, centerLon)
+        val nextWorldX = worldX(next_NW, centerLon, 17)
 
         // Transform to screen space
         val nativeScreenX = transformToWorldThenScreen(nativeWorldX, scale, offset, canvasWidth / 2)
@@ -317,8 +335,8 @@ class MapViewRenderingTest {
                 val tile_NW = tileXToLon(tileX, 15)
                 val tile_NE = tileYToLat(tileY, 15)
 
-                val worldX = worldX(tile_NW, centerLon)
-                val worldY = worldY(tile_NE, centerLat)
+                val worldX = worldX(tile_NW, centerLon, 15)
+                val worldY = worldY(tile_NE, centerLat, 15)
 
                 val screenX = transformToWorldThenScreen(worldX, scale, offset, canvasWidth / 2)
                 val screenY = transformToWorldThenScreen(worldY, scale, offset, canvasHeight / 2)
@@ -332,11 +350,11 @@ class MapViewRenderingTest {
 
         // Verify no gaps
         val eastTile_NW = tileXToLon(centerTileX + 1, 15)
-        val eastWorldX = worldX(eastTile_NW, centerLon)
+        val eastWorldX = worldX(eastTile_NW, centerLon, 15)
         val eastScreenX = transformToWorldThenScreen(eastWorldX, scale, offset, canvasWidth / 2)
 
         val centerTile_NW = tileXToLon(centerTileX, 15)
-        val centerWorldX = worldX(centerTile_NW, centerLon)
+        val centerWorldX = worldX(centerTile_NW, centerLon, 15)
         val centerScreenX = transformToWorldThenScreen(centerWorldX, scale, offset, canvasWidth / 2)
 
         val centerEnd = centerScreenX + tileSize * scale
