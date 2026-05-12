@@ -65,6 +65,13 @@ class TraceStorageManagerTest {
         val content = file.readText()
         val lines = content.lines()
         assertEquals(3, lines.size)
+
+        // Verify JSON structure
+        val loaded = TraceStorageManager.loadTrace(filename)
+        assertEquals(3, loaded.size)
+        assertTrue(loaded[0] is PipelineEvent.PositionUpdate)
+        assertTrue(loaded[1] is PipelineEvent.Arrival)
+        assertTrue(loaded[2] is PipelineEvent.Departure)
     }
 
     @Test

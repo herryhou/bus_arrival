@@ -14,11 +14,16 @@ import java.io.File
  */
 object TraceStorageManager {
 
+    private var _tracesDir: File? = null
     private val tracesDir: File
-        get() = File(context.filesDir, "traces").apply { mkdirs() }
+        get() = _tracesDir ?: File(context.filesDir, "traces").apply {
+            mkdirs()
+            _tracesDir = this
+        }
 
     private lateinit var context: Context
     private lateinit var gson: Gson
+    private val eventTypeToken = object : TypeToken<PipelineEvent>() {}.type
 
     /**
      * Initialize the manager with application context and Gson instance.
@@ -33,7 +38,6 @@ object TraceStorageManager {
      */
     data class TraceMetadata(
         val filename: String,
-        val duration: Long,
         val recordCount: Int
     )
 
@@ -54,10 +58,8 @@ object TraceStorageManager {
                 try {
                     val events = loadTrace(file.name)
                     if (events.isNotEmpty()) {
-                        val duration = calculateDuration(events)
                         TraceMetadata(
                             filename = file.name,
-                            duration = duration,
                             recordCount = events.size
                         )
                     } else null
@@ -65,7 +67,7 @@ object TraceStorageManager {
                     null
                 }
             }
-            ?.sortedByDescending { it.duration }
+            ?.sortedByDescending { it.recordCount }
             ?: emptyList()
     }
 
@@ -115,11 +117,21 @@ object TraceStorageManager {
 
         try {
             val file = File(tracesDir, filename)
-            file.writeText(
+            val tempFile = File(tracesDir, "$filename.tmp")
+
+            tempFile.writeText(
                 events.joinToString("\n") { event ->
                     gson.toJson(event)
-                }
+                } + "\n"
             )
+
+            if (!tempFile.renameTo(file)) {
+                tempFile.delete()
+                return@withContext Result.failure(
+                    IllegalStateException("Failed to write trace file")
+                )
+            }
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -152,18 +164,6 @@ object TraceStorageManager {
      * Uses Gson's type token to handle sealed class hierarchy.
      */
     private fun parseEvent(line: String): PipelineEvent? {
-        val typeToken = object : TypeToken<PipelineEvent>() {}.type
-        return gson.fromJson<PipelineEvent>(line, typeToken)
-    }
-
-    /**
-     * Calculate duration from events based on PositionUpdate timestamps.
-     * Duration is calculated from first to last position update.
-     */
-    private fun calculateDuration(events: List<PipelineEvent>): Long {
-        // Note: Current PipelineEvent doesn't include timestamp
-        // This is a placeholder implementation
-        // In production, you'd add timestamp to PositionUpdate or track separately
-        return 0L
+        return gson.fromJson<PipelineEvent>(line, eventTypeToken)
     }
 }
