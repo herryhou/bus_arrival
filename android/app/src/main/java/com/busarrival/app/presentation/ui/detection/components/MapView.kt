@@ -159,11 +159,29 @@ fun MapView(
 
                 // Helper function to transform coordinates to screen space (must be defined before tile drawing)
                 // Uses baseZ for consistent coordinates across zoom levels (prevents jumping at scale boundaries)
+                /**
+                 * Convert longitude to screen X coordinate.
+                 *
+                 * Uses baseZ for stable world coordinates across zoom changes.
+                 * Geographic → screen conversion is invariant to tileZ changes.
+                 *
+                 * @param lon Geographic longitude
+                 * @return Screen X coordinate in pixels
+                 */
                 fun toScreenX(lon: Double): Float {
                     val worldX = lonToPixelX(lon, baseZ) - lonToPixelX(center.lon, baseZ)
                     return worldX * scale + offset.x + canvasWidth / 2
                 }
 
+                /**
+                 * Convert latitude to screen Y coordinate.
+                 *
+                 * Uses baseZ for stable world coordinates across zoom changes.
+                 * Geographic → screen conversion is invariant to tileZ changes.
+                 *
+                 * @param lat Geographic latitude
+                 * @return Screen Y coordinate in pixels
+                 */
                 fun toScreenY(lat: Double): Float {
                     val worldY = latToPixelY(lat, baseZ) - latToPixelY(center.lat, baseZ)
                     return worldY * scale + offset.y + canvasHeight / 2
