@@ -159,14 +159,15 @@ fun MapView(
 
                 // Helper function to transform coordinates to screen space (must be defined before tile drawing)
                 // Uses tileZ to match tile coordinate system for proper alignment at all zoom levels
+                // Transform MUST match tile transform: scale from origin, then translate by offset+center
                 fun toScreenX(lon: Double): Float {
-                    val pixelX = lonToPixelX(lon, tileZ) - lonToPixelX(center.lon, tileZ) + canvasWidth / 2
-                    return pixelX * scale + offset.x
+                    val worldX = lonToPixelX(lon, tileZ) - lonToPixelX(center.lon, tileZ)
+                    return worldX * scale + offset.x + canvasWidth / 2
                 }
 
                 fun toScreenY(lat: Double): Float {
-                    val pixelY = latToPixelY(lat, tileZ) - latToPixelY(center.lat, tileZ) + canvasHeight / 2
-                    return pixelY * scale + offset.y
+                    val worldY = latToPixelY(lat, tileZ) - latToPixelY(center.lat, tileZ)
+                    return worldY * scale + offset.y + canvasHeight / 2
                 }
 
                 // Draw tiles with single outer transform (position in world space, let transform handle scale/offset)
