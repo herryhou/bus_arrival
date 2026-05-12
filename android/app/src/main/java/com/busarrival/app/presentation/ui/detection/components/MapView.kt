@@ -81,7 +81,7 @@ fun MapView(
 
     // Log state on recomposition
     android.util.Log.d("MapView", "State: scale=$scale, offset=$offset, cacheSize=${tileCache.size}")
-    val centerLatLon = remember {
+    val centerLatLon = remember(routeData) {
         routeData?.let {
             val bounds = it.calculateBoundingBox()
             if (bounds != null) {
@@ -107,12 +107,14 @@ fun MapView(
         (baseZ + (kotlin.math.ln(scale.toDouble()) / kotlin.math.ln(2.0)).toInt()).coerceIn(12, 18)
     }
 
-    LaunchedEffect(tileZ) {
+    // Load tiles when zoom level OR route center changes
+    // Key on both tileZ and centerLatLon to ensure tiles reload for new routes
+    LaunchedEffect(tileZ, centerLatLon) {
         centerLatLon ?: return@LaunchedEffect
 
-        android.util.Log.d("MapView", "Zoom level changed to z=$tileZ (scale=$scale), loading tiles...")
+        android.util.Log.d("MapView", "Loading tiles: z=$tileZ (scale=$scale), center=$centerLatLon")
 
-        // Load tiles for the new zoom level
+        // Load tiles for the new zoom level and/or route center
         val tiles = kotlin.runCatching {
             loadTilesForZoom(centerLatLon, tileZ, tileDiskCache)
         }.getOrNull()
@@ -307,12 +309,12 @@ fun MapView(
                     style = Stroke(width = strokeWidth, pathEffect = null)
                 )
 
-                // Draw stops with scaled radius
+                // Draw stops with scaled radius (interpolated along segments)
                 val stopRadius = 8f / scale.coerceAtLeast(0.5f)
                 routeData.stops.forEach { stop ->
-                    val node = routeData.findNodeAtProgress(stop.progressCm)
-                    if (node != null) {
-                        val ll = routeData.cmToLatLon(node.xCm, node.yCm)
+                    val pos = routeData.interpolatePosition(stop.progressCm)
+                    if (pos != null) {
+                        val ll = routeData.cmToLatLon(pos.first, pos.second)
                         val px = toScreenX(ll.lon)
                         val py = toScreenY(ll.lat)
                         drawCircle(
@@ -323,11 +325,11 @@ fun MapView(
                     }
                 }
 
-                // Draw current position (live or replay) with scaled radius
+                // Draw current position (live or replay) with scaled radius (interpolated)
                 // In replay mode, currentSCm is already updated by ViewModel's updateUiForPosition()
-                val currentNode = routeData.findNodeAtProgress(currentSCm)
-                if (currentNode != null) {
-                    val ll = routeData.cmToLatLon(currentNode.xCm, currentNode.yCm)
+                val pos = routeData.interpolatePosition(currentSCm)
+                if (pos != null) {
+                    val ll = routeData.cmToLatLon(pos.first, pos.second)
                     val px = toScreenX(ll.lon)
                     val py = toScreenY(ll.lat)
 
@@ -435,6 +437,41 @@ private fun RouteData.findNodeAtProgress(progressCm: Int): RouteNode? {
         lastNode = node
     }
     return lastNode
+}
+
+/**
+ * Interpolate position along route at given progress.
+ * Returns interpolated (x, y) coordinates in centimeters.
+ */
+private fun RouteData.interpolatePosition(progressCm: Int): Pair<Int, Int>? {
+    if (nodes.isEmpty()) return null
+
+    // Find the segment we're on
+    var prevNode: RouteNode? = null
+    for (node in nodes) {
+        if (node.cumDistCm >= progressCm) {
+            // Found the node we've passed or reached
+            prevNode?.let { prev ->
+                // We're in the middle of a segment, interpolate
+                val segmentProgressCm = progressCm - prev.cumDistCm
+                val segmentLenCm = prev.segLenMm / 10  // Convert mm to cm
+
+                if (segmentLenCm > 0) {
+                    // Interpolate along the segment
+                    val ratio = segmentProgressCm.toFloat() / segmentLenCm.toFloat()
+                    val x = prev.xCm + (prev.dxCm.toFloat() * ratio).toInt()
+                    val y = prev.yCm + (prev.dyCm.toFloat() * ratio).toInt()
+                    return Pair(x, y)
+                }
+            }
+            // At or before first node, return node position
+            return Pair(node.xCm, node.yCm)
+        }
+        prevNode = node
+    }
+
+    // Past the last node, return last node position
+    return prevNode?.let { Pair(it.xCm, it.yCm) }
 }
 
 private data class BoundingBoxData(
