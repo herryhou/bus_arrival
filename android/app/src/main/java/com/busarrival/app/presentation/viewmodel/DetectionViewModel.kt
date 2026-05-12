@@ -166,8 +166,8 @@ class DetectionViewModel(
         }
 
         val intent = Intent(getApplication(), DetectionService::class.java)
-        getApplication<Application>().startService(intent)
-        getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        getApplication().startService(intent)
+        getApplication().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
     /**
@@ -175,7 +175,7 @@ class DetectionViewModel(
      */
     fun stopDetection() {
         service?.let {
-            getApplication<Application>().unbindService(serviceConnection)
+            getApplication().unbindService(serviceConnection)
         }
         service = null
         DetectionService.stopService(getApplication())
@@ -393,13 +393,16 @@ class DetectionViewModel(
     /**
      * Update UI state for a given replay position.
      * Finds the relevant PositionUpdate events and applies them to UI.
+     *
+     * LIMITATION: PositionUpdate events don't have timestamps, so we map position to event index.
+     * This is approximate since events aren't guaranteed to be evenly spaced in time.
+     * A more accurate approach would require adding timestamps to PipelineEvent.
      */
     private fun updateUiForPosition(position: Long) {
         // Find the most recent PositionUpdate before this position
         val positionUpdates = replayEvents.filterIsInstance<PipelineEvent.PositionUpdate>()
         val latestUpdate = positionUpdates.lastOrNull { event ->
-            // We need to match position to event index since we don't have timestamps in PositionUpdate
-            // For now, use a simple approach: map position to event index
+            // Map position to event index (approximate - see limitation above)
             val eventIndex = replayEvents.indexOf(event)
             val targetIndex = (position.toFloat() / _replayState.value.traceDuration * replayEvents.size).toInt()
             eventIndex <= targetIndex
@@ -421,21 +424,22 @@ class DetectionViewModel(
         val lastDeparture = currentEvents.filterIsInstance<PipelineEvent.Departure>().lastOrNull()
 
         // Update current stop based on last arrival/departure
-        when {
-            lastArrival != null && (lastDeparture == null || lastArrival.stopIndex > lastDeparture.stopIndex) -> {
-                _uiState.value = _uiState.value.copy(currentStop = lastArrival.stopIndex)
-            }
-            lastDeparture != null -> {
-                _uiState.value = _uiState.value.copy(currentStop = lastDeparture.stopIndex + 1)
-            }
+        // State machine: at stop if arrived after last departure, otherwise at next stop
+        val currentStop = when {
+            lastArrival == null && lastDeparture == null -> -1 // No stop events yet
+            lastDeparture == null -> lastArrival.stopIndex // Arrived, never departed
+            lastArrival == null -> lastDeparture.stopIndex + 1 // Departed, never arrived
+            lastArrival.stopIndex > lastDeparture.stopIndex -> lastArrival.stopIndex // Arrived after departure
+            else -> lastDeparture.stopIndex + 1 // Departed after arrival
         }
+        _uiState.value = _uiState.value.copy(currentStop = currentStop)
     }
 
     override fun onCleared() {
         super.onCleared()
         playbackJob?.cancel()
         service?.let {
-            getApplication<Application>().unbindService(serviceConnection)
+            getApplication().unbindService(serviceConnection)
         }
     }
 }
