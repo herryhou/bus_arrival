@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.busarrival.app.BuildConfig
 import com.busarrival.app.data.cache.TileCache
 import com.busarrival.app.domain.model.ReplayState
 import com.busarrival.app.domain.model.RouteData
@@ -182,7 +183,11 @@ fun MapView(
                  */
                 fun toScreenX(lon: Double): Float {
                     val worldX = lonToPixelX(lon, baseZ) - lonToPixelX(center.lon, baseZ)
-                    return worldX * scale + offset.x + canvasWidth / 2
+                    val result = worldX * scale + offset.x + canvasWidth / 2
+                    if (BuildConfig.DEBUG) {
+                        assert(result.isFinite()) { "Non-finite screen X coordinate: $result" }
+                    }
+                    return result
                 }
 
                 /**
@@ -196,7 +201,11 @@ fun MapView(
                  */
                 fun toScreenY(lat: Double): Float {
                     val worldY = latToPixelY(lat, baseZ) - latToPixelY(center.lat, baseZ)
-                    return worldY * scale + offset.y + canvasHeight / 2
+                    val result = worldY * scale + offset.y + canvasHeight / 2
+                    if (BuildConfig.DEBUG) {
+                        assert(result.isFinite()) { "Non-finite screen Y coordinate: $result" }
+                    }
+                    return result
                 }
 
                 // Draw tiles with single outer transform (position in world space, let transform handle scale/offset)
@@ -278,6 +287,12 @@ fun MapView(
                                 val tileWorldX = worldX(tileNW, center.lon, baseZ)
                                 val tileWorldY = worldY(tileNE, center.lat, baseZ)
 
+                                if (BuildConfig.DEBUG) {
+                                    assert(tileWorldX.isFinite() && tileWorldY.isFinite()) {
+                                        "Non-finite world coordinates: x=$tileWorldX, y=$tileWorldY"
+                                    }
+                                }
+
                                 tilesDrawn++
                                 if (tilesDrawn <= 5) { // Log first 5 drawn with full details
                                     // Calculate screen position for debugging
@@ -302,6 +317,12 @@ fun MapView(
                                     1f
                                 }
                                 val totalScale = zoomScaleFactor * fallbackScaleFactor
+
+                                if (BuildConfig.DEBUG) {
+                                    assert(totalScale > 0f && totalScale < 1000f) {
+                                        "Invalid scale factor: $totalScale (tileZ=$tileZ, baseZ=$baseZ, actualTileZ=$actualTileZ)"
+                                    }
+                                }
 
                                 if (totalScale != 1f) {
                                     android.util.Log.d("MapView", "  SCALING: total=$totalScale (zoom=$zoomScaleFactor, fallback=$fallbackScaleFactor)")
