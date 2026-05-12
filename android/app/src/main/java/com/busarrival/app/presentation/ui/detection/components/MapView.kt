@@ -283,9 +283,8 @@ fun MapView(
                     android.util.Log.d("MapView", "COORDINATES: minTileNW=${tileXToLon(minTileX, tileZ)}, maxTileNE=${tileYToLat(maxTileY, tileZ)}")
                 } // End outer withTransform for tiles
 
-                // Draw route and markers in screen space (no scale transform on stroke width)
-                // This keeps line width and dot sizes constant regardless of zoom
-                // Draw route path with anti-aliasing
+                // Draw route and markers with scale-appropriate stroke width
+                // Stroke width scales inversely with zoom to maintain consistent visual weight
                 val path = Path()
                 routeData.nodes.forEachIndexed { index, node ->
                     val ll = routeData.cmToLatLon(node.xCm, node.yCm)
@@ -299,13 +298,16 @@ fun MapView(
                     }
                 }
 
+                // Scale stroke width by zoom level (thinner at high zoom, thicker at low zoom)
+                val strokeWidth = 4f / scale.coerceAtLeast(0.5f)
                 drawPath(
                     path = path,
                     color = Color.Blue,
-                    style = Stroke(width = 4f, pathEffect = null)
+                    style = Stroke(width = strokeWidth, pathEffect = null)
                 )
 
-                // Draw stops
+                // Draw stops with scaled radius
+                val stopRadius = 8f / scale.coerceAtLeast(0.5f)
                 routeData.stops.forEach { stop ->
                     val node = routeData.findNodeAtProgress(stop.progressCm)
                     if (node != null) {
@@ -314,13 +316,13 @@ fun MapView(
                         val py = toScreenY(ll.lat)
                         drawCircle(
                             color = Color.Red,
-                            radius = 8f,
+                            radius = stopRadius,
                             center = Offset(px, py)
                         )
                     }
                 }
 
-                // Draw current position (live or replay)
+                // Draw current position (live or replay) with scaled radius
                 // In replay mode, currentSCm is already updated by ViewModel's updateUiForPosition()
                 val currentNode = routeData.findNodeAtProgress(currentSCm)
                 if (currentNode != null) {
@@ -335,9 +337,10 @@ fun MapView(
                         Color.Green // Live mode: green marker
                     }
 
+                    val markerRadius = 12f / scale.coerceAtLeast(0.5f)
                     drawCircle(
                         color = markerColor,
-                        radius = 12f,
+                        radius = markerRadius,
                         center = Offset(px, py)
                     )
                 }
