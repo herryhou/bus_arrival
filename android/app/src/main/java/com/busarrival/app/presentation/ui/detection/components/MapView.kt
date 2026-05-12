@@ -127,8 +127,15 @@ fun MapView(
                             val oldScale = scale
                             val newScale = (oldScale * zoom).coerceIn(0.1f, 10f)
 
+                            // Convert centroid from screen coordinates to centered coordinates
+                            // Screen origin is top-left, our offset origin is center
+                            val centroidCentered = centroid - Offset(size.width / 2f, size.height / 2f)
+
+                            // Adjust offset to keep pinch point stable: zoom around centroid
+                            // Formula: offset += (centroid - offset) * (1 - newScale/oldScale)
                             val oldOffset = offset
-                            val newOffset = oldOffset + (centroid - oldOffset) * (1 - newScale / oldScale) + pan
+                            val scaleChange = 1 - newScale / oldScale
+                            val newOffset = oldOffset + (centroidCentered - oldOffset) * scaleChange + pan
 
                             viewModel.updateMapState(newScale, newOffset)
                         }
@@ -290,7 +297,7 @@ fun MapView(
                 }
 
                 // Scale stroke width by zoom level (thinner at high zoom, thicker at low zoom)
-                val strokeWidth = 4f / scale.coerceAtLeast(0.5f)
+                val strokeWidth = 8f / scale.coerceAtLeast(0.5f)
                 drawPath(
                     path = path,
                     color = Color.Blue,
