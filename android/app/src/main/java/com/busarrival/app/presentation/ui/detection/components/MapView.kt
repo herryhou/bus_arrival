@@ -97,23 +97,6 @@ fun MapView(
         (baseZ + (kotlin.math.ln(scale.toDouble()) / kotlin.math.ln(2.0)).toInt()).coerceIn(12, 18)
     }
 
-    // Track previous tileZ to detect zoom boundary crossings
-    // When tileZ changes, adjust offset to prevent jumping
-    val prevTileZ = remember { mutableIntStateOf(tileZ) }
-    SideEffect {
-        if (prevTileZ.intValue != tileZ) {
-            val zDiff = tileZ - prevTileZ.intValue
-            if (zDiff != 0) {
-                // Adjust offset to compensate for coordinate system change
-                // When tileZ increases by 1, world coordinates double, so halve offset
-                // When tileZ decreases by 1, world coordinates halve, so double offset
-                val adjustment = 2.0f.pow(-zDiff)
-                viewModel.updateMapState(scale, offset * adjustment)
-                android.util.Log.d("MapView", "tileZ changed: ${prevTileZ.intValue} -> $tileZ, adjusting offset by $adjustment")
-            }
-            prevTileZ.intValue = tileZ
-        }
-    }
 
     // Single LaunchedEffect handles both initial preload and subsequent zoom/route changes
     // Keys on tileZ, centerLatLon, and cache state to avoid duplicate loading
