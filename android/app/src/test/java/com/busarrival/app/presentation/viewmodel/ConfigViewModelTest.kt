@@ -1,5 +1,6 @@
 package com.busarrival.app.presentation.viewmodel
 
+import android.app.Application
 import android.net.Uri
 import com.busarrival.app.data.preferences.DetectionPreferences
 import com.busarrival.app.data.storage.RouteMetadata
@@ -19,8 +20,7 @@ import kotlin.test.assertTrue
 class ConfigViewModelTest {
 
     private lateinit var viewModel: ConfigViewModel
-    private lateinit var mockRouteStorage: RouteStorageManager
-    private lateinit var mockPreferences: DetectionPreferences
+    private lateinit var mockApplication: Application
 
     private val testDispatcher = UnconfinedTestDispatcher()
 
@@ -28,17 +28,10 @@ class ConfigViewModelTest {
     fun setup() {
         Dispatchers.setMain(testDispatcher)
 
-        mockRouteStorage = mockk()
-        mockPreferences = mockk()
+        mockApplication = mockk()
+        every { mockApplication.applicationContext } returns mockApplication
 
-        every { mockRouteStorage.loadAllMetadata() } returns emptyList()
-        every { mockPreferences.activeRouteUuid } returns null
-        every { mockPreferences.getParameters() } returns DetectionParameters.defaults
-
-        viewModel = ConfigViewModel(
-            routeStorage = mockRouteStorage,
-            preferences = mockPreferences
-        )
+        viewModel = ConfigViewModel(mockApplication)
     }
 
     @After

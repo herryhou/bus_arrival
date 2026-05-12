@@ -3,7 +3,7 @@ package com.busarrival.app.presentation.ui.detection.components
 import androidx.compose.ui.geometry.Offset
 import org.junit.Test
 import kotlin.test.assertEquals
-import com.busarrival.app.presentation.ui.detection.components.MapCoordinateUtils.*
+import kotlin.math.pow
 
 /**
  * Tests for fallback tile scaling and alignment.

@@ -2,6 +2,7 @@ package com.busarrival.app.presentation.ui.detection.components
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.math.pow
 
 /**
  * Tests to verify route stroke width and marker radii scale correctly with zoom level.
@@ -29,7 +30,7 @@ class RouteScalingTest {
      * Helper functions from MapCoordinateUtils
      */
     private fun lonToPixelX(lon: Double, zoom: Int): Float {
-        val x = (lon + 180.0) / 360.0 * kotlin.math.pow(2.0, zoom)
+        val x = (lon + 180.0) / 360.0 * pow(2.0, zoom)
         return (x * 256).toFloat()
     }
 

@@ -44,8 +44,8 @@ class HistoryViewModelTest {
     @Test
     fun `applyFilter with Today queries correct time range`() = runTest {
         val arrivals = listOf(
-            ArrivalEntity(1, 1001, stopIndex = 0, probability = 200),
-            ArrivalEntity(2, now, stopIndex = 1, probability = 180)
+            ArrivalEntity(1, 1001, stopIndex = 0, sCm = 0, probability = 200, routeId = "test_route"),
+            ArrivalEntity(2, now, stopIndex = 1, sCm = 0, probability = 180, routeId = "test_route")
         )
         every { mockRepository.getArrivalsByTimeRange(any(), any()) } returns flow { emit(arrivals) }
         every { mockRepository.getDeparturesByTimeRange(any(), any()) } returns flow { emit(emptyList()) }
@@ -86,9 +86,9 @@ class HistoryViewModelTest {
     @Test
     fun `events are sorted by timestamp descending`() = runTest {
         val arrivals = listOf(
-            ArrivalEntity(1, 1000, stopIndex = 0, probability = 200),
-            ArrivalEntity(2, 3000, stopIndex = 1, probability = 180),
-            ArrivalEntity(3, 2000, stopIndex = 2, probability = 190)
+            ArrivalEntity(1, 1000, stopIndex = 0, sCm = 0, probability = 200, routeId = "test_route"),
+            ArrivalEntity(2, 3000, stopIndex = 1, sCm = 0, probability = 180, routeId = "test_route"),
+            ArrivalEntity(3, 2000, stopIndex = 2, sCm = 0, probability = 190, routeId = "test_route")
         )
         every { mockRepository.getArrivalsByTimeRange(any(), any()) } returns flow { emit(arrivals) }
         every { mockRepository.getDeparturesByTimeRange(any(), any()) } returns flow { emit(emptyList()) }
@@ -104,10 +104,10 @@ class HistoryViewModelTest {
     @Test
     fun `arrivals and departures are combined into event list`() = runTest {
         val arrivals = listOf(
-            ArrivalEntity(1, 1000, stopIndex = 0, probability = 200)
+            ArrivalEntity(1, 1000, stopIndex = 0, sCm = 0, probability = 200, routeId = "test_route")
         )
         val departures = listOf(
-            DepartureEntity(1, 2000, stopIndex = 0, dwellTimeS = 30)
+            DepartureEntity(1, 2000, stopIndex = 0, sCm = 0, dwellTimeS = 30, routeId = "test_route")
         )
         every { mockRepository.getArrivalsByTimeRange(any(), any()) } returns flow { emit(arrivals) }
         every { mockRepository.getDeparturesByTimeRange(any(), any()) } returns flow { emit(departures) }
