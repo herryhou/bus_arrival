@@ -23,6 +23,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.busarrival.app.presentation.ui.detection.components.MapView
 import com.busarrival.app.presentation.ui.detection.components.StatusPanel
+import com.busarrival.app.presentation.ui.detection.components.TimelineScrubber
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
@@ -46,6 +47,7 @@ fun DetectionScreen(
     val uiState by viewModel.uiState.collectAsState()
     val events by viewModel.events.collectAsState()
     val activeRoute by viewModel.activeRoute.collectAsState()
+    val replayState by viewModel.replayState.collectAsState()
     val context = LocalContext.current
 
     val locationPermissions = rememberMultiplePermissionsState(
@@ -84,6 +86,18 @@ fun DetectionScreen(
                     .weight(0.4f)
                     .fillMaxWidth()
             )
+
+            // Timeline scrubber for replay mode
+            if (replayState.traceFile != null) {
+                TimelineScrubber(
+                    replayState = replayState,
+                    onPlayPause = { viewModel.playPause() },
+                    onSeek = { viewModel.seekTo(it) },
+                    onSpeedChange = { viewModel.setPlaybackSpeed(it) },
+                    onToggleCameraFollow = { viewModel.toggleReplayCameraFollow() },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 
