@@ -261,7 +261,8 @@ fun MapView(
                                 val tileNW = tileXToLon(tileX, tileZ)
                                 val tileNE = tileYToLat(tileY, tileZ)
 
-                                // Position in world space using baseZ for consistent coordinates
+                                // Position in baseZ world space for stable coordinates across zoom
+                                // Tile geographic bounds computed from requested tileZ, then converted to baseZ
                                 val tileWorldX = worldX(tileNW, center.lon, baseZ)
                                 val tileWorldY = worldY(tileNE, center.lat, baseZ)
 
