@@ -113,6 +113,9 @@ fun MapView(
                 }
             }
 
+    // Dynamically load higher zoom tiles when zoom level changes (not on every scale change)
+    val baseZ = 15
+
     // Camera follow: center map on current position when enabled
     val shouldFollow = isCameraFollowEnabled || replayState.cameraFollowEnabled
     LaunchedEffect(currentSCm, shouldFollow, routeData) {
@@ -130,9 +133,6 @@ fun MapView(
             }
         }
     }
-
-    // Dynamically load higher zoom tiles when zoom level changes (not on every scale change)
-    val baseZ = 15
     val tileZ =
             remember(scale) {
                 (baseZ + (kotlin.math.ln(scale.toDouble()) / kotlin.math.ln(2.0)).toInt()).coerceIn(
