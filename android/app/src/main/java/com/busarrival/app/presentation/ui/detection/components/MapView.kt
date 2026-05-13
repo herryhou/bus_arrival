@@ -56,8 +56,8 @@ data class LatLon(val lat: Double, val lon: Double)
 fun RouteData.cmToLatLon(xCm: Int, yCm: Int): LatLon {
     // Match Rust code exactly: spherical Earth R = 6371 km
     val R_CM = 637100000.0
-    val originLat = 20.0
-    val originLon = 120.0
+    val originLat = this.originLat.toDouble() / 1e6
+    val originLon = this.originLon.toDouble() / 1e6
     val latAvg = avgLat.toDouble() / 1e6
 
     val latAvgRad = latAvg * PI / 180.0
