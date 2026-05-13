@@ -142,13 +142,13 @@ fun MapView(
             }
 
     // Single LaunchedEffect handles both initial preload and subsequent zoom/route changes
-    // Keys on tileZ, centerLatLon, and cache state to avoid duplicate loading
-    LaunchedEffect(tileZ, centerLatLon, tileCache.size) {
+    // Keys on tileZ and centerLatLon to avoid duplicate loading
+    LaunchedEffect(tileZ, centerLatLon) {
         centerLatLon ?: return@LaunchedEffect
 
         android.util.Log.d(
                 "MapView",
-                "Loading tiles: z=$tileZ (scale=$scale), center=$centerLatLon, cacheSize=${tileCache.size}"
+                "Loading tiles: z=$tileZ (scale=$scale), center=$centerLatLon"
         )
 
         // Calculate fetch range using same formula as draw loop
