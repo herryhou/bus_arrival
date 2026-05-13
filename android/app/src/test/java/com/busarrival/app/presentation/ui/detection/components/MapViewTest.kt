@@ -1,17 +1,17 @@
 package com.busarrival.app.presentation.ui.detection.components
 
-import kotlin.math.pow
 import kotlin.math.PI
 import kotlin.math.asinh
-import kotlin.math.tan
 import kotlin.math.atan
 import kotlin.math.exp
-import org.junit.Test
+import kotlin.math.pow
+import kotlin.math.tan
 import kotlin.test.assertEquals
+import org.junit.Test
 
 /**
- * Tests for map tile rendering correctness across zoom scales.
- * Verifies tiles stitch together without gaps at zoom levels 1, 2, 4.
+ * Tests for map tile rendering correctness across zoom scales. Verifies tiles stitch together
+ * without gaps at zoom levels 1, 2, 4.
  */
 class MapViewTest {
 
@@ -54,7 +54,8 @@ class MapViewTest {
         val centerLat = 20.0
 
         val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(15)).toInt()
-        val centerTileY = ((1.0 - asinh(tan(centerLat * PI / 180.0)) / PI) / 2.0 * 2.0.pow(15)).toInt()
+        val centerTileY =
+                ((1.0 - asinh(tan(centerLat * PI / 180.0)) / PI) / 2.0 * 2.0.pow(15)).toInt()
 
         val centerTileNW = tileXToLon(centerTileX, 15)
         val eastTileNW = tileXToLon(centerTileX + 1, 15)

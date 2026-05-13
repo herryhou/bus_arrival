@@ -1,20 +1,20 @@
 package com.busarrival.app.presentation.ui.detection.components
 
-import kotlin.math.pow
 import kotlin.math.PI
 import kotlin.math.asinh
-import kotlin.math.tan
 import kotlin.math.atan
 import kotlin.math.exp
-import org.junit.Test
+import kotlin.math.pow
+import kotlin.math.tan
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.Test
 
 /**
  * Regression tests that PREVENT the tile positioning bug from returning.
  *
- * **BUG FIXED:** worldX/Y were using baseZ=15, but tiles are at tileZ=17-18.
- * This caused all tiles to stack at same position, creating visual mess.
+ * **BUG FIXED:** worldX/Y were using baseZ=15, but tiles are at tileZ=17-18. This caused all tiles
+ * to stack at same position, creating visual mess.
  *
  * **THE FIX:** worldX/Y now use tileZ (requested zoom level) for positioning.
  *
@@ -23,8 +23,8 @@ import kotlin.test.assertTrue
  * - If tileZ calculation is wrong (doesn't match user scale)
  * - If transform chain is modified incorrectly
  *
- * **HOW:** Tests simulate EXACT rendering with tileZ parameter.
- * The regression test explicitly compares baseZ vs tileZ to catch the bug.
+ * **HOW:** Tests simulate EXACT rendering with tileZ parameter. The regression test explicitly
+ * compares baseZ vs tileZ to catch the bug.
  */
 class MapViewRenderingTest {
 
@@ -72,23 +72,26 @@ class MapViewRenderingTest {
     //     translate(left = offset.x + canvasWidth / 2, top = offset.y + canvasHeight / 2)
     //     scale(scaleX = scale, scaleY = scale, pivot = Offset.Zero)
     // })
-    private fun transformToWorldThenScreen(worldX: Float, scale: Float, offset: Float, canvasCenter: Float): Float {
+    private fun transformToWorldThenScreen(
+            worldX: Float,
+            scale: Float,
+            offset: Float,
+            canvasCenter: Float
+    ): Float {
         // Step 1: Scale by user scale around Zero
         val scaledX = worldX * scale
         // Step 2: Translate by offset + canvas center
         return scaledX + offset + canvasCenter
     }
 
-    /**
-     * Test: Verify tile boundaries with EXACT transform chain (no pan offset)
-     */
+    /** Test: Verify tile boundaries with EXACT transform chain (no pan offset) */
     @Test
     fun tileBoundariesWithExactTransform() {
         val centerLon = 120.0
         val scale = 2f
-        val offset = 0f  // No pan
+        val offset = 0f // No pan
         val canvasWidth = 1000f
-        val tileZ = 16  // Requested zoom level
+        val tileZ = 16 // Requested zoom level
 
         val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(15)).toInt()
 
@@ -110,13 +113,11 @@ class MapViewRenderingTest {
         assertEquals(0f, gap, 0.1f, "With EXACT transform: tiles should have no gap")
     }
 
-    /**
-     * REGRESSION TEST: If someone uses baseZ instead of tileZ, this FAILS
-     */
+    /** REGRESSION TEST: If someone uses baseZ instead of tileZ, this FAILS */
     @Test
     fun regressionUsingBaseZInsteadOfTileZ() {
         val centerLon = 120.0
-        val tileZ = 18  // High zoom level where bug is obvious
+        val tileZ = 18 // High zoom level where bug is obvious
 
         val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(15)).toInt()
         val tile1_NW = tileXToLon(centerTileX, tileZ)
@@ -139,13 +140,13 @@ class MapViewRenderingTest {
 
         // BROKEN: spacing will be WRONG (not 256px)
         val isBroken = kotlin.math.abs(spacing_BROKEN - 256f) > 100f
-        kotlin.test.assertTrue(isBroken,
-            "Using baseZ at tileZ=18 gives WRONG spacing (actual: $spacing_BROKEN)")
+        kotlin.test.assertTrue(
+                isBroken,
+                "Using baseZ at tileZ=18 gives WRONG spacing (actual: $spacing_BROKEN)"
+        )
     }
 
-    /**
-     * Test: Verify tile boundaries at different scales
-     */
+    /** Test: Verify tile boundaries at different scales */
     @Test
     fun tileBoundariesAtScales1_2_4() {
         val centerLon = 120.0
@@ -162,8 +163,10 @@ class MapViewRenderingTest {
         // Test at scale 1, 2, 4
         val scales = listOf(1f, 2f, 4f)
         for (scale in scales) {
-            val tile1_screenX = transformToWorldThenScreen(tile1_worldX, scale, offset, canvasWidth / 2)
-            val tile2_screenX = transformToWorldThenScreen(tile2_worldX, scale, offset, canvasWidth / 2)
+            val tile1_screenX =
+                    transformToWorldThenScreen(tile1_worldX, scale, offset, canvasWidth / 2)
+            val tile2_screenX =
+                    transformToWorldThenScreen(tile2_worldX, scale, offset, canvasWidth / 2)
             val tile1_screenEnd = tile1_screenX + tileSize * scale
             val gap = tile2_screenX - tile1_screenEnd
 
@@ -171,14 +174,12 @@ class MapViewRenderingTest {
         }
     }
 
-    /**
-     * Test: Verify with pan offset (user drags map)
-     */
+    /** Test: Verify with pan offset (user drags map) */
     @Test
     fun tileBoundariesWithPanOffset() {
         val centerLon = 120.0
         val scale = 2f
-        val offset = 50f  // User panned 50px
+        val offset = 50f // User panned 50px
         val canvasWidth = 1000f
 
         val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(15)).toInt()
@@ -196,9 +197,7 @@ class MapViewRenderingTest {
         assertEquals(0f, gap, 0.1f, "With pan offset: tiles should still stitch perfectly")
     }
 
-    /**
-     * Test: Verify Y axis stitching (vertical)
-     */
+    /** Test: Verify Y axis stitching (vertical) */
     @Test
     fun verticalTileBoundariesAlign() {
         val centerLat = 20.0
@@ -206,24 +205,25 @@ class MapViewRenderingTest {
         val offset = 0f
         val canvasHeight = 1000f
 
-        val centerTileY = ((1.0 - asinh(tan(centerLat * PI / 180.0)) / PI) / 2.0 * 2.0.pow(15)).toInt()
+        val centerTileY =
+                ((1.0 - asinh(tan(centerLat * PI / 180.0)) / PI) / 2.0 * 2.0.pow(15)).toInt()
         val tile1_NE = tileYToLat(centerTileY, 15)
         val tile2_NE = tileYToLat(centerTileY + 1, 15)
 
         val tile1_worldY = worldY(tile1_NE, centerLat, 15)
         val tile2_worldY = worldY(tile2_NE, centerLat, 15)
 
-        val tile1_screenY = transformToWorldThenScreen(tile1_worldY, scale, offset, canvasHeight / 2)
-        val tile2_screenY = transformToWorldThenScreen(tile2_worldY, scale, offset, canvasHeight / 2)
+        val tile1_screenY =
+                transformToWorldThenScreen(tile1_worldY, scale, offset, canvasHeight / 2)
+        val tile2_screenY =
+                transformToWorldThenScreen(tile2_worldY, scale, offset, canvasHeight / 2)
         val tile1_screenEnd = tile1_screenY + tileSize * scale
 
         val gap = tile2_screenY - tile1_screenEnd
         assertEquals(0f, gap, 0.1f, "Vertical: tiles should stitch perfectly")
     }
 
-    /**
-     * Test: Simulate actual rendering and verify no gaps
-     */
+    /** Test: Simulate actual rendering and verify no gaps */
     @Test
     fun simulateActualRendering() {
         val centerLon = 120.0
@@ -234,7 +234,8 @@ class MapViewRenderingTest {
         val canvasHeight = 1000f
 
         val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(15)).toInt()
-        val centerTileY = ((1.0 - asinh(tan(centerLat * PI / 180.0)) / PI) / 2.0 * 2.0.pow(15)).toInt()
+        val centerTileY =
+                ((1.0 - asinh(tan(centerLat * PI / 180.0)) / PI) / 2.0 * 2.0.pow(15)).toInt()
 
         // Get world coordinates for center, east, and south tiles
         val center_NW = tileXToLon(centerTileX, 15)
@@ -249,7 +250,8 @@ class MapViewRenderingTest {
 
         // Transform to screen space
         val centerScreenX = transformToWorldThenScreen(centerWorldX, scale, offset, canvasWidth / 2)
-        val centerScreenY = transformToWorldThenScreen(centerWorldY, scale, offset, canvasHeight / 2)
+        val centerScreenY =
+                transformToWorldThenScreen(centerWorldY, scale, offset, canvasHeight / 2)
         val eastScreenX = transformToWorldThenScreen(eastWorldX, scale, offset, canvasWidth / 2)
         val southScreenY = transformToWorldThenScreen(southWorldY, scale, offset, canvasHeight / 2)
 
@@ -264,9 +266,7 @@ class MapViewRenderingTest {
         assertEquals(center_bottom, southScreenY, 0.1f, "South boundary: no gap")
     }
 
-    /**
-     * Test: Verify fallback tiles align in screen space
-     */
+    /** Test: Verify fallback tiles align in screen space */
     @Test
     fun fallbackTilesAlignInScreenSpace() {
         val centerLon = 120.0
@@ -304,23 +304,27 @@ class MapViewRenderingTest {
         val fallbackScreenSize = tileSize * zoomScaleFactor * scale
         val nativeScreenSize = tileSize * scale
 
-        assertEquals(fallbackScreenSize, nativeScreenSize, 0.1f, "Fallback should match native coverage")
+        assertEquals(
+                fallbackScreenSize,
+                nativeScreenSize,
+                0.1f,
+                "Fallback should match native coverage"
+        )
     }
 
-    /**
-     * Test: Diagnostic - log tile positions at scale 4
-     */
+    /** Test: Diagnostic - log tile positions at scale 4 */
     @Test
     fun diagnosticTilePositionsAtScale4() {
         val centerLon = 120.0
         val centerLat = 20.0
         val scale = 4f
         val offset = 0f
-        val canvasWidth = 1080f  // Typical phone width
+        val canvasWidth = 1080f // Typical phone width
         val canvasHeight = 2400f // Typical phone height
 
         val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(15)).toInt()
-        val centerTileY = ((1.0 - asinh(tan(centerLat * PI / 180.0)) / PI) / 2.0 * 2.0.pow(15)).toInt()
+        val centerTileY =
+                ((1.0 - asinh(tan(centerLat * PI / 180.0)) / PI) / 2.0 * 2.0.pow(15)).toInt()
 
         println("=== DIAGNOSTIC: Tile Positions at scale=4 ===")
         println("Canvas: ${canvasWidth}x${canvasHeight}")
@@ -344,7 +348,9 @@ class MapViewRenderingTest {
                 val screenWidth = tileSize * scale
                 val screenHeight = tileSize * scale
 
-                println("  Tile[$dx,$dy]: world=($worldX,$worldY) screen=($screenX,$screenY) size=${screenWidth}x$screenHeight")
+                println(
+                        "  Tile[$dx,$dy]: world=($worldX,$worldY) screen=($screenX,$screenY) size=${screenWidth}x$screenHeight"
+                )
             }
         }
 

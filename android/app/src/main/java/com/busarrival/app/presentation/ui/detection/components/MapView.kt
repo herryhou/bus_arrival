@@ -130,12 +130,12 @@ fun MapView(
             }
         }
     }
+    // Zoom Offset: subtract 2 to request lower-resolution tiles, making text appear 4x larger
+    // Text is embedded in tiles, so using Z-13 tiles at scale=1x renders them 4x bigger
     val tileZ =
             remember(scale) {
-                (baseZ + (kotlin.math.ln(scale.toDouble()) / kotlin.math.ln(2.0)).toInt()).coerceIn(
-                        12,
-                        18
-                )
+                (baseZ + (kotlin.math.ln(scale.toDouble()) / kotlin.math.ln(2.0)).toInt() - 1)
+                        .coerceIn(12, 18)
             }
 
     // Single LaunchedEffect handles both initial preload and subsequent zoom/route changes

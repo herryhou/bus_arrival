@@ -1,18 +1,12 @@
 package com.busarrival.app.presentation.ui.detection.components
 
 import kotlin.math.pow
-import kotlin.math.PI
-import kotlin.math.asinh
-import kotlin.math.tan
-import kotlin.math.atan
-import kotlin.math.exp
-import org.junit.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
+import org.junit.Test
 
 /**
- * Tests for map tile STITCHING - ensuring tiles align perfectly with no gaps.
- * Verifies tile boundaries meet exactly at all zoom scales (1, 2, 4).
+ * Tests for map tile STITCHING - ensuring tiles align perfectly with no gaps. Verifies tile
+ * boundaries meet exactly at all zoom scales (1, 2, 4).
  */
 class MapViewTileStitchingTest {
 
@@ -35,8 +29,8 @@ class MapViewTileStitchingTest {
     }
 
     /**
-     * Test: Verify two adjacent tiles have NO GAP between them.
-     * Tile 1 should end exactly where Tile 2 starts.
+     * Test: Verify two adjacent tiles have NO GAP between them. Tile 1 should end exactly where
+     * Tile 2 starts.
      */
     @Test
     fun tilesShouldHaveNoGapBetweenThem() {
@@ -54,13 +48,15 @@ class MapViewTileStitchingTest {
         val tile1_end = tile1_start + tileSize
 
         // Verify: tile1 end EXACTLY equals tile2 start (no gap, no overlap)
-        assertEquals(tile1_end, tile2_start, 0.01f,
-            "Tile 1 should end exactly where Tile 2 starts - no gap!")
+        assertEquals(
+                tile1_end,
+                tile2_start,
+                0.01f,
+                "Tile 1 should end exactly where Tile 2 starts - no gap!"
+        )
     }
 
-    /**
-     * Test: Verify tile boundaries at scale=1
-     */
+    /** Test: Verify tile boundaries at scale=1 */
     @Test
     fun tileBoundariesAlignAtScale1() {
         val centerLon = 120.0
@@ -79,13 +75,15 @@ class MapViewTileStitchingTest {
         val tile2_screen_start = tile2_start * scale
 
         // CRITICAL: Verify exact boundary alignment
-        assertEquals(tile1_screen_end, tile2_screen_start, 0.01f,
-            "At scale=1: Tile boundary should have NO gap")
+        assertEquals(
+                tile1_screen_end,
+                tile2_screen_start,
+                0.01f,
+                "At scale=1: Tile boundary should have NO gap"
+        )
     }
 
-    /**
-     * Test: Verify tile boundaries at scale=2
-     */
+    /** Test: Verify tile boundaries at scale=2 */
     @Test
     fun tileBoundariesAlignAtScale2() {
         val centerLon = 120.0
@@ -103,13 +101,15 @@ class MapViewTileStitchingTest {
         val tile2_screen_start = tile2_start * scale
 
         // CRITICAL: Verify exact boundary alignment
-        assertEquals(tile1_screen_end, tile2_screen_start, 0.01f,
-            "At scale=2: Tile boundary should have NO gap")
+        assertEquals(
+                tile1_screen_end,
+                tile2_screen_start,
+                0.01f,
+                "At scale=2: Tile boundary should have NO gap"
+        )
     }
 
-    /**
-     * Test: Verify tile boundaries at scale=4
-     */
+    /** Test: Verify tile boundaries at scale=4 */
     @Test
     fun tileBoundariesAlignAtScale4() {
         val centerLon = 120.0
@@ -127,13 +127,15 @@ class MapViewTileStitchingTest {
         val tile2_screen_start = tile2_start * scale
 
         // CRITICAL: Verify exact boundary alignment
-        assertEquals(tile1_screen_end, tile2_screen_start, 0.01f,
-            "At scale=4: Tile boundary should have NO gap")
+        assertEquals(
+                tile1_screen_end,
+                tile2_screen_start,
+                0.01f,
+                "At scale=4: Tile boundary should have NO gap"
+        )
     }
 
-    /**
-     * Test: Verify NO overlaps between tiles
-     */
+    /** Test: Verify NO overlaps between tiles */
     @Test
     fun tilesShouldNotOverlap() {
         val centerLon = 120.0
@@ -151,9 +153,7 @@ class MapViewTileStitchingTest {
         assertEquals(0f, gap, 0.01f, "Tiles should not overlap - gap should be exactly zero")
     }
 
-    /**
-     * Test: Verify tile stitching across zoom levels
-     */
+    /** Test: Verify tile stitching across zoom levels */
     @Test
     fun tilesStitchCorrectlyAcrossAllZoomLevels() {
         val centerLon = 120.0
@@ -174,14 +174,16 @@ class MapViewTileStitchingTest {
 
             val gap = tile2_start_scaled - tile1_end
 
-            assertEquals(0f, gap, 0.01f,
-                "At scale=$scale: Tiles should stitch perfectly with no gap")
+            assertEquals(
+                    0f,
+                    gap,
+                    0.01f,
+                    "At scale=$scale: Tiles should stitch perfectly with no gap"
+            )
         }
     }
 
-    /**
-     * Test: Verify fallback tiles align with native tiles
-     */
+    /** Test: Verify fallback tiles align with native tiles */
     @Test
     fun fallbackTilesAlignWithNativeTiles() {
         val centerLon = 120.0
@@ -198,8 +200,12 @@ class MapViewTileStitchingTest {
         // When baseZ == actualTileZ, totalScale should be 1.0
         // This means: scale down by (baseZ - tileZ) then scale up by (tileZ - actualTileZ)
         // Since baseZ == actualTileZ: 2^(15-17) * 2^(17-15) = 2^(-2) * 2^(2) = 0.25 * 4 = 1.0
-        assertEquals(1.0f, totalScale, 0.001f,
-            "When baseZ == actualTileZ, totalScale should be 1.0")
+        assertEquals(
+                1.0f,
+                totalScale,
+                0.001f,
+                "When baseZ == actualTileZ, totalScale should be 1.0"
+        )
 
         // When baseZ != actualTileZ, verify the composition
         // For example: baseZ=15, tileZ=17, actualTileZ=14
@@ -208,13 +214,15 @@ class MapViewTileStitchingTest {
         val totalScale2 = zoomScale2 * fallbackScale2 // 0.25 * 8 = 2.0
 
         // This represents: scale Z=14 tile to Z=17 size (8x), then scale to baseZ=15 space (0.25x)
-        assertEquals(2.0f, totalScale2, 0.001f,
-            "Total scale should compose zoom and fallback scaling")
+        assertEquals(
+                2.0f,
+                totalScale2,
+                0.001f,
+                "Total scale should compose zoom and fallback scaling"
+        )
     }
 
-    /**
-     * Test: Verify complete tile row has no gaps
-     */
+    /** Test: Verify complete tile row has no gaps */
     @Test
     fun completeTileRowHasNoGaps() {
         val centerLon = 120.0
@@ -239,13 +247,15 @@ class MapViewTileStitchingTest {
         }
 
         // Total gap across entire row should be exactly zero
-        assertEquals(0f, totalGap, 0.01f,
-            "Complete tile row should have no gaps - total gap should be zero")
+        assertEquals(
+                0f,
+                totalGap,
+                0.01f,
+                "Complete tile row should have no gaps - total gap should be zero"
+        )
     }
 
-    /**
-     * Test: Verify tile coverage is continuous (no pixel left uncovered)
-     */
+    /** Test: Verify tile coverage is continuous (no pixel left uncovered) */
     @Test
     fun tileCoverageIsContinuous() {
         val centerLon = 120.0
@@ -273,7 +283,11 @@ class MapViewTileStitchingTest {
         val totalCoverage = tile3_end - tile1_start
         val expectedCoverage = tileSize * scale * 3
 
-        assertEquals(expectedCoverage, totalCoverage, 0.01f,
-            "Total coverage should equal 3 tiles with no gaps")
+        assertEquals(
+                expectedCoverage,
+                totalCoverage,
+                0.01f,
+                "Total coverage should equal 3 tiles with no gaps"
+        )
     }
 }
