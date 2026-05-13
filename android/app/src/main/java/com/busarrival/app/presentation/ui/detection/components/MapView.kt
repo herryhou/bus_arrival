@@ -598,47 +598,6 @@ private fun RouteData.interpolatePosition(progressCm: Int): Pair<Int, Int>? {
 
 private data class BoundingBoxData(val minX: Int, val minY: Int, val maxX: Int, val maxY: Int)
 
-// Sync version for LaunchedEffect (run in coroutine)
-// Uses disk cache for offline support
-private suspend fun preloadTilesSync(
-        center: LatLon,
-        diskCache: TileCache
-): Map<String, ImageBitmap> =
-        withContext(Dispatchers.IO) {
-            val cache = mutableMapOf<String, ImageBitmap>()
-
-            for (z in 14..16) {
-                val tileX = lonToTileX(center.lon, z)
-                val tileY = latToTileY(center.lat, z)
-                for (dx in -2..2) {
-                    for (dy in -2..2) {
-                        val x = tileX + dx
-                        val y = tileY + dy
-                        val key = "$z/$x/$y"
-
-                        if (!cache.containsKey(key)) {
-                            // Check disk cache first
-                            var bitmap = diskCache.getTile(z, x, y)
-
-                            // Fetch from network if not in disk cache
-                            if (bitmap == null) {
-                                bitmap = diskCache.fetchAndCacheTile(z, x, y)
-                            }
-
-                            // Convert to ImageBitmap for memory cache
-                            bitmap?.let { cache[key] = it.asImageBitmap() }
-                        }
-                    }
-                }
-            }
-
-            android.util.Log.d(
-                    "MapView",
-                    "Disk cache: ${diskCache.getCachedTileCount()} tiles, ${diskCache.getCacheSize() / 1024}KB"
-            )
-            cache
-        }
-
 /** Load tiles for a specific zoom level (for dynamic loading when zooming). */
 private suspend fun loadTilesForZoom(
         center: LatLon,
