@@ -233,13 +233,7 @@ fun MapView(
                     // Position tiles in centered world space using tileZ for correct grid alignment
                     // Each zoom level has its own tile grid, so we must use tileZ for positioning
                     // Load more tiles at higher zoom levels
-                    val tileRange =
-                            when (tileZ) {
-                                in 12..13 -> 3
-                                in 14..15 -> 3
-                                in 16..17 -> 4
-                                else -> 5
-                            }
+                    val tileRange = tileRangeForZoom(tileZ)
 
                     android.util.Log.d(
                             "MapView",
@@ -591,6 +585,14 @@ private fun RouteData.interpolatePosition(progressCm: Int): Pair<Int, Int>? {
 
 private data class BoundingBoxData(val minX: Int, val minY: Int, val maxX: Int, val maxY: Int)
 
+/** Compute tile fetch/draw range for a given zoom level. Shared by loader and drawer. */
+private fun tileRangeForZoom(zoom: Int): Int =
+        when (zoom) {
+            in 12..15 -> 3
+            in 16..17 -> 4
+            else -> 5
+        }
+
 // Sync version for LaunchedEffect (run in coroutine)
 // Uses disk cache for offline support
 private suspend fun preloadTilesSync(
@@ -640,12 +642,7 @@ private suspend fun loadTilesForZoom(
 ): Map<String, ImageBitmap> =
         withContext(Dispatchers.IO) {
             val cache = mutableMapOf<String, ImageBitmap>()
-            val range =
-                    when (zoom) {
-                        in 0..14 -> 3
-                        in 15..18 -> 4
-                        else -> 4
-                    }
+            val range = tileRangeForZoom(zoom)
 
             val tileX = lonToTileX(center.lon, zoom)
             val tileY = latToTileY(center.lat, zoom)
