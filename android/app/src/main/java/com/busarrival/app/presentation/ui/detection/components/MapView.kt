@@ -112,6 +112,25 @@ fun MapView(
                     } else null
                 }
             }
+
+    // Camera follow: center map on current position when enabled
+    val shouldFollow = isCameraFollowEnabled || replayState.cameraFollowEnabled
+    LaunchedEffect(currentSCm, shouldFollow, routeData) {
+        if (shouldFollow && routeData != null && centerLatLon != null) {
+            val pos = routeData.interpolatePosition(currentSCm)
+            if (pos != null) {
+                val ll = routeData.cmToLatLon(pos.first, pos.second)
+
+                // Calculate world offset from route center to current position
+                val targetX = lonToPixelX(ll.lon, baseZ) - lonToPixelX(centerLatLon.lon, baseZ)
+                val targetY = latToPixelY(ll.lat, baseZ) - latToPixelY(centerLatLon.lat, baseZ)
+
+                // Offset = -target * scale centers current position on screen
+                viewModel.updateMapState(scale, Offset(-targetX * scale, -targetY * scale))
+            }
+        }
+    }
+
     // Dynamically load higher zoom tiles when zoom level changes (not on every scale change)
     val baseZ = 15
     val tileZ =
