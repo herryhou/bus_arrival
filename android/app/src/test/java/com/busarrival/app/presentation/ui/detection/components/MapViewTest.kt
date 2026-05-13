@@ -95,7 +95,7 @@ class MapViewTest {
         val tileX = 1000
         val tileNW = tileXToLon(tileX, 17)
 
-        val worldX = worldX(tileNW, centerLon)
+        val worldX = worldX(tileNW, centerLon, 17)
         val expectedX = lonToPixelX(tileNW, 15) - lonToPixelX(centerLon, 15)
 
         assertEquals(expectedX, worldX, 0.1f)
@@ -109,8 +109,8 @@ class MapViewTest {
         val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(15)).toInt()
         val eastTileNW = tileXToLon(centerTileX + 1, 15)
 
-        val centerWorldX = worldX(120.0, centerLon)
-        val eastWorldX = worldX(eastTileNW, centerLon)
+        val centerWorldX = worldX(120.0, centerLon, 15)
+        val eastWorldX = worldX(eastTileNW, centerLon, 15)
 
         val tileSize = 256f
         val spacing1 = eastWorldX - centerWorldX
@@ -135,7 +135,7 @@ class MapViewTest {
 
         val tileX = 1000
         val tileNW = tileXToLon(tileX, tileZ)
-        val worldX = worldX(tileNW, centerLon)
+        val worldX = worldX(tileNW, centerLon, tileZ)
 
         val zoomScaleFactor = 2.0.pow(tileZ - actualTileZ).toFloat()
         val nativeCoverage = 256f
