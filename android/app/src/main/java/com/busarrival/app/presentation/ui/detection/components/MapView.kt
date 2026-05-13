@@ -156,7 +156,9 @@ fun MapView(
         // Load tiles for the current zoom level and route center
         val tiles =
                 kotlin
-                        .runCatching { loadTilesForZoom(centerLatLon, tileZ, tileDiskCache, fetchRange) }
+                        .runCatching {
+                            loadTilesForZoom(centerLatLon, tileZ, tileDiskCache, fetchRange)
+                        }
                         .getOrNull()
 
         if (!tiles.isNullOrEmpty()) {
@@ -328,7 +330,8 @@ fun MapView(
                                 val posTileY = if (actualTileZ != tileZ) actualTileY else tileY
                                 val posZ = if (actualTileZ != tileZ) actualTileZ else tileZ
 
-                                // Calculate position using ACTUAL tile coordinates (posTileX, posTileY at posZ)
+                                // Calculate position using ACTUAL tile coordinates (posTileX,
+                                // posTileY at posZ)
                                 // Convert geographic to baseZ world space directly (not via
                                 // worldX/Y helpers)
                                 val tileNW = tileXToLon(posTileX, posZ)
@@ -340,7 +343,8 @@ fun MapView(
                                 val tileWorldX =
                                         lonToPixelX(tileNW, baseZ) - lonToPixelX(center.lon, baseZ)
                                 val tileWorldY =
-                                        latToPixelY(tileNorth, baseZ) - latToPixelY(center.lat, baseZ)
+                                        latToPixelY(tileNorth, baseZ) -
+                                                latToPixelY(center.lat, baseZ)
 
                                 if (BuildConfig.DEBUG) {
                                     assert(tileWorldX.isFinite() && tileWorldY.isFinite()) {
@@ -375,7 +379,8 @@ fun MapView(
                                     )
                                 }
 
-                                // Scale = only the baseZ→posZ conversion; fallback bitmap naturally covers correct area
+                                // Scale = only the baseZ→posZ conversion; fallback bitmap naturally
+                                // covers correct area
                                 val drawScale = 2.0f.pow(baseZ - posZ)
 
                                 if (BuildConfig.DEBUG) {
@@ -386,10 +391,12 @@ fun MapView(
 
                                 if (drawScale != 1f) {
                                     withTransform({
-                                        scale(drawScale, drawScale, pivot = Offset(tileWorldX, tileWorldY))
-                                    }) {
-                                        drawImage(it, topLeft = Offset(tileWorldX, tileWorldY))
-                                    }
+                                        scale(
+                                                drawScale,
+                                                drawScale,
+                                                pivot = Offset(tileWorldX, tileWorldY)
+                                        )
+                                    }) { drawImage(it, topLeft = Offset(tileWorldX, tileWorldY)) }
                                 } else {
                                     drawImage(it, topLeft = Offset(tileWorldX, tileWorldY))
                                 }

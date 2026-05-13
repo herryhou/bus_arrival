@@ -49,11 +49,11 @@ class TileCache(private val context: Context) {
         val file = getTileFile(z, x, y)
 
         try {
-            val url = URL("https://tile.openstreetmap.org/$z/$x/$y.png")
+            val url = URL("https://a.basemaps.cartocdn.com/rastertiles/voyager/$z/$x/$y.png")
             val connection = url.openConnection()
             connection.connectTimeout = 10000
             connection.readTimeout = 10000
-            connection.addRequestProperty("User-Agent", "BusArrival/1.0")
+            connection.addRequestProperty("User-Agent", "BusArrival/1.0 (CartoDB Voyager tiles)")
 
             val bitmap = BitmapFactory.decodeStream(connection.getInputStream())
 
