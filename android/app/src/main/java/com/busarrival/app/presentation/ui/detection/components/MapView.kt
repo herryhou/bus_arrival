@@ -76,9 +76,6 @@ fun RouteData.cmToLatLon(xCm: Int, yCm: Int): LatLon {
     return LatLon(lat, lon)
 }
 
-private fun tileRangeFor(canvasHalfMax: Float, tileWorldSize: Float, scale: Float): Int =
-    (canvasHalfMax / (tileWorldSize * scale)).toInt() + 2
-
 @Composable
 fun MapView(
         routeData: RouteData?,
@@ -154,7 +151,7 @@ fun MapView(
         // Calculate fetch range using same formula as draw loop
         // Use conservative canvas estimate since we don't have actual size here
         val tileWorldSize = 256f * 2.0f.pow(baseZ - tileZ)
-        val fetchRange = tileRangeFor(1000f, tileWorldSize, scale)
+        val fetchRange = (1000f / tileWorldSize).toInt() + 2
 
         // Load tiles for the current zoom level and route center
         val tiles =
@@ -263,7 +260,7 @@ fun MapView(
                     // tileWorldSize = 256 * 2^(baseZ - tileZ) shrinks as tileZ increases
                     val tileWorldSize = tileSize * 2.0f.pow(baseZ - tileZ)
                     val canvasHalfMax = maxOf(canvasWidth, canvasHeight) / 2f
-                    val tileRange = (canvasHalfMax / tileWorldSize / scale).toInt() + 2
+                    val tileRange = (canvasHalfMax / tileWorldSize).toInt() + 2
 
                     android.util.Log.d(
                             "MapView",
