@@ -43,6 +43,13 @@ class DetectionPipeline {
         // Convert to GpsPoint
         val gps = GpsPoint.fromLocation(location)
 
+        // Convert lat/lon to grid coordinates
+        val (gpsX, gpsY) = GeoCoordinateConverter.toGridCoordinates(
+            lat = gps.lat,
+            lon = gps.lon,
+            routeData = route
+        )
+
         // Check for GPS jump (recovery trigger)
         val jumpDetected = if (lastGpsTime > 0) {
             Recovery.isJumpDetected(lastSCm, kalmanState?.sCm ?: 0)
@@ -51,8 +58,8 @@ class DetectionPipeline {
         // Phase 1: Map matching
         val lastIdx = kalmanState?.lastSegIdx ?: 0
         val matchResult = MapMatcher.match(
-            gpsX = 0,  // TODO: Convert lat/lon to grid coordinates
-            gpsY = 0,
+            gpsX = gpsX,
+            gpsY = gpsY,
             gpsHeading = gps.headingCdeg,
             gpsSpeed = gps.speedCms ?: 0,
             routeData = route,
@@ -60,18 +67,26 @@ class DetectionPipeline {
             isFirstFix = lastGpsTime == 0L
         )
 
-        // Phase 2: Kalman filter
+        // Phase 2: Project to route for sCm
+        val (sCm, segIdx) = GeoCoordinateConverter.projectToRoute(
+            xCm = gpsX,
+            yCm = gpsY,
+            routeData = route,
+            lastSegIdx = lastIdx
+        )
+
+        // Kalman filter
         if (kalmanState == null) {
             kalmanState = KalmanState.init(
-                zCm = matchResult.segIdx,  // TODO: Use actual projection
+                zCm = sCm,
                 vGpsCms = gps.speedCms ?: 0,
-                segIdx = matchResult.segIdx
+                segIdx = segIdx
             )
         }
 
         val signals = KalmanFilter.update(
             state = kalmanState!!,
-            zCm = matchResult.segIdx,  // TODO: Use actual projection
+            zCm = sCm,
             vGpsCms = gps.speedCms ?: 0,
             hdopX10 = null,
             isSoftResync = jumpDetected
