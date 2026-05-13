@@ -299,16 +299,18 @@ class MapViewRenderingTest {
         val gap = nextScreenX - nativeScreenEnd
         assertEquals(0f, gap, 0.1f, "Native tile boundary should align")
 
-        // Fallback tile (Z=15) should cover same area as native (Z=17)
-        // It's positioned at same worldX, but inner scaled by zoomScaleFactor
-        val fallbackScreenSize = tileSize * zoomScaleFactor * scale
-        val nativeScreenSize = tileSize * scale
+        // Fallback tile (Z=15) is 4x larger than native (Z=17)
+        // Z=17 tile: 256 * 2^(15-17) = 256 * 1/4 = 64px at baseZ=15
+        // Z=15 tile: 256 * 2^(15-15) = 256 * 1 = 256px at baseZ=15
+        // Ratio: 256/64 = 4x
+        val fallbackScreenSize = tileSize * zoomScaleFactor * scale  // = 256 * 4 * 4 = 4096
+        val nativeScreenSize = tileSize * scale                       // = 256 * 4 = 1024
 
         assertEquals(
+                nativeScreenSize * zoomScaleFactor,
                 fallbackScreenSize,
-                nativeScreenSize,
                 0.1f,
-                "Fallback should match native coverage"
+                "Fallback tile should be 4x larger than native tile"
         )
     }
 

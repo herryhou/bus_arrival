@@ -44,8 +44,8 @@ class TimelineScrubberTest {
 
     @Test
     fun formatTime_severalMinutes_returnsMinutesSeconds() {
-        val result = formatTime(5_670_000) // 94 minutes 30 seconds
-        assertEquals("94:30", result)
+        val result = formatTime(5_670_000) // 1 hour 34 minutes 30 seconds
+        assertEquals("01:34:30", result)
     }
 
     @Test

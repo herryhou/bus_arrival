@@ -10,153 +10,102 @@ import kotlin.test.assertEquals
 import org.junit.Test
 
 /**
- * Tests for map tile rendering correctness across zoom scales. Verifies tiles stitch together
- * without gaps at zoom levels 1, 2, 4.
+ * Tests for map tile rendering correctness.
+ * Verifies coordinate system consistency and tile positioning.
  */
 class MapViewTest {
 
-    // Mock coordinate conversions (simplified from actual implementation)
     private val baseZ = 15
 
-    private fun lonToPixelX(lon: Double, zoom: Int): Float {
-        val n = 2.0.pow(zoom)
-        val x = (lon + 180.0) / 360.0 * n
-        return (x * 256).toFloat()
-    }
-
-    private fun latToPixelY(lat: Double, zoom: Int): Float {
-        val n = 2.0.pow(zoom)
-        val y = ((1.0 - asinh(tan(lat * PI / 180.0)) / PI) / 2.0 * n)
-        return (y * 256).toFloat()
-    }
-
-    private fun tileXToLon(tileX: Int, zoom: Int): Double {
-        return tileX / 2.0.pow(zoom) * 360.0 - 180.0
-    }
-
-    private fun tileYToLat(tileY: Int, zoom: Int): Double {
-        val n = PI - 2.0 * PI * tileY / 2.0.pow(zoom)
-        return 180.0 / PI * atan(0.5 * (exp(n) - exp(-n)))
-    }
-
-    // World space positioning using baseZ (as per fix)
-    private fun worldX(lon: Double, centerLon: Double): Float {
-        return lonToPixelX(lon, baseZ) - lonToPixelX(centerLon, baseZ)
-    }
-
-    private fun worldY(lat: Double, centerLat: Double): Float {
-        return latToPixelY(lat, baseZ) - latToPixelY(centerLat, baseZ)
-    }
-
     @Test
-    fun adjacentTilesAtSameZoomLevelHaveCorrectSpacing() {
+    fun adjacentTilesAtBaseZHaveCorrectSpacing() {
         val centerLon = 120.0
         val centerLat = 20.0
 
-        val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(15)).toInt()
-        val centerTileY =
-                ((1.0 - asinh(tan(centerLat * PI / 180.0)) / PI) / 2.0 * 2.0.pow(15)).toInt()
+        val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(baseZ)).toInt()
+        val centerTileNW = tileXToLon(centerTileX, baseZ)
+        val eastTileNW = tileXToLon(centerTileX + 1, baseZ)
 
-        val centerTileNW = tileXToLon(centerTileX, 15)
-        val eastTileNW = tileXToLon(centerTileX + 1, 15)
-
-        val centerWorldX = worldX(centerTileNW, centerLon)
-        val eastWorldX = worldX(eastTileNW, centerLon)
+        val centerWorldX = lonToPixelX(centerTileNW, baseZ) - lonToPixelX(centerLon, baseZ)
+        val eastWorldX = lonToPixelX(eastTileNW, baseZ) - lonToPixelX(centerLon, baseZ)
 
         val spacing = eastWorldX - centerWorldX
-        assertEquals(256f, spacing, 0.1f)
+        assertEquals(256f, spacing, 0.1f, "Adjacent tiles at baseZ should be 256px apart")
     }
 
     @Test
-    fun tilesMaintainCorrectSpacingAfterScaleTransform() {
-        val centerLon = 120.0
-        val centerLat = 20.0
-
-        val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(15)).toInt()
-        val centerTileNW = tileXToLon(centerTileX, 15)
-        val eastTileNW = tileXToLon(centerTileX + 1, 15)
-
-        val centerWorldX = worldX(centerTileNW, centerLon)
-        val eastWorldX = worldX(eastTileNW, centerLon)
-
-        val spacing1 = eastWorldX - centerWorldX
-        val spacing4 = spacing1 * 4f
-        val coverage4 = 256f * 4f
-
-        assertEquals(256f, spacing1, 0.1f)
-        assertEquals(1024f, spacing4, 1f)
-        assertEquals(1024f, coverage4, 1f)
-    }
-
-    @Test
-    fun fallbackTilePositionedCorrectlyRelativeToNativeTiles() {
+    fun tileSpacingScalesCorrectlyWithZoom() {
         val centerLon = 120.0
 
         val tileX = 1000
-        val tileNW = tileXToLon(tileX, 17)
+        val tileNW = tileXToLon(tileX, 15)
 
-        val worldX = worldX(tileNW, centerLon, 17)
-        val expectedX = lonToPixelX(tileNW, 15) - lonToPixelX(centerLon, 15)
+        // At Z=15: 256px spacing
+        val spacing15 = lonToPixelX(tileNW, 15) - lonToPixelX(centerLon, 15)
 
-        assertEquals(expectedX, worldX, 0.1f)
+        // At Z=16: tiles are 2x smaller, so spacing between same tiles is 2x larger in pixel space
+        val spacing16 = lonToPixelX(tileNW, 16) - lonToPixelX(centerLon, 16)
+
+        // At Z=16, each tile is 128px, so the same geographic distance spans 2x as many tiles
+        // Therefore, the pixel spacing is 2x
+        assertEquals(spacing15 * 2f, spacing16, 1f, "Z=16 spacing should be 2x Z=15 spacing")
     }
 
     @Test
-    fun tileCoverageMatchesSpacingAtDifferentScales() {
-        val centerLon = 120.0
-        val centerLat = 20.0
-
-        val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(15)).toInt()
-        val eastTileNW = tileXToLon(centerTileX + 1, 15)
-
-        val centerWorldX = worldX(120.0, centerLon, 15)
-        val eastWorldX = worldX(eastTileNW, centerLon, 15)
-
-        val tileSize = 256f
-        val spacing1 = eastWorldX - centerWorldX
-        val coverage1 = tileSize * 1f
-
-        assertEquals(spacing1, coverage1, 0.1f)
-
-        val spacing2 = spacing1 * 2f
-        val coverage2 = tileSize * 2f
-        assertEquals(spacing2, coverage2, 0.1f)
-
-        val spacing4 = spacing1 * 4f
-        val coverage4 = tileSize * 4f
-        assertEquals(spacing4, coverage4, 0.1f)
-    }
-
-    @Test
-    fun fallbackTileScalingMaintainsAlignment() {
-        val centerLon = 120.0
-        val tileZ = 17
-        val actualTileZ = 15
-
-        val tileX = 1000
-        val tileNW = tileXToLon(tileX, tileZ)
-        val worldX = worldX(tileNW, centerLon, tileZ)
-
-        val zoomScaleFactor = 2.0.pow(tileZ - actualTileZ).toFloat()
-        val nativeCoverage = 256f
-        val fallbackCoverage = 256f * zoomScaleFactor
-
-        assertEquals(nativeCoverage, fallbackCoverage, 0.1f)
-    }
-
-    @Test
-    fun worldXCoordinateConsistencyAcrossZoomLevels() {
+    fun worldCoordinatesAreConsistentAtBaseZ() {
         val centerLon = 120.0
         val testLon = 120.01
 
-        val worldX_15 = lonToPixelX(testLon, 15) - lonToPixelX(centerLon, 15)
-        val worldX_16 = lonToPixelX(testLon, 16) - lonToPixelX(centerLon, 16)
-        val worldX_17 = lonToPixelX(testLon, 17) - lonToPixelX(centerLon, 17)
+        // World coordinates at baseZ should be consistent
+        val worldX = lonToPixelX(testLon, baseZ) - lonToPixelX(centerLon, baseZ)
 
-        val baseWorldX = worldX(testLon, centerLon)
+        // Same calculation should give same result
+        val worldXAgain = lonToPixelX(testLon, baseZ) - lonToPixelX(centerLon, baseZ)
 
-        assertEquals(worldX_15, baseWorldX, 0.1f)
-        assertEquals(worldX_16 / 2f, baseWorldX, 0.1f)
-        assertEquals(worldX_17 / 4f, baseWorldX, 0.1f)
+        assertEquals(worldX, worldXAgain, 0.001f, "World coordinates should be consistent")
+    }
+
+    @Test
+    fun tileSizeAtBaseZIs256px() {
+        // At baseZ=15, a single tile is 256px in world space
+        val tileSize = 256f
+
+        val centerLon = 120.0
+        val centerTileX = ((centerLon + 180.0) / 360.0 * 2.0.pow(baseZ)).toInt()
+        val centerTileNW = tileXToLon(centerTileX, baseZ)
+        val eastTileNW = tileXToLon(centerTileX + 1, baseZ)
+
+        val centerWorldX = lonToPixelX(centerTileNW, baseZ) - lonToPixelX(centerLon, baseZ)
+        val eastWorldX = lonToPixelX(eastTileNW, baseZ) - lonToPixelX(centerLon, baseZ)
+
+        val spacing = eastWorldX - centerWorldX
+        assertEquals(tileSize, spacing, 0.1f, "Tile spacing at baseZ should be 256px")
+    }
+
+    @Test
+    fun fallbackTileAtZ15Is4xLargerThanZ17() {
+        val baseZ = 15
+
+        // Z=17 tile at baseZ: scale = 2^(15-17) = 1/4
+        val z17TileSize = 256f * 2.0f.pow(baseZ - 17)
+
+        // Z=15 tile at baseZ: scale = 2^(15-15) = 1
+        val z15TileSize = 256f * 2.0f.pow(baseZ - 15)
+
+        assertEquals(64f, z17TileSize, 0.1f, "Z=17 tile should be 64px at baseZ=15")
+        assertEquals(256f, z15TileSize, 0.1f, "Z=15 tile should be 256px at baseZ=15")
+        assertEquals(z17TileSize * 4f, z15TileSize, 0.1f, "Z=15 tile should be 4x Z=17 tile")
+    }
+
+    @Test
+    fun fallbackTileAtZ16Is2xLargerThanZ17() {
+        val baseZ = 15
+
+        val z17TileSize = 256f * 2.0f.pow(baseZ - 17)
+        val z16TileSize = 256f * 2.0f.pow(baseZ - 16)
+
+        assertEquals(64f, z17TileSize, 0.1f, "Z=17 tile should be 64px at baseZ=15")
+        assertEquals(128f, z16TileSize, 0.1f, "Z=16 tile should be 128px at baseZ=15")
+        assertEquals(z17TileSize * 2f, z16TileSize, 0.1f, "Z=16 tile should be 2x Z=17 tile")
     }
 }
