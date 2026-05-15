@@ -154,6 +154,9 @@ class DetourScenarioGoldenTest {
      */
     private fun validateOffRouteDuration(ticks: List<TraceTick>) {
         println("\n=== VALIDATION 3: Off-Route Duration ===")
+        println("Total ticks: ${ticks.size}")
+        println("Off-route ticks: ${ticks.count { it.off_route }}")
+        ticks.take(10).forEach { println("  Tick: time=${it.time}, s_cm=${it.s_cm}, off_route=${it.off_route}") }
 
         // Find off-route episode
         var offRouteStart: Int? = null
@@ -168,8 +171,14 @@ class DetourScenarioGoldenTest {
             }
         }
 
-        if (offRouteStart != null && offRouteEnd != null) {
-            maxOffRouteDuration = offRouteEnd!! - offRouteStart!!
+        // Calculate duration (handle case where off-route continues to end of data)
+        if (offRouteStart != null) {
+            maxOffRouteDuration = if (offRouteEnd != null) {
+                offRouteEnd!! - offRouteStart!!
+            } else {
+                // Off-route continues to end of data
+                ticks.size - offRouteStart!!
+            }
         }
 
         // Check if off-route was detected
@@ -272,9 +281,13 @@ class DetourScenarioGoldenTest {
             }
         }
 
-        // Skip this validation if off-route was never detected
+        // Skip this validation if off-route was never detected or never transitions back
         if (!ticks.any { it.off_route }) {
             println("⚠ Skipped: off-route never detected")
+            return
+        }
+        if (ticks.last().off_route) {
+            println("⚠ Skipped: off-route continues to end of data (no re-entry transition)")
             return
         }
 

@@ -128,9 +128,16 @@ class DetectionPipeline {
 
         // Helper function to write trace tick
         fun writeTrace() {
+            // Use frozen position during off-route, Kalman output otherwise
+            val positionSCm = if (modeState.mode == Mode.OffRoute) {
+                modeState.frozenSCm
+            } else {
+                signals.sCm
+            }
+
             traceWriter?.write(TraceTick(
                 time = gps.timestamp,
-                s_cm = signals.sCm.toLong(),
+                s_cm = positionSCm.toLong(),
                 off_route = modeState.mode == Mode.OffRoute,
                 stop_states = stopStates.map { (idx, state) ->
                     StopStateEntry(
@@ -146,10 +153,10 @@ class DetectionPipeline {
         if (modeState.mode == Mode.OffRoute) {
             println("DetectionPipeline: GPS ${gps.timestamp}: OffRoute mode, skipping detection. sCm=${signals.sCm}, matchDist2=${matchResult.dist2}")
             lastGpsTime = gps.timestamp
-            lastSCm = signals.sCm
+            lastSCm = modeState.frozenSCm  // Use frozen position
             writeTrace()
             return PipelineResult.Success(
-                sCm = signals.sCm,
+                sCm = modeState.frozenSCm,  // Return frozen position
                 vCms = kalmanState!!.vCms,
                 arrivals = emptyList(),
                 departures = emptyList()
