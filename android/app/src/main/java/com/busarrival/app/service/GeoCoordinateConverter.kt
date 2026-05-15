@@ -12,30 +12,40 @@ import kotlin.math.sin
 object GeoCoordinateConverter {
 
     /**
-     * Convert lat/lon to grid coordinates (cm) relative to route origin.
+     * Convert lat/lon (in degrees) to grid coordinates (cm) relative to route origin.
+     * Uses trigonometric formula matching Rust preprocessor (coord.rs).
      */
     fun toGridCoordinates(
-        lat: GeoCdeg,
-        lon: GeoCdeg,
+        lat: Double,  // Latitude in degrees
+        lon: Double,  // Longitude in degrees
         routeData: RouteData
     ): Pair<Int, Int> {
-        // Convert to degrees
-        val latDeg = lat / 100.0
-        val lonDeg = lon / 100.0
+        // Calculate offsets using trigonometric formula (matches Rust)
+        // Reference: crates/preprocessor/src/coord.rs:latlon_to_cm_relative
+        val R_CM = 637100000.0  // Earth radius in cm
+        val FIXED_ORIGIN_LAT_DEG = 20.0
+        val FIXED_ORIGIN_LON_DEG = 120.0
 
-        val originLatDeg = routeData.originLat / 1e6
-        val originLonDeg = routeData.originLon / 1e6
+        // Calculate average latitude from route data (or use default if corrupted)
+        val avgLat = kotlin.math.max(routeData.avgLat / 1e6, 24.0)  // Use min 24° if corrupted
+        val avgLatRad = Math.toRadians(avgLat)
+        val cosLat = kotlin.math.cos(avgLatRad)
 
-        // Calculate offsets (using average latitude for longitude scaling)
-        val avgLat = routeData.avgLat / 1e6
+        // Absolute positions (in cm)
+        val latRad = Math.toRadians(lat)
+        val lonRad = Math.toRadians(lon)
 
-        // 1 degree latitude ≈ 1111110 cm (at equator)
-        // 1 degree longitude ≈ 1111110 * cos(lat) cm
-        val latScale = 1111110.0
-        val lonScale = 1111110.0 * cos(Math.toRadians(avgLat))
+        val xAbs = R_CM * lonRad * cosLat
+        val yAbs = R_CM * latRad
 
-        val xCm = ((lonDeg - originLonDeg) * lonScale).toInt()
-        val yCm = ((latDeg - originLatDeg) * latScale).toInt()
+        // Origin reference point (uses FIXED origin, NOT avgLat)
+        // IMPORTANT: y0Abs uses FIXED_ORIGIN_LAT_DEG, not avgLat!
+        val x0Abs = (Math.toRadians(FIXED_ORIGIN_LON_DEG) * R_CM) * cosLat
+        val y0Abs = R_CM * Math.toRadians(FIXED_ORIGIN_LAT_DEG)  // Fixed 20°N
+
+        // Relative coordinates (in cm, rounded to match Rust)
+        val xCm = kotlin.math.round(xAbs - x0Abs).toInt()
+        val yCm = kotlin.math.round(yAbs - y0Abs).toInt()
 
         return Pair(xCm, yCm)
     }

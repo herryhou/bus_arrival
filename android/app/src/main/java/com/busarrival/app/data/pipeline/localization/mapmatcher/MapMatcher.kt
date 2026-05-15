@@ -145,8 +145,8 @@ object MapMatcher {
         seedEligibleFound: Boolean
     ): SearchResult {
         val grid = routeData.grid
-        val cellX = (gpsX - routeData.originLon) / grid.cellSizeCm
-        val cellY = (gpsY - routeData.originLat) / grid.cellSizeCm
+        val cellX = (gpsX - routeData.x0Cm) / grid.cellSizeCm
+        val cellY = (gpsY - routeData.y0Cm) / grid.cellSizeCm
 
         var bestIdx = seedIdx
         var bestDist2 = seedDist2
@@ -171,10 +171,15 @@ object MapMatcher {
                         val segIdx = cellIdx * 64 + bit
                         if (segIdx >= nodes.size) break
 
-                        checkSegment(
-                            nodes[segIdx], gpsX, gpsY, gpsHeading,
-                            headingThresh, segIdx, ::updateBest
-                        )
+                        val eligible = isHeadingEligible(gpsHeading, nodes[segIdx].headingCdeg, headingThresh)
+                        if (eligible) {
+                            val dist2 = pointToSegmentDist2(gpsX, gpsY, nodes[segIdx])
+                            if (dist2 < bestDist2) {
+                                bestIdx = segIdx
+                                bestDist2 = dist2
+                                eligibleFound = true
+                            }
+                        }
                     }
                 }
 
@@ -183,10 +188,15 @@ object MapMatcher {
                     val segIdx = cellIdx * 64 + offset
                     if (segIdx >= nodes.size) break
 
-                    checkSegment(
-                        nodes[segIdx], gpsX, gpsY, gpsHeading,
-                        headingThresh, segIdx, ::updateBest
-                    )
+                    val eligible = isHeadingEligible(gpsHeading, nodes[segIdx].headingCdeg, headingThresh)
+                    if (eligible) {
+                        val dist2 = pointToSegmentDist2(gpsX, gpsY, nodes[segIdx])
+                        if (dist2 < bestDist2) {
+                            bestIdx = segIdx
+                            bestDist2 = dist2
+                            eligibleFound = true
+                        }
+                    }
                 }
             }
         }
@@ -209,15 +219,6 @@ object MapMatcher {
         if (eligible) {
             onUpdate(segIdx, dist2, true)
         }
-    }
-
-    private fun updateBest(
-        segIdx: Int,
-        dist2: Dist2,
-        eligible: Boolean
-    ) {
-        // This would be a closure in the actual implementation
-        // For now, placeholder
     }
 
     /**
