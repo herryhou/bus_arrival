@@ -1,0 +1,74 @@
+package com.busarrival.app.data.preferences
+
+import android.content.Context
+import android.content.SharedPreferences
+import com.busarrival.app.domain.model.DetectionParameters
+
+/**
+ * SharedPreferences wrapper for detection settings.
+ */
+class DetectionPreferences(context: Context) {
+    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    companion object {
+        private const val PREFS_NAME = "detection_prefs"
+        private const val KEY_ACTIVE_ROUTE = "active_route_uuid"
+        private const val KEY_DISTANCE_WEIGHT = "distance_weight"
+        private const val KEY_SPEED_WEIGHT = "speed_weight"
+        private const val KEY_PROGRESS_ERROR_WEIGHT = "progress_error_weight"
+        private const val KEY_DWELL_TIME_WEIGHT = "dwell_time_weight"
+        private const val KEY_CORRIDOR_SIZE = "corridor_size"
+
+        val DEFAULT_PARAMETERS = DetectionParameters(
+            distanceWeight = 50,
+            speedWeight = 50,
+            progressErrorWeight = 50,
+            dwellTimeWeight = 50,
+            corridorSize = 0
+        )
+    }
+
+    var activeRouteUuid: String?
+        get() = prefs.getString(KEY_ACTIVE_ROUTE, null)
+        set(value) = prefs.edit().putString(KEY_ACTIVE_ROUTE, value).apply()
+
+    var distanceWeight: Int
+        get() = prefs.getInt(KEY_DISTANCE_WEIGHT, DEFAULT_PARAMETERS.distanceWeight)
+        set(value) = prefs.edit().putInt(KEY_DISTANCE_WEIGHT, value.coerceIn(0, 100)).apply()
+
+    var speedWeight: Int
+        get() = prefs.getInt(KEY_SPEED_WEIGHT, DEFAULT_PARAMETERS.speedWeight)
+        set(value) = prefs.edit().putInt(KEY_SPEED_WEIGHT, value.coerceIn(0, 100)).apply()
+
+    var progressErrorWeight: Int
+        get() = prefs.getInt(KEY_PROGRESS_ERROR_WEIGHT, DEFAULT_PARAMETERS.progressErrorWeight)
+        set(value) = prefs.edit().putInt(KEY_PROGRESS_ERROR_WEIGHT, value.coerceIn(0, 100)).apply()
+
+    var dwellTimeWeight: Int
+        get() = prefs.getInt(KEY_DWELL_TIME_WEIGHT, DEFAULT_PARAMETERS.dwellTimeWeight)
+        set(value) = prefs.edit().putInt(KEY_DWELL_TIME_WEIGHT, value.coerceIn(0, 100)).apply()
+
+    var corridorSize: Int
+        get() = prefs.getInt(KEY_CORRIDOR_SIZE, DEFAULT_PARAMETERS.corridorSize)
+        set(value) = prefs.edit().putInt(KEY_CORRIDOR_SIZE, value.coerceIn(-80, 40)).apply()
+
+    fun getParameters(): DetectionParameters = DetectionParameters(
+        distanceWeight = distanceWeight,
+        speedWeight = speedWeight,
+        progressErrorWeight = progressErrorWeight,
+        dwellTimeWeight = dwellTimeWeight,
+        corridorSize = corridorSize
+    )
+
+    fun saveParameters(params: DetectionParameters) {
+        distanceWeight = params.distanceWeight
+        speedWeight = params.speedWeight
+        progressErrorWeight = params.progressErrorWeight
+        dwellTimeWeight = params.dwellTimeWeight
+        corridorSize = params.corridorSize
+    }
+
+    fun clear() {
+        prefs.edit().clear().apply()
+    }
+}

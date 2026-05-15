@@ -79,3 +79,55 @@ test_data/*_summary.md
 test_data/*.nmea
 # Added by code-review-graph
 .code-review-graph/
+
+# Android
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+bin/
+gen/
+out/
+.gradle/
+local.properties
+.android/
+.cxx/
+keystore.properties
+release.keystore
+*.keystore
+*.jks
+
+# Android build outputs
+android/app/build/
+android/.gradle/
+android/app/release/
+android/app/debug/
+android/*/build/
+
+# Android test results
+android/app/build/reports/
+android/app/build/outputs/
+android/app/build/test-results/
+android/app/build/androidTest-results/
+
+# Android captured logs
+android/*.log
+android/*.hprof
+
+# Android Studio
+android/.idea/
+android/.DS_Store
+android/captures/
+android/.externalNativeBuild
+android/.cxx
+
+# NDK
+android/obj/
+
+# Android generated resources
+android/app/src/main/res/drawable-/navigation.json
+# Android gradle wrapper
+android/gradle/
+android/gradlew
+android/gradlew.bat
