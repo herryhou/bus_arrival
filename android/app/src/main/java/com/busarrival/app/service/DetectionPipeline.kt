@@ -7,6 +7,8 @@ import com.busarrival.app.data.pipeline.localization.mapmatcher.MapMatcher
 import com.busarrival.app.data.pipeline.detection.probability.ProbabilityModel
 import com.busarrival.app.data.pipeline.detection.recovery.Recovery
 import com.busarrival.app.data.pipeline.detection.statemachine.StateMachine
+import com.busarrival.app.data.pipeline.detection.mode.ModeMachine
+import com.busarrival.app.data.pipeline.detection.mode.Mode
 import com.busarrival.app.data.pipeline.types.*
 import com.busarrival.app.domain.model.*
 
@@ -20,6 +22,7 @@ class DetectionPipeline {
     private var kalmanState: KalmanState? = null
     private var drState: DrState? = null
     private var stopStates: Map<Int, StopState> = emptyMap()
+    private var modeState = ModeMachine.toNormal()
 
     private var lastGpsTime: Long = 0
     private var lastSCm: DistCm = 0
@@ -43,16 +46,36 @@ class DetectionPipeline {
         // Convert to GpsPoint
         val gps = GpsPoint.fromLocation(location)
 
+        // Debug: Log GPS coordinates for first few points
+        if (lastGpsTime == 0L) {
+            println("DetectionPipeline: First GPS point: lat=${gps.lat}, lon=${gps.lon}")
+        }
+
         // Check for GPS jump (recovery trigger)
         val jumpDetected = if (lastGpsTime > 0) {
             Recovery.isJumpDetected(lastSCm, kalmanState?.sCm ?: 0)
         } else false
 
-        // Phase 1: Map matching
+        // Phase 1: Convert lat/lon to grid coordinates
+        val (gpsX, gpsY) = GeoCoordinateConverter.toGridCoordinates(
+            lat = gps.lat,  // Already in degrees (Double)
+            lon = gps.lon,  // Already in degrees (Double)
+            routeData = route
+        )
+
+        // Phase 2: Project to route for sCm
         val lastIdx = kalmanState?.lastSegIdx ?: 0
+        val (sCm, segIdx) = GeoCoordinateConverter.projectToRoute(
+            xCm = gpsX,
+            yCm = gpsY,
+            routeData = route,
+            lastSegIdx = lastIdx
+        )
+
+        // Phase 3: Map matching (heading-constrained)
         val matchResult = MapMatcher.match(
-            gpsX = 0,  // TODO: Convert lat/lon to grid coordinates
-            gpsY = 0,
+            gpsX = gpsX,
+            gpsY = gpsY,
             gpsHeading = gps.headingCdeg,
             gpsSpeed = gps.speedCms ?: 0,
             routeData = route,
@@ -60,24 +83,83 @@ class DetectionPipeline {
             isFirstFix = lastGpsTime == 0L
         )
 
-        // Phase 2: Kalman filter
+        // Debug: Log map match result for first few GPS points
+        if (lastGpsTime == 0L || matchResult.dist2 > 100_000_000L) {
+            println("DetectionPipeline: MapMatch gpsX=$gpsX, gpsY=$gpsY, matchDist2=${matchResult.dist2}, segIdx=${matchResult.segIdx}")
+        }
+
+        // Phase 3.5: Mode machine update (after Kalman, need sCm)
+        // Defer until after Phase 4
+
+        // Phase 4: Kalman filter
         if (kalmanState == null) {
             kalmanState = KalmanState.init(
-                zCm = matchResult.segIdx,  // TODO: Use actual projection
+                zCm = sCm,
                 vGpsCms = gps.speedCms ?: 0,
-                segIdx = matchResult.segIdx
+                segIdx = segIdx
             )
         }
 
         val signals = KalmanFilter.update(
             state = kalmanState!!,
-            zCm = matchResult.segIdx,  // TODO: Use actual projection
+            zCm = sCm,
             vGpsCms = gps.speedCms ?: 0,
             hdopX10 = null,
             isSoftResync = jumpDetected
         )
 
-        // Phase 3: Detection
+        // Phase 3.5: Mode machine update (now we have sCm from Kalman)
+        modeState = ModeMachine.update(
+            state = modeState,
+            matchDist2 = matchResult.dist2,
+            sCm = signals.sCm
+        )
+
+        // Log mode state for debugging
+        if (modeState.mode == Mode.OffRoute && modeState.suspectTicks == 0) {
+            println("DetectionPipeline: OffRoute triggered. sCm=${signals.sCm}, matchDist2=${matchResult.dist2}")
+        }
+
+        // Handle OffRoute mode: skip detection, preserve state
+        if (modeState.mode == Mode.OffRoute) {
+            println("DetectionPipeline: GPS ${gps.timestamp}: OffRoute mode, skipping detection. sCm=${signals.sCm}, matchDist2=${matchResult.dist2}")
+            lastGpsTime = gps.timestamp
+            lastSCm = signals.sCm
+            return PipelineResult.Success(
+                sCm = signals.sCm,
+                vCms = kalmanState!!.vCms,
+                arrivals = emptyList(),
+                departures = emptyList()
+            )
+        }
+
+        // Handle Recovering mode: search for stop index
+        if (modeState.mode == Mode.Recovering) {
+            val dt = if (lastGpsTime > 0) ((gps.timestamp - lastGpsTime) / 1000).toInt() else 1
+            val recoveredIdx = Recovery.recover(
+                sCm = signals.sCm,
+                lastIdx = kalmanState!!.lastSegIdx,
+                dt = dt,
+                routeData = route,
+                frozenSCm = modeState.frozenSCm
+            )
+            if (recoveredIdx != null) {
+                // Reset stop states from recovered index
+                resetStopStatesFrom(recoveredIdx)
+                modeState = ModeMachine.toNormal()
+            }
+            // Skip detection during recovery
+            lastGpsTime = gps.timestamp
+            lastSCm = signals.sCm
+            return PipelineResult.Success(
+                sCm = signals.sCm,
+                vCms = kalmanState!!.vCms,
+                arrivals = emptyList(),
+                departures = emptyList()
+            )
+        }
+
+        // Phase 5: Detection
         val arrivals = mutableListOf<ArrivalEvent>()
         val departures = mutableListOf<DepartureEvent>()
 
@@ -117,6 +199,27 @@ class DetectionPipeline {
     }
 
     /**
+     * Reset stop states from recovered index.
+     * Called after successful recovery in OffRoute → Recovering → Normal flow.
+     */
+    private fun resetStopStatesFrom(recoveredIdx: Int) {
+        val route = routeData ?: return
+        stopStates = route.stops.mapIndexed { idx, _ ->
+            idx to StateMachine.initialState(idx)
+        }.toMap()
+
+        // Mark stops before recovered index as already passed
+        for (i in 0..<recoveredIdx) {
+            stopStates[i]?.let { state ->
+                stopStates = stopStates + (i to state.copy(
+                    fsmState = com.busarrival.app.domain.model.FsmState.Departed,
+                    announced = true
+                ))
+            }
+        }
+    }
+
+    /**
      * Reset pipeline state.
      */
     fun reset() {
@@ -125,6 +228,7 @@ class DetectionPipeline {
         stopStates = routeData?.stops?.mapIndexed { idx, _ ->
             idx to StateMachine.initialState(idx)
         }?.toMap() ?: emptyMap()
+        modeState = ModeMachine.toNormal()
         lastGpsTime = 0
         lastSCm = 0
     }
