@@ -11,6 +11,7 @@ import com.busarrival.app.data.pipeline.detection.mode.ModeMachine
 import com.busarrival.app.data.pipeline.detection.mode.Mode
 import com.busarrival.app.data.pipeline.types.*
 import com.busarrival.app.domain.model.*
+import java.io.File
 
 /**
  * Detection pipeline that integrates all components.
@@ -26,15 +27,20 @@ class DetectionPipeline {
 
     private var lastGpsTime: Long = 0
     private var lastSCm: DistCm = 0
+    private var traceWriter: TraceWriter? = null
 
     /**
      * Initialize pipeline with route data.
+     * @param traceFile Optional file for trace output (null = no tracing)
      */
-    fun initialize(routeData: RouteData) {
+    fun initialize(routeData: RouteData, traceFile: File? = null) {
         this.routeData = routeData
         this.stopStates = routeData.stops.mapIndexed { idx, _ ->
             idx to StateMachine.initialState(idx)
         }.toMap()
+
+        // Initialize trace writer if file provided
+        traceWriter = traceFile?.let { TraceWriter(it) }
     }
 
     /**
@@ -120,11 +126,28 @@ class DetectionPipeline {
             println("DetectionPipeline: OffRoute triggered. sCm=${signals.sCm}, matchDist2=${matchResult.dist2}")
         }
 
+        // Helper function to write trace tick
+        fun writeTrace() {
+            traceWriter?.write(TraceTick(
+                time = gps.timestamp,
+                s_cm = signals.sCm.toLong(),
+                off_route = modeState.mode == Mode.OffRoute,
+                stop_states = stopStates.map { (idx, state) ->
+                    StopStateEntry(
+                        stop_idx = idx,
+                        fsm_state = state.fsmState.name,
+                        skip_on_reentry = state.skipOnReentry
+                    )
+                }.takeIf { it.isNotEmpty() }
+            ))
+        }
+
         // Handle OffRoute mode: skip detection, preserve state
         if (modeState.mode == Mode.OffRoute) {
             println("DetectionPipeline: GPS ${gps.timestamp}: OffRoute mode, skipping detection. sCm=${signals.sCm}, matchDist2=${matchResult.dist2}")
             lastGpsTime = gps.timestamp
             lastSCm = signals.sCm
+            writeTrace()
             return PipelineResult.Success(
                 sCm = signals.sCm,
                 vCms = kalmanState!!.vCms,
@@ -151,6 +174,7 @@ class DetectionPipeline {
             // Skip detection during recovery
             lastGpsTime = gps.timestamp
             lastSCm = signals.sCm
+            writeTrace()
             return PipelineResult.Success(
                 sCm = signals.sCm,
                 vCms = kalmanState!!.vCms,
@@ -189,6 +213,7 @@ class DetectionPipeline {
 
         lastGpsTime = gps.timestamp
         lastSCm = signals.sCm
+        writeTrace()
 
         return PipelineResult.Success(
             sCm = signals.sCm,
@@ -231,6 +256,14 @@ class DetectionPipeline {
         modeState = ModeMachine.toNormal()
         lastGpsTime = 0
         lastSCm = 0
+    }
+
+    /**
+     * Close trace writer if open.
+     * Call this when pipeline is no longer needed.
+     */
+    fun close() {
+        traceWriter?.close()
     }
 }
 
