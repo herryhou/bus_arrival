@@ -24,7 +24,7 @@
 		state: FsmState;
 	} | null>(null);
 
-	let mapViewRef: { panToStop: (idx: number) => void } | null = null;
+	let mapViewRef: { panToStop: (idx: number) => void; panToLocation: (lat: number, lon: number) => void } | null = null;
 	let currentTime = $state<number>(0);
 
 	let timeMin = $state<number>(0);
@@ -137,14 +137,22 @@
 		time: number;
 		stopIdx?: number;
 		state?: FsmState;
+		lat?: number;
+		lon?: number;
 	}) {
+		console.log('handleEventClick:', info);
+		// For events with stop, pan to stop; otherwise pan to bus location
 		if (info.stopIdx !== undefined && info.state) {
 			highlightedEvent = {
 				stopIdx: info.stopIdx,
 				time: info.time,
 				state: info.state,
 			};
+			console.log('Panning to stop:', info.stopIdx, 'mapViewRef:', mapViewRef);
 			mapViewRef?.panToStop(info.stopIdx);
+		} else if (info.lat !== undefined && info.lon !== undefined) {
+			console.log('Panning to bus location:', info.lat, info.lon, 'mapViewRef:', mapViewRef);
+			mapViewRef?.panToLocation(info.lat, info.lon);
 		}
 	}
 

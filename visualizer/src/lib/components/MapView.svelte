@@ -47,6 +47,7 @@
 			time: number;
 		} | null;
 		onClearHighlight?: () => void;
+		eventLocation?: { lat: number; lon: number } | null;
 	}
 
 	let {
@@ -55,7 +56,8 @@
 		selectedStop = null,
 		onStopClick = () => {},
 		highlightedEvent = null,
-		onClearHighlight = () => {}
+		onClearHighlight = () => {},
+		eventLocation = null
 	}: Props = $props();
 
 	let mapContainer: HTMLDivElement;
@@ -65,6 +67,7 @@
 	let stopsSourceId = 'stops';
 	let busSourceId = 'bus';
 	let currentPanTarget = $state<number | null>(null);
+	let currentEventLocation = $state<{ lat: number; lon: number } | null>(null);
 	let handleKeyDownRef: ((e: KeyboardEvent) => void) | null = null;
 
 	onMount(() => {
@@ -123,7 +126,8 @@
 				img.src = url;
 			});
 			mapRef.addImage('bus-arrow', image);
-			
+
+			console.log('Map loaded, setting mapLoaded = true');
 			mapLoaded = true;
 
 			// Add route line
@@ -403,18 +407,27 @@
 	});
 
 	export function panToStop(stopIdx: number) {
+		console.log('MapView.panToStop called:', stopIdx);
 		currentPanTarget = stopIdx;
 	}
 
+	export function panToLocation(lat: number, lon: number) {
+		console.log('panToLocation called:', lat, lon);
+		currentEventLocation = { lat, lon };
+	}
+
 	$effect(() => {
+		console.log('Pan effect checking:', { map: !!map, mapLoaded, currentPanTarget });
 		if (!map || !mapLoaded || currentPanTarget === null) return;
 
+		console.log('Pan effect running, target:', currentPanTarget, 'mapLoaded:', mapLoaded);
 		const stop = routeData.stops[currentPanTarget];
 		if (!stop) return;
 
 		const latLon = getStopPosition(stop.progress_cm, routeData);
 		if (!latLon) return;
 
+		console.log('Panning map to:', latLon);
 		map.easeTo({
 			center: [latLon[1], latLon[0]],
 			zoom: 16,
@@ -422,6 +435,19 @@
 		});
 
 		currentPanTarget = null;
+	});
+
+	$effect(() => {
+		if (!map || !mapLoaded || !currentEventLocation) return;
+
+		console.log('Panning to event location:', currentEventLocation);
+		map.easeTo({
+			center: [currentEventLocation.lon, currentEventLocation.lat],
+			zoom: 16,
+			duration: 500
+		});
+
+		currentEventLocation = null;
 	});
 
 	// Highlight selected stop - show all 50m circles, highlight selected one

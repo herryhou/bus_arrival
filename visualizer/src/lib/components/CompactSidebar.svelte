@@ -9,7 +9,7 @@
 		selectedStop: number | null;
 		onSeek: (time: number) => void;
 		onStopSelect: (idx: number) => void;
-		onEventClick?: (info: { time: number; stopIdx?: number; state?: FsmState }) => void;
+		onEventClick?: (info: { time: number; stopIdx?: number; state?: FsmState; lat?: number; lon?: number }) => void;
 	}
 
 	let { traceData, currentTime, v_cms, selectedStop, onSeek, onStopSelect, onEventClick }: Props = $props();
@@ -76,13 +76,18 @@
 		highlightedEventTime = event.time;
 		onSeek(event.time);
 		const eventState = event.state || (event.type === 'ARRIVAL' ? 'AtStop' : undefined);
-		if (event.stopIdx !== undefined && eventState) {
-			onEventClick?.({
-				time: event.time,
-				stopIdx: event.stopIdx,
-				state: eventState
-			});
-		}
+
+		// Find the trace record at this event time to get lat/lon
+		const record = traceData.find(r => Math.abs(r.time - event.time) < 0.5);
+
+		console.log('Event clicked:', event, 'Record found:', record);
+		onEventClick?.({
+			time: event.time,
+			stopIdx: event.stopIdx,
+			state: eventState,
+			lat: record?.lat,
+			lon: record?.lon
+		});
 	}
 
 	// Helper: Format probability value (0-255) as padded string
