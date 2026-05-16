@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.busarrival.app.presentation.viewmodel.DetectionUiState
 import com.busarrival.app.service.PipelineEvent
@@ -35,6 +36,7 @@ import com.busarrival.app.service.PipelineEvent
 fun StatusPanel(
     uiState: DetectionUiState,
     events: List<PipelineEvent>,
+    routeName: String?,
     onStartStop: () -> Unit,
     onToggleCamera: () -> Unit,
     modifier: Modifier = Modifier
@@ -81,6 +83,23 @@ fun StatusPanel(
                         }
                     )
                 }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Route name
+            routeName?.let {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
             }
 
             Spacer(modifier = Modifier.height(16.dp))

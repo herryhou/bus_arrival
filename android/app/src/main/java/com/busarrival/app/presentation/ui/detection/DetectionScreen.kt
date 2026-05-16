@@ -18,6 +18,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -47,6 +50,7 @@ fun DetectionScreen(
     val uiState by viewModel.uiState.collectAsState()
     val events by viewModel.events.collectAsState()
     val activeRoute by viewModel.activeRoute.collectAsState()
+    val activeRouteMetadata by viewModel.activeRouteMetadata.collectAsState()
     val replayState by viewModel.replayState.collectAsState()
     val context = LocalContext.current
 
@@ -56,6 +60,20 @@ fun DetectionScreen(
             android.Manifest.permission.ACCESS_COARSE_LOCATION
         )
     )
+
+    // Reload active route when screen becomes visible
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.loadActiveRoute()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     if (!locationPermissions.allPermissionsGranted) {
         PermissionRequestContent(onRequest = { locationPermissions.launchMultiplePermissionRequest() })
@@ -75,6 +93,7 @@ fun DetectionScreen(
             StatusPanel(
                 uiState = uiState,
                 events = events,
+                routeName = activeRouteMetadata?.name,
                 onStartStop = {
                     if (uiState.isRunning) {
                         viewModel.stopDetection()

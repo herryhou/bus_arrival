@@ -41,6 +41,9 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     private val _activeRoute = MutableStateFlow<RouteData?>(null)
     val activeRoute: StateFlow<RouteData?> = _activeRoute.asStateFlow()
 
+    private val _activeRouteMetadata = MutableStateFlow<com.busarrival.app.domain.model.RouteMetadata?>(null)
+    val activeRouteMetadata: StateFlow<com.busarrival.app.domain.model.RouteMetadata?> = _activeRouteMetadata.asStateFlow()
+
     // Replay state for timeline/replay functionality
     private val _replayState = MutableStateFlow(ReplayState())
     val replayState: StateFlow<ReplayState> = _replayState.asStateFlow()
@@ -89,15 +92,21 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     /** Load active route from preferences. */
-    private fun loadActiveRoute() {
+    fun loadActiveRoute() {
         val activeUuid = preferences.activeRouteUuid
         android.util.Log.d("DetectionViewModel", "Loading active route: $activeUuid")
         if (activeUuid != null) {
             val route = routeStorage.loadRoute(activeUuid)
             _activeRoute.value = route
+
+            // Load route metadata for name display
+            val allMetadata = routeStorage.loadAllMetadata()
+            val metadata = allMetadata.find { it.uuid == activeUuid }
+            _activeRouteMetadata.value = metadata
+
             android.util.Log.d(
                     "DetectionViewModel",
-                    "Route loaded: ${route != null}, nodes: ${route?.nodes?.size ?: 0}"
+                    "Route loaded: ${route != null}, nodes: ${route?.nodes?.size ?: 0}, name: ${metadata?.name}"
             )
             if (route == null) {
                 _uiState.value = _uiState.value.copy(error = "Active route not found")

@@ -1,6 +1,7 @@
 package com.busarrival.app.presentation.ui.config
 
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -47,12 +48,15 @@ fun ConfigScreen(
     val uiState by viewModel.uiState.collectAsState()
     var showDeleteDialog by remember { mutableStateOf<RouteMetadata?>(null) }
     var parametersExpanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let {
-            viewModel.addRoute(it, "Route ${System.currentTimeMillis()}")
+            // Extract real file name from URI
+            val fileName = getFileNameFromUri(context, it)
+            viewModel.addRoute(it, fileName)
         }
     }
 
@@ -321,4 +325,32 @@ private fun ErrorDialog(
             }
         }
     )
+}
+
+/**
+ * Extract file name from URI.
+ * Tries to get display name from ContentResolver, falls back to last path segment.
+ */
+private fun getFileNameFromUri(context: android.content.Context, uri: Uri): String {
+    // Try to get display name from ContentResolver
+    var fileName: String? = null
+    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (nameIndex >= 0) {
+                fileName = cursor.getString(nameIndex)
+            }
+        }
+    }
+
+    // Fallback to last path segment
+    if (fileName.isNullOrBlank()) {
+        fileName = uri.lastPathSegment
+    }
+
+    // Remove .bin extension if present
+    fileName = fileName?.removeSuffix(".bin")
+
+    // Final fallback
+    return fileName ?: "Route ${System.currentTimeMillis()}"
 }
