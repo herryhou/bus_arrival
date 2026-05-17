@@ -51,6 +51,7 @@ import com.busarrival.app.domain.model.RouteNode
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.ceil
 import kotlin.math.pow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -64,7 +65,7 @@ private const val MAX_TILE_Z = 20
 private const val TILE_REQUEST_BUCKET_WORLD_PX = 256f
 private const val TILE_REQUEST_DELAY_MS = 75L
 private const val TILE_PREFETCH_PADDING = 1
-private const val MAX_FETCH_RANGE = 12
+private const val MAX_FETCH_RANGE = 5
 private const val MAX_TILE_CONCURRENCY = 4
 
 data class LatLon(val lat: Double, val lon: Double)
@@ -183,12 +184,13 @@ fun MapView(
         }
     }
 
-    val drawTileRange by remember(requestedTileZ, canvasSize.value) {
+    val drawTileRange by remember(requestedTileZ, canvasSize.value, scale) {
         derivedStateOf {
             computeVisibleTileRange(
                     zoom = requestedTileZ,
                     canvasWidth = canvasSize.value.width.toFloat(),
-                    canvasHeight = canvasSize.value.height.toFloat()
+                    canvasHeight = canvasSize.value.height.toFloat(),
+                    scale = scale
             )
         }
     }
@@ -664,12 +666,17 @@ internal fun viewportCenterToLatLon(
     )
 }
 
-internal fun computeVisibleTileRange(zoom: Int, canvasWidth: Float, canvasHeight: Float): Int {
-    if (canvasWidth <= 0f || canvasHeight <= 0f) {
+internal fun computeVisibleTileRange(
+        zoom: Int,
+        canvasWidth: Float,
+        canvasHeight: Float,
+        scale: Float
+): Int {
+    if (canvasWidth <= 0f || canvasHeight <= 0f || scale <= 0f || !scale.isFinite()) {
         return 2
     }
 
     val tileWorldSize = 256f * 2.0f.pow(BASE_Z - zoom)
-    val canvasHalfMax = maxOf(canvasWidth, canvasHeight) / 2f
-    return (canvasHalfMax / tileWorldSize).toInt() + 2
+    val viewportHalfWorld = maxOf(canvasWidth, canvasHeight) / 2f / scale
+    return ceil(viewportHalfWorld / tileWorldSize).toInt() + 1
 }
