@@ -20,6 +20,7 @@ import com.busarrival.app.domain.model.ReplayState
 import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.service.DetectionService
 import com.busarrival.app.service.PipelineEvent
+import java.util.LinkedHashMap
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,10 @@ import kotlinx.coroutines.launch
 
 /** ViewModel for detection screen. Manages service connection, active route, and UI state. */
 class DetectionViewModel(application: Application) : AndroidViewModel(application) {
+    companion object {
+        private const val MAX_MEMORY_TILES = 160
+    }
+
     private val preferences = DetectionPreferences(application)
     private val routeStorage = RouteStorageManager(application, com.google.gson.Gson())
     private val gson = com.google.gson.Gson()
@@ -201,8 +206,9 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
 
     /** Add tiles to cache. */
     fun addTiles(tiles: Map<String, ImageBitmap>) {
-        val current = _tileCache.value.toMutableMap()
+        val current = LinkedHashMap(_tileCache.value)
         current.putAll(tiles)
+        trimTileCache(current)
         _tileCache.value = current
     }
 
@@ -210,6 +216,13 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     fun clearTileCache() {
         _tileCache.value = emptyMap()
         android.util.Log.d("DetectionViewModel", "Tile cache cleared")
+    }
+
+    private fun trimTileCache(cache: LinkedHashMap<String, ImageBitmap>) {
+        while (cache.size > MAX_MEMORY_TILES) {
+            val oldestKey = cache.entries.iterator().next().key
+            cache.remove(oldestKey)
+        }
     }
 
     // ==================== Replay/Timeline Functions ====================
