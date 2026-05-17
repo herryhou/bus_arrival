@@ -22,11 +22,12 @@ pub fn check_speed_constraint(z_new: DistCm, z_prev: DistCm, dt: i32) -> bool {
 
 /// Monotonicity constraint with noise tolerance
 ///
-/// Per spec Section 8.3: reject if z(t) - ŝ(t-1) < -1000 cm
-/// Implementation uses -5000 cm (-50 m) as a practical balance:
+/// Per current constraints spec Section 8.3: reject if z(t) - ŝ(t-1) < -5000 cm
+/// This is an inclusive -50 m tolerance: exactly -5000 cm is allowed.
+/// Implementation uses -5000 cm (-50 m) as the approved threshold:
 /// - Tolerates GPS noise in urban canyon conditions
 /// - Catches legitimate anomalies (route reversals, GPS glitches)
-/// - Middle ground between spec (-10m) and previous (-500m)
+/// - Tighter than the old -500 m implementation without overreacting to jitter
 pub fn check_monotonic(z_new: DistCm, z_prev: DistCm) -> bool {
     z_new >= z_prev - 5000
 }

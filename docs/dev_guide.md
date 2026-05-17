@@ -978,7 +978,7 @@ print(f"Precision={precision:.3f}  Recall={recall:.3f}  F1={f1:.3f}")
 - [ ] `firmware/src/route_data.rs`：Flash XIP 存取、啟動 CRC 驗證
 - [ ] `firmware/src/lut.rs`：`gaussian_lut()`、`logistic_lut()`
 - [ ] `pipeline/map_match.rs`：Grid lookup + heading ramp + i64 距離平方評分
-- [ ] `pipeline/projection.rs`：segment projection + 單調性約束（-1000 cm 閾值）
+- [ ] `pipeline/projection.rs`：segment projection + 單調性約束（-5000 cm 閾值，含等於 50 m）
 - [ ] `pipeline/speed_filter.rs`：D_max = 3667 cm 跳點拒絕
 - [ ] `pipeline/kalman.rs`：固定增益 update() + HDOP 自適應（可選）+ 速度 EMA
 - [ ] `pipeline/dead_reckoning.rs`：tick() / resync()，10 s 上限

@@ -35,7 +35,7 @@
 
 ### D2 Fix - Monotonicity Threshold
 
-**Problem:** Spec Section 8.3 specifies -1000 cm (-10 m) threshold. Code uses -50000 cm (-500 m), which is too loose to catch real anomalies.
+**Problem at design time:** Earlier docs/spec text referenced a -1000 cm (-10 m) threshold, while code used -50000 cm (-500 m), which was too loose to catch real anomalies.
 
 **Solution:** Set threshold to -5000 cm (-50 m) as a practical middle ground that:
 - Tolerates GPS noise in urban canyon conditions
@@ -168,11 +168,12 @@ ProcessResult::Valid {
 ```rust
 /// Monotonicity constraint with noise tolerance
 ///
-/// Per spec Section 8.3: reject if z(t) - ŝ(t-1) < -1000 cm
-/// Implementation uses -5000 cm (-50 m) as a practical balance:
+/// Per current constraints spec Section 8.3: reject if z(t) - ŝ(t-1) < -5000 cm
+/// This is an inclusive -50 m tolerance: exactly -5000 cm is allowed.
+/// Implementation uses -5000 cm (-50 m) as the approved threshold:
 /// - Tolerates GPS noise in urban canyon conditions
 /// - Catches legitimate anomalies (route reversals, GPS glitches)
-/// - Middle ground between spec (-10m) and previous (-500m)
+/// - Tighter than the old -500 m implementation without overreacting to jitter
 fn check_monotonic(z_new: DistCm, z_prev: DistCm) -> bool {
     z_new >= z_prev - 5000  // CHANGED from 50000
 }

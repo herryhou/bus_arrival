@@ -353,6 +353,9 @@ pub fn process_gps_update(
     }
 
     // 4. Monotonicity filter
+    // Historical design note: current implementation no longer returns
+    // Rejected("monotonicity") here. It falls back to DR-style prediction
+    // and returns DrOutage on monotonicity or speed filter failure.
     if !check_monotonic(z_raw, state.s_cm) {
         return ProcessResult::Rejected("monotonicity");
     }
