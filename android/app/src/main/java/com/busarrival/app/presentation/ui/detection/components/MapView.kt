@@ -39,7 +39,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.onSizeChanged
 import com.busarrival.app.BuildConfig
 import com.busarrival.app.data.cache.TileCache
 import com.busarrival.app.data.cache.TileResolution
@@ -62,7 +64,7 @@ private const val MAX_TILE_Z = 20
 private const val TILE_REQUEST_BUCKET_WORLD_PX = 256f
 private const val TILE_REQUEST_DELAY_MS = 75L
 private const val TILE_PREFETCH_PADDING = 1
-private const val MAX_FETCH_RANGE = 4
+private const val MAX_FETCH_RANGE = 12
 private const val MAX_TILE_CONCURRENCY = 4
 
 data class LatLon(val lat: Double, val lon: Double)
@@ -106,6 +108,7 @@ fun MapView(
     val offset by viewModel.mapOffset.collectAsState()
     val mapLabelZoomBias by viewModel.mapLabelZoomBias.collectAsState()
     val tileCache by viewModel.tileCache.collectAsState()
+    val canvasSize = remember { androidx.compose.runtime.mutableStateOf(IntSize.Zero) }
     val centerLatLon =
             remember(routeData) {
                 routeData?.let {
@@ -180,15 +183,22 @@ fun MapView(
         }
     }
 
-    LaunchedEffect(requestedTileZ, viewportBucket, viewportCenterLatLon) {
+    val drawTileRange by remember(requestedTileZ, canvasSize.value) {
+        derivedStateOf {
+            computeVisibleTileRange(
+                    zoom = requestedTileZ,
+                    canvasWidth = canvasSize.value.width.toFloat(),
+                    canvasHeight = canvasSize.value.height.toFloat()
+            )
+        }
+    }
+
+    LaunchedEffect(requestedTileZ, viewportBucket, viewportCenterLatLon, drawTileRange) {
         val loadCenter = viewportCenterLatLon ?: return@LaunchedEffect
 
         kotlinx.coroutines.delay(TILE_REQUEST_DELAY_MS)
 
-        val tileWorldSize = 256f * 2.0f.pow(BASE_Z - requestedTileZ)
-        val fetchRange =
-                ((TILE_REQUEST_BUCKET_WORLD_PX / tileWorldSize).toInt() + TILE_PREFETCH_PADDING)
-                        .coerceIn(1, MAX_FETCH_RANGE)
+        val fetchRange = (drawTileRange + TILE_PREFETCH_PADDING).coerceIn(1, MAX_FETCH_RANGE)
         val resolution = TileResolution.forZoom(requestedTileZ)
 
         val tiles =
@@ -207,7 +217,10 @@ fun MapView(
         if (routeData != null && centerLatLon != null) {
             Canvas(
                     modifier =
-                            Modifier.fillMaxSize().background(Color.White).pointerInput(Unit) {
+                            Modifier.fillMaxSize()
+                                    .background(Color.White)
+                                    .onSizeChanged { canvasSize.value = it }
+                                    .pointerInput(Unit) {
                                 detectTransformGestures { centroid, pan, zoom, _ ->
                                     val oldScale = scale
                                     val newScale = (oldScale * zoom).coerceIn(0.1f, 10f)
@@ -237,12 +250,11 @@ fun MapView(
                 val canvasHeight = size.height
 
                 val center = centerLatLon
+                val viewportCenter = viewportCenterLatLon ?: center
 
                 // Always use baseZ for positioning to prevent jumps
-                val centerTileX = lonToTileX(center.lon, requestedTileZ)
-                val centerTileY = latToTileY(center.lat, requestedTileZ)
-                val tileSize = 256f
-
+                val centerTileX = lonToTileX(viewportCenter.lon, requestedTileZ)
+                val centerTileY = latToTileY(viewportCenter.lat, requestedTileZ)
                 // Helper function to transform coordinates to screen space (must be defined before
                 // tile drawing)
                 // Uses baseZ for consistent coordinates across zoom levels (prevents jumping at
@@ -293,9 +305,7 @@ fun MapView(
                     // Each zoom level has its own tile grid, so we must use tileZ for positioning
                     // Compute tile range dynamically to maintain constant screen coverage
                     // tileWorldSize = 256 * 2^(baseZ - tileZ) shrinks as tileZ increases
-                    val tileWorldSize = tileSize * 2.0f.pow(BASE_Z - requestedTileZ)
-                    val canvasHalfMax = maxOf(canvasWidth, canvasHeight) / 2f
-                    val tileRange = (canvasHalfMax / tileWorldSize).toInt() + 2
+                    val tileRange = drawTileRange
 
                     var tilesDrawn = 0
 
@@ -652,4 +662,14 @@ internal fun viewportCenterToLatLon(
             lat = pixelYToLat(viewportPixelY, zoom),
             lon = pixelXToLon(viewportPixelX, zoom)
     )
+}
+
+internal fun computeVisibleTileRange(zoom: Int, canvasWidth: Float, canvasHeight: Float): Int {
+    if (canvasWidth <= 0f || canvasHeight <= 0f) {
+        return 2
+    }
+
+    val tileWorldSize = 256f * 2.0f.pow(BASE_Z - zoom)
+    val canvasHalfMax = maxOf(canvasWidth, canvasHeight) / 2f
+    return (canvasHalfMax / tileWorldSize).toInt() + 2
 }
