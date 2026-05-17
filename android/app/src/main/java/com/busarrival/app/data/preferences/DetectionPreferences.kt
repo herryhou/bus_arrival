@@ -18,6 +18,8 @@ class DetectionPreferences(context: Context) {
         private const val KEY_PROGRESS_ERROR_WEIGHT = "progress_error_weight"
         private const val KEY_DWELL_TIME_WEIGHT = "dwell_time_weight"
         private const val KEY_CORRIDOR_SIZE = "corridor_size"
+        private const val KEY_MAP_LABEL_ZOOM_BIAS = "map_label_zoom_bias"
+        private const val DEFAULT_MAP_LABEL_ZOOM_BIAS = 1
 
         val DEFAULT_PARAMETERS = DetectionParameters(
             distanceWeight = 50,
@@ -51,6 +53,10 @@ class DetectionPreferences(context: Context) {
     var corridorSize: Int
         get() = prefs.getInt(KEY_CORRIDOR_SIZE, DEFAULT_PARAMETERS.corridorSize)
         set(value) = prefs.edit().putInt(KEY_CORRIDOR_SIZE, value.coerceIn(-80, 40)).apply()
+
+    var mapLabelZoomBias: Int
+        get() = prefs.getInt(KEY_MAP_LABEL_ZOOM_BIAS, DEFAULT_MAP_LABEL_ZOOM_BIAS)
+        set(value) = prefs.edit().putInt(KEY_MAP_LABEL_ZOOM_BIAS, value.coerceIn(0, 2)).apply()
 
     fun getParameters(): DetectionParameters = DetectionParameters(
         distanceWeight = distanceWeight,

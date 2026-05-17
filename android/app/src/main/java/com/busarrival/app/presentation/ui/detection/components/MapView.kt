@@ -104,6 +104,7 @@ fun MapView(
 
     val scale by viewModel.mapScale.collectAsState()
     val offset by viewModel.mapOffset.collectAsState()
+    val mapLabelZoomBias by viewModel.mapLabelZoomBias.collectAsState()
     val tileCache by viewModel.tileCache.collectAsState()
     val centerLatLon =
             remember(routeData) {
@@ -142,6 +143,9 @@ fun MapView(
                     .coerceIn(MIN_TILE_Z, MAX_TILE_Z)
         }
     }
+    val requestedTileZ by remember {
+        derivedStateOf { (tileZ - mapLabelZoomBias).coerceIn(MIN_TILE_Z, MAX_TILE_Z) }
+    }
 
     // Viewport center in world coordinates (changes with pan)
     val viewportCenterWorld by remember {
@@ -152,9 +156,9 @@ fun MapView(
         }
     }
 
-    val viewportBucket by remember(tileZ, viewportCenterWorld) {
+    val viewportBucket by remember(requestedTileZ, viewportCenterWorld) {
         derivedStateOf {
-            val tileWorldSize = 256f * 2.0f.pow(BASE_Z - tileZ)
+            val tileWorldSize = 256f * 2.0f.pow(BASE_Z - requestedTileZ)
             val bucketSize = maxOf(tileWorldSize, TILE_REQUEST_BUCKET_WORLD_PX)
             Pair(
                     kotlin.math.floor(viewportCenterWorld.first / bucketSize).toInt(),
@@ -176,21 +180,21 @@ fun MapView(
         }
     }
 
-    LaunchedEffect(tileZ, viewportBucket, viewportCenterLatLon) {
+    LaunchedEffect(requestedTileZ, viewportBucket, viewportCenterLatLon) {
         val loadCenter = viewportCenterLatLon ?: return@LaunchedEffect
 
         kotlinx.coroutines.delay(TILE_REQUEST_DELAY_MS)
 
-        val tileWorldSize = 256f * 2.0f.pow(BASE_Z - tileZ)
+        val tileWorldSize = 256f * 2.0f.pow(BASE_Z - requestedTileZ)
         val fetchRange =
                 ((TILE_REQUEST_BUCKET_WORLD_PX / tileWorldSize).toInt() + TILE_PREFETCH_PADDING)
                         .coerceIn(1, MAX_FETCH_RANGE)
-        val resolution = TileResolution.forZoom(tileZ)
+        val resolution = TileResolution.forZoom(requestedTileZ)
 
         val tiles =
                 kotlin
                         .runCatching {
-                            loadTilesForZoom(loadCenter, tileZ, tileDiskCache, fetchRange, resolution, tileCache)
+                            loadTilesForZoom(loadCenter, requestedTileZ, tileDiskCache, fetchRange, resolution, tileCache)
                         }
                         .getOrNull()
 
@@ -235,8 +239,8 @@ fun MapView(
                 val center = centerLatLon
 
                 // Always use baseZ for positioning to prevent jumps
-                val centerTileX = lonToTileX(center.lon, tileZ)
-                val centerTileY = latToTileY(center.lat, tileZ)
+                val centerTileX = lonToTileX(center.lon, requestedTileZ)
+                val centerTileY = latToTileY(center.lat, requestedTileZ)
                 val tileSize = 256f
 
                 // Helper function to transform coordinates to screen space (must be defined before
@@ -289,7 +293,7 @@ fun MapView(
                     // Each zoom level has its own tile grid, so we must use tileZ for positioning
                     // Compute tile range dynamically to maintain constant screen coverage
                     // tileWorldSize = 256 * 2^(baseZ - tileZ) shrinks as tileZ increases
-                    val tileWorldSize = tileSize * 2.0f.pow(BASE_Z - tileZ)
+                    val tileWorldSize = tileSize * 2.0f.pow(BASE_Z - requestedTileZ)
                     val canvasHalfMax = maxOf(canvasWidth, canvasHeight) / 2f
                     val tileRange = (canvasHalfMax / tileWorldSize).toInt() + 2
 
@@ -300,23 +304,25 @@ fun MapView(
                             val tileX = centerTileX + dx
                             val tileY = centerTileY + dy
 
-                            val resolution = TileResolution.forZoom(tileZ)
-                            val key = "$tileZ/$tileX/$tileY@${resolution.scale}"
+                            val resolution = TileResolution.forZoom(requestedTileZ)
+                            val key = "$requestedTileZ/$tileX/$tileY@${resolution.scale}"
 
                             // Try to get tile at current zoom level
                             var bitmap = tileCache[key]
-                            var actualTileZ = tileZ
+                            var actualTileZ = requestedTileZ
                             var actualTileX = tileX
                             var actualTileY = tileY
                             var actualResolution = resolution
 
                             // Fallback: try lower zoom levels if current not available
-                            if (bitmap == null && tileZ > MIN_TILE_Z) {
+                            if (bitmap == null && requestedTileZ > MIN_TILE_Z) {
                                 var foundFallback = false
-                                for (fallbackZ in (tileZ - 1) downTo MIN_TILE_Z) {
+                                for (fallbackZ in (requestedTileZ - 1) downTo MIN_TILE_Z) {
                                     if (foundFallback) break
-                                    val fallbackX = tileX / 2.0.pow(tileZ - fallbackZ).toInt()
-                                    val fallbackY = tileY / 2.0.pow(tileZ - fallbackZ).toInt()
+                                    val fallbackScaleDivisor =
+                                            2.0.pow(requestedTileZ - fallbackZ).toInt()
+                                    val fallbackX = tileX / fallbackScaleDivisor
+                                    val fallbackY = tileY / fallbackScaleDivisor
                                     val fallbackRes = TileResolution.forZoom(fallbackZ)
                                     val fallbackKey = "$fallbackZ/$fallbackX/$fallbackY@${fallbackRes.scale}"
                                     tileCache[fallbackKey]?.let {
@@ -332,9 +338,9 @@ fun MapView(
 
                             bitmap?.let {
                                 // Determine which tile actually provides the bitmap
-                                val posTileX = if (actualTileZ != tileZ) actualTileX else tileX
-                                val posTileY = if (actualTileZ != tileZ) actualTileY else tileY
-                                val posZ = if (actualTileZ != tileZ) actualTileZ else tileZ
+                                val posTileX = if (actualTileZ != requestedTileZ) actualTileX else tileX
+                                val posTileY = if (actualTileZ != requestedTileZ) actualTileY else tileY
+                                val posZ = if (actualTileZ != requestedTileZ) actualTileZ else requestedTileZ
 
                                 // Calculate position using ACTUAL tile coordinates (posTileX,
                                 // posTileY at posZ)
@@ -463,7 +469,7 @@ fun MapView(
                         color = Color.Black
                 )
                 Text(
-                        text = "Tiles: ${tileCache.size} loaded",
+                        text = "Tiles: ${tileCache.size} loaded | tileZ=$requestedTileZ | labelBias=$mapLabelZoomBias",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.Black
                 )

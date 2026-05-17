@@ -60,6 +60,9 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     private val _mapOffset = MutableStateFlow(Offset.Zero)
     val mapOffset: StateFlow<Offset> = _mapOffset.asStateFlow()
 
+    private val _mapLabelZoomBias = MutableStateFlow(preferences.mapLabelZoomBias)
+    val mapLabelZoomBias: StateFlow<Int> = _mapLabelZoomBias.asStateFlow()
+
     private val _tileCache = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
     val tileCache: StateFlow<Map<String, ImageBitmap>> = _tileCache.asStateFlow()
 
@@ -202,6 +205,14 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateMapState(scale: Float, offset: Offset) {
         _mapScale.value = scale
         _mapOffset.value = offset
+    }
+
+    /** Update label zoom bias for raster map tiles. */
+    fun setMapLabelZoomBias(bias: Int) {
+        val clampedBias = bias.coerceIn(0, 2)
+        preferences.mapLabelZoomBias = clampedBias
+        _mapLabelZoomBias.value = clampedBias
+        clearTileCache()
     }
 
     /** Add tiles to cache. */
