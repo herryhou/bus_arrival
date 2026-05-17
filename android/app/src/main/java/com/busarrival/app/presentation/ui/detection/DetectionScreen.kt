@@ -52,7 +52,10 @@ fun DetectionScreen(
     val activeRoute by viewModel.activeRoute.collectAsState()
     val activeRouteMetadata by viewModel.activeRouteMetadata.collectAsState()
     val replayState by viewModel.replayState.collectAsState()
-    val mapLabelZoomBias by viewModel.mapLabelZoomBias.collectAsState()
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshMapLabelZoomBias()
+    }
 
     val locationPermissions = rememberMultiplePermissionsState(
         permissions = listOf(
@@ -81,12 +84,6 @@ fun DetectionScreen(
         NoRouteContent()
     } else {
         Column(modifier = Modifier.fillMaxSize()) {
-            MapLabelBiasControl(
-                selectedBias = mapLabelZoomBias,
-                onBiasSelected = { viewModel.setMapLabelZoomBias(it) },
-                modifier = Modifier.fillMaxWidth()
-            )
-
             MapView(
                 routeData = activeRoute,
                 currentSCm = uiState.sCm,
@@ -132,42 +129,6 @@ fun DetectionScreen(
             error = error,
             onDismiss = { viewModel.clearError() }
         )
-    }
-}
-
-@Composable
-private fun MapLabelBiasControl(
-    selectedBias: Int,
-    onBiasSelected: (Int) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val options = listOf(
-        0 to "Small",
-        1 to "Medium",
-        2 to "Large"
-    )
-
-    Column(
-        modifier = modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            text = "Map Labels",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold
-        )
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            options.forEach { (bias, label) ->
-                FilterChip(
-                    selected = selectedBias == bias,
-                    onClick = { onBiasSelected(bias) },
-                    label = { Text(label) }
-                )
-            }
-        }
     }
 }
 

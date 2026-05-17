@@ -105,6 +105,13 @@ fun ConfigScreen(
                     }
 
                     item {
+                        MapLabelBiasSection(
+                            selectedBias = uiState.mapLabelZoomBias,
+                            onBiasSelected = { viewModel.setMapLabelZoomBias(it) }
+                        )
+                    }
+
+                    item {
                         Spacer(modifier = Modifier.height(16.dp))
 
                         Card(
@@ -215,6 +222,40 @@ fun ConfigScreen(
             error = error,
             onDismiss = { viewModel.clearError() }
         )
+    }
+}
+
+@Composable
+private fun MapLabelBiasSection(
+    selectedBias: Int,
+    onBiasSelected: (Int) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Map Labels",
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    0 to "Small",
+                    1 to "Medium",
+                    2 to "Large"
+                ).forEach { (bias, label) ->
+                    FilterChip(
+                        selected = selectedBias == bias,
+                        onClick = { onBiasSelected(bias) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+        }
     }
 }
 

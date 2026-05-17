@@ -17,6 +17,7 @@ data class ConfigUiState(
     val routes: List<RouteMetadata> = emptyList(),
     val activeRouteId: String? = null,
     val parameters: DetectionParameters = DetectionParameters.defaults,
+    val mapLabelZoomBias: Int = 1,
     val isLoading: Boolean = false,
     val error: String? = null
 )
@@ -42,11 +43,13 @@ class ConfigViewModel(
             val routes = routeStorage.loadAllMetadata()
             val activeRouteId = preferences.activeRouteUuid
             val parameters = preferences.getParameters()
+            val mapLabelZoomBias = preferences.mapLabelZoomBias
 
             _uiState.value = ConfigUiState(
                 routes = routes.sortedByDescending { it.timestamp },
                 activeRouteId = activeRouteId,
                 parameters = parameters,
+                mapLabelZoomBias = mapLabelZoomBias,
                 isLoading = false
             )
         }
@@ -115,6 +118,12 @@ class ConfigViewModel(
 
         preferences.saveParameters(newParams)
         _uiState.value = _uiState.value.copy(parameters = newParams)
+    }
+
+    fun setMapLabelZoomBias(bias: Int) {
+        val clampedBias = bias.coerceIn(0, 2)
+        preferences.mapLabelZoomBias = clampedBias
+        _uiState.value = _uiState.value.copy(mapLabelZoomBias = clampedBias)
     }
 
     fun clearError() {

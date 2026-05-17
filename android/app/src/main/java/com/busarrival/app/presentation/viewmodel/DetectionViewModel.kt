@@ -215,6 +215,11 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         clearTileCache()
     }
 
+    /** Reload label zoom bias from shared preferences. */
+    fun refreshMapLabelZoomBias() {
+        _mapLabelZoomBias.value = preferences.mapLabelZoomBias
+    }
+
     /** Add tiles to cache. */
     fun addTiles(tiles: Map<String, ImageBitmap>) {
         val current = LinkedHashMap(_tileCache.value)

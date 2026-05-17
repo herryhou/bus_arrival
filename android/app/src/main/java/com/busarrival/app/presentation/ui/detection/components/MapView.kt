@@ -18,8 +18,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,10 +48,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.layout.onSizeChanged
 import com.busarrival.app.BuildConfig
 import com.busarrival.app.data.cache.TileCache
 import com.busarrival.app.data.cache.TileResolution
@@ -50,8 +60,8 @@ import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.domain.model.RouteNode
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 import kotlin.math.PI
-import kotlin.math.cos
 import kotlin.math.ceil
+import kotlin.math.cos
 import kotlin.math.pow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -110,6 +120,7 @@ fun MapView(
     val mapLabelZoomBias by viewModel.mapLabelZoomBias.collectAsState()
     val tileCache by viewModel.tileCache.collectAsState()
     val canvasSize = remember { androidx.compose.runtime.mutableStateOf(IntSize.Zero) }
+    val showDebugDetails = remember { mutableStateOf(true) }
     val centerLatLon =
             remember(routeData) {
                 routeData?.let {
@@ -143,8 +154,10 @@ fun MapView(
     // Calculate tile zoom level from scale - use derivedStateOf to ensure updates
     val tileZ by remember {
         derivedStateOf {
-            (BASE_Z + (kotlin.math.ln(scale.toDouble()) / kotlin.math.ln(2.0)).toInt())
-                    .coerceIn(MIN_TILE_Z, MAX_TILE_Z)
+            (BASE_Z + (kotlin.math.ln(scale.toDouble()) / kotlin.math.ln(2.0)).toInt()).coerceIn(
+                    MIN_TILE_Z,
+                    MAX_TILE_Z
+            )
         }
     }
     val requestedTileZ by remember {
@@ -160,40 +173,43 @@ fun MapView(
         }
     }
 
-    val viewportBucket by remember(requestedTileZ, viewportCenterWorld) {
-        derivedStateOf {
-            val tileWorldSize = 256f * 2.0f.pow(BASE_Z - requestedTileZ)
-            val bucketSize = maxOf(tileWorldSize, TILE_REQUEST_BUCKET_WORLD_PX)
-            Pair(
-                    kotlin.math.floor(viewportCenterWorld.first / bucketSize).toInt(),
-                    kotlin.math.floor(viewportCenterWorld.second / bucketSize).toInt()
-            )
-        }
-    }
-
-    val viewportCenterLatLon by remember(centerLatLon, viewportCenterWorld) {
-        derivedStateOf {
-            centerLatLon?.let {
-                viewportCenterToLatLon(
-                        routeCenter = it,
-                        viewportCenterWorldX = viewportCenterWorld.first,
-                        viewportCenterWorldY = viewportCenterWorld.second,
-                        zoom = BASE_Z
-                )
+    val viewportBucket by
+            remember(requestedTileZ, viewportCenterWorld) {
+                derivedStateOf {
+                    val tileWorldSize = 256f * 2.0f.pow(BASE_Z - requestedTileZ)
+                    val bucketSize = maxOf(tileWorldSize, TILE_REQUEST_BUCKET_WORLD_PX)
+                    Pair(
+                            kotlin.math.floor(viewportCenterWorld.first / bucketSize).toInt(),
+                            kotlin.math.floor(viewportCenterWorld.second / bucketSize).toInt()
+                    )
+                }
             }
-        }
-    }
 
-    val drawTileRange by remember(requestedTileZ, canvasSize.value, scale) {
-        derivedStateOf {
-            computeVisibleTileRange(
-                    zoom = requestedTileZ,
-                    canvasWidth = canvasSize.value.width.toFloat(),
-                    canvasHeight = canvasSize.value.height.toFloat(),
-                    scale = scale
-            )
-        }
-    }
+    val viewportCenterLatLon by
+            remember(centerLatLon, viewportCenterWorld) {
+                derivedStateOf {
+                    centerLatLon?.let {
+                        viewportCenterToLatLon(
+                                routeCenter = it,
+                                viewportCenterWorldX = viewportCenterWorld.first,
+                                viewportCenterWorldY = viewportCenterWorld.second,
+                                zoom = BASE_Z
+                        )
+                    }
+                }
+            }
+
+    val drawTileRange by
+            remember(requestedTileZ, canvasSize.value, scale) {
+                derivedStateOf {
+                    computeVisibleTileRange(
+                            zoom = requestedTileZ,
+                            canvasWidth = canvasSize.value.width.toFloat(),
+                            canvasHeight = canvasSize.value.height.toFloat(),
+                            scale = scale
+                    )
+                }
+            }
 
     LaunchedEffect(requestedTileZ, viewportBucket, viewportCenterLatLon, drawTileRange) {
         val loadCenter = viewportCenterLatLon ?: return@LaunchedEffect
@@ -206,7 +222,14 @@ fun MapView(
         val tiles =
                 kotlin
                         .runCatching {
-                            loadTilesForZoom(loadCenter, requestedTileZ, tileDiskCache, fetchRange, resolution, tileCache)
+                            loadTilesForZoom(
+                                    loadCenter,
+                                    requestedTileZ,
+                                    tileDiskCache,
+                                    fetchRange,
+                                    resolution,
+                                    tileCache
+                            )
                         }
                         .getOrNull()
 
@@ -223,30 +246,36 @@ fun MapView(
                                     .background(Color.White)
                                     .onSizeChanged { canvasSize.value = it }
                                     .pointerInput(Unit) {
-                                detectTransformGestures { centroid, pan, zoom, _ ->
-                                    val oldScale = scale
-                                    val newScale = (oldScale * zoom).coerceIn(0.1f, 10f)
+                                        detectTransformGestures { centroid, pan, zoom, _ ->
+                                            val oldScale = scale
+                                            val newScale = (oldScale * zoom).coerceIn(0.1f, 10f)
 
-                                    // Convert centroid from screen coordinates to centered
-                                    // coordinates
-                                    // Screen origin is top-left, our offset origin is center
-                                    val centroidCentered =
-                                            centroid - Offset(size.width / 2f, size.height / 2f)
+                                            // Convert centroid from screen coordinates to centered
+                                            // coordinates
+                                            // Screen origin is top-left, our offset origin is
+                                            // center
+                                            val centroidCentered =
+                                                    centroid -
+                                                            Offset(
+                                                                    size.width / 2f,
+                                                                    size.height / 2f
+                                                            )
 
-                                    // Adjust offset to keep pinch point stable: zoom around
-                                    // centroid
-                                    // Formula: offset += (centroid - offset) * (1 -
-                                    // newScale/oldScale)
-                                    val oldOffset = offset
-                                    val scaleChange = 1 - newScale / oldScale
-                                    val newOffset =
-                                            oldOffset +
-                                                    (centroidCentered - oldOffset) * scaleChange +
-                                                    pan
+                                            // Adjust offset to keep pinch point stable: zoom around
+                                            // centroid
+                                            // Formula: offset += (centroid - offset) * (1 -
+                                            // newScale/oldScale)
+                                            val oldOffset = offset
+                                            val scaleChange = 1 - newScale / oldScale
+                                            val newOffset =
+                                                    oldOffset +
+                                                            (centroidCentered - oldOffset) *
+                                                                    scaleChange +
+                                                            pan
 
-                                    viewModel.updateMapState(newScale, newOffset)
-                                }
-                            }
+                                            viewModel.updateMapState(newScale, newOffset)
+                                        }
+                                    }
             ) {
                 val canvasWidth = size.width
                 val canvasHeight = size.height
@@ -336,7 +365,8 @@ fun MapView(
                                     val fallbackX = tileX / fallbackScaleDivisor
                                     val fallbackY = tileY / fallbackScaleDivisor
                                     val fallbackRes = TileResolution.forZoom(fallbackZ)
-                                    val fallbackKey = "$fallbackZ/$fallbackX/$fallbackY@${fallbackRes.scale}"
+                                    val fallbackKey =
+                                            "$fallbackZ/$fallbackX/$fallbackY@${fallbackRes.scale}"
                                     tileCache[fallbackKey]?.let {
                                         bitmap = it
                                         actualTileZ = fallbackZ
@@ -350,9 +380,13 @@ fun MapView(
 
                             bitmap?.let {
                                 // Determine which tile actually provides the bitmap
-                                val posTileX = if (actualTileZ != requestedTileZ) actualTileX else tileX
-                                val posTileY = if (actualTileZ != requestedTileZ) actualTileY else tileY
-                                val posZ = if (actualTileZ != requestedTileZ) actualTileZ else requestedTileZ
+                                val posTileX =
+                                        if (actualTileZ != requestedTileZ) actualTileX else tileX
+                                val posTileY =
+                                        if (actualTileZ != requestedTileZ) actualTileY else tileY
+                                val posZ =
+                                        if (actualTileZ != requestedTileZ) actualTileZ
+                                        else requestedTileZ
 
                                 // Calculate position using ACTUAL tile coordinates (posTileX,
                                 // posTileY at posZ)
@@ -365,7 +399,8 @@ fun MapView(
                                 // MUST use lonToPixelX/latToPixelY with baseZ directly, NOT
                                 // worldX/Y helpers
                                 val tileWorldX =
-                                        lonToPixelX(tileNW, BASE_Z) - lonToPixelX(center.lon, BASE_Z)
+                                        lonToPixelX(tileNW, BASE_Z) -
+                                                lonToPixelX(center.lon, BASE_Z)
                                 val tileWorldY =
                                         latToPixelY(tileNorth, BASE_Z) -
                                                 latToPixelY(center.lat, BASE_Z)
@@ -380,8 +415,7 @@ fun MapView(
                                 // Scale = only the baseZ→posZ conversion; fallback bitmap naturally
                                 // covers correct area
                                 // Adjust for variable resolution (1x, 2x, 4x, 8x)
-                                val drawScale =
-                                        2.0f.pow(BASE_Z - posZ) / actualResolution.scale
+                                val drawScale = 2.0f.pow(BASE_Z - posZ) / actualResolution.scale
 
                                 if (BuildConfig.DEBUG) {
                                     assert(drawScale > 0f && drawScale < 1000f) {
@@ -463,55 +497,73 @@ fun MapView(
             }
 
             Column(modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) {
-                Text(
-                        text = "Nodes: ${routeData.nodes.size}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Black
-                )
-                Text(
-                        text = "Stops: ${routeData.stops.size}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Black
-                )
-                val modeLabel = if (replayState.traceFile != null) "REPLAY" else "LIVE"
-                Text(
-                        text =
-                                "$modeLabel | Progress: ${currentSCm / 100}m | Zoom: ${"%.2f".format(scale)}x",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Black
-                )
-                Text(
-                        text = "Tiles: ${tileCache.size} loaded | tileZ=$requestedTileZ | labelBias=$mapLabelZoomBias",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Black
-                )
-                // Debug: test origin conversion
-                val testOrigin = routeData.cmToLatLon(0, 0)
-                Text(
-                        text =
-                                "Center: ${"%.4f".format(centerLatLon.lat)}, ${"%.4f".format(centerLatLon.lon)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Black
-                )
-                Text(
-                        text =
-                                "Origin(0,0): ${"%.4f".format(testOrigin.lat)}, ${"%.4f".format(testOrigin.lon)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Black
-                )
+                IconButton(onClick = { showDebugDetails.value = !showDebugDetails.value }) {
+                    Icon(imageVector = Icons.Default.Info, contentDescription = "Toggle debug info")
+                }
 
-                // Debug button to clear tile cache
+                if (showDebugDetails.value) {
+                    // Debug: test origin conversion
+                    Text(
+                            text = "Nodes: ${routeData.nodes.size}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Black
+                    )
+
+                    Text(
+                            text = "Stops: ${routeData.stops.size}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Black
+                    )
+
+                    val modeLabel = if (replayState.traceFile != null) "REPLAY" else "LIVE"
+
+                    Text(
+                            text =
+                                    "$modeLabel | Progress: ${currentSCm / 100}m | Zoom: ${"%.2f".format(scale)}x",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Black
+                    )
+
+                    Text(
+                            text =
+                                    "Tiles: ${tileCache.size} loaded | tileZ=$requestedTileZ | labelBias=$mapLabelZoomBias",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Black
+                    )
+
+                    val testOrigin = routeData.cmToLatLon(0, 0)
+                    Text(
+                            text =
+                                    "Center: ${"%.4f".format(centerLatLon.lat)}, ${"%.4f".format(centerLatLon.lon)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Black
+                    )
+                    Text(
+                            text =
+                                    "Origin(0,0): ${"%.4f".format(testOrigin.lat)}, ${"%.4f".format(testOrigin.lon)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Black
+                    )
+                }
+            }
+
+            Row(
+                    modifier = Modifier.align(Alignment.BottomStart).padding(16.dp),
+                    horizontalArrangement =
+                            androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+            ) {
                 androidx.compose.material3.Button(
                         onClick = {
                             viewModel.clearTileCache()
                             tileDiskCache.clearCacheAll()
-                        },
-                        modifier = Modifier.padding(top = 8.dp),
-                        colors =
-                                androidx.compose.material3.ButtonDefaults.buttonColors(
-                                        containerColor = Color.Red
-                                )
+                        }
                 ) {
+                    androidx.compose.material3.Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = null
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     androidx.compose.material3.Text(
                             "Clear Tiles",
                             style = MaterialTheme.typography.bodySmall
@@ -622,32 +674,34 @@ private suspend fun loadTilesForZoom(
             tiles.sortBy { kotlin.math.abs(it.first - tileX) + kotlin.math.abs(it.second - tileY) }
 
             // Load tiles in parallel with semaphore limiting concurrency
-            tiles.map { (x, y) ->
-                async {
-                    semaphore.acquire()
-                    try {
-                        val key = "$zoom/$x/$y@${resolution.scale}"
+            tiles
+                    .map { (x, y) ->
+                        async {
+                            semaphore.acquire()
+                            try {
+                                val key = "$zoom/$x/$y@${resolution.scale}"
 
-                        // Skip if already in memory cache
-                        if (memoryCache.containsKey(key)) {
-                            return@async null
+                                // Skip if already in memory cache
+                                if (memoryCache.containsKey(key)) {
+                                    return@async null
+                                }
+
+                                // Check disk cache first
+                                var bitmap = diskCache.getTile(zoom, x, y, resolution)
+
+                                // Fetch from network if not in disk cache
+                                if (bitmap == null) {
+                                    bitmap = diskCache.fetchAndCacheTile(zoom, x, y, resolution)
+                                }
+
+                                // Convert to ImageBitmap for memory cache
+                                bitmap?.let { key to it.asImageBitmap() }
+                            } finally {
+                                semaphore.release()
+                            }
                         }
-
-                        // Check disk cache first
-                        var bitmap = diskCache.getTile(zoom, x, y, resolution)
-
-                        // Fetch from network if not in disk cache
-                        if (bitmap == null) {
-                            bitmap = diskCache.fetchAndCacheTile(zoom, x, y, resolution)
-                        }
-
-                        // Convert to ImageBitmap for memory cache
-                        bitmap?.let { key to it.asImageBitmap() }
-                    } finally {
-                        semaphore.release()
                     }
-                }
-            }.awaitAll()
+                    .awaitAll()
                     .filterNotNull()
                     .toMap()
         }
@@ -660,10 +714,7 @@ internal fun viewportCenterToLatLon(
 ): LatLon {
     val viewportPixelX = lonToPixelX(routeCenter.lon, zoom) + viewportCenterWorldX
     val viewportPixelY = latToPixelY(routeCenter.lat, zoom) + viewportCenterWorldY
-    return LatLon(
-            lat = pixelYToLat(viewportPixelY, zoom),
-            lon = pixelXToLon(viewportPixelX, zoom)
-    )
+    return LatLon(lat = pixelYToLat(viewportPixelY, zoom), lon = pixelXToLon(viewportPixelX, zoom))
 }
 
 internal fun computeVisibleTileRange(
