@@ -53,7 +53,7 @@ class DetectionPipeline {
         val gps = GpsPoint.fromLocation(location)
 
         // Check for GPS jump (recovery trigger)
-        val jumpDetected = if (lastGpsTime > 0) {
+        val jumpDetected = if (modeState.mode == Mode.Normal && lastGpsTime > 0) {
             Recovery.isJumpDetected(lastSCm, kalmanState?.sCm ?: 0)
         } else false
 

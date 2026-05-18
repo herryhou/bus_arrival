@@ -168,6 +168,17 @@ class DetourScenarioGoldenTest {
         )
     }
 
+    @Test
+    fun test_gps_jump_detection_is_disabled_during_off_route() {
+        val run = processScenario(SHORT_DETOUR)
+        val gpsJumpDuringOffRoute = run.ticks.filter { it.off_route && it.gps_jump }
+
+        assertTrue(
+            "GPS jump detection should only run in Normal mode. OffRoute ticks with gps_jump=true: $gpsJumpDuringOffRoute",
+            gpsJumpDuringOffRoute.isEmpty()
+        )
+    }
+
     private fun testDataFile(filename: String): File {
         val explicitRoot = System.getProperty("test.data.root")?.let(::File)
         if (explicitRoot != null) {
