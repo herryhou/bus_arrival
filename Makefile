@@ -84,7 +84,6 @@ run-detour:
 # Run detour scenario without generating NMEA (uses existing NMEA file)
 run-detour-no-gen: build preprocess
 	@echo "=== Running detour scenario (ty225_short) - skipping gen_nmea ==="
-	@echo "Using existing NMEA: $(NMEA_OUT)"
 	@echo "L-shaped detour: stop 1 → 10m east → south to waypoint → east to stop 6"
 	$(MAKE) pipeline-no-gen ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.992071 DETOUR_WAYPOINT_LON=121.295621 DETOUR_DURATION_S=60
 
@@ -200,7 +199,6 @@ golden:
 pipeline-no-gen: preprocess
 	@echo "=== Running unified pipeline (using existing NMEA) ==="
 	@echo "Binary: $(PIPELINE)"
-	@echo "Source: pipeline/"
 	@echo "Using existing NMEA: $(NMEA_OUT)"
 	@if [ ! -f "$(NMEA_OUT)" ]; then \
 		echo "Error: NMEA file not found: $(NMEA_OUT)"; \
