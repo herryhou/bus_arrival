@@ -59,8 +59,6 @@ object NmeaParser {
         val fixQuality = parts[6].toIntOrNull() ?: 0
         if (fixQuality == 0) return null  // No fix
 
-        val hdop = parts[8].toFloatOrNull() ?: 1f
-
         return createLocation(lat, lon, 0f, 0f).apply {
             // GPGGA has time in parts[1]
             val time = parts[1]
@@ -117,12 +115,6 @@ object NmeaParser {
             .mapNotNull { parse(it) }
             .filter { it.speed > 0 || it.bearing > 0 }  // Only GPRMC (has speed/heading)
             .toList()
-
-        // Debug: Log first 5 locations
-        println("NmeaParser: Parsed ${locations.size} locations")
-        locations.take(5).forEach { loc ->
-            println("  lat=${loc.latitude}, lon=${loc.longitude}, time=${loc.time}")
-        }
 
         return locations
     }

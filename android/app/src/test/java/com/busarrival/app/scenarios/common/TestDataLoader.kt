@@ -14,14 +14,19 @@ object TestDataLoader {
      * Can be overridden via system property: -Dtest.data.root=/path/to/test_data
      */
     private val TEST_DATA_ROOT: String = System.getProperty("test.data.root")
-        ?: run {
-            // From android/app/src/test/, go up 4 levels to worktree root
-            val testDir = File(".").absoluteFile
-            val srcDir = testDir.parentFile ?: File(".")
-            val appDir = srcDir.parentFile ?: File(".")
-            val androidDir = appDir.parentFile ?: File(".")
-            File(androidDir, "test_data").absolutePath
+        ?: findTestDataRoot().absolutePath
+
+    private fun findTestDataRoot(): File {
+        var current: File? = File(".").absoluteFile
+        repeat(8) {
+            val candidate = File(current, "test_data")
+            if (candidate.isDirectory) {
+                return candidate
+            }
+            current = current?.parentFile
         }
+        error("Unable to locate test_data directory from ${File(".").absolutePath}. Set -Dtest.data.root explicitly.")
+    }
 
     /**
      * Get full path to test data file.
@@ -64,6 +69,14 @@ object TestDataLoader {
             }
         }
         return stopIndices
+    }
+
+    /**
+     * Load raw text from a test data file under TEST_DATA_ROOT.
+     */
+    fun loadText(filename: String): String {
+        val path = testPath(filename)
+        return File(path).readText()
     }
 
     /**
