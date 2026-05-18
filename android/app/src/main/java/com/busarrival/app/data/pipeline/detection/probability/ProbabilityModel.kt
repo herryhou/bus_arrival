@@ -54,33 +54,32 @@ object ProbabilityModel {
         vCms: SpeedCms,
         dwellS: Int
     ): Prob8 {
-        // Distance to stop
-        val dCm = stop.distanceTo(signals.sCm)
-        val absDCm = if (dCm < 0) -dCm else dCm
-
-        // Check if close stop (use adaptive weights)
-        val isClose = absDCm < 12000  // < 120 m
-
-        // F1: Distance likelihood (using raw GPS)
-        val p1 = computeDistanceLikelihood(signals.zGpsCm, stop.progressCm)
-
-        // F2: Speed likelihood
-        val p2 = computeSpeedLikelihood(vCms)
-
-        // F3: Progress likelihood (using Kalman position)
-        val p3 = computeProgressLikelihood(signals.sCm, stop.progressCm)
-
-        // F4: Dwell time likelihood
-        val p4 = computeDwellLikelihood(dwellS)
-
-        // Weighted sum
-        val p = if (isClose) {
-            (W1_ADAPT * p1.value + W2_ADAPT * p2.value + W3_ADAPT * p3.value + W4_ADAPT * p4.value) / 32
+        val features = computeFeatures(signals, stop, vCms, dwellS)
+        val p = if (features.isClose) {
+            (W1_ADAPT * features.p1.value + W2_ADAPT * features.p2.value + W3_ADAPT * features.p3.value + W4_ADAPT * features.p4.value) / 32
         } else {
-            (W1_STD * p1.value + W2_STD * p2.value + W3_STD * p3.value + W4_STD * p4.value) / 32
+            (W1_STD * features.p1.value + W2_STD * features.p2.value + W3_STD * features.p3.value + W4_STD * features.p4.value) / 32
         }
 
         return Prob8(p.coerceIn(0, 255))
+    }
+
+    fun computeFeatures(
+        signals: PositionSignals,
+        stop: Stop,
+        vCms: SpeedCms,
+        dwellS: Int
+    ): ProbabilityFeatures {
+        val dCm = stop.distanceTo(signals.sCm)
+        val absDCm = if (dCm < 0) -dCm else dCm
+
+        return ProbabilityFeatures(
+            p1 = computeDistanceLikelihood(signals.zGpsCm, stop.progressCm),
+            p2 = computeSpeedLikelihood(vCms),
+            p3 = computeProgressLikelihood(signals.sCm, stop.progressCm),
+            p4 = computeDwellLikelihood(dwellS),
+            isClose = absDCm < 12000
+        )
     }
 
     /**
@@ -176,3 +175,11 @@ object ProbabilityModel {
         return lut
     }
 }
+
+data class ProbabilityFeatures(
+    val p1: Prob8,
+    val p2: Prob8,
+    val p3: Prob8,
+    val p4: Prob8,
+    val isClose: Boolean
+)
