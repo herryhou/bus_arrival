@@ -202,7 +202,7 @@ object RouteDataParser {
                 }
 
                 cells.add(GridCell(
-                    bitmask = 1u,
+                    bitmask = 0uL,
                     offsets = segmentIndices
                 ))
             }

@@ -63,7 +63,7 @@ object GeoCoordinateConverter {
     ): Pair<Int, Int> {
         // Find closest segment
         var bestIdx = lastSegIdx
-        var bestDist = Int.MAX_VALUE
+        var bestDist = Long.MAX_VALUE
         var bestProgress = 0
 
         // Search nearby segments (limited range for performance)
@@ -100,27 +100,32 @@ object GeoCoordinateConverter {
         px: Int, py: Int,
         x1: Int, y1: Int,
         x2: Int, y2: Int
-    ): Pair<Int, Int> {
-        val dx = x2 - x1
-        val dy = y2 - y1
+    ): Pair<Long, Int> {
+        val dx = (x2 - x1).toLong()
+        val dy = (y2 - y1).toLong()
+        val relX = (px - x1).toLong()
+        val relY = (py - y1).toLong()
 
-        if (dx == 0 && dy == 0) {
+        if (dx == 0L && dy == 0L) {
             // Segment is a point
-            val dist = ((px - x1) * (px - x1) + (py - y1) * (py - y1))
-            return Pair(kotlin.math.sqrt(dist.toDouble()).toInt(), 0)
+            val dist = relX * relX + relY * relY
+            return Pair(dist, 0)
         }
 
         // Parameter t of projection onto line (clamped to [0,1])
-        val t = ((px - x1) * dx + (py - y1) * dy).toFloat() / (dx * dx + dy * dy).toFloat()
-        val tClamped = t.coerceIn(0f, 1f)
+        val len2 = dx * dx + dy * dy
+        val t = (relX * dx + relY * dy).toDouble() / len2.toDouble()
+        val tClamped = t.coerceIn(0.0, 1.0)
 
         // Closest point on segment
         val closestX = x1 + (tClamped * dx).toInt()
         val closestY = y1 + (tClamped * dy).toInt()
 
-        val dist = ((px - closestX) * (px - closestX) + (py - closestY) * (py - closestY))
-        val progress = (tClamped * kotlin.math.sqrt((dx * dx + dy * dy).toDouble())).toInt()
+        val distX = (px - closestX).toLong()
+        val distY = (py - closestY).toLong()
+        val dist = distX * distX + distY * distY
+        val progress = (tClamped * kotlin.math.sqrt(len2.toDouble())).toInt()
 
-        return Pair(kotlin.math.sqrt(dist.toDouble()).toInt(), progress)
+        return Pair(dist, progress)
     }
 }

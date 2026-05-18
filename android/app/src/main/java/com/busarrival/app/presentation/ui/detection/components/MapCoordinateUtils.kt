@@ -60,3 +60,14 @@ fun tileYToLat(tileY: Int, zoom: Int): Double {
     val n = PI - 2.0 * PI * tileY / 2.0.pow(zoom)
     return 180.0 / PI * atan(0.5 * (exp(n) - exp(-n)))
 }
+
+/** Convert pixel X to longitude at given zoom level. */
+fun pixelXToLon(pixelX: Float, zoom: Int): Double {
+    return (pixelX / 256.0 / 2.0.pow(zoom)) * 360.0 - 180.0
+}
+
+/** Convert pixel Y to latitude at given zoom level. */
+fun pixelYToLat(pixelY: Float, zoom: Int): Double {
+    val n = PI * (1 - 2 * pixelY / 256.0 / 2.0.pow(zoom))
+    return 180.0 / PI * atan(0.5 * (exp(n) - exp(-n)))
+}

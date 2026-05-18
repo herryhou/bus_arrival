@@ -30,36 +30,45 @@ object ModeMachine {
      * @param state Current mode state
      * @param matchDist2 Map match distance² (indicates divergence from route)
      * @param sCm Current route position (cm)
+     * @param isFirstFix True if this is the first GPS fix (warmup period)
      * @return Updated mode state
      */
     fun update(
         state: ModeState,
         matchDist2: Dist2,
-        sCm: DistCm
+        sCm: DistCm,
+        isFirstFix: Boolean = false
     ): ModeState {
         return when (state.mode) {
-            Mode.Normal -> updateNormal(state, matchDist2, sCm)
+            Mode.Normal -> updateNormal(state, matchDist2, sCm, isFirstFix)
             Mode.OffRoute -> updateOffRoute(state, matchDist2, sCm)
-            Mode.Recovering -> updateRecovering(state, matchDist2, sCm)
+            Mode.Recovering -> updateRecovering(state)
         }
     }
 
     /**
      * Update Normal mode.
      * Transition to OffRoute if divergence > 50m for 5 consecutive ticks.
+     * During warmup (isFirstFix=true), off-route detection is disabled.
      */
     private fun updateNormal(
         state: ModeState,
         matchDist2: Dist2,
-        sCm: DistCm
+        sCm: DistCm,
+        isFirstFix: Boolean
     ): ModeState {
+        // Warmup guard: skip off-route detection on first fix
+        // Matches Rust: if !is_first_fix { check_off_route }
+        if (isFirstFix) {
+            return state.copy(suspectTicks = 0)
+        }
+
         val isOffRoute = matchDist2 > OFF_ROUTE_D2_THRESHOLD
 
         return if (isOffRoute) {
             val newSuspectTicks = state.suspectTicks + 1
             if (newSuspectTicks >= OFF_ROUTE_SUSPECT_TICKS) {
                 // Transition to OffRoute: freeze position
-                println("ModeMachine: Normal → OffRoute: sCm=$sCm, matchDist2=$matchDist2, frozenSCm=$sCm")
                 state.copy(
                     mode = Mode.OffRoute,
                     suspectTicks = 0,
@@ -67,7 +76,6 @@ object ModeMachine {
                     frozenSCm = sCm
                 )
             } else {
-                println("ModeMachine: Normal suspect tick $newSuspectTicks/$OFF_ROUTE_SUSPECT_TICKS: sCm=$sCm, matchDist2=$matchDist2")
                 state.copy(suspectTicks = newSuspectTicks)
             }
         } else {
@@ -94,17 +102,14 @@ object ModeMachine {
             if (newClearTicks >= OFF_ROUTE_CLEAR_TICKS) {
                 // Check displacement from frozen position
                 val displacement = abs(sCm - state.frozenSCm)
-                println("ModeMachine: OffRoute → displacement=$displacement cm, sCm=$sCm, frozenSCm=${state.frozenSCm}")
                 if (displacement > RECOVERY_DISPLACEMENT_CM) {
                     // Large displacement: need recovery
-                    println("ModeMachine: OffRoute → Recovering: displacement=$displacement > $RECOVERY_DISPLACEMENT_CM")
                     state.copy(
                         mode = Mode.Recovering,
                         clearTicks = 0
                     )
                 } else {
                     // Small displacement: return to normal
-                    println("ModeMachine: OffRoute → Normal: displacement=$displacement <= $RECOVERY_DISPLACEMENT_CM")
                     state.copy(
                         mode = Mode.Normal,
                         clearTicks = 0,
@@ -125,11 +130,7 @@ object ModeMachine {
      * Stays in Recovering until explicitly transitioned by DetectionPipeline
      * after successful recovery via Recovery.recover().
      */
-    private fun updateRecovering(
-        state: ModeState,
-        matchDist2: Dist2,
-        sCm: DistCm
-    ): ModeState {
+    private fun updateRecovering(state: ModeState): ModeState {
         // Stay in Recovering mode until DetectionPipeline
         // successfully recovers and transitions to Normal
         return state

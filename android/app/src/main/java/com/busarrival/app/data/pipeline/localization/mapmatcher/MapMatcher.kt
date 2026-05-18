@@ -71,6 +71,28 @@ object MapMatcher {
         }
 
         // Phase 2: Grid search (if needed)
+        // Fallback to global search if GPS is outside grid bounds (handles detours)
+        val grid = routeData.grid
+
+        // Check 1: GPS before route start
+        if (gpsX < routeData.x0Cm || gpsY < routeData.y0Cm) {
+            return globalSearchFallback(
+                gpsX, gpsY, gpsHeading, gpsSpeed,
+                nodes, windowResult.bestIdx, windowResult.bestDist2, windowResult.eligibleFound, isFirstFix
+            )
+        }
+
+        // Check 2: GPS beyond grid extent
+        val cellX = (gpsX - routeData.x0Cm) / grid.cellSizeCm
+        val cellY = (gpsY - routeData.y0Cm) / grid.cellSizeCm
+
+        if (cellX >= grid.cols || cellY >= grid.rows) {
+            return globalSearchFallback(
+                gpsX, gpsY, gpsHeading, gpsSpeed,
+                nodes, windowResult.bestIdx, windowResult.bestDist2, windowResult.eligibleFound, isFirstFix
+            )
+        }
+
         val gridResult = searchGrid(
             gpsX, gpsY, gpsHeading, gpsSpeed,
             routeData, nodes,
@@ -165,28 +187,9 @@ object MapMatcher {
                 val cellIdx = cy * grid.cols + cx
                 val cell = grid.cells[cellIdx]
 
-                // Check bitmask segments
-                for (bit in 0..63) {
-                    if ((cell.bitmask and (1UL shl bit)) != 0UL) {
-                        val segIdx = cellIdx * 64 + bit
-                        if (segIdx >= nodes.size) break
-
-                        val eligible = isHeadingEligible(gpsHeading, nodes[segIdx].headingCdeg, headingThresh)
-                        if (eligible) {
-                            val dist2 = pointToSegmentDist2(gpsX, gpsY, nodes[segIdx])
-                            if (dist2 < bestDist2) {
-                                bestIdx = segIdx
-                                bestDist2 = dist2
-                                eligibleFound = true
-                            }
-                        }
-                    }
-                }
-
-                // Check sparse offsets
-                for (offset in cell.offsets) {
-                    val segIdx = cellIdx * 64 + offset
-                    if (segIdx >= nodes.size) break
+                // RouteDataParser stores absolute segment indices in offsets.
+                for (segIdx in cell.offsets) {
+                    if (segIdx >= nodes.size) continue
 
                     val eligible = isHeadingEligible(gpsHeading, nodes[segIdx].headingCdeg, headingThresh)
                     if (eligible) {
@@ -267,35 +270,88 @@ object MapMatcher {
         py: DistCm,
         node: RouteNode
     ): Dist2 {
-        // Segment vector: (dx, dy)
-        // Vector from segment start to point: (px - x, py - y)
-        val vx = px - node.xCm
-        val vy = py - node.yCm
+        // Vector from segment start to point
+        val dx = px - node.xCm
+        val dy = py - node.yCm
 
-        // Projection t = (v · d) / |d|²
-        val dot = (vx * node.dxCm + vy * node.dyCm).toLong()
-        val len2 = (node.dxCm * node.dxCm + node.dyCm * node.dyCm).toLong()
+        // Compute len2 from segLenMm: (mm / 10)^2 = cm^2
+        val segLenCm = node.segLenMm / 10
+        val len2 = (segLenCm * segLenCm).toLong()
 
         if (len2 == 0L) {
             // Zero-length segment
-            return (vx * vx + vy * vy).toLong()
+            return (dx.toLong() * dx + dy.toLong() * dy)
         }
 
-        // Clamped projection
+        // t = dot(point - P[i], segment) / |segment|^2
+        val tNum = dx.toLong() * node.dxCm + dy.toLong() * node.dyCm
+
+        // Clamp t to [0, len2]
         val t = when {
-            dot <= 0 -> 0L
-            dot >= len2 -> 1L shl 32  // Represent 1.0 in fixed-point
-            else -> (dot shl 32) / len2
+            tNum < 0 -> 0L
+            tNum > len2 -> len2
+            else -> tNum
         }
 
-        // Closest point on segment
-        val cx = node.xCm + ((node.dxCm * (t shr 16)) shr 16)  // Approximate t * dx
-        val cy = node.yCm + ((node.dyCm * (t shr 16)) shr 16)
+        // Projected point - use safe division order to avoid overflow
+        // px = x_cm + dx_cm * (t / len2)
+        val tRatio = (t * 1000 / len2).toInt()  // Scale to avoid precision loss
+        val pxCoord = node.xCm + (node.dxCm * tRatio / 1000)
+        val pyCoord = node.yCm + (node.dyCm * tRatio / 1000)
 
-        // Distance²
-        val dx = px - cx
-        val dy = py - cy
-        return dx.toLong() * dx + dy.toLong() * dy
+        // Distance squared
+        val pdx = px - pxCoord
+        val pdy = py - pyCoord
+        val result = pdx.toLong() * pdx + pdy.toLong() * pdy
+
+        return result
+    }
+
+    /**
+     * Global search fallback when GPS is outside grid bounds.
+     * Searches all segments and returns the best eligible (or best any if none eligible).
+     * Matches Rust: global_search_fallback in map_match/search.rs
+     */
+    private fun globalSearchFallback(
+        gpsX: DistCm,
+        gpsY: DistCm,
+        gpsHeading: HeadCdeg?,
+        gpsSpeed: SpeedCms,
+        nodes: List<RouteNode>,
+        seedIdx: Int,
+        seedDist2: Dist2,
+        seedEligibleFound: Boolean,
+        isFirstFix: Boolean
+    ): MatchResult {
+        var bestIdx = seedIdx
+        var bestDist2 = seedDist2
+        var eligibleFound = seedEligibleFound
+
+        val headingThresh = headingThreshold(gpsSpeed, isFirstFix)
+
+        // Search all segments
+        for (i in nodes.indices) {
+            val node = nodes[i]
+            val eligible = isHeadingEligible(gpsHeading, node.headingCdeg, headingThresh)
+
+            if (eligible) {
+                eligibleFound = true
+                val dist2 = pointToSegmentDist2(gpsX, gpsY, node)
+                if (dist2 < bestDist2) {
+                    bestIdx = i
+                    bestDist2 = dist2
+                }
+            } else if (!eligibleFound) {
+                // Keep track of best ineligible segment
+                val dist2 = pointToSegmentDist2(gpsX, gpsY, node)
+                if (dist2 < bestDist2) {
+                    bestIdx = i
+                    bestDist2 = dist2
+                }
+            }
+        }
+
+        return MatchResult(bestIdx, bestDist2)
     }
 
     /**

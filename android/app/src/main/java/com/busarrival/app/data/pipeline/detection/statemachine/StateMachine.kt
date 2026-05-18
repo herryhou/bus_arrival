@@ -35,174 +35,111 @@ object StateMachine {
         val distanceToStop = stop.distanceTo(sCm)
         val absDistance = if (distanceToStop < 0) -distanceToStop else distanceToStop
 
-        // Update dwell time if in active state
-        if (isActiveState(state.fsmState) && state.previousDistanceCm != null) {
-            // Check if still in corridor
-            if (stop.isInCorridor(sCm)) {
-                state.dwellTimeS++
-            }
-        }
+        // Track previous distance for re-acquisition detection
         state.previousDistanceCm = distanceToStop
 
-        // State transitions
-        val transition = computeTransition(
+        // State transitions (with dwell_time side effects matching Rust)
+        return updateWithTransition(
             state, stop, sCm, distanceToStop,
-            absDistance, probability
+            absDistance, probability, timestamp
         )
-
-        // Apply transition
-        return applyTransition(state, transition, stop, sCm, timestamp, probability)
     }
 
     /**
-     * Compute next state based on current state and inputs.
+     * Update state with transition and dwell time (matches Rust order).
+     * Rust pattern: check transitions → early return → increment dwell_time.
      */
-    private fun computeTransition(
+    private fun updateWithTransition(
         state: StopState,
         stop: Stop,
         sCm: DistCm,
         distanceToStop: DistCm,
         absDistance: DistCm,
-        probability: Prob8
-    ): FsmState {
-        return when (state.fsmState) {
+        probability: Prob8,
+        timestamp: Long
+    ): Pair<ArrivalEvent?, DepartureEvent?> {
+        val oldState = state.fsmState
+        var arrivalEvent: ArrivalEvent? = null
+        var departureEvent: DepartureEvent? = null
+
+        when (oldState) {
             FsmState.Idle -> {
                 // Entry condition: s_cm >= corridor_start
                 if (sCm >= stop.corridorStartCm) {
-                    FsmState.Approaching
-                } else {
-                    FsmState.Idle
+                    state.fsmState = FsmState.Approaching
+                    state.dwellTimeS = 1 // D5 fix: start counting from corridor entry
                 }
             }
 
             FsmState.Approaching -> {
-                // Exit: s_cm < corridor_start
+                // Exit: s_cm < corridor_start (resets dwell_time, no increment)
                 if (sCm < stop.corridorStartCm) {
+                    state.fsmState = FsmState.Idle
                     state.dwellTimeS = 0
-                    FsmState.Idle
+                    return Pair(null, null)
                 }
                 // Approaching -> Arriving: d < 50m
-                else if (absDistance < PhysicalConstants.ARRIVAL_DISTANCE_CM) {
-                    FsmState.Arriving
-                } else {
-                    FsmState.Approaching
+                if (absDistance < PhysicalConstants.ARRIVAL_DISTANCE_CM) {
+                    state.fsmState = FsmState.Arriving
+                }
+                // Update dwell time when in corridor (including first tick after transition)
+                if (sCm >= stop.corridorStartCm) {
+                    state.dwellTimeS++
                 }
             }
 
             FsmState.Arriving -> {
-                // Exit: s_cm < corridor_start
+                // Exit: s_cm < corridor_start (resets dwell_time, early return)
                 if (sCm < stop.corridorStartCm) {
+                    state.fsmState = FsmState.Idle
                     state.dwellTimeS = 0
-                    FsmState.Idle
+                    return Pair(null, null)
                 }
                 // Arriving -> AtStop: d < 50m AND probability > threshold
-                else if (absDistance < PhysicalConstants.ARRIVAL_DISTANCE_CM &&
+                if (absDistance < PhysicalConstants.ARRIVAL_DISTANCE_CM &&
                     probability.value >= Prob8.THETA_ARRIVAL) {
-                    FsmState.AtStop
+                    state.fsmState = FsmState.AtStop
+                    state.dwellTimeS++
+                    state.lastProbability = probability
+                    state.announced = true
+                    arrivalEvent = ArrivalEvent(timestamp, state.index, sCm, probability)
+                    return Pair(arrivalEvent, null)
                 }
                 // Arriving -> Departed: d > 40m AND s > stop
-                else if (distanceToStop > PhysicalConstants.DEPARTURE_DISTANCE_CM &&
+                if (distanceToStop > PhysicalConstants.DEPARTURE_DISTANCE_CM &&
                     sCm > stop.progressCm) {
-                    FsmState.Departed
-                } else {
-                    FsmState.Arriving
+                    state.fsmState = FsmState.Departed
+                    state.lastProbability = probability
+                    departureEvent = DepartureEvent(timestamp, state.index, sCm, state.dwellTimeS)
+                    return Pair(null, departureEvent)
                 }
+                // Still in Arriving: increment dwell_time
+                state.dwellTimeS++
             }
 
             FsmState.AtStop -> {
                 // AtStop -> Departed: d > 40m AND s > stop
                 if (distanceToStop > PhysicalConstants.DEPARTURE_DISTANCE_CM &&
                     sCm > stop.progressCm) {
-                    FsmState.Departed
-                } else {
-                    FsmState.AtStop
+                    state.fsmState = FsmState.Departed
+                    state.lastProbability = probability
+                    departureEvent = DepartureEvent(timestamp, state.index, sCm, state.dwellTimeS)
+                    return Pair(null, departureEvent)
                 }
+                // Don't increment dwell_time after departure
             }
 
             FsmState.Departed -> {
                 // Terminal state - no transitions
-                FsmState.Departed
             }
 
             FsmState.TripComplete -> {
                 // Terminal state - no transitions
-                FsmState.TripComplete
-            }
-        }
-    }
-
-    /**
-     * Apply state transition and emit events.
-     */
-    private fun applyTransition(
-        state: StopState,
-        newState: FsmState,
-        stop: Stop,
-        sCm: DistCm,
-        timestamp: Long,
-        probability: Prob8
-    ): Pair<ArrivalEvent?, DepartureEvent?> {
-        var arrivalEvent: ArrivalEvent? = null
-        var departureEvent: DepartureEvent? = null
-
-        when (newState) {
-            FsmState.AtStop -> {
-                if (state.fsmState != FsmState.AtStop && !state.announced) {
-                    // Transition to AtStop: emit arrival
-                    arrivalEvent = ArrivalEvent(
-                        timestamp = timestamp,
-                        stopIndex = state.index,
-                        sCm = sCm,
-                        probability = probability
-                    )
-                    state.announced = true
-                }
-            }
-
-            FsmState.Departed -> {
-                if (state.fsmState != FsmState.Departed) {
-                    // Transition to Departed: emit departure
-                    departureEvent = DepartureEvent(
-                        timestamp = timestamp,
-                        stopIndex = state.index,
-                        sCm = sCm,
-                        dwellTimeS = state.dwellTimeS
-                    )
-                }
-            }
-
-            FsmState.TripComplete -> {
-                if (state.fsmState != FsmState.TripComplete) {
-                    // Final stop: emit departure if not already
-                    if (state.fsmState != FsmState.Departed) {
-                        departureEvent = DepartureEvent(
-                            timestamp = timestamp,
-                            stopIndex = state.index,
-                            sCm = sCm,
-                            dwellTimeS = state.dwellTimeS
-                        )
-                    }
-                }
-            }
-
-            else -> {
-                // No events for other transitions
             }
         }
 
-        state.fsmState = newState
         state.lastProbability = probability
-
         return Pair(arrivalEvent, departureEvent)
-    }
-
-    /**
-     * Check if state is active (dwell time accumulates).
-     */
-    private fun isActiveState(fsmState: FsmState): Boolean {
-        return fsmState == FsmState.Approaching ||
-            fsmState == FsmState.Arriving ||
-            fsmState == FsmState.AtStop
     }
 
     /**
