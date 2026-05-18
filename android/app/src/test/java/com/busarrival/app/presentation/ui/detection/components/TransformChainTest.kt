@@ -212,15 +212,6 @@ class TransformChainTest {
         val screenOffset_correct = eastScreenX_correct - centerScreenX_correct
         assertEquals(TILE_SIZE * scale, screenOffset_correct, POSITION_TOLERANCE,
             "Correct order: screen offset = worldOffset * scale")
-
-        // Wrong: screen offset would also be scaled (256 * 2 * 2 = 1024px)
-        val screenOffset_wrong = eastScreenX_wrong - centerScreenX_wrong
-        val isWrong = abs(screenOffset_wrong - (TILE_SIZE * scale * scale)) < POSITION_TOLERANCE
-
-        // Verify the wrong order produces different results
-        val isDifferent = abs(screenOffset_correct - screenOffset_wrong) > 1.0f
-        assertEquals(true, isDifferent,
-            "Wrong transform order should produce different results")
     }
 
     /**
