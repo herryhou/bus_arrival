@@ -190,7 +190,19 @@ impl LocalizationState {
                     localization::GpsDiagnostics::new()
                 ))
             }
-            gps_processor::kalman::ProcessResult::SuspectOffRoute { .. } => None,
+            gps_processor::kalman::ProcessResult::SuspectOffRoute { s_cm, v_cms } => {
+                Some(gps::GpsRecord::new(
+                    gps.timestamp,
+                    gps.lat,
+                    gps.lon,
+                    s_cm,
+                    v_cms,
+                    None,
+                    "suspect_off_route",
+                ).with_diagnostics(
+                    localization::GpsDiagnostics::new()
+                ))
+            }
             gps_processor::kalman::ProcessResult::Rejected(_) => None,
             gps_processor::kalman::ProcessResult::Outage => None,
         }
@@ -337,6 +349,13 @@ impl PipelineResult {
             None
         };
 
+        // Determine off-route status from GPS record status
+        let off_route = match record.status {
+            "off_route" | "suspect_off_route" => Some(true),
+            "valid" | "dr_outage" => Some(false),
+            _ => None,
+        };
+
         self.trace_records.push(TraceRecordWrapper(TraceRecord {
             time: record.time,
             lat: record.lat,
@@ -359,6 +378,7 @@ impl PipelineResult {
             corridor_start_cm,
             corridor_end_cm,
             next_stop,
+            off_route,
         }));
     }
 }

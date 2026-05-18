@@ -49,6 +49,7 @@ fn test_trace_serialization_valid_json() {
         corridor_start_cm: Some(9500),
         corridor_end_cm: Some(10500),
         next_stop: Some((2, 200)),
+        off_route: Some(false),
     };
 
     // Serialize to JSON

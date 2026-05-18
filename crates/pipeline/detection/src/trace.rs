@@ -89,6 +89,10 @@ pub struct TraceRecord {
     /// Next stop index and probability (even if not in corridor)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_stop: Option<(u8, Prob8)>,
+
+    /// Off-route status (true when position is frozen due to off-route detection)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub off_route: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
