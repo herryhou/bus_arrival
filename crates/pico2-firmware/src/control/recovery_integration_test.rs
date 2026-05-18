@@ -2,7 +2,6 @@
 
 #[cfg(test)]
 mod recovery_integration_tests {
-    use super::*;
     use crate::recovery::RecoveryInput;
     use heapless::Vec;
     use shared::Stop;

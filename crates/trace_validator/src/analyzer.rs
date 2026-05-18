@@ -106,6 +106,7 @@ mod tests {
             corridor_start_cm: None,
             corridor_end_cm: None,
             next_stop: None,
+            off_route: None,
         }];
 
         let result = Analyzer::analyze(records);
@@ -147,6 +148,7 @@ mod tests {
             corridor_start_cm: Some(2000),
             corridor_end_cm: Some(14000),
             next_stop: Some((1, 50)),
+            off_route: None,
         }];
 
         let result = Analyzer::analyze(records);
@@ -177,6 +179,7 @@ mod tests {
             corridor_start_cm: None,
             corridor_end_cm: None,
             next_stop: None,
+            off_route: None,
         }, TraceRecord {
             time: 2,
             lat: 25.0,
@@ -198,6 +201,7 @@ mod tests {
             corridor_start_cm: None,
             corridor_end_cm: None,
             next_stop: None,
+            off_route: None,
         }];
 
         let result = Analyzer::analyze(records);
