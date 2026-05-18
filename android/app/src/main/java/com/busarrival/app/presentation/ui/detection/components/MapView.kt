@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -50,6 +51,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.busarrival.app.BuildConfig
@@ -119,6 +121,7 @@ fun MapView(
     val offset by viewModel.mapOffset.collectAsState()
     val mapLabelZoomBias by viewModel.mapLabelZoomBias.collectAsState()
     val tileCache by viewModel.tileCache.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
     val canvasSize = remember { androidx.compose.runtime.mutableStateOf(IntSize.Zero) }
     val showDebugDetails = remember { mutableStateOf(true) }
     val centerLatLon =
@@ -196,6 +199,23 @@ fun MapView(
                                 zoom = BASE_Z
                         )
                     }
+                }
+            }
+    val busScreenPosition by
+            remember(routeData, centerLatLon, currentSCm, scale, offset, canvasSize.value) {
+                derivedStateOf {
+                    val route = routeData ?: return@derivedStateOf null
+                    val center = centerLatLon ?: return@derivedStateOf null
+                    val size = canvasSize.value
+                    if (size.width <= 0 || size.height <= 0) return@derivedStateOf null
+
+                    val pos = route.interpolatePosition(currentSCm) ?: return@derivedStateOf null
+                    val ll = route.cmToLatLon(pos.first, pos.second)
+                    val worldX = lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(center.lon, BASE_Z)
+                    val worldY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(center.lat, BASE_Z)
+                    val x = worldX * scale + offset.x + size.width / 2f
+                    val y = worldY * scale + offset.y + size.height / 2f
+                    if (x.isFinite() && y.isFinite()) Offset(x, y) else null
                 }
             }
 
@@ -496,6 +516,31 @@ fun MapView(
                 }
             }
 
+            busScreenPosition?.let { pos ->
+                val markerLabel =
+                        formatBusMarkerLabel(
+                                stopIndex = uiState.currentStop,
+                                stopState = uiState.currentStopState
+                        )
+                Box(
+                        modifier =
+                                Modifier.offset {
+                                            IntOffset((pos.x + 14f).toInt(), (pos.y - 42f).toInt())
+                                        }
+                                        .background(
+                                                color = Color.Black.copy(alpha = 0.72f),
+                                                shape = RoundedCornerShape(10.dp)
+                                        )
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                            text = markerLabel,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White
+                    )
+                }
+            }
+
             Column(modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) {
                 IconButton(onClick = { showDebugDetails.value = !showDebugDetails.value }) {
                     Icon(imageVector = Icons.Default.Info, contentDescription = "Toggle debug info")
@@ -577,6 +622,24 @@ fun MapView(
                     color = MaterialTheme.colorScheme.error
             )
         }
+    }
+}
+
+internal fun formatBusMarkerLabel(stopIndex: Int, stopState: String): String {
+    val stopLabel = if (stopIndex >= 0) "Stop ${stopIndex + 1}" else "Stop -"
+    val stateLabel = shortStopStateLabel(stopState)
+    return "$stopLabel · $stateLabel"
+}
+
+internal fun shortStopStateLabel(stopState: String): String {
+    return when (stopState.uppercase()) {
+        "APPROACHING" -> "APR"
+        "ARRIVING" -> "ARL"
+        "ATSTOP" -> "AT"
+        "DEPARTED" -> "DEP"
+        "TRIPCOMPLETE" -> "DONE"
+        "IDLE" -> "IDLE"
+        else -> stopState
     }
 }
 

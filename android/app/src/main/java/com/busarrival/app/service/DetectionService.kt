@@ -239,10 +239,22 @@ class DetectionService : Service() {
                 }
 
                 // Emit position update
+                val primaryStopState =
+                        stopStates.entries
+                                .filter { (_, state) ->
+                                    state.fsmState != FsmState.Idle &&
+                                            state.fsmState != FsmState.Departed
+                                }
+                                .maxByOrNull { it.key }
+                                ?.let { (idx, state) -> idx to state.fsmState.name }
+                                ?: (-1 to FsmState.Idle.name)
+
                 _events.value = PipelineEvent.PositionUpdate(
-                    sCm = signals.sCm,
-                    vCms = kalmanState!!.vCms,
-                    mode = "Normal"
+                        sCm = signals.sCm,
+                        vCms = kalmanState!!.vCms,
+                        mode = "Normal",
+                        activeStopIndex = primaryStopState.first,
+                        activeStopState = primaryStopState.second
                 )
 
                 lastGpsTime = gps.timestamp
@@ -312,5 +324,11 @@ class DetectionService : Service() {
 sealed class PipelineEvent {
     data class Arrival(val stopIndex: Int, val probability: Int) : PipelineEvent()
     data class Departure(val stopIndex: Int, val dwellTimeS: Int) : PipelineEvent()
-    data class PositionUpdate(val sCm: Int, val vCms: Int, val mode: String = "Normal") : PipelineEvent()
+    data class PositionUpdate(
+            val sCm: Int,
+            val vCms: Int,
+            val mode: String = "Normal",
+            val activeStopIndex: Int = -1,
+            val activeStopState: String = "Idle"
+    ) : PipelineEvent()
 }

@@ -127,7 +127,13 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         when (event) {
             is PipelineEvent.PositionUpdate -> {
                 _uiState.value =
-                        _uiState.value.copy(sCm = event.sCm, vCms = event.vCms, mode = event.mode)
+                        _uiState.value.copy(
+                                sCm = event.sCm,
+                                vCms = event.vCms,
+                                mode = event.mode,
+                                currentStop = event.activeStopIndex,
+                                currentStopState = event.activeStopState
+                        )
             }
             is PipelineEvent.Arrival -> {
                 _uiState.value = _uiState.value.copy(currentStop = event.stopIndex)
@@ -426,7 +432,13 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
 
         latestUpdate?.let { event ->
             _uiState.value =
-                    _uiState.value.copy(sCm = event.sCm, vCms = event.vCms, mode = event.mode)
+                    _uiState.value.copy(
+                            sCm = event.sCm,
+                            vCms = event.vCms,
+                            mode = event.mode,
+                            currentStop = event.activeStopIndex,
+                            currentStopState = event.activeStopState
+                    )
         }
 
         // Find arrivals/departures at this position
@@ -448,7 +460,12 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                             lastArrival?.stopIndex ?: -1 // Arrived after departure
                     else -> lastDeparture.stopIndex + 1 // Departed after arrival
                 }
-        _uiState.value = _uiState.value.copy(currentStop = currentStop)
+        _uiState.value =
+                _uiState.value.copy(
+                        currentStop = currentStop,
+                        currentStopState =
+                                if (currentStop >= 0) _uiState.value.currentStopState else "Idle"
+                )
     }
 
     override fun onCleared() {
@@ -462,6 +479,7 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
 data class DetectionUiState(
         val isRunning: Boolean = false,
         val currentStop: Int = -1,
+        val currentStopState: String = "Idle",
         val sCm: Int = 0,
         val vCms: Int = 0,
         val isCameraFollowEnabled: Boolean = true,

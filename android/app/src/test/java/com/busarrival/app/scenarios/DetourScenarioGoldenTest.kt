@@ -17,6 +17,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import kotlin.math.abs
 
 /**
@@ -197,11 +199,7 @@ class DetourScenarioGoldenTest {
     }
 
     private fun processScenario(scenario: String): ScenarioRun {
-        val scenarioTraceFile = if (scenario == SHORT_DETOUR) {
-            traceFile
-        } else {
-            File.createTempFile("trace-$scenario", ".jsonl")
-        }
+        val scenarioTraceFile = File.createTempFile("trace-$scenario", ".jsonl")
         val scenarioPipeline = if (scenario == SHORT_DETOUR) {
             pipeline?.close()
             DetectionPipeline().also {
@@ -224,13 +222,21 @@ class DetourScenarioGoldenTest {
                     }
                 }
             }
-            scenarioPipeline.close()
             return ScenarioRun(
                 ticks = TraceLoader.load(scenarioTraceFile),
                 arrivals = arrivals
             )
         } finally {
-            if (scenario != SHORT_DETOUR && scenarioTraceFile.exists()) {
+            scenarioPipeline.close()
+            if (scenario == SHORT_DETOUR) {
+                traceFile.parentFile?.mkdirs()
+                Files.copy(
+                    scenarioTraceFile.toPath(),
+                    traceFile.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING
+                )
+            }
+            if (scenarioTraceFile.exists()) {
                 scenarioTraceFile.delete()
             }
         }
