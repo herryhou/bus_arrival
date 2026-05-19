@@ -19,6 +19,9 @@ class DetectionPreferences(context: Context) {
         private const val KEY_DWELL_TIME_WEIGHT = "dwell_time_weight"
         private const val KEY_CORRIDOR_SIZE = "corridor_size"
         private const val KEY_MAP_LABEL_ZOOM_BIAS = "map_label_zoom_bias"
+        private const val KEY_GPS_LOG_TREE_URI = "gps_log_tree_uri"
+        private const val KEY_GPS_LOG_ENABLED = "gps_log_enabled"
+        private const val KEY_LAST_GPS_LOG_REFERENCE = "last_gps_log_reference"
         private const val DEFAULT_MAP_LABEL_ZOOM_BIAS = 1
 
         val DEFAULT_PARAMETERS = DetectionParameters(
@@ -57,6 +60,18 @@ class DetectionPreferences(context: Context) {
     var mapLabelZoomBias: Int
         get() = prefs.getInt(KEY_MAP_LABEL_ZOOM_BIAS, DEFAULT_MAP_LABEL_ZOOM_BIAS)
         set(value) = prefs.edit().putInt(KEY_MAP_LABEL_ZOOM_BIAS, value.coerceIn(0, 2)).apply()
+
+    var gpsLogTreeUri: String?
+        get() = prefs.getString(KEY_GPS_LOG_TREE_URI, null)
+        set(value) = prefs.edit().putString(KEY_GPS_LOG_TREE_URI, value).apply()
+
+    var gpsLoggingEnabled: Boolean
+        get() = prefs.getBoolean(KEY_GPS_LOG_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_GPS_LOG_ENABLED, value).apply()
+
+    var lastGpsLogReference: String?
+        get() = prefs.getString(KEY_LAST_GPS_LOG_REFERENCE, null)
+        set(value) = prefs.edit().putString(KEY_LAST_GPS_LOG_REFERENCE, value).apply()
 
     fun getParameters(): DetectionParameters = DetectionParameters(
         distanceWeight = distanceWeight,

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -528,7 +529,9 @@ fun MapView(
                                             IntOffset((pos.x + 14f).toInt(), (pos.y - 42f).toInt())
                                         }
                                         .background(
-                                                color = Color.Black.copy(alpha = 0.72f),
+                                                color =
+                                                        busStateColor(uiState.currentStopState)
+                                                                .copy(alpha = 0.86f),
                                                 shape = RoundedCornerShape(10.dp)
                                         )
                                         .padding(horizontal = 10.dp, vertical = 6.dp)
@@ -640,6 +643,18 @@ internal fun shortStopStateLabel(stopState: String): String {
         "TRIPCOMPLETE" -> "DONE"
         "IDLE" -> "IDLE"
         else -> stopState
+    }
+}
+
+internal fun busStateColor(stopState: String): Color {
+    return when (stopState.uppercase()) {
+        "APPROACHING" -> Color(0xFF1565C0)
+        "ARRIVING" -> Color(0xFFF57C00)
+        "ATSTOP" -> Color(0xFF2E7D32)
+        "DEPARTED" -> Color(0xFF6A1B9A)
+        "TRIPCOMPLETE" -> Color(0xFF424242)
+        "IDLE" -> Color(0xFF37474F)
+        else -> Color(0xFF263238)
     }
 }
 

@@ -19,6 +19,8 @@ import com.busarrival.app.data.trace.TraceStorageManager
 import com.busarrival.app.domain.model.ReplayState
 import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.service.DetectionService
+import com.busarrival.app.service.GpsLogActions
+import com.busarrival.app.service.GpsLogStatus
 import com.busarrival.app.service.PipelineEvent
 import java.util.LinkedHashMap
 import kotlinx.coroutines.Job
@@ -63,6 +65,15 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     private val _mapLabelZoomBias = MutableStateFlow(preferences.mapLabelZoomBias)
     val mapLabelZoomBias: StateFlow<Int> = _mapLabelZoomBias.asStateFlow()
 
+    private val _gpsLoggingEnabled = MutableStateFlow(preferences.gpsLoggingEnabled)
+    val gpsLoggingEnabled: StateFlow<Boolean> = _gpsLoggingEnabled.asStateFlow()
+
+    private val _lastGpsLogReference = MutableStateFlow(preferences.lastGpsLogReference)
+    val lastGpsLogReference: StateFlow<String?> = _lastGpsLogReference.asStateFlow()
+
+    private val _gpsLogActive = MutableStateFlow(false)
+    val gpsLogActive: StateFlow<Boolean> = _gpsLogActive.asStateFlow()
+
     private val _tileCache = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
     val tileCache: StateFlow<Map<String, ImageBitmap>> = _tileCache.asStateFlow()
 
@@ -71,17 +82,34 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     private var replayEvents: List<PipelineEvent> = emptyList()
 
     private var service: DetectionService? = null
+    private var serviceEventJob: Job? = null
+    private var gpsLogStatusJob: Job? = null
 
     private val serviceConnection =
             object : ServiceConnection {
                 override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
                     val localBinder = binder as DetectionService.LocalBinder
                     service = localBinder.getService()
+                    val connectedService = service ?: return
 
                     // Subscribe to service events
-                    viewModelScope.launch {
-                        service?.events?.collect { event -> event?.let { handleServiceEvent(it) } }
-                    }
+                    serviceEventJob?.cancel()
+                    serviceEventJob =
+                            viewModelScope.launch {
+                                connectedService.events.collect { event ->
+                                    event?.let { handleServiceEvent(it) }
+                                }
+                            }
+
+                    gpsLogStatusJob?.cancel()
+                    gpsLogStatusJob =
+                            viewModelScope.launch {
+                                connectedService.gpsLogStatus.collect { status ->
+                                    handleGpsLogStatus(status)
+                                }
+                            }
+
+                    connectedService.gpsLogStatus.value.let { handleGpsLogStatus(it) }
 
                     // Update running state
                     _uiState.value = _uiState.value.copy(isRunning = true)
@@ -89,6 +117,10 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
 
                 override fun onServiceDisconnected(name: ComponentName?) {
                     service = null
+                    serviceEventJob?.cancel()
+                    serviceEventJob = null
+                    gpsLogStatusJob?.cancel()
+                    gpsLogStatusJob = null
                     _uiState.value = _uiState.value.copy(isRunning = false)
                 }
             }
@@ -172,10 +204,9 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
 
+        DetectionService.startService(getApplication())
         val intent = Intent(getApplication<Application>(), DetectionService::class.java)
-        getApplication<Application>().startService(intent)
-        getApplication<Application>()
-                .bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
     /** Stop detection service and unbind. */
@@ -226,6 +257,40 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         _mapLabelZoomBias.value = preferences.mapLabelZoomBias
     }
 
+    /** Reload GPS logging toggle from shared preferences. */
+    fun refreshGpsLoggingEnabled() {
+        _gpsLoggingEnabled.value = preferences.gpsLoggingEnabled
+    }
+
+    /** Reload the last known GPS log reference from shared preferences. */
+    fun refreshLastGpsLogReference() {
+        _lastGpsLogReference.value = preferences.lastGpsLogReference
+    }
+
+    /** Toggle GPS logging preference. */
+    fun toggleGpsLogging() {
+        val enabled = !preferences.gpsLoggingEnabled
+        preferences.gpsLoggingEnabled = enabled
+        _gpsLoggingEnabled.value = enabled
+    }
+
+    fun shareGpsLog(context: Context) {
+        val reference = _lastGpsLogReference.value ?: return
+        if (service?.gpsLogStatus?.value is GpsLogStatus.Active) return
+        GpsLogActions.share(context, reference)
+    }
+
+    fun deleteGpsLog(context: Context): Boolean {
+        val reference = _lastGpsLogReference.value ?: return false
+        if (service?.gpsLogStatus?.value is GpsLogStatus.Active) return false
+        val deleted = GpsLogActions.delete(context, reference)
+        if (deleted) {
+            preferences.lastGpsLogReference = null
+            _lastGpsLogReference.value = null
+        }
+        return deleted
+    }
+
     /** Add tiles to cache. */
     fun addTiles(tiles: Map<String, ImageBitmap>) {
         val current = LinkedHashMap(_tileCache.value)
@@ -238,6 +303,19 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     fun clearTileCache() {
         _tileCache.value = emptyMap()
         android.util.Log.d("DetectionViewModel", "Tile cache cleared")
+    }
+
+    private fun handleGpsLogStatus(status: GpsLogStatus) {
+        when (status) {
+            is GpsLogStatus.Active -> {
+                preferences.lastGpsLogReference = status.description
+                _lastGpsLogReference.value = status.description
+                _gpsLogActive.value = true
+            }
+            is GpsLogStatus.Disabled -> {
+                _gpsLogActive.value = false
+            }
+        }
     }
 
     private fun trimTileCache(cache: LinkedHashMap<String, ImageBitmap>) {
@@ -471,6 +549,8 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     override fun onCleared() {
         super.onCleared()
         playbackJob?.cancel()
+        serviceEventJob?.cancel()
+        gpsLogStatusJob?.cancel()
         service?.let { getApplication<Application>().unbindService(serviceConnection) }
     }
 }

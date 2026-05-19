@@ -63,6 +63,26 @@ class MapViewStateTest {
         assertEquals(700f, correct, "Correct transform: scale worldX, then add center")
     }
 
+    @Test
+    fun shortStopStateLabel_compactsKnownStates() {
+        assertEquals("APR", shortStopStateLabel("Approaching"))
+        assertEquals("ARL", shortStopStateLabel("Arriving"))
+        assertEquals("AT", shortStopStateLabel("AtStop"))
+        assertEquals("DEP", shortStopStateLabel("Departed"))
+    }
+
+    @Test
+    fun formatBusMarkerLabel_usesHumanReadableStopNumber() {
+        assertEquals("Stop 6 · AT", formatBusMarkerLabel(5, "AtStop"))
+        assertEquals("Stop - · IDLE", formatBusMarkerLabel(-1, "Idle"))
+    }
+
+    @Test
+    fun busStateColor_differsAcrossStates() {
+        assertNotEquals(busStateColor("Approaching"), busStateColor("AtStop"))
+        assertNotEquals(busStateColor("AtStop"), busStateColor("Departed"))
+    }
+
     // Helper classes and functions
 
     private data class MockLatLon(val lat: Double, val lon: Double)

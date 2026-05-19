@@ -47,14 +47,19 @@ fun DetectionScreen(
         factory = DetectionViewModelFactory(LocalContext.current.applicationContext as android.app.Application)
     )
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     val events by viewModel.events.collectAsState()
     val activeRoute by viewModel.activeRoute.collectAsState()
     val activeRouteMetadata by viewModel.activeRouteMetadata.collectAsState()
     val replayState by viewModel.replayState.collectAsState()
+    val gpsLoggingEnabled by viewModel.gpsLoggingEnabled.collectAsState()
+    val lastGpsLogReference by viewModel.lastGpsLogReference.collectAsState()
+    val gpsLogActive by viewModel.gpsLogActive.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.refreshMapLabelZoomBias()
+        viewModel.refreshLastGpsLogReference()
     }
 
     val locationPermissions = rememberMultiplePermissionsState(
@@ -97,6 +102,9 @@ fun DetectionScreen(
                 uiState = uiState,
                 events = events,
                 routeName = activeRouteMetadata?.name,
+                gpsLoggingEnabled = gpsLoggingEnabled,
+                lastGpsLogReference = lastGpsLogReference,
+                gpsLogActive = gpsLogActive,
                 onStartStop = {
                     if (uiState.isRunning) {
                         viewModel.stopDetection()
@@ -105,6 +113,9 @@ fun DetectionScreen(
                     }
                 },
                 onToggleCamera = { viewModel.toggleCameraFollow() },
+                onToggleGpsLogging = { viewModel.toggleGpsLogging() },
+                onShareGpsLog = { viewModel.shareGpsLog(context) },
+                onDeleteGpsLog = { viewModel.deleteGpsLog(context) },
                 modifier = Modifier
                     .weight(0.4f)
                     .fillMaxWidth()

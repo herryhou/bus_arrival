@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -32,6 +33,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * Foreground service for GPS processing and arrival detection.
@@ -46,12 +48,16 @@ class DetectionService : Service() {
     private val binder = LocalBinder()
 
     private lateinit var locationManager: LocationManager
+    private lateinit var gpsLogWriter: GpsLogWriter
 
     private val _isRunning = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _isRunning
 
     private val _events = MutableStateFlow<PipelineEvent?>(null)
     val events: StateFlow<PipelineEvent?> = _events
+
+    private val _gpsLogStatus = MutableStateFlow<GpsLogStatus>(GpsLogStatus.Disabled("Not started"))
+    val gpsLogStatus: StateFlow<GpsLogStatus> = _gpsLogStatus
 
     // Pipeline state
     private var activeRoute: com.busarrival.app.domain.model.RouteData? = null
@@ -68,6 +74,7 @@ class DetectionService : Service() {
         routeStorage = RouteStorageManager(this, com.google.gson.Gson())
         preferences = DetectionPreferences(this)
         locationManager = LocationManager(this)
+        gpsLogWriter = GpsLogWriter(NoopGpsLogStore())
     }
 
     override fun onBind(intent: Intent?): IBinder {
@@ -98,11 +105,25 @@ class DetectionService : Service() {
             return
         }
 
+        if (!locationManager.hasLocationPermission()) {
+            emitError("Location permission not granted")
+            return
+        }
+
         // Initialize stop state machines
         initializePipeline()
 
         // Start foreground service
         startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+
+        if (preferences.gpsLoggingEnabled) {
+            gpsLogWriter = GpsLogWriter(createGpsLogStore())
+            _gpsLogStatus.value = gpsLogWriter.open(routeId = activeUuid)
+        } else {
+            gpsLogWriter.close()
+            gpsLogWriter = GpsLogWriter(NoopGpsLogStore())
+            _gpsLogStatus.value = GpsLogStatus.Disabled("Logging disabled")
+        }
 
         // Start location updates
         serviceScope.launch {
@@ -115,11 +136,17 @@ class DetectionService : Service() {
     }
 
     private fun stopDetection() {
-        if (!_isRunning.value) return
+        if (!_isRunning.value) {
+            gpsLogWriter.close()
+            _gpsLogStatus.value = GpsLogStatus.Disabled("Not running")
+            return
+        }
 
         locationManager.stopLocationUpdates()
-        resetPipeline()
         _isRunning.value = false
+        gpsLogWriter.close()
+        _gpsLogStatus.value = GpsLogStatus.Disabled("Not running")
+        resetPipeline()
 
         // Stop foreground service
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -146,6 +173,7 @@ class DetectionService : Service() {
     }
 
     private fun processLocation(location: android.location.Location) {
+        gpsLogWriter.append(location)
         val route = activeRoute ?: return
 
         serviceScope.launch {
@@ -155,11 +183,6 @@ class DetectionService : Service() {
 
                 // Check for GPS jump (recovery trigger)
                 val isFirstFix = lastGpsTime == 0L
-                val dt = if (lastGpsTime > 0) {
-                    ((gps.timestamp - lastGpsTime) / 1000).toInt().coerceAtLeast(1)
-                } else {
-                    1
-                }
 
                 // Convert to grid coordinates
                 val (xCm, yCm) = GeoCoordinateConverter.toGridCoordinates(gps.lat, gps.lon, route)
@@ -269,6 +292,15 @@ class DetectionService : Service() {
         _events.value = PipelineEvent.PositionUpdate(0, 0, "Error: $message")
     }
 
+    private fun createGpsLogStore(): GpsLogStore {
+        val treeUri = preferences.gpsLogTreeUri
+        if (treeUri != null) {
+            return SafGpsLogStore(contentResolver, Uri.parse(treeUri))
+        }
+        val logDir = File(getExternalFilesDir(null) ?: filesDir, "gps-logs")
+        return FileGpsLogStore(logDir)
+    }
+
     private fun createNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
@@ -314,6 +346,16 @@ class DetectionService : Service() {
                 action = ACTION_STOP
             }
             context.startService(intent)
+        }
+    }
+}
+
+private class NoopGpsLogStore : GpsLogStore {
+    override fun create(routeId: String?, startedAtMillis: Long): GpsLogSession {
+        return object : GpsLogSession {
+            override val description: String = "logging-disabled"
+            override fun append(line: String) = Unit
+            override fun close() = Unit
         }
     }
 }
