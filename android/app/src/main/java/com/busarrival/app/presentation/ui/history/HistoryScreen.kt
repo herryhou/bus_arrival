@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,20 +13,31 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.state.ToggleableState
 import com.busarrival.app.presentation.ui.history.components.GpsLogRow
 import com.busarrival.app.presentation.viewmodel.HistoryViewModel
 import com.busarrival.app.service.GpsLogArchive
@@ -39,6 +51,7 @@ private class HistoryViewModelFactory(
     }
 }
 
+@OptIn(ExperimentalMaterialApi::class)
 @Composable
 fun HistoryScreen(
     viewModel: HistoryViewModel = viewModel(
@@ -47,6 +60,25 @@ fun HistoryScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val pullRefreshState = rememberPullRefreshState(
+        refreshing = uiState.isLoading,
+        onRefresh = viewModel::refresh
+    )
+    val totalLogs = uiState.logs.size
+    val allSelected = totalLogs > 0 && uiState.selectedCount == totalLogs
+    val selectionLabel =
+        when {
+            totalLogs == 0 -> "No logs"
+            uiState.selectedCount == 0 -> "Select all"
+            allSelected -> "Clear selection"
+            else -> "${uiState.selectedCount} selected"
+        }
+    val selectionState =
+        when {
+            uiState.selectedCount == 0 -> ToggleableState.Off
+            allSelected -> ToggleableState.On
+            else -> ToggleableState.Indeterminate
+        }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -76,13 +108,18 @@ fun HistoryScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            ActionBar(
-                selectedCount = uiState.selectedCount,
-                hasLogs = uiState.logs.isNotEmpty(),
+            BulkActionBar(
+                selectionState = selectionState,
+                selectionLabel = selectionLabel,
+                hasLogs = totalLogs > 0,
                 canDelete = uiState.canDeleteSelected,
-                onSelectAll = viewModel::selectAll,
-                onClearSelection = viewModel::clearSelection,
-                onRefresh = viewModel::refresh,
+                onToggleSelection = {
+                    if (allSelected) {
+                        viewModel.clearSelection()
+                    } else {
+                        viewModel.selectAll()
+                    }
+                },
                 onShare = {
                     viewModel.shareSelected()?.let { zipFile ->
                         val shareIntent =
@@ -101,16 +138,24 @@ fun HistoryScreen(
 
         HorizontalDivider()
 
-        when {
-            uiState.isLoading -> LoadingContent()
-            uiState.logs.isEmpty() -> EmptyLogsContent(onRefresh = viewModel::refresh)
-            else -> {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pullRefresh(pullRefreshState),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                when {
+                    uiState.isLoading -> item {
+                        LoadingContent(modifier = Modifier.fillMaxSize())
+                    }
+
+                    uiState.logs.isEmpty() -> item {
+                        EmptyLogsContent(modifier = Modifier.fillMaxSize())
+                    }
+
+                    else -> items(
                         items = uiState.logs,
                         key = { it.reference }
                     ) { item ->
@@ -121,44 +166,71 @@ fun HistoryScreen(
                     }
                 }
             }
+
+            PullRefreshIndicator(
+                refreshing = uiState.isLoading,
+                state = pullRefreshState,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
         }
     }
 }
 
 @Composable
-private fun ActionBar(
-    selectedCount: Int,
+private fun BulkActionBar(
+    selectionState: ToggleableState,
+    selectionLabel: String,
     hasLogs: Boolean,
     canDelete: Boolean,
-    onSelectAll: () -> Unit,
-    onClearSelection: () -> Unit,
-    onRefresh: () -> Unit,
+    onToggleSelection: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = onSelectAll, enabled = hasLogs && selectedCount == 0) {
-            Text("Select all")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        TriStateCheckbox(
+            state = selectionState,
+            onClick = onToggleSelection,
+            enabled = hasLogs
+        )
+
+        Text(
+            text = selectionLabel,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f)
+        )
+
+        IconButton(
+            onClick = onShare,
+            enabled = selectionState != ToggleableState.Off
+        ) {
+            Icon(
+                imageVector = Icons.Default.Share,
+                contentDescription = "Share selected logs"
+            )
         }
 
-        OutlinedButton(onClick = onClearSelection, enabled = selectedCount > 0) {
-            Text("Clear")
+        IconButton(
+            onClick = onDelete,
+            enabled = canDelete
+        ) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Delete selected logs"
+            )
         }
-
-        OutlinedButton(onClick = onRefresh) { Text("Refresh") }
-
-        Button(onClick = onShare, enabled = selectedCount > 0) {
-            Text("Share $selectedCount")
-        }
-
-        Button(onClick = onDelete, enabled = canDelete) { Text("Delete") }
     }
 }
 
 @Composable
-private fun LoadingContent() {
+private fun LoadingContent(modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier,
         verticalArrangement = Arrangement.Center
     ) {
         Text(
@@ -170,29 +242,20 @@ private fun LoadingContent() {
 }
 
 @Composable
-private fun EmptyLogsContent(onRefresh: () -> Unit) {
+private fun EmptyLogsContent(modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.Center
     ) {
         Text(
             text = "No GPS logs found",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(horizontal = 24.dp)
+            style = MaterialTheme.typography.titleLarge
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Start recording to create logs, then refresh this screen.",
+            text = "Start recording to create logs, then pull down to refresh.",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 24.dp)
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        OutlinedButton(
-            onClick = onRefresh,
-            modifier = Modifier.padding(horizontal = 24.dp)
-        ) {
-            Text("Refresh")
-        }
     }
 }

@@ -75,6 +75,10 @@ class HistoryViewModelTest {
             assertEquals(listOf("gps-log-newer.jsonl", "gps-log-older.jsonl"), entries)
         }
 
+        viewModel.clearSelection()
+        assertEquals(0, viewModel.uiState.value.selectedCount)
+        assertTrue(viewModel.uiState.value.canDeleteSelected.not())
+
         assertTrue(older.exists())
         assertTrue(newer.exists())
     }
