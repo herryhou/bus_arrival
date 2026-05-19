@@ -6,7 +6,7 @@
 
 ## Overview
 
-Add support for reading GPS data from JSONL files (Android FusedLocationProvider format) as an alternative to NMEA input. The pipeline will auto-detect input format based on file extension.
+Add support for reading GPS data from JSONL files (Android FusedLocationProvider format) as an alternative to NMEA input. The pipeline will auto-detect input format based on file extension and preserve the raw JSONL millisecond timestamp in the reader.
 
 ## Motivation
 
@@ -36,6 +36,11 @@ The Android app captures GPS logs in JSONL format (from FusedLocationProvider). 
 ### New Module: `jsonl_reader.rs`
 
 ```rust
+pub struct JsonlRecord {
+    pub timestamp_ms: u64,
+    pub gps: GpsPoint,
+}
+
 /// JSONL → GpsPoint converter
 pub struct JsonReader {
     skipped_lines: usize,
@@ -43,7 +48,7 @@ pub struct JsonReader {
 
 impl JsonReader {
     pub fn new() -> Self;
-    pub fn parse_line(&mut self, line: &str) -> Option<GpsPoint>;
+    pub fn parse_line(&mut self, line: &str) -> Option<JsonlRecord>;
     pub fn skipped_count(&self) -> usize;
 }
 ```
@@ -79,7 +84,7 @@ impl Pipeline {
 
 | JSONL field | GpsPoint field | Conversion |
 |-------------|----------------|------------|
-| `t` (ms) | `timestamp` (sec) | `t / 1000` |
+| `t` (ms) | `timestamp_ms` (ms) | preserved in reader |
 | `lat` | `lat` | direct (f64) |
 | `lon` | `lon` | direct (f64) |
 | `s` (m/s) | `speed_cms` | `s * 100` |
@@ -93,11 +98,21 @@ Formula: `hdop_x10 = accuracy_m * 2`
 
 Rationale: Android's `accuracy` is 68% confidence radius. Conservative mapping assumes ~4m base GPS error, so HDOP ≈ accuracy / 4m, scaled to hdop_x10 format.
 
+### Timestamp Semantics
+
+JSONL timestamps MUST be preserved at millisecond resolution in the reader as `timestamp_ms`.
+
+- The reader MUST retain the raw `t` value unchanged.
+- The current pipeline working timestamp remains second-based for compatibility.
+- File order must be preserved for records with identical millisecond timestamps.
+
+If downstream code needs the raw JSONL timestamp later, it MUST read `timestamp_ms` from `JsonlRecord` rather than reconstructing it from the normalized pipeline timestamp.
+
 ### Fix Quality Logic
 
-`has_fix = (s != None && b != None && a != None)`
+`has_fix = true` when `lat` and `lon` parse successfully.
 
-Partial GPS data (missing speed, bearing, or accuracy) indicates incomplete fix, similar to NMEA `FixQuality::PositionOnly` or `MotionOnly`.
+Partial GPS data (missing speed, bearing, or accuracy) does not change fix validity; those fields remain optional metadata.
 
 ## Error Handling
 
@@ -123,10 +138,11 @@ Processed 1000 GPS updates, skipped 3 malformed lines
 - `test_invalid_json_skipped()` - Error handling
 - `test_missing_lat_skipped()` - Error handling
 - `test_skipped_count()` - Counter increment
-- `test_timestamp_ms_to_sec()` - Conversion
+- `test_same_timestamp_order_preserved()` - Stable ordering for identical millisecond timestamps
 - `test_speed_m_to_cm()` - Conversion
 - `test_bearing_deg_to_cdeg()` - Conversion
 - `test_accuracy_to_hdop()` - Conversion
+- `test_timestamp_ms_preserved()` - Millisecond timestamp preservation
 
 ### Integration Test
 
@@ -134,24 +150,16 @@ Process `test_data/tz_23-gps-log-20260519-063111.jsonl` and verify trace output.
 
 ## Makefile Integration
 
-No new targets needed. Existing `validate-trace` auto-detects format from file extension.
+No new Makefile target is required for this feature. Existing pipeline invocation stays the same shape, but the binary must accept either NMEA or JSONL input based on file extension.
 
-```makefile
-validate-trace:
-	@if [ -n "$(INPUT_FILE)" && -n "$(ROUTE_DATA)" ]; then \
-		cargo run --release --bin pipeline -- \
-			"$(INPUT_FILE)" "$(ROUTE_DATA)" -o "$(OUTPUT)"; \
-	fi
-```
-
-**Usage:**
 ```bash
-# NMEA (existing)
-make validate-trace INPUT_FILE=test_data/ty225_normal_nmea.txt ...
-
-# JSONL (new)
-make validate-trace INPUT_FILE=test_data/tz_23-gps-log-20260519-063111.jsonl ...
+cargo run --release --bin pipeline -- \
+	"test_data/tz_23-gps-log-20260519-063111.jsonl" \
+	"test_data/ty225_normal.bin" \
+	--output "test_data/ty225_normal_trace.jsonl"
 ```
+
+If a Makefile helper is added later, it should wrap the pipeline binary directly, not `trace_validator`.
 
 ## Output Naming
 
@@ -166,4 +174,4 @@ Auto-generated trace output:
 3. Add `Pipeline::process_file()` unified entry point
 4. Update `main.rs` to use `process_file()`
 5. Integration test with real GPS log
-6. Update Makefile `validate-trace` to use `INPUT_FILE` variable
+6. Update documentation and invocation examples to use the pipeline binary directly

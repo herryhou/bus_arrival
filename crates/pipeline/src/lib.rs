@@ -18,6 +18,8 @@
 //! ```
 
 pub mod gps;
+#[cfg(feature = "std")]
+pub mod jsonl_reader;
 pub mod serde;
 pub mod detection_state;
 pub mod localization;
@@ -221,23 +223,35 @@ impl Pipeline {
         nmea_path: impl AsRef<Path>,
         route_data_path: impl AsRef<Path>,
     ) -> Result<PipelineResult, PipelineError> {
+        Self::process_file(nmea_path, route_data_path)
+    }
+
+    /// Process GPS file and detect arrivals/departures.
+    /// Automatically dispatches by file extension.
+    #[cfg(feature = "std")]
+    pub fn process_file(
+        input_path: impl AsRef<Path>,
+        route_data_path: impl AsRef<Path>,
+    ) -> Result<PipelineResult, PipelineError> {
         use std::fs::File;
         use std::io::BufReader;
 
-        // Load route data
         let route_buffer = std::fs::read(route_data_path.as_ref())?;
         let route_data = RouteData::load(&route_buffer)?;
+        let input_path = input_path.as_ref();
 
-        // Parse NMEA and process
-        let nmea_file = File::open(nmea_path.as_ref())?;
-        let reader = BufReader::new(nmea_file);
-
-        let result = Self::process_nmea_reader(
-            reader,
-            &route_data,
-        )?;
-
-        Ok(result)
+        match InputFormat::from_path(input_path) {
+            InputFormat::Nmea => {
+                let file = File::open(input_path)?;
+                let reader = BufReader::new(file);
+                Self::process_nmea_reader(reader, &route_data)
+            }
+            InputFormat::Jsonl => {
+                let file = File::open(input_path)?;
+                let reader = BufReader::new(file);
+                Self::process_jsonl_reader(reader, &route_data)
+            }
+        }
     }
 
     /// Process NMEA from a BufRead reader and detect arrivals/departures
@@ -292,6 +306,51 @@ impl Pipeline {
         Ok(result)
     }
 
+    /// Process JSONL from a BufRead reader and detect arrivals/departures.
+    #[cfg(feature = "std")]
+    pub fn process_jsonl_reader<R: BufRead>(
+        reader: R,
+        route_data: &RouteData,
+    ) -> Result<PipelineResult, PipelineError> {
+        let mut result = PipelineResult::new();
+
+        let mut loc_state = LocalizationState::new(route_data);
+        let mut det_state = DetectionState::new(route_data);
+        let mut jsonl_reader = jsonl_reader::JsonReader::new();
+
+        for line in reader.lines() {
+            let line = line.map_err(PipelineError::IoError)?;
+
+            if let Some(record) = jsonl_reader.parse_line(&line) {
+                let gps = record.gps;
+                if let Some(gps_record) = loc_state.process_gps(&gps, route_data) {
+                    det_state.process_gps_record(&gps_record, route_data, &mut result);
+
+                    #[cfg(feature = "std")]
+                    result.add_trace_record(&gps_record, &mut det_state, route_data);
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+}
+
+#[cfg(feature = "std")]
+enum InputFormat {
+    Nmea,
+    Jsonl,
+}
+
+#[cfg(feature = "std")]
+impl InputFormat {
+    fn from_path(path: &Path) -> Self {
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("jsonl") => Self::Jsonl,
+            _ => Self::Nmea,
+        }
+    }
 }
 
 impl PipelineResult {

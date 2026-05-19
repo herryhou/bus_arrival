@@ -15,14 +15,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Determine trace output path
     let trace_path = args.output.unwrap_or_else(|| {
-        let auto_path = generate_trace_path(&args.nmea);
+        let auto_path = generate_trace_path(&args.input);
         eprintln!("Auto-generating trace output: {}", auto_path.display());
         auto_path
     });
 
     // Run pipeline
-    let result = Pipeline::process_nmea_file(
-        &args.nmea,
+    let result = Pipeline::process_file(
+        &args.input,
         &args.route_data,
     )?;
 
@@ -47,14 +47,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(feature = "std")]
 struct Args {
-    nmea: PathBuf,
+    input: PathBuf,
     route_data: PathBuf,
     output: Option<PathBuf>,
 }
 
 #[cfg(feature = "std")]
 fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
-    let mut nmea = None;
+    let mut input = None;
     let mut route_data = None;
     let mut output = None;
 
@@ -77,23 +77,23 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
                 return Err(format!("Unknown option: {}", arg).into());
             }
             _ => {
-                // Positional arguments: nmea route_data
-                if nmea.is_none() {
-                    nmea = Some(PathBuf::from(arg));
+                // Positional arguments: input route_data
+                if input.is_none() {
+                    input = Some(PathBuf::from(arg));
                 } else if route_data.is_none() {
                     route_data = Some(PathBuf::from(arg));
                 } else {
-                    return Err("Too many arguments. Usage: pipeline <nmea> <route_data> [--output <trace.jsonl>]".into());
+                    return Err("Too many arguments. Usage: pipeline <input> <route_data> [--output <trace.jsonl>]".into());
                 }
             }
         }
     }
 
-    let nmea = nmea.ok_or("Missing NMEA input file")?;
+    let input = input.ok_or("Missing input file")?;
     let route_data = route_data.ok_or("Missing route_data.bin file")?;
 
     Ok(Args {
-        nmea,
+        input,
         route_data,
         output,
     })
@@ -103,10 +103,10 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
 fn print_help() {
     println!("Bus Arrival Detection Pipeline");
     println!();
-    println!("Usage: pipeline [OPTIONS] <nmea> <route_data>");
+    println!("Usage: pipeline [OPTIONS] <input> <route_data>");
     println!();
     println!("Arguments:");
-    println!("  <nmea>       NMEA log file (GPS data)");
+    println!("  <input>      NMEA or JSONL GPS log file");
     println!("  <route_data> Route data binary file");
     println!();
     println!("Options:");
@@ -115,7 +115,7 @@ fn print_help() {
     println!();
     println!("Examples:");
     println!("  pipeline gps.nmea route_data.bin");
-    println!("  pipeline gps.nmea route_data.bin --output custom_trace.jsonl");
+    println!("  pipeline gps.jsonl route_data.bin --output custom_trace.jsonl");
     println!();
     println!("Helper scripts:");
     println!("  ./tools/arrival_from_trace.sh trace.jsonl > arrivals.jsonl");
