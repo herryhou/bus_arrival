@@ -9,6 +9,7 @@ fn jsonl_minimal_record_keeps_fix() {
         .expect("expected valid JSONL record");
 
     assert_eq!(record.timestamp_ms, 1779172271904);
+    assert_eq!(record.gps.timestamp, 1779172271904);
     assert!(record.gps.has_fix);
     assert_eq!(record.gps.speed_cms, None);
     assert_eq!(record.gps.heading_cdeg, None);

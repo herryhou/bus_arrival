@@ -416,7 +416,7 @@ impl PipelineResult {
         };
 
         self.trace_records.push(TraceRecordWrapper(TraceRecord {
-            time: record.time,
+            time_ms: record.time,
             lat: record.lat,
             lon: record.lon,
             s_cm: record.s_cm,

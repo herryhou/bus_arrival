@@ -246,9 +246,9 @@ pub fn estimate(
 /// Handle GPS outage
 fn handle_outage(state: &mut EstimationState, timestamp: u64) -> EstimationOutput {
 
-    let dt = match state.dr.last_gps_time {
-        Some(t) => timestamp.saturating_sub(t),
-        None => return EstimationOutput {
+        let dt = match state.dr.last_gps_time {
+            Some(t) => timestamp.saturating_sub(t) / 1000,
+            None => return EstimationOutput {
             z_gps_cm: state.kalman.s_cm,
             s_cm: state.kalman.s_cm,
             v_cms: state.kalman.v_cms,
@@ -342,22 +342,22 @@ mod tests {
         // Initialize: GPS fix at t=100, position=0, velocity=100 cm/s
         state.kalman.s_cm = 0;
         state.kalman.v_cms = 100;
-        state.dr.last_gps_time = Some(100);
+        state.dr.last_gps_time = Some(100_000);
         state.dr.filtered_v = 100;
         state.dr.last_valid_s = Some(0);
 
         // Tick 1 (dt=1): s = 0 + 100*1 = 100
-        let result = handle_outage(&mut state, 101);
+        let result = handle_outage(&mut state, 101_000);
         assert_eq!(result.s_cm, 100);
 
         // Tick 2 (dt=2): s = 0 + 90*2 = 180 (after speed decay)
         // BUG (incremental with growing dt): s = 100 + 90*2 = 280
-        let result = handle_outage(&mut state, 102);
+        let result = handle_outage(&mut state, 102_000);
         assert_eq!(result.s_cm, 180, "Should be absolute from anchor, not incremental");
 
         // Tick 3 (dt=3): s = 0 + 72*3 = 216
         // BUG (incremental): s = 180 + 72*3 = 396
-        let result = handle_outage(&mut state, 103);
+        let result = handle_outage(&mut state, 103_000);
         assert_eq!(result.s_cm, 216, "Should be absolute from anchor, not incremental");
     }
 
@@ -368,12 +368,12 @@ mod tests {
         // Initialize with zero velocity
         state.kalman.s_cm = 1000;
         state.kalman.v_cms = 0;
-        state.dr.last_gps_time = Some(100);
+        state.dr.last_gps_time = Some(100_000);
         state.dr.filtered_v = 0;
         state.dr.last_valid_s = Some(1000);
 
         // During outage, position should NOT change
-        for timestamp in [101, 102, 103] {
+        for timestamp in [101_000, 102_000, 103_000] {
             let result = handle_outage(&mut state, timestamp);
             assert_eq!(result.s_cm, 1000, "Position should not change with v=0");
         }
@@ -384,16 +384,16 @@ mod tests {
         let mut state = EstimationState::new();
 
         state.kalman.s_cm = 500;
-        state.dr.last_gps_time = Some(100);
+        state.dr.last_gps_time = Some(100_000);
         state.dr.filtered_v = 100;
         state.dr.last_valid_s = Some(500);
 
         // At dt=10, should still do DR
-        let result = handle_outage(&mut state, 110);
+        let result = handle_outage(&mut state, 110_000);
         assert_eq!(result.s_cm, 500 + 100 * 10, "Should do DR at dt=10");
 
         // At dt=11, should timeout (return last position)
-        let result = handle_outage(&mut state, 111);
+        let result = handle_outage(&mut state, 111_000);
         assert_eq!(result.s_cm, 500 + 100 * 10, "Should timeout at dt>10");
         assert!(state.dr.in_recovery, "Should set recovery flag");
     }
@@ -403,16 +403,16 @@ mod tests {
         let mut state = EstimationState::new();
 
         state.kalman.s_cm = 0;
-        state.dr.last_gps_time = Some(100);
+        state.dr.last_gps_time = Some(100_000);
         state.dr.filtered_v = 1000; // 10 m/s
         state.dr.last_valid_s = Some(0);
 
         // First tick: speed should decay
-        handle_outage(&mut state, 101);
+        handle_outage(&mut state, 101_000);
         let v1 = state.dr.filtered_v;
 
         // Second tick: speed should decay more
-        handle_outage(&mut state, 102);
+        handle_outage(&mut state, 102_000);
         let v2 = state.dr.filtered_v;
 
         assert!(v2 < v1, "Speed should decay during outage");

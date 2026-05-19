@@ -84,7 +84,7 @@ pub fn process_gps_update(
 
     // Calculate time delta since last GPS update
     let dt = match dr.last_gps_time {
-        Some(t) => (gps.timestamp.saturating_sub(t)) as i32,
+        Some(t) => (gps.timestamp.saturating_sub(t) / 1000) as i32,
         None => 1, // First fix
     };
 
@@ -336,7 +336,7 @@ pub fn process_gps_update(
 /// Handle GPS outage (max 10 seconds per spec Section 11.2)
 fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> ProcessResult {
     let dt = match dr.last_gps_time {
-        Some(t) => timestamp.saturating_sub(t),
+        Some(t) => timestamp.saturating_sub(t) / 1000,
         None => return ProcessResult::Rejected("no previous fix"),
     };
 

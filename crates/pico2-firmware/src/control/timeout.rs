@@ -5,7 +5,7 @@
 
 use shared::DistCm;
 
-const RECOVERING_TIMEOUT_SECONDS: u64 = 30;  // 30 seconds max
+const RECOVERING_TIMEOUT_MS: u64 = 30_000;  // 30 seconds max
 
 /// Check if recovery has timed out
 ///
@@ -23,7 +23,7 @@ pub fn check_recovering_timeout(
         .map(|t| now.saturating_sub(t))
         .unwrap_or(0);
 
-    elapsed > RECOVERING_TIMEOUT_SECONDS
+    elapsed > RECOVERING_TIMEOUT_MS
 }
 
 /// Find closest stop index to current position (geometric fallback)
@@ -60,13 +60,13 @@ mod tests {
         use super::super::SystemMode;
 
         // Normal mode — no timeout
-        assert!(!check_recovering_timeout(SystemMode::Normal, Some(0), 25));
+        assert!(!check_recovering_timeout(SystemMode::Normal, Some(0), 25_000));
 
         // Recovering for 25 seconds — no timeout
-        assert!(!check_recovering_timeout(SystemMode::Recovering, Some(0), 25));
+        assert!(!check_recovering_timeout(SystemMode::Recovering, Some(0), 25_000));
 
         // Recovering for 31 seconds — timeout
-        assert!(check_recovering_timeout(SystemMode::Recovering, Some(0), 31));
+        assert!(check_recovering_timeout(SystemMode::Recovering, Some(0), 31_000));
     }
 
     #[test]

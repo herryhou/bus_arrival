@@ -7,7 +7,7 @@ use shared::FsmState;
 fn test_trace_serialization_valid_json() {
     // Verify TraceRecord serializes to valid JSON with FsmState and new fields
     let record = TraceRecord {
-        time: 1234567890,
+        time_ms: 1_234_567_890,
         lat: 25.00425,
         lon: 121.28645,
         s_cm: 10000,
@@ -59,7 +59,7 @@ fn test_trace_serialization_valid_json() {
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("Failed to parse JSON as Value");
 
     // Verify structure
-    assert_eq!(parsed["time"], 1234567890);
+    assert_eq!(parsed["time_ms"], 1_234_567_890);
     assert_eq!(parsed["s_cm"], 10000);
     assert_eq!(parsed["v_cms"], 500);
     assert!(parsed["active_stops"].is_array());

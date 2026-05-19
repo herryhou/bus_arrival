@@ -5,7 +5,7 @@ use shared::{DistCm, SpeedCms, HeadCdeg};
 /// GPS record emitted by localization phase
 #[derive(Debug, Clone)]
 pub struct GpsRecord {
-    /// GPS timestamp (seconds since epoch)
+    /// GPS timestamp (milliseconds since epoch)
     pub time: u64,
     /// Latitude
     pub lat: f64,

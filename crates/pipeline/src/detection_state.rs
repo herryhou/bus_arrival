@@ -9,7 +9,7 @@ use detection::state_machine::{StopState, StopEvent};
 pub struct DetectionState {
     /// Per-stop state machines
     stop_states: Vec<StopState>,
-    /// Current GPS timestamp counter
+    /// Current GPS timestamp in milliseconds since epoch
     current_timestamp: u64,
     /// Track which stops arrived this frame
     arrived_this_frame: Vec<u8>,

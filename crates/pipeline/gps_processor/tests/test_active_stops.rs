@@ -121,7 +121,7 @@ fn test_active_stops_when_in_corridor() {
 
     // Test Case 2: Inside corridor (s_cm = 5000)
     // Should find the active stop
-    gps.timestamp += 1;
+    gps.timestamp += 1000;
     gps.lat = lat_from_y(start_y + 5000);
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 1, false, 0);
     if let ProcessResult::Valid { signals, .. } = result {
@@ -143,6 +143,7 @@ fn test_active_stops_when_in_corridor() {
     }
 
     // Test Case 3: At stop (s_cm = 10000)
+    gps.timestamp += 1000;
     gps.lat = lat_from_y(start_y + 10000);
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 2, false, 0);
     if let ProcessResult::Valid { signals, .. } = result {
@@ -163,6 +164,7 @@ fn test_active_stops_when_in_corridor() {
     }
 
     // Test Case 4: After corridor (s_cm = 15000)
+    gps.timestamp += 1000;
     gps.lat = lat_from_y(start_y + 15000);
     let result = process_gps_update(&mut state, &mut dr, &gps, &route_data, 3, false, 0);
     if let ProcessResult::Valid { signals, .. } = result {

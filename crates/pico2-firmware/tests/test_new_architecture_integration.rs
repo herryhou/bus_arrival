@@ -101,7 +101,7 @@ mod tests {
 #[allow(dead_code)]
 fn create_test_gps_point() -> GpsPoint {
     GpsPoint {
-        timestamp: 123519,
+        timestamp: 123_519_000,
         lat: 48.07038,  // 48.07038° N
         lon: 11.31324,  // 11.31324° E
         has_fix: true,

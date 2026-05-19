@@ -18,8 +18,8 @@ where
 /// Trace record for debugging visualization
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TraceRecord {
-    /// Input: GPS timestamp (seconds since epoch)
-    pub time: u64,
+    /// Input: GPS timestamp (milliseconds since epoch)
+    pub time_ms: u64,
 
     /// Input: Latitude
     #[serde(serialize_with = "serialize_f64_6dec")]
@@ -135,7 +135,7 @@ pub struct FeatureScores {
 /// v8.4: Voice announcement event
 #[derive(Serialize)]
 pub struct AnnounceEvent {
-    /// GPS timestamp (seconds since epoch)
+    /// GPS timestamp (milliseconds since epoch)
     pub time: u64,
     /// Stop index being announced
     pub stop_idx: u8,

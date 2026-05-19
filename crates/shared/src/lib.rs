@@ -186,7 +186,8 @@ pub enum FixQuality {
 /// Other fields use integer types for no-FPU compatibility.
 #[derive(Debug, Clone)]
 pub struct GpsPoint {
-    pub timestamp: u64, // seconds since epoch
+    /// Timestamp in milliseconds since epoch.
+    pub timestamp: u64,
     pub lat: f64, // Latitude in degrees (full precision)
     pub lon: f64, // Longitude in degrees (full precision)
     pub heading_cdeg: Option<HeadCdeg>, // Heading in 0.01° units
@@ -241,7 +242,7 @@ pub struct KalmanState {
     pub off_route_clear_ticks: u8,
     /// Frozen position when off-route is first suspected (for immediate position freezing)
     pub frozen_s_cm: Option<DistCm>,
-    /// Timestamp when position was frozen (for accurate recovery elapsed time calculation)
+    /// Timestamp when position was frozen, in milliseconds since epoch.
     pub off_route_freeze_time: Option<u64>,
     /// Off-route freeze context for spatial anchoring during recovery
     pub freeze_ctx: Option<FreezeContext>,
@@ -364,6 +365,7 @@ impl SpatialGrid {
 /// Dead-reckoning state for GPS outage compensation.
 #[derive(Debug, Clone)]
 pub struct DrState {
+    /// Timestamp of the last GPS fix, in milliseconds since epoch.
     pub last_gps_time: Option<u64>,
     pub last_valid_s: DistCm,
     pub filtered_v: SpeedCms,
@@ -423,7 +425,7 @@ pub enum ArrivalEventType {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ArrivalEvent {
-    /// GPS update timestamp (seconds since epoch)
+    /// GPS update timestamp (milliseconds since epoch)
     pub time: u64,
     /// Stop index that was arrived at
     pub stop_idx: u8,
@@ -510,7 +512,7 @@ impl PersistedState {
 /// Departure event emitted when bus leaves a stop
 #[cfg_attr(feature = "serde", derive(Debug, Clone, serde::Serialize))]
 pub struct DepartureEvent {
-    /// GPS update timestamp (seconds since epoch)
+    /// GPS update timestamp (milliseconds since epoch)
     pub time: u64,
     /// Stop index that was departed from
     pub stop_idx: u8,

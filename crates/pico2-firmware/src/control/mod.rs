@@ -339,12 +339,12 @@ impl<'a> SystemState<'a> {
         // Build RecoveryInput
         let dt = self.off_route_since
             .map(|t| now.saturating_sub(t))
-            .unwrap_or(1);
+            .unwrap_or(1000);
 
         let input = crate::recovery::RecoveryInput {
             s_cm: est.z_gps_cm,
             v_cms: est.v_cms,
-            dt_seconds: dt,
+            dt_seconds: dt / 1000,
             stops: self.collect_stops(),
             hint_idx: self.last_stop_index,
             frozen_s_cm: self.frozen_s_cm,
@@ -572,11 +572,11 @@ impl<'a> SystemState<'a> {
                 );
 
                 // Calculate time delta since last GPS fix (in seconds)
-                let dt_since_last_fix = if self.last_gps_timestamp > 0 {
-                    gps.timestamp.saturating_sub(self.last_gps_timestamp)
-                } else {
-                    1 // Default to 1 second on first fix or after outage
-                };
+        let dt_since_last_fix = if self.last_gps_timestamp > 0 {
+            gps.timestamp.saturating_sub(self.last_gps_timestamp) / 1000
+        } else {
+            1 // Default to 1 second on first fix or after outage
+        };
 
                 // Collect stops into a heapless::Vec for recovery module
                 let mut stops_vec = heapless::Vec::<shared::Stop, 256>::new();
@@ -656,7 +656,7 @@ impl<'a> SystemState<'a> {
 
             // Calculate elapsed time since freeze
             let elapsed_seconds = self.off_route_since
-                .map(|t| gps.timestamp.saturating_sub(t))
+                .map(|t| gps.timestamp.saturating_sub(t) / 1000)
                 .unwrap_or(1);
 
             // Run recovery to find correct stop index

@@ -78,7 +78,7 @@ impl FixAccumulator {
         }
     }
 
-    /// Check if timestamp changed (new second arrived).
+    /// Check if timestamp changed.
     /// Returns true if we should emit the previous snapshot.
     ///
     /// Updates `last_emitted_timestamp` when returning true.
@@ -180,7 +180,7 @@ impl FixAccumulator {
             let hh: u64 = parts[1][0..2].parse().unwrap_or(0);
             let mm: u64 = parts[1][2..4].parse().unwrap_or(0);
             let ss: u64 = parts[1][4..6].parse().unwrap_or(0);
-            self.timestamp = Some(hh * 3600 + mm * 60 + ss);
+            self.timestamp = Some((hh * 3600 + mm * 60 + ss) * 1000);
         }
 
         self.lat = Some(lat);
@@ -225,7 +225,7 @@ impl FixAccumulator {
             let hh: u64 = parts[1][0..2].parse().unwrap_or(0);
             let mm: u64 = parts[1][2..4].parse().unwrap_or(0);
             let ss: u64 = parts[1][4..6].parse().unwrap_or(0);
-            self.timestamp = Some(hh * 3600 + mm * 60 + ss);
+            self.timestamp = Some((hh * 3600 + mm * 60 + ss) * 1000);
         }
 
         self.lat = Some(lat);
@@ -333,7 +333,7 @@ mod tests {
         assert!(acc.should_emit());
 
         let (gps, _) = acc.build().unwrap();
-        assert_eq!(gps.timestamp, 22 * 3600 + 13 * 60 + 21);  // NEW timestamp, not old
+        assert_eq!(gps.timestamp, (22 * 3600 + 13 * 60 + 21) * 1000);  // NEW timestamp, not old
     }
 
     #[test]

@@ -5,6 +5,7 @@ use shared::{ArrivalEvent, DepartureEvent, DistCm, Prob8, SpeedCms};
 
 #[derive(Serialize)]
 struct ArrivalOutputRecord {
+    /// Event timestamp in milliseconds since epoch.
     time: u64,
     stop_idx: u8,
     s_cm: DistCm,
@@ -14,6 +15,7 @@ struct ArrivalOutputRecord {
 
 #[derive(Serialize)]
 struct DepartureOutputRecord {
+    /// Event timestamp in milliseconds since epoch.
     time: u64,
     stop_idx: u8,
     s_cm: DistCm,

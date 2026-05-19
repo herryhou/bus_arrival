@@ -6,6 +6,7 @@ use std::io::{BufRead, BufReader};
 
 #[derive(Deserialize)]
 struct Phase2Record {
+    /// Input GPS timestamp in milliseconds since epoch.
     time: u64,
     lat: f64,
     lon: f64,
@@ -19,6 +20,7 @@ struct Phase2Record {
 
 /// Parsed input record
 pub struct InputRecord {
+    /// Input GPS timestamp in milliseconds since epoch.
     pub time: u64,
     pub lat: f64,
     pub lon: f64,

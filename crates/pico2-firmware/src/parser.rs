@@ -83,7 +83,7 @@ impl NmeaParser {
     ///
     /// // Third sentence (RMC with new timestamp) - triggers emission of previous timestamp
     /// let gps = parser.feed_sentence("$GPRMC,221321,A,2500.2583,N,12117.1899,E,8.5,81.5,141123,,*2F").unwrap();
-    /// assert_eq!(gps.timestamp, 22 * 3600 + 13 * 60 + 21);  // New timestamp
+    /// assert_eq!(gps.timestamp, (22 * 3600 + 13 * 60 + 21) * 1000);  // New timestamp
     /// ```
     pub fn feed_sentence(&mut self, sentence: &str) -> Option<GpsPoint> {
         // Update accumulator with this sentence
@@ -149,7 +149,7 @@ mod tests {
         let gps = parser.feed_sentence("$GPRMC,221321,A,2500.2583,N,12117.1899,E,8.5,81.5,141123,,*2F").unwrap();
 
         // The accumulator emits after updating, so we get the NEW timestamp
-        assert_eq!(gps.timestamp, 22 * 3600 + 13 * 60 + 21);
+        assert_eq!(gps.timestamp, (22 * 3600 + 13 * 60 + 21) * 1000);
     }
 
     #[test]

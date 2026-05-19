@@ -52,9 +52,12 @@ export interface StopTraceState {
 /**
  * Trace record for debugging visualization
  * One line per GPS update in trace.jsonl
+ *
+ * Input format supports both 'time' (seconds) and 'time_ms' (milliseconds) fields.
+ * The parser normalizes both to the 'time' field in seconds.
  */
 export interface TraceRecord {
-	/** GPS timestamp (seconds since epoch) */
+	/** GPS timestamp (seconds since epoch) - normalized from time or time_ms */
 	time: number;
 	/** Latitude */
 	lat: number;

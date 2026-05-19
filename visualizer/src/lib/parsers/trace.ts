@@ -24,12 +24,23 @@ export function parseTraceJsonl(content: string): TraceData {
 		if (!line) continue;
 
 		try {
-			const record = JSON.parse(line) as TraceRecord;
+			const raw = JSON.parse(line);
+
+			// Handle both 'time' (seconds) and 'time_ms' (milliseconds) fields
+			const timeMs = typeof raw.time_ms === 'number' ? raw.time_ms :
+			               typeof raw.time === 'number' ? raw.time * 1000 :
+			               null;
+
+			if (timeMs === null) {
+				throw new Error(`Line ${i + 1}: missing or invalid 'time' or 'time_ms' field`);
+			}
+
+			const record: TraceRecord = {
+				...raw,
+				time: timeMs / 1000  // Normalize to seconds
+			};
 
 			// Validate required fields
-			if (typeof record.time !== 'number') {
-				throw new Error(`Line ${i + 1}: missing or invalid 'time' field`);
-			}
 			if (typeof record.lat !== 'number') {
 				throw new Error(`Line ${i + 1}: missing or invalid 'lat' field`);
 			}

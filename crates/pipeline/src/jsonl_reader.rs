@@ -64,7 +64,7 @@ impl JsonReader {
         Some(JsonlRecord {
             timestamp_ms: sample.t,
             gps: GpsPoint {
-                timestamp: sample.t / 1000,
+                timestamp: sample.t,
                 lat: sample.lat,
                 lon: sample.lon,
                 heading_cdeg,
