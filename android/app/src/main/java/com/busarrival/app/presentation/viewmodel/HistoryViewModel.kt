@@ -2,148 +2,144 @@ package com.busarrival.app.presentation.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
-import com.busarrival.app.data.repository.DetectionRepository
-import com.busarrival.app.data.local.entity.ArrivalEntity
-import com.busarrival.app.data.local.entity.DepartureEntity
+import com.busarrival.app.data.gpslog.GpsLogMetadata
+import com.busarrival.app.data.gpslog.GpsLogStorageManager
+import com.busarrival.app.service.GpsLogArchive
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.LocalDateTime
-import java.time.temporal.ChronoUnit
+import kotlinx.coroutines.runBlocking
+import java.io.File
 
-enum class TimeFilter { Today, Week, All }
-
-data class HistoryEventItem(
-    val id: Long,
-    val timestamp: Long,
-    val stopIndex: Int,
-    val type: EventType,
-    val details: String
+data class LogManagerItem(
+    val filename: String,
+    val reference: String,
+    val modifiedAtMillis: Long,
+    val sizeBytes: Long,
+    val isActive: Boolean,
+    val isSelected: Boolean = false
 )
 
-enum class EventType { Arrival, Departure }
-
-data class HistoryUiState(
-    val events: List<HistoryEventItem> = emptyList(),
-    val timeFilter: TimeFilter = TimeFilter.Today,
-    val stopFilter: Int? = null,  // null = all stops
-    val isLoading: Boolean = false
+data class LogManagerUiState(
+    val isLoading: Boolean = false,
+    val logs: List<LogManagerItem> = emptyList(),
+    val selectedCount: Int = 0,
+    val canDeleteSelected: Boolean = false,
+    val error: String? = null
 )
 
-class HistoryViewModel(
-    application: Application
-) : AndroidViewModel(application) {
-    private val repository = DetectionRepository(application.applicationContext)
-
-    private val _uiState = MutableStateFlow(HistoryUiState())
-    val uiState: StateFlow<HistoryUiState> = _uiState.asStateFlow()
+class HistoryViewModel(application: Application) : AndroidViewModel(application) {
+    private val _uiState = MutableStateFlow(LogManagerUiState(isLoading = true))
+    val uiState: StateFlow<LogManagerUiState> = _uiState.asStateFlow()
 
     init {
-        loadEvents()
+        refresh()
     }
 
-    fun loadEvents() {
-        applyFilter(_uiState.value.timeFilter)
+    fun refresh() {
+        reloadLogs(preserveSelection = true)
     }
 
-    fun applyFilter(timeFilter: TimeFilter) {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
+    fun toggleSelection(reference: String) {
+        updateSelection { item ->
+            if (item.reference == reference) item.copy(isSelected = !item.isSelected) else item
+        }
+    }
 
-            val now = System.currentTimeMillis()
-            val startTime = when (timeFilter) {
-                TimeFilter.Today -> {
-                    LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                }
-                TimeFilter.Week -> {
-                    LocalDateTime.now().minusDays(7).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                }
-                TimeFilter.All -> 0
-            }
+    fun selectAll() {
+        updateSelection { item -> item.copy(isSelected = true) }
+    }
 
-            // Collect flows to get lists
-            val arrivalsList = repository.getArrivalsByTimeRange(startTime, now).first()
-            val departuresList = repository.getDeparturesByTimeRange(startTime, now).first()
+    fun clearSelection() {
+        updateSelection { item -> item.copy(isSelected = false) }
+    }
 
-            val events = mutableListOf<HistoryEventItem>()
+    fun shareSelected(): File? {
+        val selected = _uiState.value.logs.filter { it.isSelected }
+        if (selected.isEmpty()) return null
+        return GpsLogArchive.createZip(getApplication(), selected.map { it.toMetadata() })
+    }
 
-            arrivalsList.forEach { arrival ->
-                events.add(
-                    HistoryEventItem(
-                        id = arrival.id,
-                        timestamp = arrival.timestamp,
-                        stopIndex = arrival.stopIndex,
-                        type = EventType.Arrival,
-                        details = "p=${arrival.probability}"
+    fun deleteSelected() {
+        val selected = _uiState.value.logs.filter { it.isSelected }
+        if (selected.isEmpty()) return
+        if (selected.any { it.isActive }) {
+            _uiState.value =
+                _uiState.value.copy(error = "Stop recording before deleting the active log.")
+            return
+        }
+
+        _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+        val context = getApplication<Application>()
+        runBlocking(Dispatchers.IO) {
+            selected.forEach { GpsLogStorageManager.deleteLog(context, it.reference) }
+        }
+        reloadLogs(preserveSelection = false)
+    }
+
+    private fun reloadLogs(preserveSelection: Boolean) {
+        val currentSelectedRefs =
+            if (preserveSelection) {
+                _uiState.value.logs.filter { it.isSelected }.mapTo(mutableSetOf()) { it.reference }
+            } else {
+                emptySet<String>()
+        }
+
+        _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+        val context = getApplication<Application>()
+        val logs =
+            try {
+                runBlocking(Dispatchers.IO) { GpsLogStorageManager.listLogs(context) }
+            } catch (error: Exception) {
+                _uiState.value =
+                    LogManagerUiState(
+                        isLoading = false,
+                        error = error.message ?: "Failed to load GPS logs."
                     )
-                )
+                return
             }
 
-            departuresList.forEach { departure ->
-                events.add(
-                    HistoryEventItem(
-                        id = departure.id,
-                        timestamp = departure.timestamp,
-                        stopIndex = departure.stopIndex,
-                        type = EventType.Departure,
-                        details = "dwell=${departure.dwellTimeS}s"
-                    )
-                )
-            }
-
-            // Sort by timestamp descending
-            events.sortByDescending { it.timestamp }
-
-            // Group by day
-            val groupedEvents = groupByDay(events)
-
-            _uiState.value = HistoryUiState(
-                events = groupedEvents,
-                timeFilter = timeFilter,
-                isLoading = false
+        _uiState.value =
+            LogManagerUiState(
+                isLoading = false,
+                logs = logs.map { it.toItem(currentSelectedRefs.contains(it.reference)) },
+                selectedCount = logs.count { currentSelectedRefs.contains(it.reference) },
+                canDeleteSelected = logs.any { currentSelectedRefs.contains(it.reference) && it.isActive }.not() &&
+                    logs.any { currentSelectedRefs.contains(it.reference) }
             )
-        }
     }
 
-    fun filterByStop(stopIndex: Int?) {
-        _uiState.value = _uiState.value.copy(stopFilter = stopIndex)
-        // Re-apply current filter with stop filter
-        applyFilter(_uiState.value.timeFilter)
+    private fun updateSelection(update: (LogManagerItem) -> LogManagerItem) {
+        val current = _uiState.value.logs.map(update)
+        val selectedCount = current.count { it.isSelected }
+        _uiState.value =
+            _uiState.value.copy(
+                logs = current,
+                selectedCount = selectedCount,
+                canDeleteSelected = selectedCount > 0 && current.none { it.isSelected && it.isActive },
+                error = null
+            )
     }
 
-    private fun groupByDay(events: List<HistoryEventItem>): List<HistoryEventItem> {
-        val grouped = mutableListOf<HistoryEventItem>()
-        var lastDay: String? = null
+    private fun LogManagerItem.toMetadata(): GpsLogMetadata {
+        return GpsLogMetadata(
+            filename = filename,
+            reference = reference,
+            modifiedAtMillis = modifiedAtMillis,
+            sizeBytes = sizeBytes,
+            isActive = isActive
+        )
+    }
 
-        events.forEach { event ->
-            val day = LocalDate.ofInstant(
-                Instant.ofEpochMilli(event.timestamp),
-                ZoneId.systemDefault()
-            ).toString()
-
-            if (day != lastDay) {
-                // Add day header as a special event
-                grouped.add(
-                    HistoryEventItem(
-                        id = -grouped.size.toLong() - 1,
-                        timestamp = event.timestamp,
-                        stopIndex = -1,
-                        type = EventType.Arrival,  // Placeholder
-                        details = "DAY_HEADER:$day"
-                    )
-                )
-                lastDay = day
-            }
-
-            grouped.add(event)
-        }
-
-        return grouped
+    private fun GpsLogMetadata.toItem(isSelected: Boolean): LogManagerItem {
+        return LogManagerItem(
+            filename = filename,
+            reference = reference,
+            modifiedAtMillis = modifiedAtMillis,
+            sizeBytes = sizeBytes,
+            isActive = isActive,
+            isSelected = isSelected
+        )
     }
 }
