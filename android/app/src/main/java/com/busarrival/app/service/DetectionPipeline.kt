@@ -25,7 +25,7 @@ class DetectionPipeline {
     private var stopStates: Map<Int, StopState> = emptyMap()
     private var modeState = ModeMachine.toNormal()
 
-    private var lastGpsTime: Long = 0
+    private var lastGpsTime: TimestampMs = 0
     private var lastSCm: DistCm = 0
     private var traceWriter: TraceWriter? = null
 
@@ -154,7 +154,7 @@ class DetectionPipeline {
             }
 
             traceWriter?.write(TraceTick(
-                time = gps.timestamp / 1000,
+                time_ms = gps.timestamp,
                 lat = gps.lat,
                 lon = gps.lon,
                 s_cm = positionSCm.toLong(),

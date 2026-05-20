@@ -53,12 +53,12 @@ export interface StopTraceState {
  * Trace record for debugging visualization
  * One line per GPS update in trace.jsonl
  *
- * Input format supports both 'time' (seconds) and 'time_ms' (milliseconds) fields.
- * The parser normalizes both to the 'time' field in seconds.
+ * Input format supports canonical 'time_ms' (milliseconds) and legacy 'time'
+ * (seconds) fields. The parser exposes millisecond semantics as 'time_ms'.
  */
 export interface TraceRecord {
-	/** GPS timestamp (seconds since epoch) - normalized from time or time_ms */
-	time: number;
+	/** GPS timestamp in milliseconds */
+	time_ms: number;
 	/** Latitude */
 	lat: number;
 	/** Longitude */
@@ -116,8 +116,8 @@ export type TraceData = TraceRecord[];
  * Emitted when bus enters corridor for the first time
  */
 export interface AnnounceEvent {
-	/** GPS timestamp (seconds since epoch) */
-	time: number;
+	/** GPS timestamp in milliseconds */
+	time_ms: number;
 	/** Stop index being announced */
 	stop_idx: number;
 	/** Route progress at announcement (cm) */

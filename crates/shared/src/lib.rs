@@ -52,6 +52,12 @@ pub type Prob8 = u8;
 /// Prevents overflow in dot products: (2×10⁶)² ≈ 4×10¹² < i64::MAX.
 pub type Dist2 = i64;
 
+/// Timestamp in milliseconds since epoch.
+pub type TimestampMs = u64;
+
+/// Duration in milliseconds.
+pub type DurationMs = u64;
+
 /// Position signals for arrival detection
 ///
 /// Per spec Section 13.2: F1 uses raw GPS projection, F3 uses Kalman-filtered position.
@@ -187,7 +193,7 @@ pub enum FixQuality {
 #[derive(Debug, Clone)]
 pub struct GpsPoint {
     /// Timestamp in milliseconds since epoch.
-    pub timestamp: u64,
+    pub timestamp: TimestampMs,
     pub lat: f64, // Latitude in degrees (full precision)
     pub lon: f64, // Longitude in degrees (full precision)
     pub heading_cdeg: Option<HeadCdeg>, // Heading in 0.01° units
@@ -243,7 +249,7 @@ pub struct KalmanState {
     /// Frozen position when off-route is first suspected (for immediate position freezing)
     pub frozen_s_cm: Option<DistCm>,
     /// Timestamp when position was frozen, in milliseconds since epoch.
-    pub off_route_freeze_time: Option<u64>,
+    pub off_route_freeze_time: Option<TimestampMs>,
     /// Off-route freeze context for spatial anchoring during recovery
     pub freeze_ctx: Option<FreezeContext>,
 }
@@ -366,7 +372,7 @@ impl SpatialGrid {
 #[derive(Debug, Clone)]
 pub struct DrState {
     /// Timestamp of the last GPS fix, in milliseconds since epoch.
-    pub last_gps_time: Option<u64>,
+    pub last_gps_time: Option<TimestampMs>,
     pub last_valid_s: DistCm,
     pub filtered_v: SpeedCms,
     /// H3: Flag indicating we're in GPS recovery mode
@@ -426,7 +432,7 @@ pub enum ArrivalEventType {
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ArrivalEvent {
     /// GPS update timestamp (milliseconds since epoch)
-    pub time: u64,
+    pub time: TimestampMs,
     /// Stop index that was arrived at
     pub stop_idx: u8,
     /// Route progress at arrival (cm)
@@ -441,7 +447,7 @@ pub struct ArrivalEvent {
 
 impl ArrivalEvent {
     /// Create arrival event (backward compatible)
-    pub fn arrival(time: u64, stop_idx: u8, s_cm: DistCm, v_cms: SpeedCms, probability: Prob8) -> Self {
+    pub fn arrival(time: TimestampMs, stop_idx: u8, s_cm: DistCm, v_cms: SpeedCms, probability: Prob8) -> Self {
         Self {
             time,
             stop_idx,
@@ -513,7 +519,7 @@ impl PersistedState {
 #[cfg_attr(feature = "serde", derive(Debug, Clone, serde::Serialize))]
 pub struct DepartureEvent {
     /// GPS update timestamp (milliseconds since epoch)
-    pub time: u64,
+    pub time: TimestampMs,
     /// Stop index that was departed from
     pub stop_idx: u8,
     /// Route progress at departure (cm)

@@ -41,7 +41,7 @@ fn test_detour_reentry_snap_behavior() {
         let line = line.expect("Failed to read trace line");
         let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
 
-        let time = trace["time"].as_u64().unwrap();
+        let time = trace["time_ms"].as_u64().unwrap();
         let s_cm = trace["s_cm"].as_i64().unwrap();
         let off_route = trace["off_route"].as_bool().unwrap();
 
@@ -88,7 +88,7 @@ fn test_detour_reentry_snap_behavior() {
             assert_eq!(
                 s_cm, frozen_s_cm,
                 "Position should remain frozen at {} during off-route (found {} at tick {})",
-                frozen_s_cm, s_cm, trace["time"]
+                frozen_s_cm, s_cm, trace["time_ms"]
             );
         }
     }
@@ -185,7 +185,7 @@ fn test_no_arrivals_during_offroute() {
         let line = line.expect("Failed to read trace line");
         let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
 
-        let time = trace["time"].as_u64().unwrap();
+        let time = trace["time_ms"].as_u64().unwrap();
         let off_route = trace["off_route"].as_bool().unwrap();
 
         if off_route && off_route_start_time.is_none() {
@@ -244,7 +244,7 @@ fn test_reentry_immediate_snap_not_gradual() {
         let line = line.expect("Failed to read trace line");
         let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
 
-        let time = trace["time"].as_u64().unwrap();
+        let time = trace["time_ms"].as_u64().unwrap();
         let s_cm = trace["s_cm"].as_i64().unwrap();
         let off_route = trace["off_route"].as_bool().unwrap();
 

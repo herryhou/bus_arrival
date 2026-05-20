@@ -1,12 +1,12 @@
 //! GPS record types for pipeline processing
 
-use shared::{DistCm, SpeedCms, HeadCdeg};
+use shared::{DistCm, SpeedCms, HeadCdeg, TimestampMs};
 
 /// GPS record emitted by localization phase
 #[derive(Debug, Clone)]
 pub struct GpsRecord {
     /// GPS timestamp (milliseconds since epoch)
-    pub time: u64,
+    pub time: TimestampMs,
     /// Latitude
     pub lat: f64,
     /// Longitude
@@ -40,7 +40,7 @@ pub struct GpsRecord {
 impl GpsRecord {
     /// Create a new GPS record
     pub fn new(
-        time: u64,
+        time: TimestampMs,
         lat: f64,
         lon: f64,
         s_cm: DistCm,

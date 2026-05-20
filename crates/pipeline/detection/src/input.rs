@@ -1,13 +1,13 @@
 //! Phase 2 JSONL input parser
 
 use serde::Deserialize;
-use shared::{DistCm, SpeedCms, HeadCdeg};
+use shared::{DistCm, SpeedCms, HeadCdeg, TimestampMs};
 use std::io::{BufRead, BufReader};
 
 #[derive(Deserialize)]
 struct Phase2Record {
     /// Input GPS timestamp in milliseconds since epoch.
-    time: u64,
+    time: TimestampMs,
     lat: f64,
     lon: f64,
     s_cm: i32,
@@ -21,7 +21,7 @@ struct Phase2Record {
 /// Parsed input record
 pub struct InputRecord {
     /// Input GPS timestamp in milliseconds since epoch.
-    pub time: u64,
+    pub time: TimestampMs,
     pub lat: f64,
     pub lon: f64,
     pub s_cm: DistCm,

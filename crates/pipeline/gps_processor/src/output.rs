@@ -2,12 +2,12 @@
 
 use serde::Serialize;
 use shared::binfile::RouteData;
-use shared::{DistCm, HeadCdeg, Stop};
+use shared::{DistCm, HeadCdeg, Stop, TimestampMs};
 use std::io::{self, Write};
 
 #[derive(Serialize)]
 struct OutputRecord {
-    time: u64,
+    time: TimestampMs,
     lat: f64,
     lon: f64,
     s_cm: i64,
@@ -50,7 +50,7 @@ fn create_stop_states(s_cm: DistCm, active_stops: &[usize], stops: &[Stop]) -> V
 
 pub fn write_output<W: Write>(
     output: &mut W,
-    time: u64,
+    time: TimestampMs,
     lat: f64,
     lon: f64,
     heading_cdeg: HeadCdeg,

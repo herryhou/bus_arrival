@@ -22,7 +22,7 @@ object StateMachine {
      * @param stop Stop definition
      * @param sCm Current route position (cm)
      * @param probability Arrival probability (0..255)
-     * @param timestamp Current timestamp
+     * @param timestamp Current timestamp in milliseconds since epoch
      * @return Pair of (arrivalEvent, departureEvent) - either can be null
      */
     fun update(
@@ -30,7 +30,7 @@ object StateMachine {
         stop: Stop,
         sCm: DistCm,
         probability: Prob8,
-        timestamp: Long
+        timestamp: TimestampMs
     ): Pair<ArrivalEvent?, DepartureEvent?> {
         val distanceToStop = stop.distanceTo(sCm)
         val absDistance = if (distanceToStop < 0) -distanceToStop else distanceToStop
@@ -56,7 +56,7 @@ object StateMachine {
         distanceToStop: DistCm,
         absDistance: DistCm,
         probability: Prob8,
-        timestamp: Long
+        timestamp: TimestampMs
     ): Pair<ArrivalEvent?, DepartureEvent?> {
         val oldState = state.fsmState
         var arrivalEvent: ArrivalEvent? = null

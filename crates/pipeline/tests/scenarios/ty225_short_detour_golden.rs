@@ -67,9 +67,9 @@ use super::common::{load_nmea_reader, load_trace_reader, load_ty225_route, test_
 
 const SHORT_DETOUR: &str = "short_detour";
 const NORMAL_SCENARIO: &str = "normal";
-const MIN_OFF_ROUTE_DURATION_S: usize = 5;
+const MIN_OFF_ROUTE_DURATION_MS: usize = 5_000;
 const MIN_REENTRY_JUMP_CM: i64 = 10_000;
-const MAX_REENTRY_TO_STOP6_S: u64 = 10;
+const MAX_REENTRY_TO_STOP6_MS: u64 = 10_000;
 const MAX_ALLOWED_BACKTRACK_CM: i64 = 5_000;
 const DETOUR_PHASE_TRANSITION_CM: i64 = 10_000;
 const EXPECTED_DETOUR_ARRIVALS: [usize; 5] = [0, 6, 7, 8, 9];
@@ -97,7 +97,7 @@ fn detect_off_route_episode(scenario: &str) -> OffRouteEpisode {
         let line = line.expect("Failed to read trace line");
         let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
 
-        let time = trace["time"].as_u64().unwrap();
+        let time = trace["time_ms"].as_u64().unwrap();
         let s_cm = trace["s_cm"].as_i64().unwrap();
         let off_route = trace["off_route"].as_bool().unwrap_or(false);
 
@@ -131,9 +131,9 @@ fn detect_off_route_episode(scenario: &str) -> OffRouteEpisode {
 fn validate_off_route_episode_duration(episode: OffRouteEpisode) -> usize {
     let duration = (episode.end_time - episode.start_time) as usize;
     assert!(
-        duration >= MIN_OFF_ROUTE_DURATION_S,
-        "Off-route episode must last at least {} seconds per PRD. Got {} seconds",
-        MIN_OFF_ROUTE_DURATION_S,
+        duration >= MIN_OFF_ROUTE_DURATION_MS,
+        "Off-route episode must last at least {}ms per PRD. Got {}ms",
+        MIN_OFF_ROUTE_DURATION_MS,
         duration
     );
     duration
@@ -406,7 +406,7 @@ fn test_ty225_short_detour_golden_standard() {
         let line = line.expect("Failed to read trace line");
         let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
 
-        let time = trace["time"].as_u64().unwrap();
+        let time = trace["time_ms"].as_u64().unwrap();
         let s_cm = trace["s_cm"].as_i64().unwrap();
         let off_route = trace["off_route"].as_bool().unwrap_or(false);
 
@@ -499,7 +499,7 @@ fn test_ty225_short_detour_golden_standard() {
     let off_route_duration = validate_off_route_episode_duration(off_route_episode);
 
     println!(
-        "✓ Off-route detected and lasted {} seconds (PRD requires ≥5s)",
+        "✓ Off-route detected and lasted {}ms (PRD requires ≥5000ms)",
         off_route_duration
     );
     println!("  Started at tick {}", off_route_episode.start_time);
@@ -535,7 +535,7 @@ fn test_ty225_short_detour_golden_standard() {
     );
     assert!(
         stop_6_arrival_time >= off_route_episode.reentry_time
-            && stop_6_arrival_time - off_route_episode.reentry_time <= MAX_REENTRY_TO_STOP6_S,
+            && stop_6_arrival_time - off_route_episode.reentry_time <= MAX_REENTRY_TO_STOP6_MS,
         "Stop 6 should be reached quickly after re-entry. Re-entry at {}, stop 6 arrival at {}",
         off_route_episode.reentry_time,
         stop_6_arrival_time
@@ -546,7 +546,7 @@ fn test_ty225_short_detour_golden_standard() {
         reentry_position_jump_cm
     );
     println!(
-        "  Stop 6 reached {}s after re-entry",
+        "  Stop 6 reached {}ms after re-entry",
         stop_6_arrival_time - off_route_episode.reentry_time
     );
     println!("  Validates \"重入時直接 snap\" (direct snap on re-entry)");
@@ -647,7 +647,7 @@ fn test_ty225_short_detour_golden_standard() {
 
     println!("✓ All PRD requirements satisfied:");
     println!(
-        "  ✓ Off-route 5+ seconds → position freeze (got {} seconds)",
+        "  ✓ Off-route 5000+ms → position freeze (got {}ms)",
         off_route_duration
     );
     println!("  ✓ Position frozen during off-route");
@@ -741,7 +741,7 @@ fn test_fsm_state_transitions_detour() {
         let line = line.expect("Failed to read trace line");
         let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
 
-        let time = trace["time"].as_u64().unwrap();
+        let time = trace["time_ms"].as_u64().unwrap();
 
         // Check stop_states if present
         if let Some(stop_states) = trace["stop_states"].as_array() {
@@ -783,7 +783,7 @@ fn test_fsm_state_transitions_detour() {
         }
 
         // Only check first 100 ticks to keep output manageable
-        if time > 80200 {
+        if time > 80_200_000 {
             break;
         }
     }
@@ -815,7 +815,7 @@ fn test_announce_precedes_arrival() {
             let value: serde_json::Value =
                 serde_json::from_str(line).expect("Failed to parse announce line");
             (
-                value["time"].as_u64().unwrap(),
+                value["time"].as_u64().unwrap() * 1000,
                 value["stop_idx"].as_u64().unwrap() as usize,
             )
         })
@@ -906,7 +906,7 @@ fn test_off_route_reentry_snap_to_forward_stop() {
     );
     assert!(
         stop_6_arrival.time >= off_route_episode.reentry_time
-            && stop_6_arrival.time - off_route_episode.reentry_time <= MAX_REENTRY_TO_STOP6_S,
+            && stop_6_arrival.time - off_route_episode.reentry_time <= MAX_REENTRY_TO_STOP6_MS,
         "Stop 6 should be reached quickly after re-entry. Re-entry at {}, stop 6 at {}",
         off_route_episode.reentry_time,
         stop_6_arrival.time
@@ -1022,7 +1022,7 @@ fn test_normal_operation_does_not_skip_stops() {
                         panic!(
                             "Normal operation should NOT mark any stops to skip on re-entry. Stop {} is marked at time {}",
                             stop_idx,
-                            trace["time"]
+                            trace["time_ms"]
                         );
                     }
                 }

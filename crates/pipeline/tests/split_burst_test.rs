@@ -20,7 +20,7 @@ fn test_split_burst_emits_once() {
     assert!(acc.should_emit());
 
     let (gps, _) = acc.build().unwrap();
-    assert_eq!(gps.timestamp, 22 * 3600 + 13 * 60 + 21); // t=02 (current timestamp)
+    assert_eq!(gps.timestamp, (22 * 3600 + 13 * 60 + 21) * 1000); // t=02 (current timestamp)
     assert!(gps.speed_cms.is_some()); // Has RMC data
     assert!(gps.hdop_x10.is_some());  // Has GGA data (from previous burst)
 }
@@ -41,7 +41,7 @@ fn test_timestamp_jump() {
     assert!(acc.should_emit()); // New timestamp - emit
 
     let (gps, _) = acc.build().unwrap();
-    assert_eq!(gps.timestamp, 22 * 3600 + 13 * 60 + 23); // t=03 (current timestamp)
+    assert_eq!(gps.timestamp, (22 * 3600 + 13 * 60 + 23) * 1000); // t=03 (current timestamp)
 
     // Reset and process t=03
     acc.reset();

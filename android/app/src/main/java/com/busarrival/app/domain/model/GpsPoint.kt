@@ -8,7 +8,7 @@ import com.busarrival.app.data.pipeline.types.*
  * Ported from crates/shared/src/lib.rs
  */
 data class GpsPoint(
-    val timestamp: Long,
+    val timestamp: TimestampMs,
     val lat: Double,  // Degrees (not centidegrees) to preserve precision
     val lon: Double,  // Degrees (not centidegrees) to preserve precision
     val headingCdeg: HeadCdeg?,

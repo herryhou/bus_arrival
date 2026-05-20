@@ -126,7 +126,7 @@ class DetourScenarioGoldenTest {
             }
         ).jsonObject
         val expectedKeys = setOf(
-            "time",
+            "time_ms",
             "lat",
             "lon",
             "s_cm",
@@ -148,6 +148,7 @@ class DetourScenarioGoldenTest {
         )
 
         assertEquals(expectedKeys, firstTrace.keys)
+        assertFalse("Canonical Android trace output must not contain legacy time", firstTrace.containsKey("time"))
 
         val firstStopState = firstTrace["stop_states"]
             ?.jsonArray
@@ -218,7 +219,7 @@ class DetourScenarioGoldenTest {
                 val result = scenarioPipeline.process(location)
                 if (result is PipelineResult.Success) {
                     result.arrivals.forEach { arrival ->
-                        arrivals.add(arrival.stopIndex to arrival.timestamp / 1000)
+                        arrivals.add(arrival.stopIndex to arrival.timestamp)
                     }
                 }
             }
@@ -353,7 +354,7 @@ class DetourScenarioGoldenTest {
         for (tick in ticks) {
             tick.stop_states.forEach { state ->
                 if (state.fsm_state == "AtStop" && !stopFirstAtStop.containsKey(state.stop_idx)) {
-                    stopFirstAtStop[state.stop_idx] = tick.time
+                    stopFirstAtStop[state.stop_idx] = tick.time_ms
                 }
             }
         }
@@ -374,7 +375,7 @@ class DetourScenarioGoldenTest {
         for ((idx, tick) in ticks.withIndex()) {
             if (tick.off_route && startTick == null) {
                 startTick = idx
-                startTime = tick.time
+                startTime = tick.time_ms
                 frozenSCm = tick.s_cm
             }
 
@@ -384,10 +385,10 @@ class DetourScenarioGoldenTest {
                     startTick = startTick ?: error("Missing off-route start tick"),
                     endTick = idx,
                     startTime = startTime ?: error("Missing off-route start time"),
-                    endTime = tick.time,
+                    endTime = tick.time_ms,
                     frozenSCm = frozenSCm ?: error("Missing frozen s_cm"),
                     reentrySCm = tick.s_cm,
-                    reentryTime = tick.time
+                    reentryTime = tick.time_ms
                 )
                 startTick = null
                 startTime = null
@@ -804,7 +805,7 @@ class DetourScenarioGoldenTest {
                 }
             }
 
-            if (tick.time > 80_200L) break
+            if (tick.time_ms > 80_200_000L) break
         }
     }
 
@@ -827,7 +828,7 @@ class DetourScenarioGoldenTest {
                     ?.get(1)
                     ?.toInt()
                     ?: error("Failed to parse stop_idx from announce line: $line")
-                time to stop
+                (time * 1000) to stop
             }
 
         for ((arrivalStop, arrivalTime) in run.arrivals) {

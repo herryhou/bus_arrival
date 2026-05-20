@@ -33,7 +33,7 @@ DetectionPipeline
 ```kotlin
 @Serializable
 data class TraceTick(
-    val time: Long,
+    val time_ms: Long,
     val s_cm: Long,
     val off_route: Boolean,
     val stop_states: List<StopStateEntry>?
@@ -88,7 +88,7 @@ class DetectionPipeline {
 
         // Capture state for trace (after all updates)
         traceWriter?.write(TraceTick(
-            time = gps.timestamp,
+            time_ms = gps.timestamp,
             s_cm = signals.sCm,
             off_route = modeState.mode == Mode.OffRoute,
             stop_states = stopStates.map { (idx, state) ->

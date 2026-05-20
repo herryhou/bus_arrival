@@ -86,7 +86,7 @@
   const currentRecord = $derived.by(() => {
     if (!traceData || traceData.length === 0) return null;
     return traceData.reduce((prev: TraceRecord, curr: TraceRecord) =>
-      Math.abs(curr.time - currentTime) < Math.abs(prev.time - currentTime)
+      Math.abs(curr.time_ms - currentTime) < Math.abs(prev.time_ms - currentTime)
         ? curr
         : prev,
     );

@@ -9,7 +9,7 @@ impl Analyzer {
         let mut result = ValidationResult {
             trace_file: String::new(),
             total_records: records.len(),
-            time_range: (records[0].time, records.last().unwrap().time),
+            time_range: (records[0].time_ms, records.last().unwrap().time_ms),
             stops_analyzed: Default::default(),
             global_issues: Default::default(),
             gps_jump_count: 0,
@@ -26,10 +26,10 @@ impl Analyzer {
                     .entry(stop_idx)
                     .or_insert_with(|| StopAnalysis::new(stop_idx));
 
-                record_event(analysis, record.time, stop_state.fsm_state,
+                record_event(analysis, record.time_ms, stop_state.fsm_state,
                              stop_state.progress_distance_cm, record.s_cm, record.v_cms,
                              stop_state.just_arrived);
-                track_corridor(analysis, record.time, stop_state.progress_distance_cm);
+                track_corridor(analysis, record.time_ms, stop_state.progress_distance_cm);
             }
         }
 
@@ -86,7 +86,7 @@ mod tests {
     #[test]
     fn test_analyze_empty_records() {
         let records = vec![TraceRecord {
-            time: 1,
+            time_ms: 1,
             lat: 25.0,
             lon: 121.0,
             s_cm: 0,
@@ -119,7 +119,7 @@ mod tests {
         use detection::trace::{StopTraceState, FeatureScores};
 
         let records = vec![TraceRecord {
-            time: 100,
+            time_ms: 100,
             lat: 25.0,
             lon: 121.0,
             s_cm: 10000,
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn test_analyze_counts_gps_jumps() {
         let records = vec![TraceRecord {
-            time: 1,
+            time_ms: 1,
             lat: 25.0,
             lon: 121.0,
             s_cm: 0,
@@ -181,7 +181,7 @@ mod tests {
             next_stop: None,
             off_route: None,
         }, TraceRecord {
-            time: 2,
+            time_ms: 2,
             lat: 25.0,
             lon: 121.0,
             s_cm: 100,

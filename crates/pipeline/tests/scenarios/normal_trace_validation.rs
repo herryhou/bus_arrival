@@ -137,7 +137,7 @@ fn test_normal_fsm_state_progression() {
     let mut stop_states: std::collections::HashMap<usize, Vec<String>> = std::collections::HashMap::new();
 
     for trace in &trace_records {
-        let time = trace.time;
+        let time = trace.time_ms;
 
         // Track FSM states for each stop
         for stop_state in &trace.stop_states {
@@ -199,7 +199,7 @@ fn test_normal_position_accuracy_at_arrivals() {
             if stop_state.just_arrived {
                 arrival_positions.push((
                     stop_state.stop_idx,
-                    trace.time,
+                    trace.time_ms,
                     trace.lat,
                     trace.lon,
                     trace.s_cm,
@@ -326,7 +326,7 @@ fn test_normal_trace_completeness() {
 
     for trace in &trace_records {
         tick_count += 1;
-        let time = trace.time;
+        let time = trace.time_ms;
 
         if first_time.is_none() {
             first_time = Some(time);

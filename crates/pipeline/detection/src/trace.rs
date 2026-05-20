@@ -1,7 +1,7 @@
 //! Trace record emission for debugging visualization
 
 use serde::{Deserialize, Serialize, Serializer};
-use shared::{DistCm, SpeedCms, Prob8, FsmState, HeadCdeg};
+use shared::{DistCm, SpeedCms, Prob8, FsmState, HeadCdeg, TimestampMs};
 use std::io::{BufWriter, Write};
 
 /// Serialize f64 with at most 6 decimal places
@@ -19,7 +19,7 @@ where
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TraceRecord {
     /// Input: GPS timestamp (milliseconds since epoch)
-    pub time_ms: u64,
+    pub time_ms: TimestampMs,
 
     /// Input: Latitude
     #[serde(serialize_with = "serialize_f64_6dec")]
@@ -136,7 +136,7 @@ pub struct FeatureScores {
 #[derive(Serialize)]
 pub struct AnnounceEvent {
     /// GPS timestamp (milliseconds since epoch)
-    pub time: u64,
+    pub time: TimestampMs,
     /// Stop index being announced
     pub stop_idx: u8,
     /// Route progress at announcement (cm)

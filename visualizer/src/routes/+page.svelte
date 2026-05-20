@@ -44,7 +44,7 @@
 		const interval = setInterval(() => {
 			if (isPlaying && traceData && currentTime < timeMax) {
 				const fps = 10; // Base updates per second
-				const dt = (1 / fps) * playbackSpeed;
+				const dt = (1000 / fps) * playbackSpeed;
 				const nextTime = currentTime + dt;
 				if (nextTime >= timeMax) {
 					currentTime = timeMax;
@@ -86,8 +86,8 @@
 		currentTime = timeMin + (percent / 100) * (timeMax - timeMin);
 	}
 
-	function formatTime(seconds: number): string {
-		return new Date(seconds * 1000).toLocaleTimeString([], {
+	function formatTime(timeMs: number): string {
+		return new Date(timeMs).toLocaleTimeString([], {
 			hour12: false,
 		});
 	}
@@ -96,8 +96,8 @@
 		if (!traceData || traceData.length === 0) return null;
 		// Binary search or closest record for better performance
 		return traceData.reduce((prev, curr) =>
-			Math.abs(curr.time - currentTime) <
-			Math.abs(prev.time - currentTime)
+			Math.abs(curr.time_ms - currentTime) <
+			Math.abs(prev.time_ms - currentTime)
 				? curr
 				: prev,
 		);

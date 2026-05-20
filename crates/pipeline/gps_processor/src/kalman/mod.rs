@@ -12,7 +12,7 @@ mod filters;
 use core::cmp::Ord;
 
 use crate::route_data::RouteData;
-use shared::{DistCm, DrState, GpsPoint, KalmanState, PositionSignals, SpeedCms};
+use shared::{DistCm, DrState, GpsPoint, KalmanState, PositionSignals, SpeedCms, TimestampMs};
 
 // Re-export constants and types from submodules
 pub use hysteresis::{
@@ -58,7 +58,7 @@ pub enum ProcessResult {
     OffRoute {
         last_valid_s: DistCm,
         last_valid_v: SpeedCms,
-        freeze_time: u64,
+        freeze_time: TimestampMs,
     },
     /// GPS is suspect off-route — position frozen, awaiting confirmation
     SuspectOffRoute {
@@ -73,7 +73,7 @@ pub fn process_gps_update(
     dr: &mut DrState,
     gps: &GpsPoint,
     route_data: &RouteData,
-    _current_time: u64,
+    _current_time: TimestampMs,
     is_first_fix: bool,
     current_stop_idx: u8,
 ) -> ProcessResult {
@@ -334,7 +334,7 @@ pub fn process_gps_update(
 }
 
 /// Handle GPS outage (max 10 seconds per spec Section 11.2)
-fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: u64) -> ProcessResult {
+fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: TimestampMs) -> ProcessResult {
     let dt = match dr.last_gps_time {
         Some(t) => timestamp.saturating_sub(t) / 1000,
         None => return ProcessResult::Rejected("no previous fix"),

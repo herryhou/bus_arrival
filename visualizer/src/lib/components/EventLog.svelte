@@ -27,12 +27,13 @@
 		let lastTime = 0;
 
 		traceData.forEach((record, i) => {
-			const timeDiff = record.time - lastTime;
-			lastTime = record.time;
+			const timeDiff = record.time_ms - lastTime;
+			lastTime = record.time_ms;
 			// 1. GPS Jump
 			if (record.gps_jump) {
 				log.push({
-					time: record.time,
+					time: record.time_ms,
+					timeDiff,
 					type: 'JUMP',
 					message: `GPS Jump detected: dist > 200m`
 				});
@@ -41,7 +42,8 @@
 			// 2. Recovery
 			if (record.recovery_idx !== null) {
 				log.push({
-					time: record.time,
+					time: record.time_ms,
+					timeDiff,
 					type: 'RECOVERY',
 					message: `Recovery: Switched to stop ${record.recovery_idx}`
 				});
@@ -53,7 +55,7 @@
 				const lastState = lastStates.get(stop.stop_idx);
 				if (lastState && lastState !== stop.fsm_state) {
 					log.push({
-						time: record.time,
+						time: record.time_ms,
 						timeDiff,
 						type: 'TRANSITION',
 						message: `Stop ${stop.stop_idx}: ${lastState} → ${stop.fsm_state}`,
@@ -66,7 +68,7 @@
 				// Arrival
 				if (stop.just_arrived) {
 					log.push({
-						time: record.time,
+						time: record.time_ms,
 						timeDiff,
 						type: 'ARRIVAL',
 						message: `Stop ${stop.stop_idx}: ARRIVED!`,
@@ -79,8 +81,8 @@
 		return log.sort((a, b) => a.time - b.time);
 	});
 
-	function formatTime(seconds: number): string {
-		return new Date(seconds * 1000).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+	function formatTime(timeMs: number): string {
+		return new Date(timeMs).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 	}
 </script>
 

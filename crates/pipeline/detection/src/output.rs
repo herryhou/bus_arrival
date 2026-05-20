@@ -1,12 +1,12 @@
 //! Event JSON output (arrival and departure)
 
 use serde::Serialize;
-use shared::{ArrivalEvent, DepartureEvent, DistCm, Prob8, SpeedCms};
+use shared::{ArrivalEvent, DepartureEvent, DistCm, Prob8, SpeedCms, TimestampMs};
 
 #[derive(Serialize)]
 struct ArrivalOutputRecord {
     /// Event timestamp in milliseconds since epoch.
-    time: u64,
+    time: TimestampMs,
     stop_idx: u8,
     s_cm: DistCm,
     v_cms: SpeedCms,
@@ -16,7 +16,7 @@ struct ArrivalOutputRecord {
 #[derive(Serialize)]
 struct DepartureOutputRecord {
     /// Event timestamp in milliseconds since epoch.
-    time: u64,
+    time: TimestampMs,
     stop_idx: u8,
     s_cm: DistCm,
     v_cms: SpeedCms,

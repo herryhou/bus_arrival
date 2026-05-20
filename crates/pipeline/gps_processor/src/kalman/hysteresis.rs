@@ -15,7 +15,7 @@
 //! false positives from transient multipath. Position is frozen during off-route
 //! episodes, and recovery re-synchronizes stop indices when GPS returns to route.
 
-use shared::KalmanState;
+use shared::{KalmanState, TimestampMs};
 
 /// Off-route distance threshold: d=50m → d²=2,500 m² = 25,000,000 cm²
 pub const OFF_ROUTE_D2_THRESHOLD: i64 = 25_000_000;
@@ -44,7 +44,7 @@ pub enum OffRouteStatus {
 pub fn update_off_route_hysteresis(
     state: &mut KalmanState,
     match_d2: i64,
-    gps_timestamp: u64,
+    gps_timestamp: TimestampMs,
     current_stop_idx: u8,
 ) -> OffRouteStatus {
     if match_d2 > OFF_ROUTE_D2_THRESHOLD {

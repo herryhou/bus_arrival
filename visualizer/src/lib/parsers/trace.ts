@@ -26,7 +26,7 @@ export function parseTraceJsonl(content: string): TraceData {
 		try {
 			const raw = JSON.parse(line);
 
-			// Handle both 'time' (seconds) and 'time_ms' (milliseconds) fields
+			// Handle canonical 'time_ms' and legacy 'time' (seconds) fields.
 			const timeMs = typeof raw.time_ms === 'number' ? raw.time_ms :
 			               typeof raw.time === 'number' ? raw.time * 1000 :
 			               null;
@@ -35,9 +35,10 @@ export function parseTraceJsonl(content: string): TraceData {
 				throw new Error(`Line ${i + 1}: missing or invalid 'time' or 'time_ms' field`);
 			}
 
+			const { time: _legacyTime, ...recordFields } = raw;
 			const record: TraceRecord = {
-				...raw,
-				time: timeMs / 1000  // Normalize to seconds
+				...recordFields,
+				time_ms: timeMs
 			};
 
 			// Validate required fields
@@ -103,17 +104,17 @@ export async function loadTraceFile(file: File | string): Promise<TraceData> {
  * Get time range from trace data
  *
  * @param data - Trace data array
- * @returns [min_time, max_time] in seconds since epoch
+ * @returns [min_time, max_time] in milliseconds
  */
 export function getTraceTimeRange(data: TraceData): [number, number] {
 	if (data.length === 0) return [0, 0];
 
-	let minTime = data[0].time;
-	let maxTime = data[0].time;
+	let minTime = data[0].time_ms;
+	let maxTime = data[0].time_ms;
 
 	for (const record of data) {
-		if (record.time < minTime) minTime = record.time;
-		if (record.time > maxTime) maxTime = record.time;
+		if (record.time_ms < minTime) minTime = record.time_ms;
+		if (record.time_ms > maxTime) maxTime = record.time_ms;
 	}
 
 	return [minTime, maxTime];
@@ -123,12 +124,12 @@ export function getTraceTimeRange(data: TraceData): [number, number] {
  * Filter trace records by time range
  *
  * @param data - Trace data array
- * @param startTime - Start time (seconds since epoch)
- * @param endTime - End time (seconds since epoch)
+ * @param startTime - Start time in milliseconds
+ * @param endTime - End time in milliseconds
  * @returns Filtered trace data
  */
 export function filterTraceByTime(data: TraceData, startTime: number, endTime: number): TraceData {
-	return data.filter((record) => record.time >= startTime && record.time <= endTime);
+	return data.filter((record) => record.time_ms >= startTime && record.time_ms <= endTime);
 }
 
 /**

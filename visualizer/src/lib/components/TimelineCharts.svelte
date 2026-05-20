@@ -27,7 +27,7 @@
 			? traceData.filter((record) => record.active_stops.includes(selectedStop!))
 			: traceData;
 
-		const timeLabels = data.map((r) => new Date(r.time * 1000).toLocaleTimeString([], { hour12: false }));
+		const timeLabels = data.map((r) => new Date(r.time_ms).toLocaleTimeString([], { hour12: false }));
 		
 		mainChart.data.labels = timeLabels;
 		mainChart.data.datasets[0].data = data.map(r => r.v_cms);
@@ -130,7 +130,7 @@
 						const data = selectedStop !== null
 							? traceData.filter((record) => record.active_stops.includes(selectedStop!))
 							: traceData;
-						onTimeChange(data[index].time);
+						onTimeChange(data[index].time_ms);
 					}
 				}
 			}

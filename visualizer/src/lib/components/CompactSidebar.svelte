@@ -46,8 +46,8 @@
 	}
 
 	// Helper: Format event time (locale-independent)
-	function formatEventTime(seconds: number): string {
-		const date = new Date(seconds * 1000);
+	function formatEventTime(timeMs: number): string {
+		const date = new Date(timeMs);
 		const hh = String(date.getHours()).padStart(2, '0');
 		const mm = String(date.getMinutes()).padStart(2, '0');
 		const ss = String(date.getSeconds()).padStart(2, '0');
@@ -55,14 +55,14 @@
 	}
 
 	// Helper: Check if event is at current time
-	const TIME_TOLERANCE_SECONDS = 1;
+	const TIME_TOLERANCE_MS = 1000;
 
 	// Probability thresholds (0-255 range)
 	const PROB_HIGH_THRESHOLD = 191; // 75% of 255
 	const PROB_MED_THRESHOLD = 128; // 50% of 255
 
 	function isEventAtCurrentTime(eventTime: number): boolean {
-		return Math.abs(eventTime - currentTime) < TIME_TOLERANCE_SECONDS;
+		return Math.abs(eventTime - currentTime) < TIME_TOLERANCE_MS;
 	}
 
 	// Helper: Check if event is highlighted (clicked)
@@ -78,7 +78,7 @@
 		const eventState = event.state || (event.type === 'ARRIVAL' ? 'AtStop' : undefined);
 
 		// Find the trace record at this event time to get lat/lon
-		const record = traceData.find(r => Math.abs(r.time - event.time) < 0.5);
+		const record = traceData.find(r => Math.abs(r.time_ms - event.time) < 500);
 
 		console.log('Event clicked:', event, 'Record found:', record);
 		onEventClick?.({
@@ -112,7 +112,7 @@
 			// GPS Jump
 			if (record.gps_jump) {
 				log.push({
-					time: record.time,
+					time: record.time_ms,
 					type: 'JUMP',
 					message: `GPS Jump: dist > 200m`,
 					index: index++
@@ -122,7 +122,7 @@
 			// Recovery
 			if (record.recovery_idx !== null) {
 				log.push({
-					time: record.time,
+					time: record.time_ms,
 					type: 'RECOVERY',
 					message: `Recovery: stop ${record.recovery_idx}`,
 					index: index++
@@ -142,7 +142,7 @@
 					const isRedundant = hasArrival && stop.fsm_state === 'AtStop';
 					if (!isRedundant) {
 						log.push({
-							time: record.time,
+							time: record.time_ms,
 							type: 'TRANSITION',
 							message: `Stop ${stop.stop_idx}`,
 							stopIdx: stop.stop_idx,
@@ -155,7 +155,7 @@
 
 				if (stop.just_arrived) {
 					log.push({
-						time: record.time,
+						time: record.time_ms,
 						type: 'ARRIVAL',
 						message: `Stop ${stop.stop_idx}: ARRIVED`,
 						stopIdx: stop.stop_idx,
@@ -177,7 +177,7 @@
 	let currentRecord = $derived.by(() => {
 		if (traceData.length === 0) return null;
 		return traceData.reduce((prev, curr) =>
-			Math.abs(curr.time - currentTime) < Math.abs(prev.time - currentTime) ? curr : prev
+			Math.abs(curr.time_ms - currentTime) < Math.abs(prev.time_ms - currentTime) ? curr : prev
 		);
 	});
 

@@ -1,6 +1,7 @@
 package com.busarrival.app.service
 
 import kotlinx.serialization.Serializable
+import com.busarrival.app.data.pipeline.types.TimestampMs
 
 /**
  * Single tick of pipeline state for trace output.
@@ -10,7 +11,7 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class TraceTick(
-    val time: Long,           // GPS timestamp (ms)
+    val time_ms: TimestampMs, // GPS timestamp (ms)
     val lat: Double? = null,  // Input latitude
     val lon: Double? = null,  // Input longitude
     val s_cm: Long,           // Route position (cm)

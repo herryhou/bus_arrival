@@ -1,6 +1,6 @@
 //! Arrival detection state machine
 
-use shared::{DistCm, PositionSignals};
+use shared::{DistCm, PositionSignals, TimestampMs};
 use shared::binfile::RouteData;
 use crate::{PipelineResult, ArrivalEvent, DepartureEvent, gps::GpsRecord, StopTraceState};
 use detection::state_machine::{StopState, StopEvent};
@@ -10,7 +10,7 @@ pub struct DetectionState {
     /// Per-stop state machines
     stop_states: Vec<StopState>,
     /// Current GPS timestamp in milliseconds since epoch
-    current_timestamp: u64,
+    current_timestamp: TimestampMs,
     /// Track which stops arrived this frame
     arrived_this_frame: Vec<u8>,
     /// Active stop indices from last update

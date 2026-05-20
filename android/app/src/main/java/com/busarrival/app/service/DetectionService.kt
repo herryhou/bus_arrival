@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.busarrival.app.R
+import com.busarrival.app.data.pipeline.types.TimestampMs
 import com.busarrival.app.data.pipeline.detection.probability.ProbabilityModel
 import com.busarrival.app.data.pipeline.detection.statemachine.StateMachine
 import com.busarrival.app.data.pipeline.localization.kalman.KalmanFilter
@@ -63,7 +64,7 @@ class DetectionService : Service() {
     private var activeRoute: com.busarrival.app.domain.model.RouteData? = null
     private var kalmanState: KalmanState? = null
     private var stopStates: Map<Int, StopState> = emptyMap()
-    private var lastGpsTime: Long = 0
+    private var lastGpsTime: TimestampMs = 0
 
     inner class LocalBinder : Binder() {
         fun getService(): DetectionService = this@DetectionService

@@ -14,6 +14,8 @@ typealias HeadCdeg = Short       // Heading in 0.01° (-180°..+180°)
 typealias GeoCdeg = Short        // Lat/lon in 0.01° (-180°..+180°)
 typealias Prob8 = UByteWrapper   // Probability × 255 (0..255)
 typealias Dist2 = Long           // Squared distance (cm²)
+typealias TimestampMs = Long     // Timestamp in milliseconds since epoch
+typealias DurationMs = Long      // Duration in milliseconds
 
 /**
  * Unsigned byte wrapper for Prob8.

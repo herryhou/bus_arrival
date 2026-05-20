@@ -30,7 +30,7 @@ data class KalmanState(
  * Ported from crates/shared/src/lib.rs
  */
 data class DrState(
-    var lastGpsTime: Long? = null,
+    var lastGpsTime: TimestampMs? = null,
     var lastValidS: DistCm = 0,
     var filteredV: SpeedCms = 0,
     var inRecovery: Boolean = false
@@ -78,7 +78,7 @@ data class StopState(
  * Arrival event.
  */
 data class ArrivalEvent(
-    val timestamp: Long,
+    val timestamp: TimestampMs,
     val stopIndex: Int,
     val sCm: DistCm,
     val probability: Prob8
@@ -88,7 +88,7 @@ data class ArrivalEvent(
  * Departure event.
  */
 data class DepartureEvent(
-    val timestamp: Long,
+    val timestamp: TimestampMs,
     val stopIndex: Int,
     val sCm: DistCm,
     val dwellTimeS: Int
