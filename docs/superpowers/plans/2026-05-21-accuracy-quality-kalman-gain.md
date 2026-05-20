@@ -95,7 +95,7 @@ class AccuracyQualityTest {
 Run:
 
 ```bash
-rtk ./gradlew testDebugUnitTest --tests com.busarrival.app.data.pipeline.types.AccuracyQualityTest
+rtk gradle -p android testDebugUnitTest --tests com.busarrival.app.data.pipeline.types.AccuracyQualityTest
 ```
 
 Expected: FAIL because `AccuracyQuality` is unresolved.
@@ -131,7 +131,7 @@ enum class AccuracyQuality(val ks: Int, val kv: Int = 77) {
 Run:
 
 ```bash
-rtk ./gradlew testDebugUnitTest --tests com.busarrival.app.data.pipeline.types.AccuracyQualityTest
+rtk gradle -p android testDebugUnitTest --tests com.busarrival.app.data.pipeline.types.AccuracyQualityTest
 ```
 
 Expected: PASS.
@@ -223,7 +223,7 @@ class KalmanFilterQualityTest {
 Run:
 
 ```bash
-rtk ./gradlew testDebugUnitTest --tests com.busarrival.app.data.pipeline.localization.kalman.KalmanFilterQualityTest
+rtk gradle -p android testDebugUnitTest --tests com.busarrival.app.data.pipeline.localization.kalman.KalmanFilterQualityTest
 ```
 
 Expected: FAIL because `KalmanFilter.update` has no `accuracyM` parameter.
@@ -313,8 +313,8 @@ val signals = KalmanFilter.update(
 Run:
 
 ```bash
-rtk ./gradlew testDebugUnitTest --tests com.busarrival.app.data.pipeline.localization.kalman.KalmanFilterQualityTest
-rtk ./gradlew testDebugUnitTest --tests com.busarrival.app.data.pipeline.types.AccuracyQualityTest
+rtk gradle -p android testDebugUnitTest --tests com.busarrival.app.data.pipeline.localization.kalman.KalmanFilterQualityTest
+rtk gradle -p android testDebugUnitTest --tests com.busarrival.app.data.pipeline.types.AccuracyQualityTest
 ```
 
 Expected: PASS.
@@ -324,7 +324,7 @@ Expected: PASS.
 Run:
 
 ```bash
-rtk ./gradlew :app:compileDebugKotlin
+rtk gradle -p android :app:compileDebugKotlin
 ```
 
 Expected: PASS.
@@ -751,8 +751,8 @@ rtk git commit -m "Use accuracy quality in Rust Kalman paths"
 Run:
 
 ```bash
-rtk ./gradlew testDebugUnitTest
-rtk ./gradlew :app:compileDebugKotlin
+rtk gradle -p android testDebugUnitTest
+rtk gradle -p android :app:compileDebugKotlin
 ```
 
 Expected: PASS.
