@@ -9,7 +9,6 @@
 	import Timeline from "$lib/components/Timeline.svelte";
 	import UploadScreen from "$lib/components/UploadScreen.svelte";
 	import type { RouteData, TraceData, FsmState } from "$lib/types";
-	import { getInterpolatedBusState } from "$lib/parsers/routeData";
 	import { getTraceTimeRange } from "$lib/parsers/trace";
 
 	let routeData = $state<RouteData | null>(null);
@@ -105,14 +104,12 @@
 
 	const busPosition = $derived.by(() => {
 		if (!currentRecord || !routeData) return null;
-		const interpolated = getInterpolatedBusState(
-			currentRecord.s_cm,
-			routeData,
-		);
 		return {
 			lat: currentRecord.lat,
 			lon: currentRecord.lon,
-			heading: interpolated.heading_cdeg / 100, // Convert to degrees
+			heading: currentRecord.heading_cdeg !== undefined
+				? currentRecord.heading_cdeg / 100 // GPS heading in degrees
+				: undefined,
 		};
 	});
 

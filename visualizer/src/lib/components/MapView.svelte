@@ -38,7 +38,7 @@
 
 	interface Props {
 		routeData: RouteData;
-		busPosition?: { lat: number; lon: number; heading?: number } | null;
+		busPosition?: { lat: number; lon: number; heading?: number | undefined } | null;
 		selectedStop?: number | null;
 		onStopClick?: (stopIndex: number) => void;
 		highlightedEvent?: {
@@ -111,21 +111,37 @@
 			if (!map) return;
 			const mapRef = map;
 
-			// Add custom arrow icon for bus
-			const svgArrow = `
-				<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
-					<circle cx="20" cy="20" r="18" fill="#22c55e" stroke="white" stroke-width="3"/>
-					<path d="M20 5 L32 30 L20 22 L8 30 Z" fill="white"/>
-				</svg>
-			`;
-			const blob = new Blob([svgArrow], { type: 'image/svg+xml' });
-			const url = URL.createObjectURL(blob);
-			const image = await new Promise<HTMLImageElement>((resolve) => {
-				const img = new Image();
-				img.onload = () => resolve(img);
-				img.src = url;
-			});
-			mapRef.addImage('bus-arrow', image);
+				// Add custom arrow icon for bus (when heading is available)
+				const svgArrow = `
+					<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+						<circle cx="20" cy="20" r="18" fill="#22c55e" stroke="white" stroke-width="3"/>
+						<path d="M20 5 L32 30 L20 22 L8 30 Z" fill="white"/>
+					</svg>
+				`;
+				const blobArrow = new Blob([svgArrow], { type: 'image/svg+xml' });
+				const urlArrow = URL.createObjectURL(blobArrow);
+				const imageArrow = await new Promise<HTMLImageElement>((resolve) => {
+					const img = new Image();
+					img.onload = () => resolve(img);
+					img.src = urlArrow;
+				});
+				mapRef.addImage('bus-arrow', imageArrow);
+
+				// Add question mark icon for bus (when heading is unknown)
+				const svgQuestion = `
+					<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+						<circle cx="20" cy="20" r="18" fill="#f59e0b" stroke="white" stroke-width="3"/>
+						<text x="20" y="28" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="white" text-anchor="middle">?</text>
+					</svg>
+				`;
+				const blobQuestion = new Blob([svgQuestion], { type: 'image/svg+xml' });
+				const urlQuestion = URL.createObjectURL(blobQuestion);
+				const imageQuestion = await new Promise<HTMLImageElement>((resolve) => {
+					const img = new Image();
+					img.onload = () => resolve(img);
+					img.src = urlQuestion;
+				});
+				mapRef.addImage('bus-question', imageQuestion);
 
 			console.log('Map loaded, setting mapLoaded = true');
 			mapLoaded = true;
@@ -326,53 +342,60 @@
 		};
 	});
 
-	// Update bus position when it changes
-	$effect(() => {
-		if (!map || !busPosition || !mapLoaded) return;
+		// Update bus position when it changes
+		$effect(() => {
+			if (!map || !busPosition || !mapLoaded) return;
 
-		const { lat, lon } = busPosition;
+			const { lat, lon, heading } = busPosition;
+			const hasHeading = heading !== undefined;
+			const iconName = hasHeading ? 'bus-arrow' : 'bus-question';
+			const rotation = hasHeading ? heading : 0;
 
-		if (map.getSource(busSourceId)) {
-			(map.getSource(busSourceId) as maplibregl.GeoJSONSource).setData({
-				type: 'Feature',
-				properties: {
-					rotation: busPosition.heading || 0
-				},
-				geometry: {
-					type: 'Point',
-					coordinates: [lon, lat]
-				}
-			});
-		} else {
-			map.addSource(busSourceId, {
-				type: 'geojson',
-				data: {
+			if (map.getSource(busSourceId)) {
+				(map.getSource(busSourceId) as maplibregl.GeoJSONSource).setData({
 					type: 'Feature',
 					properties: {
-						rotation: busPosition.heading || 0
+						rotation,
+						icon: iconName
 					},
 					geometry: {
 						type: 'Point',
 						coordinates: [lon, lat]
 					}
-				}
-			});
+				});
+				// Update icon image when heading availability changes
+				map.setLayoutProperty('bus-marker', 'icon-image', iconName);
+			} else {
+				map.addSource(busSourceId, {
+					type: 'geojson',
+					data: {
+						type: 'Feature',
+						properties: {
+							rotation,
+							icon: iconName
+						},
+						geometry: {
+							type: 'Point',
+							coordinates: [lon, lat]
+						}
+					}
+				});
 
-			map.addLayer({
-				id: 'bus-marker',
-				type: 'symbol',
-				source: busSourceId,
-				layout: {
-					'icon-image': 'bus-arrow',
-					'icon-size': 0.8,
-					'icon-rotate': ['get', 'rotation'],
-					'icon-allow-overlap': true,
-					'icon-ignore-placement': true,
-					'icon-rotation-alignment': 'map'
-				}
-			});
-		}
-	});
+				map.addLayer({
+					id: 'bus-marker',
+					type: 'symbol',
+					source: busSourceId,
+					layout: {
+						'icon-image': iconName,
+						'icon-size': 0.8,
+						'icon-rotate': ['get', 'rotation'],
+						'icon-allow-overlap': true,
+						'icon-ignore-placement': true,
+						'icon-rotation-alignment': 'map'
+					}
+				});
+			}
+		});
 
 	$effect(() => {
 		if (!map || !mapLoaded) return;
