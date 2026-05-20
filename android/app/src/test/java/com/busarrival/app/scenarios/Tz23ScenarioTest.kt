@@ -127,29 +127,17 @@ class Tz23ScenarioTest {
 
     @Test
     fun test_tz23_short_trace_output_written() {
-        val scenarioTraceFile = testDataFile(TRACE_FILENAME)
-        val scenarioPipeline = DetectionPipeline().apply {
-            initialize(routeData, traceFile = scenarioTraceFile)
-        }
+        processScenario()
 
-        try {
-            for (location in TestDataLoader.loadNmea(SCENARIO)) {
-                scenarioPipeline.process(location)
-            }
-        } finally {
-            scenarioPipeline.close()
-        }
-
+        val destFile = testDataFile("tz_23_short_trace.jsonl")
         assertTrue(
-            "Trace should be written to test_data/$TRACE_FILENAME",
-            scenarioTraceFile.exists()
+            "Trace should be written to test_data/tz_23_short_trace.jsonl",
+            destFile.exists()
         )
 
-        val traceLines = scenarioTraceFile.readLines().filter { it.isNotBlank() }.size
+        val traceLines = destFile.readLines().filter { it.isNotBlank() }.size
         println("Trace lines written: $traceLines")
         assertTrue("Trace should have data", traceLines > 0)
-
-        scenarioTraceFile.delete()
     }
 
     @Test
@@ -217,7 +205,9 @@ class Tz23ScenarioTest {
             )
         } finally {
             scenarioPipeline.close()
-            traceFile.parentFile?.mkdirs()
+            val destFile = testDataFile("tz_23_short_trace.jsonl")
+            destFile.parentFile?.mkdirs()
+            traceFile.copyTo(destFile, overwrite = true)
             traceFile.delete()
         }
     }
