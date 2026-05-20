@@ -37,19 +37,38 @@ object TestDataLoader {
 
     /**
      * Load route data binary file.
+     * Supports both ty225_*.bin and tz_23_*.bin patterns.
      */
     fun loadRouteData(scenario: String): com.busarrival.app.domain.model.RouteData {
-        val path = testPath("ty225_${scenario}.bin")
-        return RouteDataParser.loadFromFile(path)
+        val candidates = listOf(
+            "ty225_${scenario}.bin",
+            "tz_23_${scenario}.bin"
+        )
+        for (candidate in candidates) {
+            val path = testPath(candidate)
+            if (File(path).exists()) {
+                return RouteDataParser.loadFromFile(path)
+            }
+        }
+        error("Route data not found for scenario '$scenario'. Tried: $candidates")
     }
 
     /**
      * Load NMEA test data file.
+     * Supports ty225_*_nmea.txt and tz_23-gps.jsonl formats.
      */
     fun loadNmea(scenario: String): List<Location> {
-        val path = testPath("ty225_${scenario}_nmea.txt")
-        val content = File(path).readText()
-        return NmeaParser.parseFile(content)
+        val nmeaPath = testPath("ty225_${scenario}_nmea.txt")
+        if (File(nmeaPath).exists()) {
+            return NmeaParser.parseFile(File(nmeaPath).readText())
+        }
+
+        val jsonlPath = testPath("tz_23-gps.jsonl")
+        if (File(jsonlPath).exists()) {
+            return JsonGpsParser.parseJsonl(File(jsonlPath).readText())
+        }
+
+        error("GPS data not found for scenario '$scenario'")
     }
 
     /**
