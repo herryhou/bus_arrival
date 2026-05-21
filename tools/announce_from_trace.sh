@@ -1,11 +1,11 @@
 #!/bin/bash
-# Extract announce events from trace.jsonl
-# Usage: ./tools/announce_from_trace.sh <trace.jsonl>
+# Extract announce events from grouped trace v2 JSONL
+# Usage: ./tools/announce_from_trace.sh <trace_v2.jsonl>
 
 set -euo pipefail
 
 if [ $# -ne 1 ]; then
-    echo "Usage: $0 <trace.jsonl>" >&2
+    echo "Usage: $0 <trace_v2.jsonl>" >&2
     exit 1
 fi
 
@@ -16,6 +16,6 @@ if [ ! -f "$TRACE_FILE" ]; then
     exit 1
 fi
 
-jq -c 'select(.active_stops and (.active_stops | length > 0)) |
-    {time, stop_idx: .active_stops[0], s_cm, v_cms}' \
+jq -c 'select(.corridor.active_stops and (.corridor.active_stops | length > 0)) |
+    {time: .gps.time_ms, stop_idx: .corridor.active_stops[0], s_cm: .kalman.s_cm, v_cms: .kalman.v_cms}' \
   "$TRACE_FILE"

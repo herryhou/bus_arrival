@@ -1,11 +1,11 @@
 #!/bin/bash
-# Extract arrival events from trace.jsonl
-# Usage: ./tools/arrival_from_trace.sh <trace.jsonl>
+# Extract arrival events from grouped trace v2 JSONL
+# Usage: ./tools/arrival_from_trace.sh <trace_v2.jsonl>
 
 set -euo pipefail
 
 if [ $# -ne 1 ]; then
-    echo "Usage: $0 <trace.jsonl>" >&2
+    echo "Usage: $0 <trace_v2.jsonl>" >&2
     exit 1
 fi
 
@@ -17,7 +17,7 @@ if [ ! -f "$TRACE_FILE" ]; then
 fi
 
 jq -c 'select(.stop_states) |
-  {time, s_cm, v_cms} + .stop_states[] |
+  {time: .gps.time_ms, s_cm: .kalman.s_cm, v_cms: .kalman.v_cms} + .stop_states[] |
   select(.just_arrived == true) |
   {time, stop_idx, s_cm, v_cms, probability}' \
   "$TRACE_FILE"

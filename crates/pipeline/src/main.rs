@@ -83,7 +83,7 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
                 } else if route_data.is_none() {
                     route_data = Some(PathBuf::from(arg));
                 } else {
-                    return Err("Too many arguments. Usage: pipeline <input> <route_data> [--output <trace.jsonl>]".into());
+                    return Err("Too many arguments. Usage: pipeline <input> <route_data> [--output <trace_v2.jsonl>]".into());
                 }
             }
         }
@@ -115,20 +115,20 @@ fn print_help() {
     println!();
     println!("Examples:");
     println!("  pipeline gps.nmea route_data.bin");
-    println!("  pipeline gps.jsonl route_data.bin --output custom_trace.jsonl");
+    println!("  pipeline gps.jsonl route_data.bin --output custom_trace_v2.jsonl");
     println!();
     println!("Helper scripts:");
-    println!("  ./tools/arrival_from_trace.sh trace.jsonl > arrivals.jsonl");
-    println!("  ./tools/announce_from_trace.sh trace.jsonl > announce.jsonl");
+    println!("  ./tools/arrival_from_trace.sh trace_v2.jsonl > arrivals.jsonl");
+    println!("  ./tools/announce_from_trace.sh trace_v2.jsonl > announce.jsonl");
 }
 
 /// Generate trace output path from NMEA input path
-/// Example: test_data/ty225_normal_nmea.txt -> test_data/ty225_normal_trace.jsonl
+/// Example: test_data/ty225_normal_nmea.txt -> test_data/ty225_normal_trace_v2.jsonl
 #[cfg(feature = "std")]
 fn generate_trace_path(nmea_path: &Path) -> PathBuf {
     let mut trace_path = nmea_path.to_path_buf();
 
-    // Replace extension with _trace.jsonl
+    // Replace extension with _trace_v2.jsonl
     let file_stem = trace_path.file_stem().unwrap_or_default();
     let parent = trace_path.parent();
 
@@ -136,7 +136,7 @@ fn generate_trace_path(nmea_path: &Path) -> PathBuf {
     let stem_str = file_stem.to_string_lossy();
     let base_name = stem_str.strip_suffix("_nmea").unwrap_or(&stem_str);
 
-    let new_name = format!("{}_trace.jsonl", base_name);
+    let new_name = format!("{}_trace_v2.jsonl", base_name);
 
     if let Some(p) = parent {
         trace_path = p.join(new_name);
