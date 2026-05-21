@@ -93,6 +93,27 @@ fn test_trace_serialization_valid_json() {
     assert_eq!(parsed["kalman"]["v_cms"], 500);
     assert!(parsed["corridor"]["active_stops"].is_array());
     assert_eq!(parsed["corridor"]["active_stops"].as_array().unwrap().len(), 2);
+    assert!(parsed.get("time_ms").is_none());
+    assert!(parsed.get("lat").is_none());
+    assert!(parsed.get("lon").is_none());
+    assert!(parsed.get("s_cm").is_none());
+    assert!(parsed.get("v_cms").is_none());
+    assert!(parsed.get("heading_cdeg").is_none());
+    assert!(parsed.get("active_stops").is_none());
+    assert!(parsed.get("gps_jump").is_none());
+    assert!(parsed.get("recovery_idx").is_none());
+    assert!(parsed.get("segment_idx").is_none());
+    assert!(parsed.get("heading_constraint_met").is_none());
+    assert!(parsed.get("divergence_cm").is_none());
+    assert!(parsed.get("hdop").is_none());
+    assert!(parsed.get("accuracy_cm").is_none());
+    assert!(parsed.get("num_sats").is_none());
+    assert!(parsed.get("fix_type").is_none());
+    assert!(parsed.get("variance_cm2").is_none());
+    assert!(parsed.get("corridor_start_cm").is_none());
+    assert!(parsed.get("corridor_end_cm").is_none());
+    assert!(parsed.get("next_stop").is_none());
+    assert!(parsed.get("off_route").is_none());
 
     // Verify FsmState serializes as string name (not object)
     assert!(json.contains(r#""fsm_state":"Approaching""#));
@@ -128,17 +149,14 @@ fn test_trace_serialization_valid_json() {
 fn test_all_fsm_states_serialize() {
     // Verify all FsmState variants serialize correctly
     let states = [
-        FsmState::Approaching,
-        FsmState::Arriving,
-        FsmState::AtStop,
-        FsmState::Departed,
+        (FsmState::Approaching, "\"Approaching\""),
+        (FsmState::Arriving, "\"Arriving\""),
+        (FsmState::AtStop, "\"AtStop\""),
+        (FsmState::Departed, "\"Departed\""),
     ];
 
-    for state in states {
+    for (state, expected_json) in states {
         let json = serde_json::to_string(&state).expect("Failed to serialize FsmState");
-        // Should serialize as string name like "Approaching", not {"Approaching":{}}
-        assert!(json.starts_with('"') && json.ends_with('"'));
-        let parsed: String = serde_json::from_str(&json).expect("Failed to deserialize");
-        assert!(!parsed.is_empty());
+        assert_eq!(json, expected_json);
     }
 }
