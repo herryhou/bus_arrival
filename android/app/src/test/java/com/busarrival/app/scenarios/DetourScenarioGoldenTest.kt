@@ -1,6 +1,7 @@
 package com.busarrival.app.scenarios
 
-import com.busarrival.app.scenarios.common.TestDataLoader
+import com.busarrival.app.data.pipeline.binary.RouteDataParser
+import com.busarrival.app.scenarios.common.NmeaParser
 import com.busarrival.app.scenarios.common.TraceLoader
 import com.busarrival.app.service.DetectionPipeline
 import com.busarrival.app.service.PipelineResult
@@ -53,7 +54,11 @@ class DetourScenarioGoldenTest {
         val EXPECTED_DETOUR_ARRIVALS_WITH_STOP1 = listOf(0, 1, 6, 7, 8, 9)
         val SKIPPED_DETOUR_STOPS = listOf(2, 3, 4, 5)
         val EXPECTED_ANNOUNCED_STOPS = listOf(0, 1, 6, 7, 8, 9)
-        const val ANDROID_TRACE_FILENAME = "ty225_short_detour_android_trace.jsonl"
+        const val ROUTE_DATA_FILENAME = "ty225_short_detour.bin"
+        const val NMEA_FILENAME = "ty225_short_detour_nmea.txt"
+        const val NORMAL_ROUTE_DATA_FILENAME = "ty225_normal.bin"
+        const val NORMAL_NMEA_FILENAME = "ty225_normal_nmea.txt"
+        const val ANDROID_TRACE_FILENAME = "ty225_short_detour_android_trace_v2.jsonl"
     }
 
     private data class OffRouteEpisode(
@@ -78,7 +83,7 @@ class DetourScenarioGoldenTest {
     @Before
     fun setup() {
         traceFile = testDataFile(ANDROID_TRACE_FILENAME)
-        routeData = TestDataLoader.loadRouteData(SHORT_DETOUR)
+        routeData = RouteDataParser.loadFromFile(testDataFile(ROUTE_DATA_FILENAME).absolutePath)
     }
 
     @After
@@ -179,11 +184,15 @@ class DetourScenarioGoldenTest {
             return File(explicitRoot, filename)
         }
 
+        return File(findTestDataRoot(), filename)
+    }
+
+    private fun findTestDataRoot(): File {
         var current: File? = File(".").absoluteFile
         repeat(8) {
             val candidate = File(current, "test_data")
-            if (candidate.isDirectory) {
-                return File(candidate, filename)
+            if (File(candidate, ROUTE_DATA_FILENAME).exists()) {
+                return candidate
             }
             current = current?.parentFile
         }
@@ -200,13 +209,21 @@ class DetourScenarioGoldenTest {
             }
         } else {
             DetectionPipeline().also {
-                it.initialize(TestDataLoader.loadRouteData(scenario), traceFile = scenarioTraceFile)
+                it.initialize(
+                    RouteDataParser.loadFromFile(testDataFile(NORMAL_ROUTE_DATA_FILENAME).absolutePath),
+                    traceFile = scenarioTraceFile
+                )
             }
         }
         val arrivals = mutableListOf<Pair<Int, Long>>()
+        val locations = when (scenario) {
+            SHORT_DETOUR -> NmeaParser.parseFile(testDataFile(NMEA_FILENAME).readText())
+            NORMAL_SCENARIO -> NmeaParser.parseFile(testDataFile(NORMAL_NMEA_FILENAME).readText())
+            else -> error("Unsupported scenario: $scenario")
+        }
 
         try {
-            for (location in TestDataLoader.loadNmea(scenario)) {
+            for (location in locations) {
                 val result = scenarioPipeline.process(location)
                 if (result is PipelineResult.Success) {
                     result.arrivals.forEach { arrival ->
@@ -489,7 +506,7 @@ class DetourScenarioGoldenTest {
      */
     private fun validateGroundTruthConsistency() {
         println("\n=== VALIDATION 8: Ground Truth Consistency ===")
-        val gtContent = TestDataLoader.loadText("ty225_short_detour_gt.json")
+        val gtContent = testDataFile("ty225_short_detour_gt.json").readText()
         val detourDurationS = validateGroundTruthDetourEvents(gtContent)
 
         assertTrue(
@@ -542,7 +559,7 @@ class DetourScenarioGoldenTest {
      */
     private fun validateAnnounceEvents() {
         println("\n=== VALIDATION 9: Announce Events ===")
-        val announceContent = TestDataLoader.loadText("ty225_short_detour_announce.jsonl")
+        val announceContent = testDataFile("ty225_short_detour_announce.jsonl").readText()
         val announceStops = announceContent
             .lines()
             .filter { it.isNotBlank() }
@@ -803,7 +820,7 @@ class DetourScenarioGoldenTest {
     @Test
     fun test_announce_precedes_arrival() {
         val run = processScenario(SHORT_DETOUR)
-        val announceEvents = TestDataLoader.loadText("ty225_short_detour_announce.jsonl")
+        val announceEvents = testDataFile("ty225_short_detour_announce.jsonl").readText()
             .lines()
             .filter { it.isNotBlank() }
             .map { line ->

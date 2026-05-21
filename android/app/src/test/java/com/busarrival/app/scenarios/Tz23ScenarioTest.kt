@@ -1,10 +1,16 @@
 package com.busarrival.app.scenarios
 
-import com.busarrival.app.scenarios.common.TestDataLoader
+import com.busarrival.app.data.pipeline.binary.RouteDataParser
+import com.busarrival.app.scenarios.common.JsonGpsParser
 import com.busarrival.app.scenarios.common.TraceLoader
 import com.busarrival.app.service.DetectionPipeline
 import com.busarrival.app.service.PipelineResult
 import com.busarrival.app.service.TraceTick
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import org.junit.Assert.*
 import org.junit.After
 import org.junit.Before
@@ -20,8 +26,9 @@ import java.io.File
 @RunWith(RobolectricTestRunner::class)
 class Tz23ScenarioTest {
     private companion object {
-        const val SCENARIO = "short"
-        const val TRACE_FILENAME = "tz_23_trace.jsonl"
+        const val ROUTE_DATA_FILENAME = "tz_23_short.bin"
+        const val GPS_FILENAME = "tz_23-gps.jsonl"
+        const val TRACE_FILENAME = "tz_23_short_trace_v2.jsonl"
         const val MAX_ALLOWED_BACKTRACK_CM = 5_000L
     }
 
@@ -32,7 +39,7 @@ class Tz23ScenarioTest {
     @Before
     fun setup() {
         traceFile = testDataFile(TRACE_FILENAME)
-        routeData = TestDataLoader.loadRouteData(SCENARIO)
+        routeData = RouteDataParser.loadFromFile(testDataFile(ROUTE_DATA_FILENAME).absolutePath)
     }
 
     @After
@@ -129,9 +136,9 @@ class Tz23ScenarioTest {
     fun test_tz23_short_trace_output_written() {
         processScenario()
 
-        val destFile = testDataFile("tz_23_short_trace.jsonl")
+        val destFile = testDataFile(TRACE_FILENAME)
         assertTrue(
-            "Trace should be written to test_data/tz_23_short_trace.jsonl",
+            "Trace should be written to test_data/$TRACE_FILENAME",
             destFile.exists()
         )
 
@@ -166,17 +173,66 @@ class Tz23ScenarioTest {
         }
     }
 
+    @Test
+    fun test_tz23_short_trace_uses_grouped_v2_schema() {
+        processScenario()
+
+        val firstTrace = Json.parseToJsonElement(
+            testDataFile(TRACE_FILENAME).useLines { lines ->
+                lines.first { it.isNotBlank() }
+            }
+        ).jsonObject
+
+        assertEquals(
+            setOf("gps", "kalman", "map_matching", "detection", "corridor", "stop_states"),
+            firstTrace.keys
+        )
+        assertFalse(firstTrace.containsKey("time"))
+        assertFalse(firstTrace.containsKey("s_cm"))
+
+        val tickWithStopState = testDataFile(TRACE_FILENAME).useLines { lines ->
+            lines
+                .filter { it.isNotBlank() }
+                .map { Json.parseToJsonElement(it).jsonObject }
+                .first { trace -> trace.getValue("stop_states").jsonArray.isNotEmpty() }
+        }
+        val firstStopState = tickWithStopState.getValue("stop_states").jsonArray.first().jsonObject
+        assertEquals(
+            setOf(
+                "stop_idx",
+                "gps_distance_cm",
+                "progress_distance_cm",
+                "fsm_state",
+                "dwell_time_s",
+                "probability",
+                "previous_probability",
+                "features",
+                "announced",
+                "skip_on_reentry",
+                "previous_distance_cm",
+                "just_arrived"
+            ),
+            firstStopState.keys
+        )
+        assertTrue(firstTrace.getValue("gps").jsonObject.getValue("time_ms").jsonPrimitive.long > 0)
+        assertNotNull(firstTrace.getValue("detection").jsonObject.getValue("status").jsonPrimitive.content)
+    }
+
     private fun testDataFile(filename: String): File {
         val explicitRoot = System.getProperty("test.data.root")?.let(::File)
         if (explicitRoot != null) {
             return File(explicitRoot, filename)
         }
 
+        return File(findTestDataRoot(), filename)
+    }
+
+    private fun findTestDataRoot(): File {
         var current: File? = File(".").absoluteFile
         repeat(8) {
             val candidate = File(current, "test_data")
-            if (candidate.isDirectory) {
-                return File(candidate, filename)
+            if (File(candidate, ROUTE_DATA_FILENAME).exists()) {
+                return candidate
             }
             current = current?.parentFile
         }
@@ -184,14 +240,16 @@ class Tz23ScenarioTest {
     }
 
     private fun processScenario(): ScenarioRun {
+        val scenarioTraceFile = File.createTempFile("tz23-trace", ".jsonl")
         val scenarioPipeline = DetectionPipeline().apply {
-            initialize(routeData, traceFile = traceFile)
+            initialize(routeData, traceFile = scenarioTraceFile)
             pipeline = this
         }
         val arrivals = mutableListOf<Pair<Int, Long>>()
+        val locations = JsonGpsParser.parseJsonl(testDataFile(GPS_FILENAME).readText())
 
         try {
-            for (location in TestDataLoader.loadNmea(SCENARIO)) {
+            for (location in locations) {
                 val result = scenarioPipeline.process(location)
                 if (result is PipelineResult.Success) {
                     result.arrivals.forEach { arrival ->
@@ -200,15 +258,15 @@ class Tz23ScenarioTest {
                 }
             }
             return ScenarioRun(
-                ticks = TraceLoader.load(traceFile),
+                ticks = TraceLoader.load(scenarioTraceFile),
                 arrivals = arrivals
             )
         } finally {
             scenarioPipeline.close()
-            val destFile = testDataFile("tz_23_short_trace.jsonl")
+            val destFile = testDataFile(TRACE_FILENAME)
             destFile.parentFile?.mkdirs()
-            traceFile.copyTo(destFile, overwrite = true)
-            traceFile.delete()
+            scenarioTraceFile.copyTo(destFile, overwrite = true)
+            scenarioTraceFile.delete()
         }
     }
 
