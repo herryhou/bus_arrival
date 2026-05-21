@@ -212,9 +212,13 @@ pub fn estimate(
         (z_raw, state.kalman.v_cms)
     } else {
         // Normal Kalman update
-        let hdop_x10 = input.gps.hdop_x10.unwrap_or(9990);
         let speed_cms = input.gps.speed_cms.unwrap_or(0);
-        state.kalman.update_adaptive(z_raw, speed_cms, hdop_x10);
+        state.kalman.update_adaptive(
+            z_raw,
+            speed_cms,
+            input.gps.accuracy_cm,
+            input.gps.hdop_x10,
+        );
         state.kalman.last_seg_idx = seg_idx;
 
         // Update DR state

@@ -141,6 +141,7 @@ fn test_snap_prevents_h1_recovery() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -154,6 +155,7 @@ fn test_snap_prevents_h1_recovery() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -177,6 +179,7 @@ fn test_snap_prevents_h1_recovery() {
             lon: 120.0,
             heading_cdeg: Some(9000),
             speed_cms: Some(500),
+            accuracy_cm: None,
             hdop_x10: Some(10),
             has_fix: true,
         };
@@ -197,6 +200,7 @@ fn test_snap_prevents_h1_recovery() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -213,6 +217,7 @@ fn test_snap_prevents_h1_recovery() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -253,6 +258,7 @@ fn test_snap_prevents_reacquisition_recovery() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -266,6 +272,7 @@ fn test_snap_prevents_reacquisition_recovery() {
             lon: 120.0,
             heading_cdeg: Some(9000),
             speed_cms: Some(500),
+            accuracy_cm: None,
             hdop_x10: Some(10),
             has_fix: true,
         };
@@ -282,6 +289,7 @@ fn test_snap_prevents_reacquisition_recovery() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -298,6 +306,7 @@ fn test_snap_prevents_reacquisition_recovery() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -333,6 +342,7 @@ fn test_forward_stop_selection_at_boundary() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -346,6 +356,7 @@ fn test_forward_stop_selection_at_boundary() {
             lon: 120.0,
             heading_cdeg: Some(9000),
             speed_cms: Some(500),
+            accuracy_cm: None,
             hdop_x10: Some(10),
             has_fix: true,
         };
@@ -359,6 +370,7 @@ fn test_forward_stop_selection_at_boundary() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -375,6 +387,7 @@ fn test_forward_stop_selection_at_boundary() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -409,6 +422,7 @@ fn test_snap_cooldown_expires() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -421,6 +435,7 @@ fn test_snap_cooldown_expires() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -434,6 +449,7 @@ fn test_snap_cooldown_expires() {
             lon: 120.0015,
             heading_cdeg: Some(9000),
             speed_cms: Some(500),
+            accuracy_cm: None,
             hdop_x10: Some(10),
             has_fix: true,
         };
@@ -447,6 +463,7 @@ fn test_snap_cooldown_expires() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -464,6 +481,7 @@ fn test_snap_cooldown_expires() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -481,6 +499,7 @@ fn test_snap_cooldown_expires() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -498,6 +517,7 @@ fn test_snap_cooldown_expires() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -534,6 +554,7 @@ fn test_geometry_fsm_reset() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -547,6 +568,7 @@ fn test_geometry_fsm_reset() {
             lon: 120.0,
             heading_cdeg: Some(9000),
             speed_cms: Some(500),
+            accuracy_cm: None,
             hdop_x10: Some(10),
             has_fix: true,
         };
@@ -560,6 +582,7 @@ fn test_geometry_fsm_reset() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -572,6 +595,7 @@ fn test_geometry_fsm_reset() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };

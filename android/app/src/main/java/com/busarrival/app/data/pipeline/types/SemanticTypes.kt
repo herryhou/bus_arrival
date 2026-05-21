@@ -80,6 +80,26 @@ enum class HdopQuality(val ks: Int, val kv: Int = 77) {
     }
 }
 
+// Kalman gains (Android accuracy-adaptive, in meters)
+enum class AccuracyQuality(val ks: Int, val kv: Int = 77) {
+    EXCELLENT(77),   // < 8m accuracy
+    GOOD(51),        // 8m - 20m accuracy
+    FAIR(26),        // >20m - 50m accuracy
+    POOR(13)         // >50m accuracy or missing quality fallback
+    ;
+
+    companion object {
+        fun fromAccuracyMeters(accuracyM: Float): AccuracyQuality {
+            return when {
+                accuracyM < 8.0f -> EXCELLENT
+                accuracyM <= 20.0f -> GOOD
+                accuracyM <= 50.0f -> FAIR
+                else -> POOR
+            }
+        }
+    }
+}
+
 // Extension functions for unit conversions
 fun Double.toCm(): DistCm = (this * 100).toInt()
 fun Double.toMm(): Int = (this * 1000).toInt()

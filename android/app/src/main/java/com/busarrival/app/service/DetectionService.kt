@@ -217,6 +217,7 @@ class DetectionService : Service() {
                     state = kalmanState!!,
                     zCm = zCm,
                     vGpsCms = gps.speedCms ?: 0,
+                    accuracyM = gps.accuracyM,
                     hdopX10 = null,  // Location API doesn't provide HDOP
                     isSoftResync = false
                 )

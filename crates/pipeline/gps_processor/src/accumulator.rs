@@ -136,6 +136,7 @@ impl FixAccumulator {
                 lon,
                 speed_cms: self.speed,
                 heading_cdeg: self.heading,
+                accuracy_cm: None,
                 hdop_x10: self.hdop,
                 has_fix: true,
             },

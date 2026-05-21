@@ -76,6 +76,7 @@ fn test_off_route_confirms_after_5_ticks() {
         lon: 120.0, // 120°E (matches origin)
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -93,6 +94,7 @@ fn test_off_route_confirms_after_5_ticks() {
             lon: 120.0,
             heading_cdeg: Some(9000),
             speed_cms: Some(500),
+            accuracy_cm: None,
             hdop_x10: Some(10),
             has_fix: true,
         };
@@ -200,6 +202,7 @@ fn test_off_route_disabled_during_warmup() {
             lon: 120.0,
             heading_cdeg: Some(9000),
             speed_cms: Some(500),
+            accuracy_cm: None,
             hdop_x10: Some(10),
             has_fix: true,
         };
@@ -290,6 +293,7 @@ fn test_off_route_clears_after_2_good_ticks() {
         lon: 120.0, // 120°E (on route)
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -303,6 +307,7 @@ fn test_off_route_clears_after_2_good_ticks() {
             lon: 120.0,
             heading_cdeg: Some(9000),
             speed_cms: Some(500),
+            accuracy_cm: None,
             hdop_x10: Some(10),
             has_fix: true,
         };
@@ -318,6 +323,7 @@ fn test_off_route_clears_after_2_good_ticks() {
             lon: 120.0,
             heading_cdeg: Some(9000),
             speed_cms: Some(500),
+            accuracy_cm: None,
             hdop_x10: Some(10),
             has_fix: true,
         };
@@ -409,6 +415,7 @@ fn test_off_route_hysteresis_partial_clear() {
         lon: 120.0, // 120°E (on route)
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -422,6 +429,7 @@ fn test_off_route_hysteresis_partial_clear() {
             lon: 120.0,
             heading_cdeg: Some(9000),
             speed_cms: Some(500),
+            accuracy_cm: None,
             hdop_x10: Some(10),
             has_fix: true,
         };
@@ -436,6 +444,7 @@ fn test_off_route_hysteresis_partial_clear() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -452,6 +461,7 @@ fn test_off_route_hysteresis_partial_clear() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -520,6 +530,7 @@ fn test_off_route_counter_resets_on_outage() {
         lon: 120.0, // 120°E (on route)
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: true,
     };
@@ -533,6 +544,7 @@ fn test_off_route_counter_resets_on_outage() {
             lon: 120.0,
             heading_cdeg: Some(9000),
             speed_cms: Some(500),
+            accuracy_cm: None,
             hdop_x10: Some(10),
             has_fix: true,
         };
@@ -548,6 +560,7 @@ fn test_off_route_counter_resets_on_outage() {
         lon: 120.0,
         heading_cdeg: Some(9000),
         speed_cms: Some(500),
+        accuracy_cm: None,
         hdop_x10: Some(10),
         has_fix: false,  // NO FIX
     };

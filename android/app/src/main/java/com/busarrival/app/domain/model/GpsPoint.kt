@@ -13,6 +13,7 @@ data class GpsPoint(
     val lon: Double,  // Degrees (not centidegrees) to preserve precision
     val headingCdeg: HeadCdeg?,
     val speedCms: SpeedCms?,
+    val accuracyM: Float?,
     val hdop: Float?,
     val hasFix: Boolean
 ) {
@@ -25,6 +26,7 @@ data class GpsPoint(
                 lon = location.longitude,  // Keep as Double (degrees)
                 headingCdeg = location.bearing?.toCdeg(),
                 speedCms = location.speed?.toCms(),
+                accuracyM = if (location.hasAccuracy()) location.accuracy else null,
                 hdop = null, // Location API doesn't provide HDOP directly
                 hasFix = true // Location API only provides valid fixes
             )

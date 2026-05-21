@@ -308,7 +308,12 @@ pub fn process_gps_update(
         dr.in_recovery = false;
     } else {
         // Normal Kalman update
-        state.update_adaptive(z_raw, gps.speed_cms.unwrap_or(0), gps.hdop_x10.unwrap_or(9990));
+        state.update_adaptive(
+            z_raw,
+            gps.speed_cms.unwrap_or(0),
+            gps.accuracy_cm,
+            gps.hdop_x10,
+        );
     }
     state.last_seg_idx = seg_idx;
 
