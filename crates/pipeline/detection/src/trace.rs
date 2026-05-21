@@ -1,7 +1,7 @@
 //! Trace record emission for debugging visualization
 
 use serde::{Deserialize, Serialize, Serializer};
-use shared::{DistCm, SpeedCms, Prob8, FsmState, HeadCdeg, TimestampMs};
+use shared::{DistCm, FsmState, HeadCdeg, Prob8, SpeedCms, TimestampMs};
 use std::io::{BufWriter, Write};
 
 /// Serialize f64 with at most 6 decimal places
@@ -18,6 +18,16 @@ where
 /// Trace record for debugging visualization
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TraceRecord {
+    pub gps: GpsTrace,
+    pub kalman: KalmanTrace,
+    pub map_matching: MapMatchingTrace,
+    pub detection: DetectionTrace,
+    pub corridor: CorridorTrace,
+    pub stop_states: Vec<StopTraceState>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GpsTrace {
     /// Input: GPS timestamp (milliseconds since epoch)
     pub time_ms: TimestampMs,
 
@@ -29,40 +39,9 @@ pub struct TraceRecord {
     #[serde(serialize_with = "serialize_f64_6dec")]
     pub lon: f64,
 
-    /// Input: Route progress (cm)
-    pub s_cm: DistCm,
-
-    /// Input: Velocity (cm/s)
-    pub v_cms: SpeedCms,
-
     /// Input: Heading (hundredths of degrees, -18000 to 18000)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub heading_cdeg: Option<HeadCdeg>,
-
-    /// Corridor filter: which stops are active
-    pub active_stops: Vec<u8>,
-
-    /// Per-stop detailed state (only for active stops)
-    pub stop_states: Vec<StopTraceState>,
-
-    /// GPS jump detected?
-    pub gps_jump: bool,
-
-    /// Recovery: new stop index if jumped
-    pub recovery_idx: Option<u8>,
-
-    // === New: Map matching ===
-    /// Which route segment we're matched to (None if off-route)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub segment_idx: Option<u16>,
-
-    /// Did the heading constraint pass? (±90° rule)
-    pub heading_constraint_met: bool,
-
-    // === New: Divergence ===
-    /// Raw GPS projection - Kalman filtered position (cm)
-    /// Positive = GPS ahead of filter, Negative = GPS behind
-    pub divergence_cm: i32,
 
     // === New: GPS quality ===
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,26 +55,61 @@ pub struct TraceRecord {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fix_type: Option<String>,
+}
 
-    // === New: Kalman state ===
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KalmanTrace {
+    /// Input: Route progress (cm)
+    pub s_cm: DistCm,
+
+    /// Input: Velocity (cm/s)
+    pub v_cms: SpeedCms,
+
     /// Position variance (cm²), represents filter uncertainty
     pub variance_cm2: i32,
+}
 
-    // === New: Corridor info ===
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MapMatchingTrace {
+    /// GPS jump detected?
+    pub gps_jump: bool,
+
+    /// Recovery: new stop index if jumped
+    pub recovery_idx: Option<u8>,
+
+    /// Which route segment we're matched to (None if off-route)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segment_idx: Option<u16>,
+
+    /// Did the heading constraint pass? (±90° rule)
+    pub heading_constraint_met: bool,
+
+    /// Raw GPS projection - Kalman filtered position (cm)
+    /// Positive = GPS ahead of filter, Negative = GPS behind
+    pub divergence_cm: i32,
+
+    /// Off-route status (true when position is frozen due to off-route detection)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub off_route: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DetectionTrace {
+    /// Next stop index and probability (even if not in corridor)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_stop: Option<(u8, Prob8)>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CorridorTrace {
+    /// Corridor filter: which stops are active
+    pub active_stops: Vec<u8>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub corridor_start_cm: Option<i32>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub corridor_end_cm: Option<i32>,
-
-    // === New: Next stop (outside corridor) ===
-    /// Next stop index and probability (even if not in corridor)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_stop: Option<(u8, Prob8)>,
-
-    /// Off-route status (true when position is frozen due to off-route detection)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub off_route: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -119,8 +133,20 @@ pub struct StopTraceState {
     /// Arrival probability (0-255)
     pub probability: Prob8,
 
+    /// Previous arrival probability from the prior tick
+    pub previous_probability: Prob8,
+
     /// Individual feature scores
     pub features: FeatureScores,
+
+    /// Whether this stop has already been announced in this trip
+    pub announced: bool,
+
+    /// Whether this stop should be skipped after off-route re-entry
+    pub skip_on_reentry: bool,
+
+    /// Previous signed distance to stop, if available
+    pub previous_distance_cm: Option<DistCm>,
 
     /// Just arrived this frame?
     pub just_arrived: bool,

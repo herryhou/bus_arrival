@@ -1,19 +1,52 @@
 //! Integration test for trace output
 
-use detection::trace::{TraceRecord, StopTraceState, FeatureScores};
+use detection::trace::{
+    CorridorTrace,
+    DetectionTrace,
+    FeatureScores,
+    GpsTrace,
+    KalmanTrace,
+    MapMatchingTrace,
+    StopTraceState,
+    TraceRecord,
+};
 use shared::FsmState;
 
 #[test]
 fn test_trace_serialization_valid_json() {
-    // Verify TraceRecord serializes to valid JSON with FsmState and new fields
+    // Verify TraceRecord serializes to grouped v2 JSON with FsmState and new fields
     let record = TraceRecord {
-        time_ms: 1_234_567_890,
-        lat: 25.00425,
-        lon: 121.28645,
-        s_cm: 10000,
-        v_cms: 500,
-        heading_cdeg: Some(-950), // 350.5° converted to -950 cdeg
-        active_stops: vec![0, 1],
+        gps: GpsTrace {
+            time_ms: 1_234_567_890,
+            lat: 25.00425,
+            lon: 121.28645,
+            heading_cdeg: Some(-950), // 350.5° converted to -950 cdeg
+            hdop: Some(1.2),
+            accuracy_cm: Some(150),
+            num_sats: Some(12),
+            fix_type: Some("3d".to_string()),
+        },
+        kalman: KalmanTrace {
+            s_cm: 10000,
+            v_cms: 500,
+            variance_cm2: 100,
+        },
+        map_matching: MapMatchingTrace {
+            gps_jump: false,
+            recovery_idx: None,
+            segment_idx: Some(5),
+            heading_constraint_met: true,
+            divergence_cm: 15,
+            off_route: Some(false),
+        },
+        detection: DetectionTrace {
+            next_stop: Some((2, 200)),
+        },
+        corridor: CorridorTrace {
+            active_stops: vec![0, 1],
+            corridor_start_cm: Some(9500),
+            corridor_end_cm: Some(10500),
+        },
         stop_states: vec![
             StopTraceState {
                 stop_idx: 0,
@@ -22,7 +55,11 @@ fn test_trace_serialization_valid_json() {
                 fsm_state: FsmState::Approaching,
                 dwell_time_s: 0,
                 probability: 128,
+                previous_probability: 64,
                 features: FeatureScores { p1: 200, p2: 150, p3: 180, p4: 100 },
+                announced: false,
+                skip_on_reentry: false,
+                previous_distance_cm: Some(550),
                 just_arrived: false,
             },
             StopTraceState {
@@ -32,25 +69,14 @@ fn test_trace_serialization_valid_json() {
                 fsm_state: FsmState::AtStop,
                 dwell_time_s: 10,
                 probability: 230,
+                previous_probability: 220,
                 features: FeatureScores { p1: 250, p2: 200, p3: 240, p4: 255 },
+                announced: true,
+                skip_on_reentry: true,
+                previous_distance_cm: Some(-450),
                 just_arrived: true,
             },
         ],
-        gps_jump: false,
-        recovery_idx: None,
-        // New fields
-        segment_idx: Some(5),
-        heading_constraint_met: true,
-        divergence_cm: 15,
-        hdop: Some(1.2),
-        accuracy_cm: Some(150),
-        num_sats: Some(12),
-        fix_type: Some("3d".to_string()),
-        variance_cm2: 100,
-        corridor_start_cm: Some(9500),
-        corridor_end_cm: Some(10500),
-        next_stop: Some((2, 200)),
-        off_route: Some(false),
     };
 
     // Serialize to JSON
@@ -60,11 +86,13 @@ fn test_trace_serialization_valid_json() {
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("Failed to parse JSON as Value");
 
     // Verify structure
-    assert_eq!(parsed["time_ms"], 1_234_567_890);
-    assert_eq!(parsed["s_cm"], 10000);
-    assert_eq!(parsed["v_cms"], 500);
-    assert!(parsed["active_stops"].is_array());
-    assert_eq!(parsed["active_stops"].as_array().unwrap().len(), 2);
+    assert_eq!(parsed["gps"]["time_ms"], 1_234_567_890);
+    assert_eq!(parsed["gps"]["lat"], 25.00425);
+    assert_eq!(parsed["gps"]["lon"], 121.28645);
+    assert_eq!(parsed["kalman"]["s_cm"], 10000);
+    assert_eq!(parsed["kalman"]["v_cms"], 500);
+    assert!(parsed["corridor"]["active_stops"].is_array());
+    assert_eq!(parsed["corridor"]["active_stops"].as_array().unwrap().len(), 2);
 
     // Verify FsmState serializes as string name (not object)
     assert!(json.contains(r#""fsm_state":"Approaching""#));
@@ -72,22 +100,28 @@ fn test_trace_serialization_valid_json() {
 
     // Verify nested feature scores
     assert!(json.contains(r#""p1":200"#));
+    assert!(json.contains(r#""previous_probability":64"#));
+    assert!(json.contains(r#""announced":false"#));
+    assert!(json.contains(r#""skip_on_reentry":true"#));
+    assert!(json.contains(r#""previous_distance_cm":-450"#));
     assert!(json.contains(r#""just_arrived":false"#));
     assert!(json.contains(r#""just_arrived":true"#));
 
-    // Verify new fields
-    assert_eq!(parsed["segment_idx"], 5);
-    assert_eq!(parsed["heading_constraint_met"], true);
-    assert_eq!(parsed["divergence_cm"], 15);
-    assert_eq!(parsed["hdop"], 1.2);
-    assert_eq!(parsed["accuracy_cm"], 150);
-    assert_eq!(parsed["num_sats"], 12);
-    assert_eq!(parsed["fix_type"], "3d");
-    assert_eq!(parsed["variance_cm2"], 100);
-    assert_eq!(parsed["corridor_start_cm"], 9500);
-    assert_eq!(parsed["corridor_end_cm"], 10500);
-    assert_eq!(parsed["next_stop"][0], 2);
-    assert_eq!(parsed["next_stop"][1], 200);
+    // Verify grouped fields
+    assert_eq!(parsed["gps"]["heading_cdeg"], -950);
+    assert_eq!(parsed["gps"]["hdop"], 1.2);
+    assert_eq!(parsed["gps"]["accuracy_cm"], 150);
+    assert_eq!(parsed["gps"]["num_sats"], 12);
+    assert_eq!(parsed["gps"]["fix_type"], "3d");
+    assert_eq!(parsed["kalman"]["variance_cm2"], 100);
+    assert_eq!(parsed["map_matching"]["segment_idx"], 5);
+    assert_eq!(parsed["map_matching"]["heading_constraint_met"], true);
+    assert_eq!(parsed["map_matching"]["divergence_cm"], 15);
+    assert_eq!(parsed["map_matching"]["off_route"], false);
+    assert_eq!(parsed["corridor"]["corridor_start_cm"], 9500);
+    assert_eq!(parsed["corridor"]["corridor_end_cm"], 10500);
+    assert_eq!(parsed["detection"]["next_stop"][0], 2);
+    assert_eq!(parsed["detection"]["next_stop"][1], 200);
 }
 
 #[test]
