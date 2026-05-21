@@ -17,7 +17,7 @@ fn process_real_jsonl_log() {
         "real JSONL log should produce more than one trace record"
     );
     assert!(
-        result.trace_records.iter().any(|r| r.time_ms > 1_000_000),
+        result.trace_records.iter().any(|r| r.gps.time_ms > 1_000_000),
         "trace records should preserve millisecond timestamps"
     );
     assert!(result.arrivals.len() <= result.trace_records.len());

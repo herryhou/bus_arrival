@@ -35,19 +35,19 @@ fn test_normal_gps_quality() {
         tick_count += 1;
 
         // Check HDOP (should be constant 3.5 from simulator)
-        if let Some(hdop) = trace.hdop {
+        if let Some(hdop) = trace.gps.hdop {
             if (hdop - 3.5).abs() > 0.1 {
                 hdop_violations += 1;
             }
         }
 
         // Check variance_cm2 (should be 0 - Kalman converged)
-        if trace.variance_cm2 != 0 {
+        if trace.kalman.variance_cm2 != 0 {
             variance_violations += 1;
         }
 
         // Check for GPS jumps (none expected in normal scenario)
-        if trace.gps_jump {
+        if trace.detection.gps_jump {
             gps_jumps += 1;
         }
     }
@@ -68,7 +68,7 @@ fn test_normal_gps_quality() {
 /// Behavioral invariants:
 /// - DR outage only occurs when heading_constraint_met=false
 /// - Divergence_cm should be 0 during dr_outage
-/// - Status should be one of: valid, dr_outage, off_route
+/// - Status should be one of the known pipeline states
 #[test]
 fn test_normal_status_transitions() {
     let route_bytes = load_ty225_route("normal");
@@ -85,21 +85,21 @@ fn test_normal_status_transitions() {
     let mut dr_outage_with_divergence = 0;
 
     for trace in &trace_records {
-        // Note: status field removed in refactoring, DR detection logic moved elsewhere
-        // These counters are kept for future validation but won't be incremented
+        match trace.detection.status.as_str() {
+            "valid" | "off_route" | "suspect_off_route" => {}
+            "dr_outage" => {
+                dr_outage_count += 1;
 
-        // Verify heading_constraint_met when available
-        if trace.heading_constraint_met {
-            // Heading constraint was met
+                if trace.map_matching.heading_constraint_met {
+                    dr_outage_with_heading_constraint += 1;
+                }
+
+                if trace.kalman.divergence_cm != 0 {
+                    dr_outage_with_divergence += 1;
+                }
+            }
+            _ => invalid_transitions += 1,
         }
-
-        // Verify divergence_cm tracking
-        if trace.divergence_cm != 0 {
-            // Divergence detected
-        }
-
-        // Note: status-based validation removed in refactoring
-        // Status transitions are now handled by different mechanisms
     }
 
     println!("Status transition validation:");
@@ -108,10 +108,7 @@ fn test_normal_status_transitions() {
     println!("  DR outages with heading_constraint_met=true: {}", dr_outage_with_heading_constraint);
     println!("  DR outages with divergence_cm != 0: {}", dr_outage_with_divergence);
 
-    // Note: DR outage detection moved in refactoring, status field removed
-    // These assertions are kept for future validation but won't fail
-    // assert!(dr_outage_count > 0, "Should have some DR outages in normal scenario");
-    assert_eq!(invalid_transitions, 0, "Should have no invalid status transitions");
+    assert_eq!(invalid_transitions, 0, "Should have no unknown status transitions");
     assert_eq!(dr_outage_with_heading_constraint, 0,
         "DR outage should only occur when heading_constraint_met=false");
     assert_eq!(dr_outage_with_divergence, 0,
@@ -137,7 +134,7 @@ fn test_normal_fsm_state_progression() {
     let mut stop_states: std::collections::HashMap<usize, Vec<String>> = std::collections::HashMap::new();
 
     for trace in &trace_records {
-        let time = trace.time_ms;
+        let time = trace.gps.time_ms;
 
         // Track FSM states for each stop
         for stop_state in &trace.stop_states {
@@ -199,10 +196,10 @@ fn test_normal_position_accuracy_at_arrivals() {
             if stop_state.just_arrived {
                 arrival_positions.push((
                     stop_state.stop_idx,
-                    trace.time_ms,
-                    trace.lat,
-                    trace.lon,
-                    trace.s_cm,
+                    trace.gps.time_ms,
+                    trace.gps.lat,
+                    trace.gps.lon,
+                    trace.kalman.s_cm,
                     stop_state.gps_distance_cm,
                 ));
             }
@@ -258,11 +255,11 @@ fn test_normal_corridor_boundaries() {
 
     for trace in &trace_records {
         // Only check when active_stops is present
-        if !trace.active_stops.is_empty() {
+        if !trace.corridor.active_stops.is_empty() {
             corridor_checks += 1;
 
             // Verify corridor_start_cm and corridor_end_cm exist
-            let corridor_start = match trace.corridor_start_cm {
+            let corridor_start = match trace.corridor.corridor_start_cm {
                 Some(v) => v,
                 None => {
                     corridor_violations += 1;
@@ -270,7 +267,7 @@ fn test_normal_corridor_boundaries() {
                 }
             };
 
-            let corridor_end = match trace.corridor_end_cm {
+            let corridor_end = match trace.corridor.corridor_end_cm {
                 Some(v) => v,
                 None => {
                     corridor_violations += 1;
@@ -285,7 +282,7 @@ fn test_normal_corridor_boundaries() {
             }
 
             // Verify s_cm is within corridor bounds
-            if trace.s_cm < corridor_start || trace.s_cm > corridor_end {
+            if trace.kalman.s_cm < corridor_start || trace.kalman.s_cm > corridor_end {
                 progress_violations += 1;
             }
         }
@@ -326,7 +323,7 @@ fn test_normal_trace_completeness() {
 
     for trace in &trace_records {
         tick_count += 1;
-        let time = trace.time_ms;
+        let time = trace.gps.time_ms;
 
         if first_time.is_none() {
             first_time = Some(time);
@@ -342,7 +339,7 @@ fn test_normal_trace_completeness() {
         prev_time = Some(time);
 
         // Check for critical fields
-        let has_critical = trace.lat != 0.0 && trace.lon != 0.0;
+        let has_critical = trace.gps.lat != 0.0 && trace.gps.lon != 0.0;
         if !has_critical {
             missing_critical_fields += 1;
         }
