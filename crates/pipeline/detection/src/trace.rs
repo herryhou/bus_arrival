@@ -67,37 +67,40 @@ pub struct KalmanTrace {
 
     /// Position variance (cm²), represents filter uncertainty
     pub variance_cm2: i32,
+
+    /// Raw GPS projection - Kalman filtered position (cm)
+    /// Positive = GPS ahead of filter, Negative = GPS behind
+    pub divergence_cm: i32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MapMatchingTrace {
-    /// GPS jump detected?
-    pub gps_jump: bool,
-
-    /// Recovery: new stop index if jumped
-    pub recovery_idx: Option<u8>,
-
     /// Which route segment we're matched to (None if off-route)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub segment_idx: Option<u16>,
 
     /// Did the heading constraint pass? (±90° rule)
     pub heading_constraint_met: bool,
-
-    /// Raw GPS projection - Kalman filtered position (cm)
-    /// Positive = GPS ahead of filter, Negative = GPS behind
-    pub divergence_cm: i32,
-
-    /// Off-route status (true when position is frozen due to off-route detection)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub off_route: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DetectionTrace {
-    /// Next stop index and probability (even if not in corridor)
+    /// Detection status label
+    pub status: String,
+
+    /// Off-route status (true when position is frozen due to off-route detection)
+    pub off_route: bool,
+
+    /// GPS jump detected?
+    pub gps_jump: bool,
+
+    /// Recovery: new stop index if jumped
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_stop: Option<(u8, Prob8)>,
+    pub recovery_idx: Option<u8>,
+
+    /// Route position where off-route episode started
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub off_route_last_s_cm: Option<DistCm>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -110,6 +113,10 @@ pub struct CorridorTrace {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub corridor_end_cm: Option<i32>,
+
+    /// Next stop index and probability (even if not in corridor)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_stop: Option<(u8, Prob8)>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

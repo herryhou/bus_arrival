@@ -30,22 +30,24 @@ fn test_trace_serialization_valid_json() {
             s_cm: 10000,
             v_cms: 500,
             variance_cm2: 100,
+            divergence_cm: 15,
         },
         map_matching: MapMatchingTrace {
-            gps_jump: false,
-            recovery_idx: None,
             segment_idx: Some(5),
             heading_constraint_met: true,
-            divergence_cm: 15,
-            off_route: Some(false),
         },
         detection: DetectionTrace {
-            next_stop: Some((2, 200)),
+            status: "normal".to_string(),
+            off_route: false,
+            gps_jump: false,
+            recovery_idx: None,
+            off_route_last_s_cm: Some(9876),
         },
         corridor: CorridorTrace {
             active_stops: vec![0, 1],
             corridor_start_cm: Some(9500),
             corridor_end_cm: Some(10500),
+            next_stop: Some((2, 200)),
         },
         stop_states: vec![
             StopTraceState {
@@ -114,6 +116,8 @@ fn test_trace_serialization_valid_json() {
     assert!(parsed.get("corridor_end_cm").is_none());
     assert!(parsed.get("next_stop").is_none());
     assert!(parsed.get("off_route").is_none());
+    assert!(parsed.get("status").is_none());
+    assert!(parsed.get("off_route_last_s_cm").is_none());
 
     // Verify FsmState serializes as string name (not object)
     assert!(json.contains(r#""fsm_state":"Approaching""#));
@@ -135,14 +139,18 @@ fn test_trace_serialization_valid_json() {
     assert_eq!(parsed["gps"]["num_sats"], 12);
     assert_eq!(parsed["gps"]["fix_type"], "3d");
     assert_eq!(parsed["kalman"]["variance_cm2"], 100);
+    assert_eq!(parsed["kalman"]["divergence_cm"], 15);
     assert_eq!(parsed["map_matching"]["segment_idx"], 5);
     assert_eq!(parsed["map_matching"]["heading_constraint_met"], true);
-    assert_eq!(parsed["map_matching"]["divergence_cm"], 15);
-    assert_eq!(parsed["map_matching"]["off_route"], false);
+    assert_eq!(parsed["detection"]["status"], "normal");
+    assert_eq!(parsed["detection"]["off_route"], false);
+    assert_eq!(parsed["detection"]["gps_jump"], false);
+    assert!(parsed["detection"]["recovery_idx"].is_null());
+    assert_eq!(parsed["detection"]["off_route_last_s_cm"], 9876);
     assert_eq!(parsed["corridor"]["corridor_start_cm"], 9500);
     assert_eq!(parsed["corridor"]["corridor_end_cm"], 10500);
-    assert_eq!(parsed["detection"]["next_stop"][0], 2);
-    assert_eq!(parsed["detection"]["next_stop"][1], 200);
+    assert_eq!(parsed["corridor"]["next_stop"][0], 2);
+    assert_eq!(parsed["corridor"]["next_stop"][1], 200);
 }
 
 #[test]
