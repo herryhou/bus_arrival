@@ -198,6 +198,7 @@ pub struct GpsPoint {
     pub lon: f64, // Longitude in degrees (full precision)
     pub heading_cdeg: Option<HeadCdeg>, // Heading in 0.01° units
     pub speed_cms: Option<SpeedCms>, // Speed in cm/s
+    pub accuracy_cm: Option<DistCm>, // Horizontal accuracy in centimeters
     pub hdop_x10: Option<u16>, // HDOP * 10 (e.g., 15 = 1.5)
     pub has_fix: bool,
 }
@@ -216,6 +217,7 @@ impl GpsPoint {
             lon: 0.0,
             heading_cdeg: None, // Heading not available
             speed_cms: None, // Speed not available
+            accuracy_cm: None, // Accuracy not available
             hdop_x10: None, // HDOP not available
             has_fix: false,
         }
@@ -296,12 +298,37 @@ impl KalmanState {
         self.v_cms = (v_pred + (77 * (v_gps_cms - v_pred)) / 256).max(0);
     }
 
-    pub fn update_adaptive(&mut self, z_cm: DistCm, v_gps_cms: SpeedCms, hdop_x10: u16) {
-        let ks = Self::ks_from_hdop(hdop_x10);
+    pub fn update_adaptive(
+        &mut self,
+        z_cm: DistCm,
+        v_gps_cms: SpeedCms,
+        accuracy_cm: Option<DistCm>,
+        hdop_x10: Option<u16>,
+    ) {
+        let ks = Self::ks_from_quality(accuracy_cm, hdop_x10);
         let s_pred = self.s_cm + self.v_cms;
         let v_pred = self.v_cms;
         self.s_cm = s_pred + (ks * (z_cm - s_pred)) / 256;
         self.v_cms = (v_pred + (77 * (v_gps_cms - v_pred)) / 256).max(0);
+    }
+
+    fn ks_from_quality(accuracy_cm: Option<DistCm>, hdop_x10: Option<u16>) -> i32 {
+        if let Some(accuracy_cm) = accuracy_cm {
+            Self::ks_from_accuracy_cm(accuracy_cm)
+        } else if let Some(hdop_x10) = hdop_x10 {
+            Self::ks_from_hdop(hdop_x10)
+        } else {
+            13
+        }
+    }
+
+    fn ks_from_accuracy_cm(accuracy_cm: DistCm) -> i32 {
+        match accuracy_cm {
+            i32::MIN..=799 => 77,
+            800..=2000 => 51,
+            2001..=5000 => 26,
+            _ => 13,
+        }
     }
 
     fn ks_from_hdop(hdop_x10: u16) -> i32 {
@@ -561,9 +588,40 @@ mod tests {
 
         // Test with various HDOP levels, all should respect non-negative constraint
         for hdop in [10, 25, 40, 100] {
-            state.update_adaptive(10100, -1000, hdop);
+            state.update_adaptive(10100, -1000, None, Some(hdop));
             assert!(state.v_cms >= 0, "v_cms should be non-negative for HDOP {}", hdop);
         }
+    }
+
+    #[test]
+    fn test_accuracy_quality_gain_boundaries() {
+        assert_eq!(KalmanState::ks_from_accuracy_cm(799), 77);
+        assert_eq!(KalmanState::ks_from_accuracy_cm(800), 51);
+        assert_eq!(KalmanState::ks_from_accuracy_cm(2000), 51);
+        assert_eq!(KalmanState::ks_from_accuracy_cm(2001), 26);
+        assert_eq!(KalmanState::ks_from_accuracy_cm(5000), 26);
+        assert_eq!(KalmanState::ks_from_accuracy_cm(5001), 13);
+    }
+
+    #[test]
+    fn test_kalman_accuracy_takes_precedence_over_hdop() {
+        let mut state = KalmanState::init(10_000, 0, 0);
+        state.update_adaptive(11_000, 0, Some(6000), Some(10));
+        assert_eq!(state.s_cm, 10_050);
+    }
+
+    #[test]
+    fn test_kalman_hdop_fallback_when_accuracy_missing() {
+        let mut state = KalmanState::init(10_000, 0, 0);
+        state.update_adaptive(11_000, 0, None, Some(10));
+        assert_eq!(state.s_cm, 10_300);
+    }
+
+    #[test]
+    fn test_kalman_missing_quality_uses_poor_gain() {
+        let mut state = KalmanState::init(10_000, 0, 0);
+        state.update_adaptive(11_000, 0, None, None);
+        assert_eq!(state.s_cm, 10_050);
     }
 
     #[test]
