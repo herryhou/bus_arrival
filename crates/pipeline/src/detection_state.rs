@@ -1,6 +1,6 @@
 //! Arrival detection state machine
 
-use shared::{DistCm, PositionSignals, TimestampMs};
+use shared::{DistCm, PositionSignals, Prob8, TimestampMs};
 use shared::binfile::RouteData;
 use crate::{PipelineResult, ArrivalEvent, DepartureEvent, gps::GpsRecord, StopTraceState};
 use detection::state_machine::{StopState, StopEvent};
@@ -19,6 +19,8 @@ pub struct DetectionState {
     off_route: bool,
     /// Track last position during off-route
     off_route_last_s_cm: Option<DistCm>,
+    /// Probability snapshot from immediately before the current tick's updates
+    previous_probabilities: Vec<Prob8>,
 }
 
 impl DetectionState {
@@ -35,6 +37,7 @@ impl DetectionState {
             active_indices: Vec::new(),
             off_route: false,
             off_route_last_s_cm: None,
+            previous_probabilities: vec![0; stop_count],
         }
     }
 
@@ -55,6 +58,13 @@ impl DetectionState {
         // Reset per-frame tracking
         self.arrived_this_frame.clear();
         self.active_indices.clear();
+        for (snapshot, stop_state) in self
+            .previous_probabilities
+            .iter_mut()
+            .zip(self.stop_states.iter())
+        {
+            *snapshot = stop_state.last_probability;
+        }
 
         let s_cm = record.s_cm;
         let v_cms = record.v_cms;
@@ -161,7 +171,16 @@ impl DetectionState {
 
         let z_gps_cm = record.s_cm + record.divergence_cm;
 
-        let stop_states: Vec<StopTraceState> = self.active_indices.iter().map(|&idx| {
+        let mut trace_indices = self.active_indices.clone();
+        for (idx, stop_state) in self.stop_states.iter().enumerate() {
+            if (stop_state.announced || stop_state.skip_on_reentry)
+                && !trace_indices.contains(&idx)
+            {
+                trace_indices.push(idx);
+            }
+        }
+
+        let stop_states: Vec<StopTraceState> = trace_indices.iter().map(|&idx| {
             let stop = &stops[idx];
             let stop_state = &self.stop_states[idx];
 
@@ -190,7 +209,11 @@ impl DetectionState {
                 fsm_state: stop_state.fsm_state,
                 dwell_time_s: stop_state.dwell_time_s,
                 probability,
+                previous_probability: self.previous_probabilities[idx],
                 features,
+                announced: stop_state.announced,
+                skip_on_reentry: stop_state.skip_on_reentry,
+                previous_distance_cm: stop_state.previous_distance_cm,
                 just_arrived: self.arrived_this_frame.contains(&(idx as u8)),
             }
         }).collect();
@@ -206,5 +229,106 @@ impl DetectionState {
     /// Check if currently off-route
     pub fn is_off_route(&self) -> bool {
         self.off_route
+    }
+
+    /// Last route position recorded while off-route, if any.
+    pub fn off_route_last_s_cm(&self) -> Option<DistCm> {
+        self.off_route_last_s_cm
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn load_route_data() -> RouteData<'static> {
+        let route_bytes = fs::read("../../test_data/ty225_normal.bin")
+            .expect("Failed to load ty225_normal.bin");
+        let route_bytes: &'static [u8] = Box::leak(route_bytes.into_boxed_slice());
+        RouteData::load(route_bytes).expect("Failed to parse ty225_normal.bin")
+    }
+
+    fn gps_record(status: &'static str, s_cm: DistCm) -> GpsRecord {
+        GpsRecord::new(1_234_567, 25.0, 121.0, s_cm, 250, Some(9000), status)
+    }
+
+    #[test]
+    fn get_trace_info_includes_active_announced_and_skipped_stop_states() {
+        let route_data = load_route_data();
+        let mut state = DetectionState::new(&route_data);
+        let stops = route_data.stops();
+
+        state.active_indices = vec![0];
+        state.arrived_this_frame.push(0);
+
+        state.stop_states[0].last_probability = 64;
+        state.stop_states[0].announced = false;
+        state.stop_states[0].skip_on_reentry = false;
+        state.stop_states[0].previous_distance_cm = Some(321);
+
+        state.stop_states[1].last_probability = 128;
+        state.stop_states[1].announced = true;
+        state.stop_states[1].skip_on_reentry = false;
+        state.stop_states[1].previous_distance_cm = Some(-456);
+
+        state.stop_states[2].last_probability = 192;
+        state.stop_states[2].announced = false;
+        state.stop_states[2].skip_on_reentry = true;
+        state.stop_states[2].previous_distance_cm = Some(-789);
+
+        let mut record = gps_record("valid", stops[0].corridor_start_cm + 100);
+        record.divergence_cm = 25;
+
+        let (active_stops, stop_states) = state.get_trace_info(&record, &route_data);
+
+        assert_eq!(active_stops, vec![0]);
+
+        let mut emitted_indices: Vec<u8> = stop_states.iter().map(|stop| stop.stop_idx).collect();
+        emitted_indices.sort_unstable();
+        assert_eq!(emitted_indices, vec![0, 1, 2]);
+
+        let announced = stop_states
+            .iter()
+            .find(|stop| stop.stop_idx == 1)
+            .expect("announced stop should be included");
+        assert!(announced.announced);
+        assert!(!announced.skip_on_reentry);
+        assert_eq!(announced.previous_distance_cm, Some(-456));
+
+        let skipped = stop_states
+            .iter()
+            .find(|stop| stop.stop_idx == 2)
+            .expect("skipped stop should be included");
+        assert!(!skipped.announced);
+        assert!(skipped.skip_on_reentry);
+        assert_eq!(skipped.previous_distance_cm, Some(-789));
+    }
+
+    #[test]
+    fn get_trace_info_reports_probability_from_before_latest_update() {
+        let route_data = load_route_data();
+        let mut state = DetectionState::new(&route_data);
+        let mut result = PipelineResult::new();
+        let stop = &route_data.stops()[0];
+
+        let first = gps_record("valid", stop.corridor_start_cm);
+        state.process_gps_record(&first, &route_data, &mut result);
+        let expected_previous_probability = state.stop_states[0].last_probability;
+
+        let second = gps_record("valid", stop.progress_cm - 1000);
+        state.process_gps_record(&second, &route_data, &mut result);
+
+        let (_, stop_states) = state.get_trace_info(&second, &route_data);
+        let trace_state = stop_states
+            .iter()
+            .find(|trace_state| trace_state.stop_idx == 0)
+            .expect("active stop should be present");
+
+        assert_ne!(
+            state.stop_states[0].last_probability, expected_previous_probability,
+            "test requires the second update to change probability"
+        );
+        assert_eq!(trace_state.previous_probability, expected_previous_probability);
     }
 }

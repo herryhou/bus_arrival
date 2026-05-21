@@ -26,17 +26,49 @@ pub mod localization;
 
 // Re-export trace types from detection crate
 #[cfg(feature = "std")]
-pub use detection::trace::{TraceRecord, StopTraceState};
+pub use detection::trace::{
+    CorridorTrace,
+    DetectionTrace,
+    GpsTrace,
+    KalmanTrace,
+    MapMatchingTrace,
+    StopTraceState,
+    TraceRecord,
+};
 #[cfg(feature = "std")]
 #[derive(Debug)]
-pub struct TraceRecordWrapper(pub TraceRecord);
+pub struct TraceRecordWrapper {
+    pub record: TraceRecord,
+    pub time_ms: shared::TimestampMs,
+    pub lat: f64,
+    pub lon: f64,
+    pub s_cm: shared::DistCm,
+    pub v_cms: shared::SpeedCms,
+    pub heading_cdeg: Option<shared::HeadCdeg>,
+    pub active_stops: Vec<u8>,
+    pub gps_jump: bool,
+    pub recovery_idx: Option<u8>,
+    pub segment_idx: Option<u16>,
+    pub heading_constraint_met: bool,
+    pub divergence_cm: i32,
+    pub hdop: Option<f32>,
+    pub accuracy_cm: Option<shared::DistCm>,
+    pub num_sats: Option<u8>,
+    pub fix_type: Option<String>,
+    pub variance_cm2: i32,
+    pub corridor_start_cm: Option<i32>,
+    pub corridor_end_cm: Option<i32>,
+    pub next_stop: Option<(u8, shared::Prob8)>,
+    pub off_route: bool,
+    pub status: String,
+}
 
 #[cfg(feature = "std")]
 impl ::std::ops::Deref for TraceRecordWrapper {
     type Target = TraceRecord;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.record
     }
 }
 
@@ -46,7 +78,7 @@ impl ::serde::Serialize for TraceRecordWrapper {
     where
         S: ::serde::Serializer,
     {
-        self.0.serialize(serializer)
+        self.record.serialize(serializer)
     }
 }
 
@@ -415,36 +447,154 @@ impl PipelineResult {
         };
 
         // Determine off-route status from GPS record status
-        let off_route = match record.status {
-            "off_route" | "suspect_off_route" => Some(true),
-            "valid" | "dr_outage" => Some(false),
-            _ => None,
+        let gps_jump = false;
+        let recovery_idx = None;
+        let off_route = record.status == "off_route";
+        let status = record.status.to_string();
+
+        let trace_record = TraceRecord {
+            gps: GpsTrace {
+                time_ms: record.time,
+                lat: record.lat,
+                lon: record.lon,
+                heading_cdeg: record.heading_cdeg,
+                hdop: record.hdop,
+                accuracy_cm: record.accuracy_cm,
+                num_sats: record.num_sats,
+                fix_type: record.fix_type.clone(),
+            },
+            kalman: KalmanTrace {
+                s_cm: record.s_cm,
+                v_cms: record.v_cms,
+                variance_cm2: record.variance_cm2,
+                divergence_cm: record.divergence_cm,
+            },
+            map_matching: MapMatchingTrace {
+                segment_idx: record.segment_idx,
+                heading_constraint_met: record.heading_constraint_met,
+            },
+            detection: DetectionTrace {
+                status: status.clone(),
+                off_route,
+                gps_jump,
+                recovery_idx,
+                off_route_last_s_cm: det_state.off_route_last_s_cm(),
+            },
+            corridor: CorridorTrace {
+                active_stops: active_stops.clone(),
+                corridor_start_cm,
+                corridor_end_cm,
+                next_stop,
+            },
+            stop_states,
         };
 
-        self.trace_records.push(TraceRecordWrapper(TraceRecord {
-            time_ms: record.time,
-            lat: record.lat,
-            lon: record.lon,
-            s_cm: record.s_cm,
-            v_cms: record.v_cms,
-            heading_cdeg: record.heading_cdeg,
+        self.trace_records.push(TraceRecordWrapper {
+            time_ms: trace_record.gps.time_ms,
+            lat: trace_record.gps.lat,
+            lon: trace_record.gps.lon,
+            s_cm: trace_record.kalman.s_cm,
+            v_cms: trace_record.kalman.v_cms,
+            heading_cdeg: trace_record.gps.heading_cdeg,
             active_stops,
-            stop_states,
-            gps_jump: false,  // TODO: implement GPS jump detection
-            recovery_idx: None, // TODO: implement recovery
-            // New fields
-            segment_idx: record.segment_idx,
-            heading_constraint_met: record.heading_constraint_met,
-            divergence_cm: record.divergence_cm,
-            hdop: record.hdop,
-            accuracy_cm: record.accuracy_cm,
-            num_sats: record.num_sats,
-            fix_type: record.fix_type.clone(),
-            variance_cm2: record.variance_cm2,
-            corridor_start_cm,
-            corridor_end_cm,
-            next_stop,
+            gps_jump,
+            recovery_idx,
+            segment_idx: trace_record.map_matching.segment_idx,
+            heading_constraint_met: trace_record.map_matching.heading_constraint_met,
+            divergence_cm: trace_record.kalman.divergence_cm,
+            hdop: trace_record.gps.hdop,
+            accuracy_cm: trace_record.gps.accuracy_cm,
+            num_sats: trace_record.gps.num_sats,
+            fix_type: trace_record.gps.fix_type.clone(),
+            variance_cm2: trace_record.kalman.variance_cm2,
+            corridor_start_cm: trace_record.corridor.corridor_start_cm,
+            corridor_end_cm: trace_record.corridor.corridor_end_cm,
+            next_stop: trace_record.corridor.next_stop,
             off_route,
-        }));
+            status,
+            record: trace_record,
+        });
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn load_route_data() -> RouteData<'static> {
+        let route_bytes = fs::read("../../test_data/ty225_normal.bin")
+            .expect("Failed to load ty225_normal.bin");
+        let route_bytes: &'static [u8] = Box::leak(route_bytes.into_boxed_slice());
+        RouteData::load(route_bytes).expect("Failed to parse ty225_normal.bin")
+    }
+
+    #[test]
+    fn add_trace_record_uses_grouped_trace_v2_fields() {
+        let route_data = load_route_data();
+        let stop = &route_data.stops()[0];
+        let mut det_state = DetectionState::new(&route_data);
+        let mut result = PipelineResult::new();
+
+        let record = gps::GpsRecord::new(
+            1_234_567,
+            25.0,
+            121.0,
+            stop.corridor_start_cm,
+            250,
+            Some(9000),
+            "valid",
+        )
+        .with_diagnostics(
+            localization::GpsDiagnostics::new()
+                .with_segment_idx(Some(7))
+                .with_heading_met(true)
+                .with_divergence_cm(33)
+                .with_hdop(Some(1.5))
+                .with_accuracy_cm(Some(250))
+                .with_num_sats(Some(9))
+                .with_fix_type(Some("3d".to_string()))
+                .with_variance_cm2(144),
+        );
+
+        det_state.process_gps_record(&record, &route_data, &mut result);
+        result.add_trace_record(&record, &mut det_state, &route_data);
+
+        let trace = &result.trace_records[0];
+        assert_eq!(trace.gps.time_ms, 1_234_567);
+        assert_eq!(trace.gps.heading_cdeg, Some(9000));
+        assert_eq!(trace.gps.hdop, Some(1.5));
+        assert_eq!(trace.kalman.s_cm, stop.corridor_start_cm);
+        assert_eq!(trace.kalman.divergence_cm, 33);
+        assert_eq!(trace.map_matching.segment_idx, Some(7));
+        assert!(trace.map_matching.heading_constraint_met);
+        assert_eq!(trace.detection.status, "valid");
+        assert!(!trace.detection.off_route);
+        assert_eq!(trace.corridor.active_stops, vec![0]);
+        assert!(!trace.stop_states.is_empty());
+    }
+
+    #[test]
+    fn add_trace_record_only_marks_exact_off_route_status_as_off_route() {
+        let route_data = load_route_data();
+        let mut det_state = DetectionState::new(&route_data);
+        let mut result = PipelineResult::new();
+
+        let suspect_record = gps::GpsRecord::new(10, 25.0, 121.0, 1000, 0, None, "suspect_off_route");
+        det_state.process_gps_record(&suspect_record, &route_data, &mut result);
+        result.add_trace_record(&suspect_record, &mut det_state, &route_data);
+
+        let off_route_record = gps::GpsRecord::new(11, 25.0, 121.0, 2000, 0, None, "off_route");
+        det_state.process_gps_record(&off_route_record, &route_data, &mut result);
+        result.add_trace_record(&off_route_record, &mut det_state, &route_data);
+
+        let suspect_trace = &result.trace_records[0];
+        assert_eq!(suspect_trace.detection.status, "suspect_off_route");
+        assert!(!suspect_trace.detection.off_route);
+
+        let off_route_trace = &result.trace_records[1];
+        assert_eq!(off_route_trace.detection.status, "off_route");
+        assert!(off_route_trace.detection.off_route);
+        assert_eq!(off_route_trace.detection.off_route_last_s_cm, Some(2000));
     }
 }
