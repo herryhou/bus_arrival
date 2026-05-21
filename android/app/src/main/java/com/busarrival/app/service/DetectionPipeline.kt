@@ -102,6 +102,7 @@ class DetectionPipeline {
             state = kalmanState!!,
             zCm = sCm,
             vGpsCms = gps.speedCms ?: 0,
+            accuracyM = gps.accuracyM,
             hdopX10 = null,
             isSoftResync = jumpDetected
         )

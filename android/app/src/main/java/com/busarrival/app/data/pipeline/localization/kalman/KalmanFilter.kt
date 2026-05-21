@@ -26,6 +26,7 @@ object KalmanFilter {
      * @param state Kalman state (mutated)
      * @param zCm Raw GPS projection (cm)
      * @param vGpsCms GPS speed (cm/s)
+     * @param accuracyM Android location accuracy in meters (null if unavailable)
      * @param hdopX10 HDOP × 10 (null if unavailable)
      * @param isSoftResync Use conservative gains for recovery
      * @return PositionSignals for probability model
@@ -34,6 +35,7 @@ object KalmanFilter {
         state: KalmanState,
         zCm: DistCm,
         vGpsCms: SpeedCms,
+        accuracyM: Float?,
         hdopX10: Int?,
         isSoftResync: Boolean = false
     ): PositionSignals {
@@ -47,9 +49,12 @@ object KalmanFilter {
             state.sCm = sPred + (Ks_SOFT * (zCm - sPred)) / 256
             state.vCms = (vPred + (Kv_SOFT * (vGpsCms - vPred)) / 256).coerceAtLeast(0)
         } else {
-            // Standard update with HDOP-adaptive gain
-            val quality = hdopX10?.let { HdopQuality.fromHdop(it / 10f) }
-            val ks = quality?.ks ?: Ks_STANDARD
+            // Standard update with Android accuracy first, HDOP fallback second.
+            val ks = when {
+                accuracyM != null -> AccuracyQuality.fromAccuracyMeters(accuracyM).ks
+                hdopX10 != null -> HdopQuality.fromHdop(hdopX10 / 10f).ks
+                else -> AccuracyQuality.POOR.ks
+            }
 
             state.sCm = sPred + (ks * (zCm - sPred)) / 256
             state.vCms = (vPred + (Kv_STANDARD * (vGpsCms - vPred)) / 256).coerceAtLeast(0)
