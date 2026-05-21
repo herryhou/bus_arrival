@@ -7,7 +7,7 @@
 use serde::Deserialize;
 
 #[cfg(feature = "std")]
-use shared::{GpsPoint, HeadCdeg, SpeedCms};
+use shared::{DistCm, GpsPoint, HeadCdeg, SpeedCms};
 
 /// Parsed JSONL record with both the normalized GPS point and the raw input timestamp.
 #[cfg(feature = "std")]
@@ -57,7 +57,8 @@ impl JsonReader {
 
         let heading_cdeg = sample.b.map(json_bearing_to_cdeg);
         let speed_cms = sample.s.map(json_speed_to_cms);
-        let hdop_x10 = sample.a.map(json_accuracy_to_hdop_x10);
+        let accuracy_cm = sample.a.map(json_accuracy_to_cm);
+        let hdop_x10 = None;
 
         let _ = sample.p;
 
@@ -69,6 +70,7 @@ impl JsonReader {
                 lon: sample.lon,
                 heading_cdeg,
                 speed_cms,
+                accuracy_cm,
                 hdop_x10,
                 has_fix: true,
             },
@@ -95,6 +97,6 @@ fn json_bearing_to_cdeg(bearing_deg: f64) -> HeadCdeg {
 }
 
 #[cfg(feature = "std")]
-fn json_accuracy_to_hdop_x10(accuracy_m: f64) -> u16 {
-    (accuracy_m * 2.0) as u16
+fn json_accuracy_to_cm(accuracy_m: f64) -> DistCm {
+    (accuracy_m * 100.0) as DistCm
 }

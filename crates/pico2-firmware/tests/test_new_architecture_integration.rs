@@ -105,6 +105,7 @@ fn create_test_gps_point() -> GpsPoint {
         lat: 48.07038,  // 48.07038° N
         lon: 11.31324,  // 11.31324° E
         has_fix: true,
+        accuracy_cm: None,
         hdop_x10: Some(10),
         speed_cms: Some(500),  // 5 m/s
         heading_cdeg: Some(8440),  // 84.4°
