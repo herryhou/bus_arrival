@@ -145,7 +145,7 @@ fn test_trace_serialization_valid_json() {
     assert_eq!(parsed["detection"]["status"], "normal");
     assert_eq!(parsed["detection"]["off_route"], false);
     assert_eq!(parsed["detection"]["gps_jump"], false);
-    assert!(parsed["detection"]["recovery_idx"].is_null());
+    assert!(parsed["detection"].get("recovery_idx").is_none());
     assert_eq!(parsed["detection"]["off_route_last_s_cm"], 9876);
     assert_eq!(parsed["corridor"]["corridor_start_cm"], 9500);
     assert_eq!(parsed["corridor"]["corridor_end_cm"], 10500);
