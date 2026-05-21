@@ -8,12 +8,11 @@ import com.busarrival.app.domain.model.PositionSignals
  * 1D Kalman filter for route progress estimation.
  * Ported from crates/pipeline/gps_processor/src/kalman.rs
  *
- * Fixed-point arithmetic with HDOP-adaptive gains.
+ * Fixed-point arithmetic with Android accuracy-first adaptive gains and HDOP fallback.
  * Reference: specs/02-kalman_filter.md
  */
 object KalmanFilter {
 
-    private const val Ks_STANDARD = 51   // Position gain (standard)
     private const val Kv_STANDARD = 77   // Velocity gain (fixed)
 
     // Soft resync gains (for recovery mode)
