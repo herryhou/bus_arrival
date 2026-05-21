@@ -95,8 +95,8 @@
 		if (!traceData || traceData.length === 0) return null;
 		// Binary search or closest record for better performance
 		return traceData.reduce((prev, curr) =>
-			Math.abs(curr.time_ms - currentTime) <
-			Math.abs(prev.time_ms - currentTime)
+			Math.abs(curr.gps.time_ms - currentTime) <
+			Math.abs(prev.gps.time_ms - currentTime)
 				? curr
 				: prev,
 		);
@@ -105,10 +105,10 @@
 	const busPosition = $derived.by(() => {
 		if (!currentRecord || !routeData) return null;
 		return {
-			lat: currentRecord.lat,
-			lon: currentRecord.lon,
-			heading: currentRecord.heading_cdeg !== undefined
-				? currentRecord.heading_cdeg / 100 // GPS heading in degrees
+			lat: currentRecord.gps.lat,
+			lon: currentRecord.gps.lon,
+			heading: currentRecord.gps.heading_cdeg !== undefined
+				? currentRecord.gps.heading_cdeg / 100 // GPS heading in degrees
 				: undefined,
 		};
 	});
@@ -224,7 +224,7 @@
 								<!-- Detailed view for selected stop -->
 								<ProbabilityScope
 									stopState={activeStopState}
-									v_cms={currentRecord.v_cms}
+									v_cms={currentRecord.kalman.v_cms}
 								/>
 								<div class="spacer"></div>
 								<FsmInspector
@@ -255,7 +255,7 @@
 						<CompactSidebar
 							{traceData}
 							{currentTime}
-							v_cms={currentRecord?.v_cms ?? 0}
+							v_cms={currentRecord?.kalman.v_cms ?? 0}
 							{selectedStop}
 							onSeek={handleSeek}
 							onStopSelect={(idx) => (selectedStop = idx)}
@@ -269,8 +269,8 @@
 					{#if routeData && currentRecord}
 						<LinearRouteWidget
 							{routeData}
-							busProgress={currentRecord.s_cm}
-							busSpeed={currentRecord.v_cms}
+							busProgress={currentRecord.kalman.s_cm}
+							busSpeed={currentRecord.kalman.v_cms}
 							{highlightedEvent}
 							{traceData}
 							{currentTime}

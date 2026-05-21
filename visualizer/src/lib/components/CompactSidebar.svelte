@@ -78,15 +78,15 @@
 		const eventState = event.state || (event.type === 'ARRIVAL' ? 'AtStop' : undefined);
 
 		// Find the trace record at this event time to get lat/lon
-		const record = traceData.find(r => Math.abs(r.time_ms - event.time) < 500);
+		const record = traceData.find(r => Math.abs(r.gps.time_ms - event.time) < 500);
 
 		console.log('Event clicked:', event, 'Record found:', record);
 		onEventClick?.({
 			time: event.time,
 			stopIdx: event.stopIdx,
 			state: eventState,
-			lat: record?.lat,
-			lon: record?.lon
+			lat: record?.gps.lat,
+			lon: record?.gps.lon
 		});
 	}
 
@@ -110,9 +110,9 @@
 
 		traceData.forEach((record) => {
 			// GPS Jump
-			if (record.gps_jump) {
+			if (record.detection.gps_jump) {
 				log.push({
-					time: record.time_ms,
+					time: record.gps.time_ms,
 					type: 'JUMP',
 					message: `GPS Jump: dist > 200m`,
 					index: index++
@@ -120,11 +120,11 @@
 			}
 
 			// Recovery
-			if (record.recovery_idx !== null) {
+			if (record.detection.recovery_idx !== null) {
 				log.push({
-					time: record.time_ms,
+					time: record.gps.time_ms,
 					type: 'RECOVERY',
-					message: `Recovery: stop ${record.recovery_idx}`,
+					message: `Recovery: stop ${record.detection.recovery_idx}`,
 					index: index++
 				});
 			}
@@ -142,7 +142,7 @@
 					const isRedundant = hasArrival && stop.fsm_state === 'AtStop';
 					if (!isRedundant) {
 						log.push({
-							time: record.time_ms,
+							time: record.gps.time_ms,
 							type: 'TRANSITION',
 							message: `Stop ${stop.stop_idx}`,
 							stopIdx: stop.stop_idx,
@@ -155,7 +155,7 @@
 
 				if (stop.just_arrived) {
 					log.push({
-						time: record.time_ms,
+						time: record.gps.time_ms,
 						type: 'ARRIVAL',
 						message: `Stop ${stop.stop_idx}: ARRIVED`,
 						stopIdx: stop.stop_idx,
@@ -177,7 +177,7 @@
 	let currentRecord = $derived.by(() => {
 		if (traceData.length === 0) return null;
 		return traceData.reduce((prev, curr) =>
-			Math.abs(curr.time_ms - currentTime) < Math.abs(prev.time_ms - currentTime) ? curr : prev
+			Math.abs(curr.gps.time_ms - currentTime) < Math.abs(prev.gps.time_ms - currentTime) ? curr : prev
 		);
 	});
 

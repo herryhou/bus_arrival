@@ -11,9 +11,9 @@
 
 	// Find the trace record closest to current time
 	const currentRecord = $derived.by(() => {
-		return traceData.find((r) => r.time_ms === currentTime)
+		return traceData.find((r) => r.gps.time_ms === currentTime)
 			?? traceData.reduce((closest, record) => {
-				return Math.abs(record.time_ms - currentTime) < Math.abs(closest.time_ms - currentTime)
+				return Math.abs(record.gps.time_ms - currentTime) < Math.abs(closest.gps.time_ms - currentTime)
 					? record
 					: closest;
 			}, traceData[0]);

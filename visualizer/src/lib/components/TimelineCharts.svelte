@@ -24,13 +24,13 @@
 		if (!mainChart) return;
 
 		const data = selectedStop !== null
-			? traceData.filter((record) => record.active_stops.includes(selectedStop!))
+			? traceData.filter((record) => record.corridor.active_stops.includes(selectedStop!))
 			: traceData;
 
-		const timeLabels = data.map((r) => new Date(r.time_ms).toLocaleTimeString([], { hour12: false }));
+		const timeLabels = data.map((r) => new Date(r.gps.time_ms).toLocaleTimeString([], { hour12: false }));
 		
 		mainChart.data.labels = timeLabels;
-		mainChart.data.datasets[0].data = data.map(r => r.v_cms);
+		mainChart.data.datasets[0].data = data.map(r => r.kalman.v_cms);
 		
 		if (selectedStop !== null) {
 			mainChart.data.datasets[1].data = data.map(r => {
@@ -128,9 +128,9 @@
 					if (elements.length > 0) {
 						const index = elements[0].index;
 						const data = selectedStop !== null
-							? traceData.filter((record) => record.active_stops.includes(selectedStop!))
+							? traceData.filter((record) => record.corridor.active_stops.includes(selectedStop!))
 							: traceData;
-						onTimeChange(data[index].time_ms);
+						onTimeChange(data[index].gps.time_ms);
 					}
 				}
 			}
