@@ -7,7 +7,9 @@ import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -37,6 +39,7 @@ class DetectionPipelineTraceV2Test {
                 setOf("gps", "kalman", "map_matching", "detection", "corridor", "stop_states"),
                 firstTrace.keys
             )
+            assertEquals("normal", firstTrace.getValue("detection").jsonObject.getValue("status").toString().trim('"'))
 
             val traceWithStopState = traceFile.useLines { lines ->
                 lines
@@ -64,9 +67,35 @@ class DetectionPipelineTraceV2Test {
                 firstStopState.keys
             )
 
-            val parsedStopState = ticks.first { it.stop_states.isNotEmpty() }.stop_states.first()
-            assertTrue(parsedStopState.previous_probability >= 0)
-            assertTrue(parsedStopState.fsm_state.isNotBlank())
+            assertTrue(
+                "Detour trace should include off_route status at least once",
+                ticks.any { it.detection.status == "off_route" }
+            )
+
+            val firstTickWithStopState = ticks.first { it.stop_states.isNotEmpty() }
+            val firstParsedStopState = firstTickWithStopState.stop_states.first()
+            assertEquals(0, firstParsedStopState.previous_probability)
+            assertEquals(null, firstParsedStopState.previous_distance_cm)
+            assertTrue(firstParsedStopState.fsm_state.isNotBlank())
+
+            val consecutivePair = ticks
+                .zipWithNext()
+                .firstOrNull { (previous, current) ->
+                    previous.stop_states.isNotEmpty() &&
+                        current.stop_states.isNotEmpty() &&
+                        previous.stop_states.first().stop_idx == current.stop_states.first().stop_idx
+                }
+            assertNotNull("Expected consecutive ticks for the same active stop", consecutivePair)
+            val (previousTick, currentTick) = consecutivePair!!
+            val previousStopState = previousTick.stop_states.first()
+            val currentStopState = currentTick.stop_states.first()
+
+            assertEquals(previousStopState.probability, currentStopState.previous_probability)
+            assertEquals(previousStopState.progress_distance_cm, currentStopState.previous_distance_cm)
+            assertFalse(
+                "Previous distance should come from the prior tick, not the current one",
+                currentStopState.previous_distance_cm == currentStopState.progress_distance_cm
+            )
         } finally {
             pipeline.close()
             traceFile.delete()

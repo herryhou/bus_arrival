@@ -224,7 +224,7 @@ class DetectionPipeline {
                             ),
                             announced = state.announced,
                             skip_on_reentry = state.skipOnReentry,
-                            previous_distance_cm = state.previousDistanceCm,
+                            previous_distance_cm = state.previousTraceDistanceCm,
                             just_arrived = justArrivedStops.contains(idx)
                         )
                     }
@@ -278,6 +278,7 @@ class DetectionPipeline {
         for ((idx, stop) in route.stops.withIndex()) {
             val state = stopStates[idx] ?: continue
             state.previousProbability = state.lastProbability
+            state.previousTraceDistanceCm = state.previousDistanceCm
 
             // Compute probability
             // Rust golden detection uses the filtered route position for both

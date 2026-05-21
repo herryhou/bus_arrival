@@ -43,13 +43,20 @@ class TraceLoaderTest {
     }
 
     @Test
-    fun load_rejectsLegacyFlatTraceTick() {
+    fun load_readsGroupedV2TraceTickWithoutOptionalPreviousDistance() {
         val file = writeTrace(
-            """{"time_ms":80001000,"lat":25.0,"lon":121.0,"s_cm":100,"v_cms":10,"active_stops":[],"stop_states":[],"gps_jump":false,"recovery_idx":null,"heading_constraint_met":true,"divergence_cm":0,"variance_cm2":0,"off_route":false}"""
+            """{"gps":{"time_ms":99,"lat":1.0,"lon":2.0},"kalman":{"s_cm":300,"v_cms":0,"variance_cm2":0,"divergence_cm":0},"map_matching":{"heading_constraint_met":false},"detection":{"status":"recovering","off_route":false,"gps_jump":true},"corridor":{"active_stops":[5]},"stop_states":[{"stop_idx":5,"gps_distance_cm":10,"progress_distance_cm":20,"fsm_state":"Arriving","dwell_time_s":1,"probability":11,"previous_probability":7,"features":{"p1":1,"p2":1,"p3":1,"p4":1},"announced":false,"skip_on_reentry":true,"just_arrived":true}]}"""
         )
 
         try {
-            assertTrue(TraceLoader.load(file).isEmpty())
+            val tick = TraceLoader.load(file).single()
+            val stopState = tick.stop_states.single()
+
+            assertEquals("recovering", tick.detection.status)
+            assertTrue(tick.detection.gps_jump)
+            assertEquals(7, stopState.previous_probability)
+            assertTrue(stopState.skip_on_reentry)
+            assertEquals(null, stopState.previous_distance_cm)
         } finally {
             file.delete()
         }

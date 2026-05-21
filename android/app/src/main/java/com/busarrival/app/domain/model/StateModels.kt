@@ -71,6 +71,7 @@ data class StopState(
     var previousProbability: Prob8 = UByteWrapper(0),
     var lastAnnouncedStop: Int = -1,
     var announced: Boolean = false,
+    var previousTraceDistanceCm: DistCm? = null,
     var previousDistanceCm: DistCm? = null,
     var skipOnReentry: Boolean = false
 )
