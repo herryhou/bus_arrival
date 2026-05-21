@@ -27,7 +27,7 @@ fn jsonl_accuracy_is_preserved_without_synthetic_hdop() {
 
     assert_eq!(record.gps.accuracy_cm, Some(1595));
     assert_eq!(record.gps.hdop_x10, None);
-    assert_eq!(record.accuracy_cm, None);
+    assert_eq!(record.accuracy_cm, Some(1595));
 }
 
 #[test]
