@@ -216,4 +216,10 @@ class Tz23ScenarioTest {
         val ticks: List<TraceTick>,
         val arrivals: List<Pair<Int, Long>>,
     )
+
+    private val TraceTick.time_ms: Long
+        get() = gps.time_ms
+
+    private val TraceTick.s_cm: Long
+        get() = kalman.s_cm
 }

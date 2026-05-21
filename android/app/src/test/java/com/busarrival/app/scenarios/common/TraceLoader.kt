@@ -6,7 +6,7 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 /**
- * Helper to load trace.jsonl files for golden test validation.
+ * Helper to load grouped trace_v2.jsonl files for golden test validation.
  */
 object TraceLoader {
     private val json = Json {
@@ -15,7 +15,7 @@ object TraceLoader {
     }
 
     /**
-     * Load all ticks from trace.jsonl file.
+     * Load all ticks from a grouped v2 trace file.
      * @return List of TraceTick in order
      */
     fun load(file: File): List<TraceTick> {
@@ -37,7 +37,7 @@ object TraceLoader {
      * @return List of TraceTick
      */
     fun loadFromTestData(scenarioName: String): List<TraceTick> {
-        val file = File("../test_data/$scenarioName/trace.jsonl")
+        val file = File("../test_data/$scenarioName/trace_v2.jsonl")
         if (!file.exists()) {
             throw IllegalArgumentException("Trace file not found: ${file.absolutePath}")
         }

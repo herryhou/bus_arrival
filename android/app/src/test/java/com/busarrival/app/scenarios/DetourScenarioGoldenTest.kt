@@ -126,26 +126,12 @@ class DetourScenarioGoldenTest {
             }
         ).jsonObject
         val expectedKeys = setOf(
-            "time_ms",
-            "lat",
-            "lon",
-            "s_cm",
-            "v_cms",
-            "heading_cdeg",
-            "active_stops",
+            "gps",
+            "kalman",
+            "map_matching",
+            "detection",
+            "corridor",
             "stop_states",
-            "gps_jump",
-            "recovery_idx",
-            "segment_idx",
-            "heading_constraint_met",
-            "divergence_cm",
-            "hdop",
-            "accuracy_cm",
-            "variance_cm2",
-            "corridor_start_cm",
-            "corridor_end_cm",
-            "next_stop",
-            "off_route"
         )
 
         assertEquals(expectedKeys, firstTrace.keys)
@@ -165,7 +151,11 @@ class DetourScenarioGoldenTest {
                 "fsm_state",
                 "dwell_time_s",
                 "probability",
+                "previous_probability",
                 "features",
+                "announced",
+                "skip_on_reentry",
+                "previous_distance_cm",
                 "just_arrived"
             ),
             firstStopState.keys
@@ -896,6 +886,18 @@ class DetourScenarioGoldenTest {
             )
         }
     }
+
+    private val TraceTick.time_ms: Long
+        get() = gps.time_ms
+
+    private val TraceTick.s_cm: Long
+        get() = kalman.s_cm
+
+    private val TraceTick.off_route: Boolean
+        get() = detection.off_route
+
+    private val TraceTick.gps_jump: Boolean
+        get() = detection.gps_jump
 
     @Test
     fun test_normal_operation_does_not_skip_stops() {

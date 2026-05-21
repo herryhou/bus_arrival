@@ -68,6 +68,7 @@ data class StopState(
     var fsmState: FsmState = FsmState.Idle,
     var dwellTimeS: Int = 0,
     var lastProbability: Prob8 = UByteWrapper(0),
+    var previousProbability: Prob8 = UByteWrapper(0),
     var lastAnnouncedStop: Int = -1,
     var announced: Boolean = false,
     var previousDistanceCm: DistCm? = null,

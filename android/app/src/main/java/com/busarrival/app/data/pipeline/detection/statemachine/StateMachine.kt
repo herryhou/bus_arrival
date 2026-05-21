@@ -151,6 +151,7 @@ object StateMachine {
             fsmState = FsmState.Idle,
             dwellTimeS = 0,
             lastProbability = Prob8(0),
+            previousProbability = Prob8(0),
             lastAnnouncedStop = -1,
             announced = false,
             previousDistanceCm = null,

@@ -153,15 +153,46 @@ class DetectionPipeline {
                         listOf(indexedStop.index, probability)
                     }
             }
+            val detectionStatus = when (modeState.mode) {
+                Mode.Normal -> "normal"
+                Mode.OffRoute -> "off_route"
+                Mode.Recovering -> "recovering"
+            }
 
             traceWriter?.write(TraceTick(
-                time_ms = gps.timestamp,
-                lat = gps.lat,
-                lon = gps.lon,
-                s_cm = positionSCm.toLong(),
-                v_cms = kalmanState!!.vCms,
-                heading_cdeg = gps.headingCdeg,
-                active_stops = activeEntries.keys.sorted(),
+                gps = GpsTraceTick(
+                    time_ms = gps.timestamp,
+                    lat = gps.lat,
+                    lon = gps.lon,
+                    heading_cdeg = gps.headingCdeg,
+                    hdop = gps.hdop,
+                    accuracy_cm = gps.accuracyCm
+                ),
+                kalman = KalmanTraceTick(
+                    s_cm = positionSCm.toLong(),
+                    v_cms = kalmanState!!.vCms,
+                    variance_cm2 = 0,
+                    divergence_cm = sCm - positionSCm
+                ),
+                map_matching = MapMatchingTraceTick(
+                    segment_idx = matchResult.segIdx,
+                    heading_constraint_met = matchResult.dist2 != Long.MAX_VALUE
+                ),
+                detection = DetectionTraceTick(
+                    status = detectionStatus,
+                    // off_route=true only in confirmed OffRoute mode.
+                    // Suspect ticks are transitional and should not create detour episodes in trace.
+                    off_route = modeState.mode == Mode.OffRoute,
+                    gps_jump = jumpDetected,
+                    recovery_idx = null,
+                    off_route_last_s_cm = if (modeState.mode == Mode.Normal) null else modeState.frozenSCm.toLong()
+                ),
+                corridor = CorridorTraceTick(
+                    active_stops = activeEntries.keys.sorted(),
+                    corridor_start_cm = corridorStartCm,
+                    corridor_end_cm = corridorEndCm,
+                    next_stop = nextStop
+                ),
                 stop_states = activeEntries
                     .toSortedMap()
                     .map { (idx, state) ->
@@ -184,29 +215,19 @@ class DetectionPipeline {
                             fsm_state = state.fsmState.name,
                             dwell_time_s = state.dwellTimeS,
                             probability = state.lastProbability.value,
+                            previous_probability = state.previousProbability.value,
                             features = TraceFeatureScores(
                                 p1 = features.p1.value,
                                 p2 = features.p2.value,
                                 p3 = features.p3.value,
                                 p4 = features.p4.value
                             ),
+                            announced = state.announced,
+                            skip_on_reentry = state.skipOnReentry,
+                            previous_distance_cm = state.previousDistanceCm,
                             just_arrived = justArrivedStops.contains(idx)
                         )
-                    },
-                gps_jump = jumpDetected,
-                recovery_idx = null,
-                segment_idx = matchResult.segIdx,
-                heading_constraint_met = matchResult.dist2 != Long.MAX_VALUE,
-                divergence_cm = sCm - positionSCm,
-                hdop = gps.hdop,
-                accuracy_cm = gps.accuracyCm,
-                variance_cm2 = 0,
-                corridor_start_cm = corridorStartCm,
-                corridor_end_cm = corridorEndCm,
-                next_stop = nextStop,
-                // off_route=true only in confirmed OffRoute mode.
-                // Suspect ticks are transitional and should not create detour episodes in trace.
-                off_route = modeState.mode == Mode.OffRoute
+                    }
             ))
         }
 
@@ -256,6 +277,7 @@ class DetectionPipeline {
 
         for ((idx, stop) in route.stops.withIndex()) {
             val state = stopStates[idx] ?: continue
+            state.previousProbability = state.lastProbability
 
             // Compute probability
             // Rust golden detection uses the filtered route position for both

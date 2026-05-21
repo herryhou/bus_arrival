@@ -55,6 +55,26 @@ class TraceLoaderTest {
         }
     }
 
+    @Test
+    fun loadFromTestData_readsTraceV2File() {
+        val scenarioName = "trace-loader-test-${System.nanoTime()}"
+        val scenarioDir = File("../test_data/$scenarioName")
+        val traceFile = File(scenarioDir, "trace_v2.jsonl")
+
+        scenarioDir.mkdirs()
+        traceFile.writeText(
+            """{"gps":{"time_ms":42},"kalman":{"s_cm":100},"map_matching":{"heading_constraint_met":false},"detection":{"status":"normal","off_route":false},"corridor":{"active_stops":[]},"stop_states":[]}"""
+        )
+
+        try {
+            val tick = TraceLoader.loadFromTestData(scenarioName).single()
+            assertEquals(42L, tick.gps.time_ms)
+            assertEquals(100L, tick.kalman.s_cm)
+        } finally {
+            scenarioDir.deleteRecursively()
+        }
+    }
+
     private fun writeTrace(line: String): File {
         return File.createTempFile("trace-loader", ".jsonl").apply {
             writeText(line)
