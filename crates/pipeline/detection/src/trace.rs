@@ -69,6 +69,9 @@ pub struct TraceRecord {
     pub hdop: Option<f32>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub accuracy_cm: Option<DistCm>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub num_sats: Option<u8>,
 
     #[serde(skip_serializing_if = "Option::is_none")]

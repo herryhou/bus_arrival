@@ -14,13 +14,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -34,7 +30,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.busarrival.app.presentation.viewmodel.DetectionUiState
-import com.busarrival.app.service.GpsLogActions
 import com.busarrival.app.service.PipelineEvent
 
 @Composable
@@ -43,13 +38,9 @@ fun StatusPanel(
         events: List<PipelineEvent>,
         routeName: String?,
         gpsLoggingEnabled: Boolean,
-        lastGpsLogReference: String?,
-        gpsLogActive: Boolean,
         onStartStop: () -> Unit,
         onToggleCamera: () -> Unit,
         onToggleGpsLogging: () -> Unit,
-        onShareGpsLog: () -> Unit,
-        onDeleteGpsLog: () -> Unit,
         modifier: Modifier = Modifier
 ) {
     Card(
@@ -142,49 +133,6 @@ fun StatusPanel(
                             onCheckedChange = { onToggleGpsLogging() },
                             modifier = Modifier.semantics { contentDescription = "Toggle GPS logging" }
                     )
-                }
-            }
-
-            if (lastGpsLogReference != null) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                        text = "Last log: ${GpsLogActions.displayName(lastGpsLogReference)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Button(
-                            onClick = onShareGpsLog,
-                            enabled = !gpsLogActive,
-                            modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                                imageVector = Icons.Default.Share,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Share")
-                    }
-                    Button(
-                            onClick = onDeleteGpsLog,
-                            enabled = !gpsLogActive,
-                            modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Delete")
-                    }
                 }
             }
 

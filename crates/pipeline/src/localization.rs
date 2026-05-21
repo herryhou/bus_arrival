@@ -10,6 +10,7 @@ pub struct GpsDiagnostics {
     pub heading_met: bool,
     pub divergence_cm: i32,
     pub hdop: Option<f32>,
+    pub accuracy_cm: Option<i32>,
     pub num_sats: Option<u8>,
     pub fix_type: Option<String>,
     pub variance_cm2: i32,
@@ -45,6 +46,12 @@ impl GpsDiagnostics {
         self
     }
 
+    /// Builder method for accuracy_cm
+    pub fn with_accuracy_cm(mut self, accuracy_cm: Option<i32>) -> Self {
+        self.accuracy_cm = accuracy_cm;
+        self
+    }
+
     /// Builder method for num_sats
     pub fn with_num_sats(mut self, sats: Option<u8>) -> Self {
         self.num_sats = sats;
@@ -75,6 +82,7 @@ mod tests {
             .with_heading_met(true)
             .with_divergence_cm(100)
             .with_hdop(Some(1.5))
+            .with_accuracy_cm(Some(150))
             .with_num_sats(Some(12))
             .with_fix_type(Some("3D".to_string()))
             .with_variance_cm2(50);
@@ -83,6 +91,7 @@ mod tests {
         assert_eq!(diag.heading_met, true);
         assert_eq!(diag.divergence_cm, 100);
         assert_eq!(diag.hdop, Some(1.5));
+        assert_eq!(diag.accuracy_cm, Some(150));
         assert_eq!(diag.num_sats, Some(12));
         assert_eq!(diag.fix_type, Some("3D".to_string()));
         assert_eq!(diag.variance_cm2, 50);
@@ -96,6 +105,7 @@ mod tests {
         assert_eq!(diag.heading_met, false);
         assert_eq!(diag.divergence_cm, 0);
         assert_eq!(diag.hdop, None);
+        assert_eq!(diag.accuracy_cm, None);
         assert_eq!(diag.num_sats, None);
         assert_eq!(diag.fix_type, None);
         assert_eq!(diag.variance_cm2, 0);

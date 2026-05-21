@@ -32,6 +32,8 @@ Each line is a JSON object (JSONL format):
 - `time`: GPS timestamp (milliseconds)
 - `s_cm`: Route position (centimeters)
 - `off_route`: Off-route mode flag
+- `hdop`: Horizontal dilution of precision if available
+- `accuracy_cm`: Horizontal accuracy in centimeters if available
 - `stop_states`: List of per-stop FSM states (null if empty)
   - `stop_idx`: Stop index
   - `fsm_state`: FSM state name ("Approaching", "Arriving", "AtStop", "Departed", "Idle")

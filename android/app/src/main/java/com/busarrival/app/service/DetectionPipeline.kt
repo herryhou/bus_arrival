@@ -199,6 +199,7 @@ class DetectionPipeline {
                 heading_constraint_met = matchResult.dist2 != Long.MAX_VALUE,
                 divergence_cm = sCm - positionSCm,
                 hdop = gps.hdop,
+                accuracy_cm = gps.accuracyCm,
                 variance_cm2 = 0,
                 corridor_start_cm = corridorStartCm,
                 corridor_end_cm = corridorEndCm,

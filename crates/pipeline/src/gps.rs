@@ -29,6 +29,8 @@ pub struct GpsRecord {
     pub divergence_cm: i32,
     /// GPS quality: HDOP (None if not available)
     pub hdop: Option<f32>,
+    /// GPS quality: horizontal accuracy in cm (None if not available)
+    pub accuracy_cm: Option<DistCm>,
     /// GPS quality: number of satellites (None if not available)
     pub num_sats: Option<u8>,
     /// GPS quality: fix type - "none", "2d", "3d" (None if not available)
@@ -61,6 +63,7 @@ impl GpsRecord {
             heading_constraint_met: false,
             divergence_cm: 0,
             hdop: None,
+            accuracy_cm: None,
             num_sats: None,
             fix_type: None,
             variance_cm2: 0,
@@ -73,6 +76,7 @@ impl GpsRecord {
         self.heading_constraint_met = diag.heading_met;
         self.divergence_cm = diag.divergence_cm;
         self.hdop = diag.hdop;
+        self.accuracy_cm = diag.accuracy_cm;
         self.num_sats = diag.num_sats;
         self.fix_type = diag.fix_type;
         self.variance_cm2 = diag.variance_cm2;

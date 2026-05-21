@@ -111,11 +111,39 @@ object NmeaParser {
      * Only returns GPRMC sentences (avoid duplicates).
      */
     fun parseFile(content: String): List<Location> {
-        val locations = content.lineSequence()
-            .mapNotNull { parse(it) }
-            .filter { it.speed > 0 || it.bearing > 0 }  // Only GPRMC (has speed/heading)
-            .toList()
+        val locations = mutableListOf<Location>()
+        var pendingRmc: Location? = null
 
-        return locations
+        content.lineSequence().forEach { line ->
+            when {
+                line.startsWith("\$GPRMC") -> {
+                    pendingRmc?.let { locations.add(it) }
+                    pendingRmc = parseGPRMC(line)
+                }
+                line.startsWith("\$GPGGA") -> {
+                    val accuracyM = parseGPGGAAccuracy(line)
+                    if (accuracyM != null) {
+                        pendingRmc?.accuracy = accuracyM * 10f
+                    }
+                    pendingRmc?.let {
+                        locations.add(it)
+                        pendingRmc = null
+                    }
+                }
+            }
+        }
+
+        pendingRmc?.let { locations.add(it) }
+
+        return locations.filter { it.speed > 0 || it.bearing > 0 }
+    }
+
+    /**
+     * Parse GPGGA HDOP for a paired GPRMC fix.
+     */
+    private fun parseGPGGAAccuracy(sentence: String): Float? {
+        val parts = sentence.split(",")
+        if (parts.size < 9) return null
+        return parts[8].toFloatOrNull()
     }
 }

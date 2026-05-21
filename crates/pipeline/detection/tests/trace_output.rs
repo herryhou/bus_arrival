@@ -43,6 +43,7 @@ fn test_trace_serialization_valid_json() {
         heading_constraint_met: true,
         divergence_cm: 15,
         hdop: Some(1.2),
+        accuracy_cm: Some(150),
         num_sats: Some(12),
         fix_type: Some("3d".to_string()),
         variance_cm2: 100,
@@ -79,6 +80,7 @@ fn test_trace_serialization_valid_json() {
     assert_eq!(parsed["heading_constraint_met"], true);
     assert_eq!(parsed["divergence_cm"], 15);
     assert_eq!(parsed["hdop"], 1.2);
+    assert_eq!(parsed["accuracy_cm"], 150);
     assert_eq!(parsed["num_sats"], 12);
     assert_eq!(parsed["fix_type"], "3d");
     assert_eq!(parsed["variance_cm2"], 100);

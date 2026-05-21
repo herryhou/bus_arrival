@@ -15,6 +15,7 @@ data class GpsPoint(
     val speedCms: SpeedCms?,
     val accuracyM: Float?,
     val hdop: Float?,
+    val accuracyCm: Int?,
     val hasFix: Boolean
 ) {
     companion object {
@@ -24,10 +25,11 @@ data class GpsPoint(
                 timestamp = location.time,
                 lat = location.latitude,  // Keep as Double (degrees)
                 lon = location.longitude,  // Keep as Double (degrees)
-                headingCdeg = location.bearing?.toCdeg(),
-                speedCms = location.speed?.toCms(),
+                headingCdeg = location.bearing.toCdeg(),
+                speedCms = location.speed.toCms(),
                 accuracyM = if (location.hasAccuracy()) location.accuracy else null,
                 hdop = null, // Location API doesn't provide HDOP directly
+                accuracyCm = if (location.hasAccuracy()) (location.accuracy * 100).toInt() else null,
                 hasFix = true // Location API only provides valid fixes
             )
             // Debug: Log first 5 conversions

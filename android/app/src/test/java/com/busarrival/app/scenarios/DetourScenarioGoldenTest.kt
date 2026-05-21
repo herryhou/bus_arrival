@@ -140,6 +140,7 @@ class DetourScenarioGoldenTest {
             "heading_constraint_met",
             "divergence_cm",
             "hdop",
+            "accuracy_cm",
             "variance_cm2",
             "corridor_start_cm",
             "corridor_end_cm",

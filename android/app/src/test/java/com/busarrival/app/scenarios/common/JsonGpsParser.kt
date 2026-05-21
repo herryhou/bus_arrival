@@ -22,6 +22,7 @@ object JsonGpsParser {
         val time = obj["t"]?.jsonPrimitive?.long ?: return null
         val lat = obj["lat"]?.jsonPrimitive?.float?.toDouble() ?: return null
         val lon = obj["lon"]?.jsonPrimitive?.float?.toDouble() ?: return null
+        val accuracy = obj["a"]?.jsonPrimitive?.float
         val speed = obj["s"]?.jsonPrimitive?.float ?: 0f
         val bearing = obj["b"]?.jsonPrimitive?.float ?: 0f
 
@@ -29,6 +30,9 @@ object JsonGpsParser {
             this.time = time
             this.latitude = lat
             this.longitude = lon
+            if (accuracy != null) {
+                this.accuracy = accuracy
+            }
             this.speed = speed
             this.bearing = bearing
         }

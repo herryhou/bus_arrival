@@ -25,6 +25,7 @@ data class TraceTick(
     val heading_constraint_met: Boolean = false,
     val divergence_cm: Int = 0,
     val hdop: Float? = null,
+    val accuracy_cm: Int? = null,
     val variance_cm2: Int = 0,
     val corridor_start_cm: Int? = null,
     val corridor_end_cm: Int? = null,

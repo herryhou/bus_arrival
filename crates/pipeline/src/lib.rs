@@ -132,7 +132,12 @@ impl LocalizationState {
     }
 
     /// Process GPS point and return GpsRecord if valid
-    pub fn process_gps(&mut self, gps: &GpsPoint, route_data: &RouteData) -> Option<gps::GpsRecord> {
+    pub fn process_gps(
+        &mut self,
+        gps: &GpsPoint,
+        route_data: &RouteData,
+        accuracy_cm: Option<shared::DistCm>,
+    ) -> Option<gps::GpsRecord> {
         let result = gps_processor::kalman::process_gps_update(
             &mut self.kalman,
             &mut self.dr,
@@ -164,6 +169,7 @@ impl LocalizationState {
                         .with_heading_met(true)
                         .with_divergence_cm(divergence_cm)
                         .with_hdop(hdop)
+                        .with_accuracy_cm(accuracy_cm)
                 ))
             }
             gps_processor::kalman::ProcessResult::DrOutage { s_cm, v_cms } => {
@@ -176,7 +182,7 @@ impl LocalizationState {
                     gps.heading_cdeg,  // CRITICAL: Preserve heading even in DR mode
                     "dr_outage",
                 ).with_diagnostics(
-                    localization::GpsDiagnostics::new()
+                    localization::GpsDiagnostics::new().with_accuracy_cm(accuracy_cm)
                 ))
             }
             gps_processor::kalman::ProcessResult::OffRoute { last_valid_s, last_valid_v, freeze_time: _ } => {
@@ -189,7 +195,7 @@ impl LocalizationState {
                     None,
                     "off_route",
                 ).with_diagnostics(
-                    localization::GpsDiagnostics::new()
+                    localization::GpsDiagnostics::new().with_accuracy_cm(accuracy_cm)
                 ))
             }
             gps_processor::kalman::ProcessResult::SuspectOffRoute { s_cm, v_cms } => {
@@ -202,7 +208,7 @@ impl LocalizationState {
                     None,
                     "suspect_off_route",
                 ).with_diagnostics(
-                    localization::GpsDiagnostics::new()
+                    localization::GpsDiagnostics::new().with_accuracy_cm(accuracy_cm)
                 ))
             }
             gps_processor::kalman::ProcessResult::Rejected(_) => None,
@@ -290,7 +296,7 @@ impl Pipeline {
                 if nmea_acc.should_emit() {
                     if let Some((gps, _fix_quality)) = nmea_acc.build() {
                         // Phase 2: Localization (Kalman + Map Matching)
-                        if let Some(gps_record) = loc_state.process_gps(&gps, route_data) {
+                        if let Some(gps_record) = loc_state.process_gps(&gps, route_data, None) {
                             // Phase 3: Arrival Detection
                             det_state.process_gps_record(&gps_record, route_data, &mut result);
 
@@ -323,7 +329,7 @@ impl Pipeline {
 
             if let Some(record) = jsonl_reader.parse_line(&line) {
                 let gps = record.gps;
-                if let Some(gps_record) = loc_state.process_gps(&gps, route_data) {
+                if let Some(gps_record) = loc_state.process_gps(&gps, route_data, record.accuracy_cm) {
                     det_state.process_gps_record(&gps_record, route_data, &mut result);
 
                     #[cfg(feature = "std")]
@@ -431,6 +437,7 @@ impl PipelineResult {
             heading_constraint_met: record.heading_constraint_met,
             divergence_cm: record.divergence_cm,
             hdop: record.hdop,
+            accuracy_cm: record.accuracy_cm,
             num_sats: record.num_sats,
             fix_type: record.fix_type.clone(),
             variance_cm2: record.variance_cm2,

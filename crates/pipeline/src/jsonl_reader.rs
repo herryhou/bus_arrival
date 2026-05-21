@@ -15,6 +15,7 @@ use shared::{DistCm, GpsPoint, HeadCdeg, SpeedCms};
 pub struct JsonlRecord {
     pub timestamp_ms: u64,
     pub gps: GpsPoint,
+    pub accuracy_cm: Option<DistCm>,
 }
 
 #[cfg(feature = "std")]
@@ -64,6 +65,7 @@ impl JsonReader {
 
         Some(JsonlRecord {
             timestamp_ms: sample.t,
+            accuracy_cm,
             gps: GpsPoint {
                 timestamp: sample.t,
                 lat: sample.lat,
