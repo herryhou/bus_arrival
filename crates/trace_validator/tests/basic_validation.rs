@@ -23,5 +23,6 @@ fn test_basic_trace_validation() {
     // Verify HTML was generated
     let html = std::fs::read_to_string(output_file.path()).unwrap();
     assert!(html.contains("Trace Validation Report"));
-    assert!(html.contains("1"));  // total_records
+    assert!(html.contains("<div class=\"metric-value\">2</div>\n      <div>Total Records</div>"));
+    assert!(html.contains("\"total_records\": 2"));
 }

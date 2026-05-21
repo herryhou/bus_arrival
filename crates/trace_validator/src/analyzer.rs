@@ -6,10 +6,15 @@ pub struct Analyzer;
 
 impl Analyzer {
     pub fn analyze(records: Vec<TraceRecord>) -> ValidationResult {
+        let time_range = match (records.first(), records.last()) {
+            (Some(first), Some(last)) => (first.gps.time_ms, last.gps.time_ms),
+            _ => (0, 0),
+        };
+
         let mut result = ValidationResult {
             trace_file: String::new(),
             total_records: records.len(),
-            time_range: (records[0].gps.time_ms, records.last().unwrap().gps.time_ms),
+            time_range,
             stops_analyzed: Default::default(),
             global_issues: Default::default(),
             gps_jump_count: 0,
@@ -128,13 +133,11 @@ mod tests {
 
     #[test]
     fn test_analyze_empty_records() {
-        let mut record = sample_record(1, false, vec![]);
-        record.corridor.active_stops.clear();
-        let records = vec![record];
-
-        let result = Analyzer::analyze(records);
-        assert_eq!(result.total_records, 1);
+        let result = Analyzer::analyze(vec![]);
+        assert_eq!(result.total_records, 0);
+        assert_eq!(result.time_range, (0, 0));
         assert_eq!(result.stops_analyzed.len(), 0);
+        assert_eq!(result.gps_jump_count, 0);
     }
 
     #[test]
