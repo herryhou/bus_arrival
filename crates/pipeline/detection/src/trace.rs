@@ -153,6 +153,7 @@ pub struct StopTraceState {
     pub skip_on_reentry: bool,
 
     /// Previous signed distance to stop, if available
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_distance_cm: Option<DistCm>,
 
     /// Just arrived this frame?

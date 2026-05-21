@@ -61,7 +61,7 @@ fn test_trace_serialization_valid_json() {
                 features: FeatureScores { p1: 200, p2: 150, p3: 180, p4: 100 },
                 announced: false,
                 skip_on_reentry: false,
-                previous_distance_cm: Some(550),
+                previous_distance_cm: None,
                 just_arrived: false,
             },
             StopTraceState {
@@ -151,6 +151,8 @@ fn test_trace_serialization_valid_json() {
     assert_eq!(parsed["corridor"]["corridor_end_cm"], 10500);
     assert_eq!(parsed["corridor"]["next_stop"][0], 2);
     assert_eq!(parsed["corridor"]["next_stop"][1], 200);
+    assert!(parsed["stop_states"][0].get("previous_distance_cm").is_none());
+    assert_eq!(parsed["stop_states"][1]["previous_distance_cm"], -450);
 }
 
 #[test]
