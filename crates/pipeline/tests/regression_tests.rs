@@ -118,3 +118,33 @@ fn test_skip_stop5_on_offroute_reentry() {
     println!("✓ Stop 5 correctly skipped on off-route re-entry");
     println!("  Detected stops: {:?} (stop 5 skipped)", mut_detected);
 }
+
+#[test]
+fn test_tpF805_trace_v2_stop_states_match_active_stops() {
+    let mut trace_path = test_data_dir();
+    trace_path.push("tpF805_normal_trace_v2.jsonl");
+
+    let trace = fs::read_to_string(&trace_path).expect("Failed to load tpF805 trace_v2 fixture");
+
+    for (line_idx, line) in trace.lines().filter(|line| !line.is_empty()).enumerate() {
+        let record: pipeline::TraceRecord =
+            serde_json::from_str(line).expect("Failed to parse trace_v2 record");
+        let mut active_stops = record.corridor.active_stops;
+        let mut stop_state_indices: Vec<u8> = record
+            .stop_states
+            .iter()
+            .map(|state| state.stop_idx)
+            .collect();
+
+        active_stops.sort_unstable();
+        stop_state_indices.sort_unstable();
+
+        assert_eq!(
+            stop_state_indices,
+            active_stops,
+            "trace_v2 stop_states must contain only current active stops at line {}, time {}",
+            line_idx + 1,
+            record.gps.time_ms
+        );
+    }
+}

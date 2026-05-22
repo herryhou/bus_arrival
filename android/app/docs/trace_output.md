@@ -57,7 +57,7 @@ Each line is a grouped JSON object (JSONL format):
   - `map_matching`: segment and heading-constraint result
   - `detection`: mode/status flags such as `off_route` and `gps_jump`
   - `corridor`: active stop corridor window
-  - `stop_states`: per-stop FSM state entries (empty list if none)
+  - `stop_states`: per-stop FSM state entries for the current `corridor.active_stops` only
 - `stop_states` entry fields:
   - `stop_idx`: Stop index
   - `gps_distance_cm`: Raw GPS distance to stop

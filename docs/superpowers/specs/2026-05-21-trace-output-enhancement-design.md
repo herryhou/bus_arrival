@@ -108,21 +108,11 @@ available mode/recovery state from `DetectionPipeline`.
 
 ### Stop State Emission
 
-`corridor.active_stops` remains the exact corridor-filter output.
+`corridor.active_stops` is the exact corridor-filter output.
 
-`stop_states` is a diagnostic superset. Consumers must not infer active stops
-from presence in `stop_states`; they must use `corridor.active_stops`.
-
-Emit a stop state when any condition is true:
-
-```text
-stop is active in the corridor
-stop.announced == true
-stop.skip_on_reentry == true
-```
-
-This keeps trace size bounded while exposing meaningful inactive stops after
-announcement or detour re-entry.
+`stop_states` must contain only the stop states for the current
+`corridor.active_stops` on the same tick. Consumers can rely on the two lists
+containing the same stop indices.
 
 ### Probability Fields
 
@@ -138,16 +128,16 @@ update function.
 `detection.off_route_last_s_cm` is the last valid route position before
 confirmed off-route mode. It supports detour jump threshold debugging.
 
-`stop_states[].skip_on_reentry` shows stops skipped after re-entry.
+`stop_states[].skip_on_reentry` shows whether an active stop is skipped after
+re-entry.
 
 `stop_states[].previous_distance_cm` shows the previous route-distance-to-stop
 value used for re-acquisition and transition debugging.
 
 ### Announcement Field
 
-`stop_states[].announced` exposes the per-stop one-time announcement flag. It is
-visible after departure because announced stops are part of the diagnostic
-`stop_states` superset.
+`stop_states[].announced` exposes the per-stop one-time announcement flag for
+currently active stops.
 
 ---
 
@@ -166,7 +156,7 @@ visible after departure because announced stops are part of the diagnostic
   - Move corridor fields into the `corridor` group.
 - `crates/pipeline/src/detection_state.rs`
   - Keep tracking `off_route_last_s_cm`.
-  - Expand trace emission to active stops, announced stops, and skipped stops.
+  - Emit trace stop states only for current active stops.
   - Snapshot `previous_probability` before stop state update.
 
 ### Android
@@ -178,7 +168,7 @@ visible after departure because announced stops are part of the diagnostic
   - Build grouped `TraceTick` values.
   - Keep Android trace-specific state inside `DetectionPipeline.kt`; do not add a
     new Android `DetectionState` abstraction for this work.
-  - Expand stop-state emission using the same diagnostic superset semantics.
+  - Emit trace stop states only for current active stops.
   - Snapshot `previous_probability` before each stop state update.
 
 ---
@@ -230,7 +220,7 @@ Each implementation phase must include tests that prove:
 - Scenario tests no longer depend on flat top-level trace fields.
 - `detection.off_route` is false for `"suspect_off_route"`.
 - `corridor.active_stops` is corridor-only.
-- `stop_states` can include announced or skipped inactive stops.
+- `stop_states` contains only the same stop indices as `corridor.active_stops`.
 - `previous_probability` is the pre-update value, while `probability` is the
   current tick value.
 

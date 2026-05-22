@@ -31,6 +31,13 @@ class DetectionPipelineTraceV2Test {
 
             val ticks = TraceLoader.load(traceFile)
             assertTrue("Expected grouped trace ticks to be parsed", ticks.isNotEmpty())
+            ticks.forEach { tick ->
+                assertEquals(
+                    "stop_states must contain only the current active stops at ${tick.gps.time_ms}",
+                    tick.corridor.active_stops.sorted(),
+                    tick.stop_states.map { it.stop_idx }.sorted()
+                )
+            }
 
             val firstTrace = Json.parseToJsonElement(
                 traceFile.useLines { lines -> lines.first { it.isNotBlank() } }
@@ -96,6 +103,31 @@ class DetectionPipelineTraceV2Test {
                 "Previous distance should come from the prior tick, not the current one",
                 currentStopState.previous_distance_cm == currentStopState.progress_distance_cm
             )
+        } finally {
+            pipeline.close()
+            traceFile.delete()
+        }
+    }
+
+    @Test
+    fun process_tpF805TraceV2StopStatesMatchCurrentActiveStops() {
+        val routeData = RouteDataParser.loadFromFile(testDataFile("tpF805_normal.bin").absolutePath)
+        val locations = NmeaParser.parseFile(testDataFile("tpF805_normal_nmea.txt").readText())
+        val traceFile = File.createTempFile("trace-v2-tpF805", ".jsonl")
+        val pipeline = DetectionPipeline()
+
+        try {
+            pipeline.initialize(routeData, traceFile = traceFile)
+            locations.forEach { pipeline.process(it) }
+            pipeline.close()
+
+            TraceLoader.load(traceFile).forEach { tick ->
+                assertEquals(
+                    "stop_states must contain only the current active stops at ${tick.gps.time_ms}",
+                    tick.corridor.active_stops.sorted(),
+                    tick.stop_states.map { it.stop_idx }.sorted()
+                )
+            }
         } finally {
             pipeline.close()
             traceFile.delete()
