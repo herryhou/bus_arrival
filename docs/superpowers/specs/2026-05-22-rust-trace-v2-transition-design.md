@@ -68,7 +68,13 @@ Remove legacy `trace.jsonl` support from Rust pipeline code. `trace_v2.jsonl` be
 
 #### 3. Makefile
 
-Add `update-fixtures` target:
+**Update existing targets (hard-coded `_trace.jsonl` references):**
+- Line 55: `TRACE_OUT` variable → `$(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_trace_v2.jsonl`
+- Line 193: `golden` target cp command → use `_trace_v2.jsonl`
+- Line 215: `clean` target rm pattern → remove both `*_trace.jsonl` and `*_trace_v2.jsonl`
+- Line 277: `validate-ty225` fixture path → `tpF805_normal_trace_v2.jsonl`
+
+**Add new target:**
 ```makefile
 update-fixtures:
 	cargo run -p pipeline -- test_data/ty225_normal_nmea.txt test_data/ty225_normal.bin --output test_data/ty225_normal_trace_v2.jsonl
@@ -81,17 +87,24 @@ Update `CLAUDE.md` examples to reference `trace_v2.jsonl`
 
 ## Testing
 
-- Existing tests validate trace_v2 format (stop_states grouping, field expansion)
+**Existing tests:**
+- `test_tpF805_trace_v2_stop_states_match_active_stops()` validates trace_v2 schema (stop_states grouping, field expansion)
 - Golden tests compare against trace_v2 fixtures
-- No new tests needed (format already validated)
+
+**New test needed:**
+- Add test validating `generate_trace_path()` output filename contract
+- Ensures auto-generated paths use `_trace_v2.jsonl` suffix
+- Prevents regression if default output naming drifts back to `_trace.jsonl`
 
 ## Rollout
 
-1. Update test code references
-2. Delete old trace fixtures
-3. Add makefile target
-4. Update documentation
-5. Verify all tests pass
+1. Update test code references (`mod.rs`, `normal.rs`, `detour_reentry_integration.rs`)
+2. Update Makefile (TRACE_OUT, golden, clean, validate-ty225)
+3. Add makefile `update-fixtures` target
+4. Add test for `generate_trace_path()` output filename contract
+5. Delete old trace fixtures
+6. Update documentation
+7. Verify all tests pass
 
 ## Alternatives Considered
 
