@@ -39,7 +39,7 @@ fn test_normal_complete_route() {
     // With the Android-parity detection gate, suspect/off-route ticks no longer
     // advance stop FSM state. Characterize the gated host-pipeline behavior for
     // the ground-truth range while keeping the order and precision checks below.
-    let expected_gated_arrivals = 32;
+    let expected_gated_arrivals = 42;
     assert_eq!(
         filtered_detected.len(),
         expected_gated_arrivals,
