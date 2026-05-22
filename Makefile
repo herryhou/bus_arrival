@@ -274,7 +274,7 @@ validate-trace:
 
 validate-ty225:
 	@cargo run --release --bin trace_validator -- \
-		test_data/tpF805_normal_trace.jsonl \
+		test_data/tpF805_normal_trace_v2.jsonl \
 		--ground-truth ground_truth.json \
 		-o validation_report.html \
 		--verbose
