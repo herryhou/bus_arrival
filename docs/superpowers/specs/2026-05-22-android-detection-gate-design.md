@@ -31,15 +31,15 @@ entries.
 ## Design
 
 `ModeMachine.update()` should return both the updated mode state and a detection
-gate. The gate is the single authoritative answer to: "May this tick update
-arrival detection state?"
+gate. The gate is the single authoritative answer to: "Does route-trust policy
+allow this tick to update arrival detection state?"
 
 Suggested shape:
 
 ```kotlin
 data class ModeUpdate(
     val state: ModeState,
-    val detectionEnabled: Boolean,
+    val detectionAllowed: Boolean,
 )
 ```
 
@@ -47,22 +47,52 @@ The exact type name can follow local style, but the important boundary is that
 `DetectionPipeline` receives an explicit decision instead of reading
 `suspectTicks` and duplicating policy.
 
+First-fix tracking stays in `DetectionPipeline`. First fix is a pipeline
+initialization concern, not route-trust state owned by `ModeMachine`.
+
+```kotlin
+private var firstFixProcessed = false
+
+val modeUpdate = ModeMachine.update(...)
+val detectionAllowed = modeUpdate.detectionAllowed && firstFixProcessed
+firstFixProcessed = true
+```
+
 ## Detection Gate Rules
 
 Detection must be disabled for:
 
-- The first GPS fix after initialization.
 - `Mode.Normal` with `suspectTicks > 0`.
 - `Mode.OffRoute`.
 - `Mode.Recovering`.
-- Transition ticks into or out of off-route/recovery when state is being frozen,
-  cleared, or reset.
 
 Detection may be enabled only when:
 
 - The updated mode is `Mode.Normal`.
-- The tick is not the first fix.
 - No off-route suspicion is active after processing the current match.
+
+`DetectionPipeline` additionally disables detection for the first GPS fix after
+initialization.
+
+Transition ticks do not need a separate flag. They are covered by existing
+state:
+
+- Entering `OffRoute` or `Recovering`: updated mode is not `Normal`, so
+  `detectionAllowed == false`.
+- Exiting `OffRoute` or `Recovering`: `DetectionPipeline` handles recovery or
+  state reset and should not run detection until the next trusted Normal tick.
+
+## Mode Table
+
+| Updated mode | `suspectTicks` | `detectionAllowed` | Notes |
+| --- | ---: | --- | --- |
+| `Normal` | 0 | `true` | Trusted route geometry. |
+| `Normal` | 1-4 | `false` | Suspect phase before off-route confirmation. |
+| `OffRoute` | 0 | `false` | Confirmed off-route; position frozen. |
+| `Recovering` | 0 | `false` | Recovery is active; detection waits. |
+
+`DetectionPipeline` applies the first-fix gate after this table, so the first
+tick is detection-disabled even if `ModeMachine` reports trusted `Normal`.
 
 ## Pipeline Behavior
 
@@ -70,16 +100,40 @@ Detection may be enabled only when:
 
 1. Run GPS conversion, map matching, Kalman update, and mode update.
 2. Use the mode update result to choose one of two paths:
-   - `detectionEnabled == false`: update time/position bookkeeping, write a
+   - `detectionAllowed == false`: update time/position bookkeeping, write a
      trace tick with empty `corridor.active_stops` and empty `stop_states`, and
      return no arrivals/departures.
-   - `detectionEnabled == true`: run probability and stop FSM updates, then
+   - `detectionAllowed == true`: run probability and stop FSM updates, then
      write trace with active stop state entries.
 3. Avoid direct detection-policy checks like `modeState.suspectTicks > 0` in
    pipeline code.
 
 The trace should reflect the same gate as detection. If detection did not run,
 trace output must not imply that a stop corridor or FSM state is active.
+
+### Trace Examples
+
+Gate closed:
+
+```json
+{
+  "gps": {"time_ms": 1779172273176},
+  "detection": {"status": "normal", "off_route": false},
+  "corridor": {"active_stops": [], "next_stop": null},
+  "stop_states": []
+}
+```
+
+Gate open:
+
+```json
+{
+  "gps": {"time_ms": 1779172300000},
+  "detection": {"status": "normal", "off_route": false},
+  "corridor": {"active_stops": [0], "next_stop": [1, 50]},
+  "stop_states": [{"stop_idx": 0, "fsm_state": "Approaching"}]
+}
+```
 
 ## Why Not Default To OffRoute
 
@@ -131,7 +185,6 @@ simpler and remains safe for first visible entries.
 
 Add or update tests for:
 
-- `ModeMachine`: first fix disables detection.
 - `ModeMachine`: suspect ticks disable detection without immediately entering
   `OffRoute`.
 - `ModeMachine`: trusted Normal tick enables detection.
@@ -150,3 +203,17 @@ Add or update tests for:
 - Keep `ModeState` fields available for diagnostics and transitions, but do not
   require consumers to infer detection policy from them.
 - Prefer adding focused mode-machine unit tests before adjusting the pipeline.
+
+## Implementation Order
+
+1. Add `ModeUpdate` with `detectionAllowed`, and return it from
+   `ModeMachine.update()`.
+2. Add focused `ModeMachine` unit tests for `detectionAllowed` before pipeline
+   changes.
+3. Add `firstFixProcessed` tracking in `DetectionPipeline`.
+4. Update `DetectionPipeline` to use `modeUpdate.detectionAllowed` combined
+   with `firstFixProcessed`.
+5. Add or keep `Tz23ScenarioTest` validation that ticks before initial
+   off-route confirmation have empty `stop_states`.
+6. Verify existing grouped trace tests still pass.
+7. Remove dead pipeline-side policy checks based on `suspectTicks`.
