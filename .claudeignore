@@ -1,0 +1,27 @@
+# Exclude non-Rust parts by default (token optimization)
+android/
+visualizer/
+
+# Exclude archived docs
+docs/archive/
+
+# Exclude build artifacts
+target/
+node_modules/
+
+# Exclude test data
+test_data/
+
+# Exclude caches
+.cargo/
+cargo-cache/
+claude-npm-cache/
+.playwright-*/
+
+# Exclude IDE
+.vscode/
+.idea/
+
+# Exclude generated files
+*.rlib
+crates.txt
