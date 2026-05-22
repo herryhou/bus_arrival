@@ -171,16 +171,7 @@ impl DetectionState {
 
         let z_gps_cm = record.s_cm + record.divergence_cm;
 
-        let mut trace_indices = self.active_indices.clone();
-        for (idx, stop_state) in self.stop_states.iter().enumerate() {
-            if (stop_state.announced || stop_state.skip_on_reentry)
-                && !trace_indices.contains(&idx)
-            {
-                trace_indices.push(idx);
-            }
-        }
-
-        let stop_states: Vec<StopTraceState> = trace_indices.iter().map(|&idx| {
+        let stop_states: Vec<StopTraceState> = self.active_indices.iter().map(|&idx| {
             let stop = &stops[idx];
             let stop_state = &self.stop_states[idx];
 
@@ -254,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn get_trace_info_includes_active_announced_and_skipped_stop_states() {
+    fn get_trace_info_includes_only_active_stops() {
         let route_data = load_route_data();
         let mut state = DetectionState::new(&route_data);
         let stops = route_data.stops();
@@ -284,25 +275,14 @@ mod tests {
 
         assert_eq!(active_stops, vec![0]);
 
-        let mut emitted_indices: Vec<u8> = stop_states.iter().map(|stop| stop.stop_idx).collect();
-        emitted_indices.sort_unstable();
-        assert_eq!(emitted_indices, vec![0, 1, 2]);
+        let emitted_indices: Vec<u8> = stop_states.iter().map(|stop| stop.stop_idx).collect();
+        assert_eq!(emitted_indices, vec![0]);
 
-        let announced = stop_states
-            .iter()
-            .find(|stop| stop.stop_idx == 1)
-            .expect("announced stop should be included");
-        assert!(announced.announced);
-        assert!(!announced.skip_on_reentry);
-        assert_eq!(announced.previous_distance_cm, Some(-456));
-
-        let skipped = stop_states
-            .iter()
-            .find(|stop| stop.stop_idx == 2)
-            .expect("skipped stop should be included");
-        assert!(!skipped.announced);
-        assert!(skipped.skip_on_reentry);
-        assert_eq!(skipped.previous_distance_cm, Some(-789));
+        let active = &stop_states[0];
+        assert_eq!(active.stop_idx, 0);
+        assert!(!active.announced);
+        assert!(!active.skip_on_reentry);
+        assert_eq!(active.previous_distance_cm, Some(321));
     }
 
     #[test]
