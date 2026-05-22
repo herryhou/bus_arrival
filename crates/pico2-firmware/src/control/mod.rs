@@ -6,9 +6,9 @@
 pub mod mode;
 pub mod timeout;
 
-use shared::{DistCm, binfile::RouteData, GpsPoint, ArrivalEvent};
-use crate::estimation::EstimationOutput;
 use crate::estimation::EstimationInput;
+use crate::estimation::EstimationOutput;
+use shared::{binfile::RouteData, ArrivalEvent, DistCm, GpsPoint};
 
 pub use mode::{SystemMode, TransitionAction};
 pub use timeout::{check_recovering_timeout, find_closest_stop_index};
@@ -124,7 +124,9 @@ impl<'a> SystemState<'a> {
     pub fn current_position(&self, est: &EstimationOutput) -> DistCm {
         match self.mode {
             SystemMode::Normal => est.s_cm,
-            SystemMode::OffRoute => self.frozen_s_cm.expect("Invariant: frozen_s_cm set in OffRoute"),
+            SystemMode::OffRoute => self
+                .frozen_s_cm
+                .expect("Invariant: frozen_s_cm set in OffRoute"),
             SystemMode::Recovering => est.z_gps_cm,
         }
     }
@@ -146,7 +148,9 @@ impl<'a> SystemState<'a> {
 
     /// Find closest stop index to current position
     pub fn find_closest_stop_index(&self, s_cm: DistCm) -> u8 {
-        timeout::find_closest_stop_index(s_cm, self.route_data.stop_count as u8, |i| self.route_data.get_stop(i as usize))
+        timeout::find_closest_stop_index(s_cm, self.route_data.stop_count as u8, |i| {
+            self.route_data.get_stop(i as usize)
+        })
     }
 
     /// Find closest stop index in forward direction only
@@ -236,9 +240,7 @@ impl<'a> SystemState<'a> {
                     state.last_announced_stop = recovered_idx as u8;
                 }
 
-                if current_s_cm >= stop.corridor_start_cm
-                    && current_s_cm <= stop.corridor_end_cm
-                {
+                if current_s_cm >= stop.corridor_start_cm && current_s_cm <= stop.corridor_end_cm {
                     state.fsm_state = FsmState::Approaching;
                 }
             }
@@ -337,7 +339,8 @@ impl<'a> SystemState<'a> {
         }
 
         // Build RecoveryInput
-        let dt = self.off_route_since
+        let dt = self
+            .off_route_since
             .map(|t| now.saturating_sub(t))
             .unwrap_or(1000);
 
@@ -355,6 +358,18 @@ impl<'a> SystemState<'a> {
         crate::recovery::recover(input).map(|idx| idx as usize)
     }
 
+    fn detection_gate_open(
+        &self,
+        suspect_this_tick: bool,
+        transitioned_to_normal_this_tick: bool,
+    ) -> bool {
+        self.mode == SystemMode::Normal
+            && !suspect_this_tick
+            && self.off_route_suspect_ticks == 0
+            && !transitioned_to_normal_this_tick
+            && self.detection_ready()
+    }
+
     /// Main tick function — control layer orchestrator
     ///
     /// # Responsibilities
@@ -368,7 +383,11 @@ impl<'a> SystemState<'a> {
     /// - Recovery ONLY runs in Recovering mode
     /// - frozen_s_cm only accessed in OffRoute/Recovering modes
     /// - Only ONE transition executes per tick
-    pub fn tick(&mut self, gps: &GpsPoint, est_state: &mut crate::estimation::EstimationState) -> TickResult {
+    pub fn tick(
+        &mut self,
+        gps: &GpsPoint,
+        est_state: &mut crate::estimation::EstimationState,
+    ) -> TickResult {
         // STEP 1: Isolated estimation
         let input = EstimationInput {
             gps: gps.clone(),
@@ -380,7 +399,10 @@ impl<'a> SystemState<'a> {
         // Handle GPS outage
         if !est.has_fix {
             // TODO: handle outage
-            return TickResult { event: None, persist_request: None };
+            return TickResult {
+                event: None,
+                persist_request: None,
+            };
         }
 
         // Mark first fix as received after successful GPS fix
@@ -439,7 +461,10 @@ impl<'a> SystemState<'a> {
             self.estimation_total_ticks = 1;
             self.detection_total_ticks = 1;
             // Position is already updated above, just block detection
-            return TickResult { event: None, persist_request: None };
+            return TickResult {
+                event: None,
+                persist_request: None,
+            };
         }
 
         // Increment total time counters
@@ -458,11 +483,16 @@ impl<'a> SystemState<'a> {
 
         // Block detection unless ready (but position tracking continues above)
         if !self.detection_ready() {
-            return TickResult { event: None, persist_request: None };
+            return TickResult {
+                event: None,
+                persist_request: None,
+            };
         }
 
         // STEP 2: State machine transitions (unified triggers)
         let old_mode = self.mode;
+        let mut suspect_this_tick = false;
+        let mut transitioned_to_normal_this_tick = false;
 
         match self.mode {
             SystemMode::Normal => {
@@ -475,9 +505,13 @@ impl<'a> SystemState<'a> {
                         self.needs_recovery_on_reacquisition = true;
                     }
                     self.off_route_suspect_ticks += 1;
+                    suspect_this_tick = true;
                     if self.off_route_suspect_ticks >= 5 {
                         self.transition_to_offroute(&est, gps.timestamp);
-                        return TickResult { event: None, persist_request: None };  // Suppress detection during transition
+                        return TickResult {
+                            event: None,
+                            persist_request: None,
+                        }; // Suppress detection during transition
                     }
                 } else {
                     // Good divergence - reset suspect counter
@@ -500,11 +534,14 @@ impl<'a> SystemState<'a> {
                     }
                     TransitionAction::ToNormal => {
                         self.transition_offroute_to_normal();
-                        return TickResult { event: None, persist_request: None };  // Will resume detection next tick
+                        transitioned_to_normal_this_tick = true;
                     }
                     TransitionAction::Stay => {
                         // Stay in OffRoute
-                        return TickResult { event: None, persist_request: None };
+                        return TickResult {
+                            event: None,
+                            persist_request: None,
+                        };
                     }
                 }
             }
@@ -545,9 +582,12 @@ impl<'a> SystemState<'a> {
         if self.mode == SystemMode::Recovering {
             if let Some(idx) = self.attempt_recovery(&est, gps.timestamp) {
                 self.recovery_success(idx, s_cm_for_detection);
-                // Continue to detection
+                transitioned_to_normal_this_tick = true;
             } else {
-                return TickResult { event: None, persist_request: None };  // Recovery failed, stay in Recovering
+                return TickResult {
+                    event: None,
+                    persist_request: None,
+                }; // Recovery failed, stay in Recovering
             }
         }
 
@@ -563,7 +603,9 @@ impl<'a> SystemState<'a> {
         // Skip recovery on first fix - last_valid_s_cm is still 0 (initial value)
         if self.mode == SystemMode::Normal && !self.just_reset && self.has_received_first_fix {
             let s_raw = self.current_position(&est);
-            if !in_snap_cooldown && crate::recovery_trigger::should_trigger_recovery(s_raw, prev_s_cm) {
+            if !in_snap_cooldown
+                && crate::recovery_trigger::should_trigger_recovery(s_raw, prev_s_cm)
+            {
                 #[cfg(feature = "firmware")]
                 defmt::warn!(
                     "GPS jump detected: s={}→{}, triggering recovery",
@@ -572,11 +614,11 @@ impl<'a> SystemState<'a> {
                 );
 
                 // Calculate time delta since last GPS fix (in seconds)
-        let dt_since_last_fix = if self.last_gps_timestamp > 0 {
-            gps.timestamp.saturating_sub(self.last_gps_timestamp) / 1000
-        } else {
-            1 // Default to 1 second on first fix or after outage
-        };
+                let dt_since_last_fix = if self.last_gps_timestamp > 0 {
+                    gps.timestamp.saturating_sub(self.last_gps_timestamp) / 1000
+                } else {
+                    1 // Default to 1 second on first fix or after outage
+                };
 
                 // Collect stops into a heapless::Vec for recovery module
                 let mut stops_vec = heapless::Vec::<shared::Stop, 256>::new();
@@ -596,7 +638,7 @@ impl<'a> SystemState<'a> {
                     dt_seconds: dt_since_last_fix,
                     stops: stops_vec,
                     hint_idx: self.last_stop_index,
-                    frozen_s_cm: None,  // No frozen position in Normal mode
+                    frozen_s_cm: None, // No frozen position in Normal mode
                     search_window: 10,
                 };
 
@@ -617,11 +659,13 @@ impl<'a> SystemState<'a> {
         }
 
         // Update position tracking if no jump occurred
-        if !crate::recovery_trigger::should_trigger_recovery(self.current_position(&est), self.last_valid_s_cm) {
+        if !crate::recovery_trigger::should_trigger_recovery(
+            self.current_position(&est),
+            self.last_valid_s_cm,
+        ) {
             self.last_valid_s_cm = self.current_position(&est);
             self.last_gps_timestamp = gps.timestamp;
         }
-
 
         // STEP 3.6: Handle snap from off-route re-entry
         if est.snapped && self.mode == SystemMode::Normal {
@@ -651,11 +695,16 @@ impl<'a> SystemState<'a> {
         // - v_cms: filtered velocity
         // - dt_seconds: time since off_route_since
         // - frozen_s_cm: None (freeze context cleared after off-route)
-        if !est.snapped && !in_snap_cooldown && self.needs_recovery_on_reacquisition && self.mode == SystemMode::Normal {
+        if !est.snapped
+            && !in_snap_cooldown
+            && self.needs_recovery_on_reacquisition
+            && self.mode == SystemMode::Normal
+        {
             self.needs_recovery_on_reacquisition = false;
 
             // Calculate elapsed time since freeze
-            let elapsed_seconds = self.off_route_since
+            let elapsed_seconds = self
+                .off_route_since
                 .map(|t| gps.timestamp.saturating_sub(t) / 1000)
                 .unwrap_or(1);
 
@@ -673,7 +722,7 @@ impl<'a> SystemState<'a> {
                 dt_seconds: elapsed_seconds,
                 stops: stops_vec,
                 hint_idx: self.last_stop_index,
-                frozen_s_cm: None,  // No frozen position for re-acquisition
+                frozen_s_cm: None, // No frozen position for re-acquisition
                 search_window: 10,
             };
 
@@ -689,15 +738,18 @@ impl<'a> SystemState<'a> {
             self.frozen_s_cm = None;
         }
 
-        // STEP 4: Detection (ONLY in Normal mode)
-        let event = if self.mode == SystemMode::Normal {
+        let detection_gate_open =
+            self.detection_gate_open(suspect_this_tick, transitioned_to_normal_this_tick);
+
+        // STEP 4: Detection (ONLY on trusted steady-state Normal ticks)
+        let event = if detection_gate_open {
             self.run_detection(&est, s_cm_for_detection, gps.timestamp)
         } else {
             None
         };
 
-        // STEP 5: Check persistence
-        let persist_request = if self.mode == SystemMode::Normal {
+        // STEP 5: Check persistence under the same trusted-Normal gate.
+        let persist_request = if detection_gate_open {
             self.current_stop_index()
                 .filter(|&idx| self.should_persist(idx))
                 .map(|idx| shared::PersistedState::new(s_cm_for_detection, idx))
@@ -710,11 +762,19 @@ impl<'a> SystemState<'a> {
             self.just_snapped_ticks = self.just_snapped_ticks.saturating_sub(1);
         }
 
-        TickResult { event, persist_request }
+        TickResult {
+            event,
+            persist_request,
+        }
     }
 
     /// Run arrival detection (Normal mode only)
-    fn run_detection(&mut self, est: &EstimationOutput, s_cm: DistCm, timestamp: u64) -> Option<ArrivalEvent> {
+    fn run_detection(
+        &mut self,
+        est: &EstimationOutput,
+        s_cm: DistCm,
+        timestamp: u64,
+    ) -> Option<ArrivalEvent> {
         use shared::PositionSignals;
 
         // Create position signals for detection
@@ -725,7 +785,8 @@ impl<'a> SystemState<'a> {
 
         // Step 1: Find active stops (corridor filter)
         let skip_flags = &[false; 32]; // TODO: track skip flags per stop
-        let active_indices = crate::detection::find_active_stops(est.s_cm, self.route_data, skip_flags);
+        let active_indices =
+            crate::detection::find_active_stops(est.s_cm, self.route_data, skip_flags);
 
         // Step 2: For each active stop, compute probability and update FSM
         for stop_idx in active_indices {
@@ -819,11 +880,7 @@ impl<'a> SystemState<'a> {
 /// * Normal: strict monotonic (s_new >= s_prev)
 /// * Recovering: allow backward (re-localization may need it)
 /// * OffRoute: frozen (returns s_prev, no jump counted)
-pub fn enforce_monotonic(
-    s_new: DistCm,
-    s_prev: DistCm,
-    mode: SystemMode,
-) -> (DistCm, bool) {
+pub fn enforce_monotonic(s_new: DistCm, s_prev: DistCm, mode: SystemMode) -> (DistCm, bool) {
     match mode {
         SystemMode::Normal => {
             if s_new < s_prev {
@@ -832,12 +889,8 @@ pub fn enforce_monotonic(
                 (s_new, false)
             }
         }
-        SystemMode::Recovering => {
-            (s_new, false)
-        }
-        SystemMode::OffRoute => {
-            (s_prev, false)
-        }
+        SystemMode::Recovering => (s_new, false),
+        SystemMode::OffRoute => (s_prev, false),
     }
 }
 
@@ -847,8 +900,8 @@ mod tests {
 
     #[test]
     fn test_warmup_methods() {
-        use shared::binfile::{RouteData, MAGIC, VERSION};
         use shared::binfile::crc32;
+        use shared::binfile::{RouteData, MAGIC, VERSION};
 
         // Create minimal valid RouteData buffer
         // Header: magic(4) + version(2) + node_count(2) + stop_count(1) + padding(3) + origin(8) + lat_avg(8) = 28 bytes
@@ -875,7 +928,10 @@ mod tests {
 
         assert!(!state.estimation_ready(), "Should not be ready initially");
         assert!(!state.detection_ready(), "Detection should not be ready");
-        assert!(state.disable_heading_filter(), "Should disable filter before first fix");
+        assert!(
+            state.disable_heading_filter(),
+            "Should disable filter before first fix"
+        );
     }
 
     #[test]
@@ -931,8 +987,8 @@ mod tests {
 
     #[test]
     fn test_find_closest_stop_index() {
-        use shared::binfile::{RouteData, MAGIC, VERSION};
         use shared::binfile::crc32;
+        use shared::binfile::{RouteData, MAGIC, VERSION};
 
         // Create minimal valid RouteData buffer with 1 stop
         let mut buffer = [0u8; 128];
@@ -958,13 +1014,18 @@ mod tests {
 
         // Test that method returns a valid index
         let idx = state.find_closest_stop_index(5000);
-        assert!(idx < route_data.stop_count as u8, "Index {} should be less than stop_count {}", idx, route_data.stop_count);
+        assert!(
+            idx < route_data.stop_count as u8,
+            "Index {} should be less than stop_count {}",
+            idx,
+            route_data.stop_count
+        );
     }
 
     #[test]
     fn test_find_forward_closest_stop_index() {
-        use shared::binfile::{RouteData, MAGIC, VERSION};
         use shared::binfile::crc32;
+        use shared::binfile::{RouteData, MAGIC, VERSION};
 
         // Create minimal valid RouteData buffer
         let mut buffer = [0u8; 128];
@@ -994,9 +1055,43 @@ mod tests {
     }
 
     #[test]
-    fn test_persistence_helpers() {
-        use shared::binfile::{RouteData, MAGIC, VERSION};
+    fn test_detection_gate_blocks_suspect_and_transition_ticks() {
         use shared::binfile::crc32;
+        use shared::binfile::{RouteData, MAGIC, VERSION};
+
+        let mut buffer = [0u8; 128];
+        buffer[0..4].copy_from_slice(&MAGIC.to_le_bytes());
+        buffer[4..6].copy_from_slice(&VERSION.to_le_bytes());
+        buffer[6..8].copy_from_slice(&0u16.to_le_bytes());
+        buffer[8] = 0;
+        let crc = crc32(&buffer[..124]);
+        buffer[124..128].copy_from_slice(&crc.to_le_bytes());
+
+        let route_data = RouteData::load(&buffer).expect("Failed to load minimal route data");
+        let mut state = SystemState::new(&route_data, None);
+        state.detection_enabled_ticks = 3;
+        state.detection_total_ticks = 3;
+
+        assert!(state.detection_gate_open(false, false));
+
+        state.off_route_suspect_ticks = 1;
+        assert!(!state.detection_gate_open(false, false));
+
+        state.off_route_suspect_ticks = 0;
+        assert!(!state.detection_gate_open(true, false));
+        assert!(!state.detection_gate_open(false, true));
+
+        state.mode = SystemMode::OffRoute;
+        assert!(!state.detection_gate_open(false, false));
+
+        state.mode = SystemMode::Recovering;
+        assert!(!state.detection_gate_open(false, false));
+    }
+
+    #[test]
+    fn test_persistence_helpers() {
+        use shared::binfile::crc32;
+        use shared::binfile::{RouteData, MAGIC, VERSION};
 
         // Create minimal valid RouteData buffer
         let mut buffer = [0u8; 128];

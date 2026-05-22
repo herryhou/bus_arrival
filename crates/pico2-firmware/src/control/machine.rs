@@ -12,8 +12,10 @@
 //! - No access to position, stops, or other external state
 //! - Single transition per tick (enforced by design)
 
-use shared::{DistCm, Dist2};
-use super::mode::{SystemMode, TransitionAction, check_normal_to_offroute, check_offroute_transition};
+use super::mode::{
+    check_normal_to_offroute, check_offroute_transition, SystemMode, TransitionAction,
+};
+use shared::{Dist2, DistCm};
 
 /// Mode state machine — owns mode and hysteresis counters
 ///
@@ -132,11 +134,12 @@ impl ModeMachine {
             };
         }
 
-        // Stay in Normal
+        // Stay in Normal. Suspect ticks keep the detection gate closed until
+        // a clean Normal tick resets the hysteresis counter.
         ModeOutput {
             mode: self.mode,
             action: ModeAction::None,
-            detection_enabled: true,
+            detection_enabled: self.off_route_suspect_ticks == 0,
         }
     }
 
@@ -164,16 +167,14 @@ impl ModeMachine {
                 ModeOutput {
                     mode: self.mode,
                     action: ModeAction::ResumeNormal,
-                    detection_enabled: true,
-                }
-            }
-            TransitionAction::Stay => {
-                ModeOutput {
-                    mode: self.mode,
-                    action: ModeAction::None,
                     detection_enabled: false,
                 }
             }
+            TransitionAction::Stay => ModeOutput {
+                mode: self.mode,
+                action: ModeAction::None,
+                detection_enabled: false,
+            },
         }
     }
 
@@ -231,7 +232,12 @@ pub struct ModeInput {
 
 impl ModeInput {
     /// Create a new mode input
-    pub fn new(divergence_d2: Dist2, has_gps_fix: bool, frozen_s_cm: Option<DistCm>, current_z_gps_cm: DistCm) -> Self {
+    pub fn new(
+        divergence_d2: Dist2,
+        has_gps_fix: bool,
+        frozen_s_cm: Option<DistCm>,
+        current_z_gps_cm: DistCm,
+    ) -> Self {
         Self {
             divergence_d2,
             has_gps_fix,
@@ -349,13 +355,22 @@ mod tests {
         // Need 5 consecutive ticks of high divergence
         for i in 0..4 {
             let input = ModeInput {
-                divergence_d2: 30_000_000,  // > 50m threshold
+                divergence_d2: 30_000_000, // > 50m threshold
                 has_gps_fix: true,
                 frozen_s_cm: None,
                 current_z_gps_cm: 10000,
             };
             let output = machine.update(input);
-            assert_eq!(output.mode, SystemMode::Normal, "Should stay Normal after {} ticks", i + 1);
+            assert_eq!(
+                output.mode,
+                SystemMode::Normal,
+                "Should stay Normal after {} ticks",
+                i + 1
+            );
+            assert!(
+                !output.detection_enabled,
+                "Detection should be disabled while off-route is suspect"
+            );
         }
 
         // 5th tick triggers transition
@@ -388,7 +403,7 @@ mod tests {
 
         // One good tick resets counter
         let input = ModeInput {
-            divergence_d2: 10_000_000,  // < 50m threshold
+            divergence_d2: 10_000_000, // < 50m threshold
             has_gps_fix: true,
             frozen_s_cm: None,
             current_z_gps_cm: 10000,
@@ -407,15 +422,19 @@ mod tests {
 
         // Two ticks of good divergence with small displacement
         let input = ModeInput {
-            divergence_d2: 10_000_000,  // < 50m
+            divergence_d2: 10_000_000, // < 50m
             has_gps_fix: true,
             frozen_s_cm: Some(0),
-            current_z_gps_cm: 1000,  // Small displacement (< 5000 cm)
+            current_z_gps_cm: 1000, // Small displacement (< 5000 cm)
         };
 
         // First tick
         let output1 = machine.update(input);
-        assert_eq!(output1.mode, SystemMode::OffRoute, "Should stay OffRoute after 1 tick");
+        assert_eq!(
+            output1.mode,
+            SystemMode::OffRoute,
+            "Should stay OffRoute after 1 tick"
+        );
         assert_eq!(output1.action, ModeAction::None);
 
         // Second tick triggers transition (need to recreate input)
@@ -428,7 +447,17 @@ mod tests {
         let output2 = machine.update(input);
         assert_eq!(output2.mode, SystemMode::Normal);
         assert_eq!(output2.action, ModeAction::ResumeNormal);
-        assert!(output2.detection_enabled);
+        assert!(!output2.detection_enabled);
+
+        let input = ModeInput {
+            divergence_d2: 10_000_000,
+            has_gps_fix: true,
+            frozen_s_cm: None,
+            current_z_gps_cm: 1000,
+        };
+        let output3 = machine.update(input);
+        assert_eq!(output3.mode, SystemMode::Normal);
+        assert!(output3.detection_enabled);
     }
 
     #[test]
@@ -441,10 +470,10 @@ mod tests {
 
         // Two ticks of good divergence with large displacement
         let input = ModeInput {
-            divergence_d2: 10_000_000,  // < 50m
+            divergence_d2: 10_000_000, // < 50m
             has_gps_fix: true,
             frozen_s_cm: Some(0),
-            current_z_gps_cm: 10000,  // Large displacement (> 5000 cm)
+            current_z_gps_cm: 10000, // Large displacement (> 5000 cm)
         };
 
         // First tick
@@ -475,13 +504,18 @@ mod tests {
         // High divergence persists
         for i in 0..3 {
             let input = ModeInput {
-                divergence_d2: 30_000_000,  // > 50m
+                divergence_d2: 30_000_000, // > 50m
                 has_gps_fix: true,
                 frozen_s_cm: Some(0),
                 current_z_gps_cm: 10000,
             };
             let output = machine.update(input);
-            assert_eq!(output.mode, SystemMode::OffRoute, "Should stay OffRoute after tick {}", i + 1);
+            assert_eq!(
+                output.mode,
+                SystemMode::OffRoute,
+                "Should stay OffRoute after tick {}",
+                i + 1
+            );
             assert_eq!(output.action, ModeAction::None);
             assert!(!output.detection_enabled);
         }
@@ -499,7 +533,10 @@ mod tests {
             current_z_gps_cm: 10000,
         };
         let output = machine.update(input);
-        assert!(output.detection_enabled, "Detection should be enabled in Normal mode");
+        assert!(
+            output.detection_enabled,
+            "Detection should be enabled in Normal mode"
+        );
 
         // Transition to OffRoute - detection disabled
         for _ in 0..5 {
@@ -519,7 +556,39 @@ mod tests {
             current_z_gps_cm: 10000,
         };
         let output = machine.update(input);
-        assert!(!output.detection_enabled, "Detection should be disabled in OffRoute mode");
+        assert!(
+            !output.detection_enabled,
+            "Detection should be disabled in OffRoute mode"
+        );
+    }
+
+    #[test]
+    fn test_suspect_normal_ticks_disable_detection_until_clean_tick() {
+        let mut machine = ModeMachine::new();
+
+        for i in 1..=4 {
+            let output = machine.update(ModeInput {
+                divergence_d2: 30_000_000,
+                has_gps_fix: true,
+                frozen_s_cm: None,
+                current_z_gps_cm: 10000,
+            });
+            assert_eq!(output.mode, SystemMode::Normal);
+            assert!(
+                !output.detection_enabled,
+                "suspect tick {} should close gate",
+                i
+            );
+        }
+
+        let output = machine.update(ModeInput {
+            divergence_d2: 10_000_000,
+            has_gps_fix: true,
+            frozen_s_cm: None,
+            current_z_gps_cm: 10000,
+        });
+        assert_eq!(output.mode, SystemMode::Normal);
+        assert!(output.detection_enabled);
     }
 
     #[test]
