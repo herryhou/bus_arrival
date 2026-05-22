@@ -4,6 +4,13 @@
 - `bus_arrival_tech_report_v8.md` — Detailed design doc with rationale, algorithms, and data structures
 - `docs/SPEC.md` — Master spec index
 
+## When Ask User questions for Clarification
+- Keep your question clear yet short
+- Give options to your question when possible
+- List PROS and CONS for each option if applicable
+- Always give a recommendation based on the tradeoffs
+- If the user provides an answer, ask follow-up questions to clarify any ambiguities or details
+
 ## Build Commands
 
 ```bash
