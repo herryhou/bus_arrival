@@ -57,7 +57,7 @@ TRACE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_trace_v2.jsonl
 # Node.js executable
 NODE := node
 
-.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour run-detour-no-gen regression-test regression-save
+.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour run-detour-no-gen regression-test regression-save update-fixtures
 
 # Default target
 all: run
@@ -194,6 +194,13 @@ golden:
 	@echo "Golden files updated in test_data/golden/"
 	@echo "Generated: test_data/golden/$(ROUTE_NAME)_normal_trace_v2.jsonl"
 
+# Update trace_v2 fixtures from NMEA source
+update-fixtures:
+	@echo "=== Updating trace_v2 fixtures ==="
+	cargo run -p pipeline -- test_data/ty225_normal_nmea.txt test_data/ty225_normal.bin --output test_data/ty225_normal_trace_v2.jsonl
+	cargo run -p pipeline -- test_data/ty225_short_detour_nmea.txt test_data/ty225_short_detour.bin --output test_data/ty225_short_detour_trace_v2.jsonl
+	cargo run -p pipeline -- test_data/tpF805_normal_nmea.txt test_data/tpF805_normal.bin --output test_data/tpF805_normal_trace_v2.jsonl
+	@echo "Fixture update complete"
 
 # Run unified pipeline without generating NMEA (uses existing NMEA file)
 pipeline-no-gen: preprocess
