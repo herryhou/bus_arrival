@@ -212,7 +212,7 @@ pipeline-no-gen: preprocess
 clean:
 	@echo "=== Cleaning generated files ==="
 	rm -f $(DATA_DIR)/*_nmea.txt
-	rm -f $(DATA_DIR)/*_trace.jsonl
+	rm -f $(DATA_DIR)/*_trace.jsonl $(DATA_DIR)/*_trace_v2.jsonl
 	rm -f $(DATA_DIR)/*.bin
 	@echo "Clean complete"
 
