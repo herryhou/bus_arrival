@@ -1,14 +1,18 @@
 # Trace Output Enhancement Design
 
-**Goal:** Add missing internal state fields to trace.jsonl for better debugging visibility.
+**Goal:** Replace the current flat trace schema with a grouped `trace_v2.jsonl`
+schema that exposes internal GPS, Kalman, map-matching, detection, corridor, and
+per-stop state for debugging.
 
-**Approach:** Scenario-driven, phased implementation with grouped structure for better reasoning.
+**Decision:** This is an intentional breaking schema migration. Existing flat
+`trace.jsonl` output and consumers must migrate to `trace_v2.jsonl`; no v1/v2
+dual-write or compatibility adapter is required.
 
 ---
 
-## New Grouped Structure
+## Trace V2 Schema
 
-Current flat structure becomes grouped for logical organization:
+Each line in `trace_v2.jsonl` is one grouped JSON object:
 
 ```json
 {
@@ -36,149 +40,217 @@ Current flat structure becomes grouped for logical organization:
     "status": "valid",
     "off_route": false,
     "gps_jump": false,
-    "recovery_idx": null
+    "recovery_idx": null,
+    "off_route_last_s_cm": null
   },
   "corridor": {
     "active_stops": [5, 6],
+    "corridor_start_cm": 120000,
+    "corridor_end_cm": 132000,
     "next_stop": [7, 128]
   },
   "stop_states": [
-    // Active stops + meaningful inactive stops
+    {
+      "stop_idx": 5,
+      "gps_distance_cm": -1200,
+      "progress_distance_cm": -1000,
+      "fsm_state": "Approaching",
+      "dwell_time_s": 0,
+      "probability": 96,
+      "previous_probability": 72,
+      "features": {"p1": 120, "p2": 255, "p3": 118, "p4": 0},
+      "just_arrived": false,
+      "announced": false,
+      "skip_on_reentry": false,
+      "previous_distance_cm": -1800
+    }
   ]
 }
 ```
 
-**Groups:**
-- `gps` - Raw GPS input and quality
-- `kalman` - Filter state and divergence
-- `map_matching` - Segment matching results
-- `detection` - State machine status
-- `corridor` - Stop corridor filter state
-- `stop_states` - Per-stop detailed state (expanded scope)
+### Groups
+
+- `gps`: raw GPS input and quality fields.
+- `kalman`: filtered route position, velocity, uncertainty, and divergence.
+- `map_matching`: route segment matching diagnostics.
+- `detection`: GPS processing status and high-level detection mode flags.
+- `corridor`: corridor filter output and next-stop summary.
+- `stop_states`: diagnostic per-stop state.
 
 ---
 
-## Phase 1: Core State Visibility
+## Core Semantics
 
-### Fields
+### Detection Status
 
-**`detection` group:**
-- `status: String?` - GPS processing status (source of truth)
-  - Values: `"valid"`, `"off_route"`, `"dr_outage"`, `"suspect_off_route"`
-  - `off_route` field becomes derived: `status == "off_route"`
+`detection.status` is the source of truth for GPS processing state.
 
-**`stop_states` items:**
-- `last_probability: Int` - Previous tick's probability (0-255)
+Allowed values:
 
-### Debugging Value
+- `"valid"`
+- `"off_route"`
+- `"dr_outage"`
+- `"suspect_off_route"`
 
-- `status` explains WHY detection behaved (4-state nuance vs binary off_route)
-- `last_probability` shows probability trends (sudden drops = noise detection)
+`detection.off_route` is derived only from:
 
-### Files
-
-**Rust:**
-- `crates/pipeline/detection/src/trace.rs` - Add fields, restructure into groups
-- `crates/pipeline/src/lib.rs` - Pass `status` from `GpsRecord`, pass `last_probability` from `StopState`
-
-**Android:**
-- `TraceTick.kt` - Restructure into groups, add fields
-- `DetectionPipeline.kt` - Populate new structure
-
----
-
-## Phase 2: Detour Debugging
-
-### Fields
-
-**`detection` group:**
-- `off_route_last_s_cm: Int?` - Last valid position before off-route (cm)
-
-**`stop_states` items (expanded scope):**
-Now includes:
-- Active stops (in corridor)
-- Departed stops where `announced == true`
-- Any stop where `skip_on_reentry == true`
-
-**Per-stop fields:**
-- `skip_on_reentry: Boolean` - Whether stop is skipped on off-route re-entry
-- `previous_distance_cm: Int?` - Previous distance to stop (for re-acquisition detection)
-
-### Debugging Value
-
-- `off_route_last_s_cm` enables detour jump threshold debugging
-- `skip_on_reentry` visible even when stop is inactive (critical for detour debugging)
-- `previous_distance_cm` helps debug re-acquisition logic
-
-### Emission Logic
-
-```rust
-// Emit stop_state if ANY condition true:
-- s_cm >= corridor_start_cm && s_cm <= corridor_end_cm  // Active
-- announced == true                                      // Departed but announced
-- skip_on_reentry == true                                // Skipped (detour case)
+```text
+detection.status == "off_route"
 ```
 
-### Files
+`"suspect_off_route"` remains visible as a distinct status and must not be
+collapsed into `off_route: true`.
 
-**Rust:**
-- `crates/pipeline/detection/src/trace.rs` - Add fields
-- `crates/pipeline/src/detection_state.rs` - Track `off_route_last_s_cm`
-- `crates/pipeline/src/lib.rs` - Expanded emission logic
+`detection.gps_jump` and `detection.recovery_idx` stay in the grouped schema to
+preserve the current trace vocabulary. Their current implementation is partial:
+Rust currently emits placeholder values in some paths, and Android emits the
+available mode/recovery state from `DetectionPipeline`.
 
-**Android:**
-- `TraceTick.kt` - Add fields
-- `DetectionState.kt` - Track `off_route_last_s_cm`
-- `DetectionPipeline.kt` - Expanded emission logic
+### Stop State Emission
+
+`corridor.active_stops` remains the exact corridor-filter output.
+
+`stop_states` is a diagnostic superset. Consumers must not infer active stops
+from presence in `stop_states`; they must use `corridor.active_stops`.
+
+Emit a stop state when any condition is true:
+
+```text
+stop is active in the corridor
+stop.announced == true
+stop.skip_on_reentry == true
+```
+
+This keeps trace size bounded while exposing meaningful inactive stops after
+announcement or detour re-entry.
+
+### Probability Fields
+
+`probability` is the current tick probability.
+
+`previous_probability` is the probability value captured before this tick's stop
+state update. It is not the current stored `last_probability` after update.
+Implementations must snapshot the previous value before calling the stop state
+update function.
+
+### Detour Fields
+
+`detection.off_route_last_s_cm` is the last valid route position before
+confirmed off-route mode. It supports detour jump threshold debugging.
+
+`stop_states[].skip_on_reentry` shows stops skipped after re-entry.
+
+`stop_states[].previous_distance_cm` shows the previous route-distance-to-stop
+value used for re-acquisition and transition debugging.
+
+### Announcement Field
+
+`stop_states[].announced` exposes the per-stop one-time announcement flag. It is
+visible after departure because announced stops are part of the diagnostic
+`stop_states` superset.
 
 ---
 
-## Phase 3: Announcement Debugging
+## Implementation Scope
 
-### Fields
+### Rust
 
-**`stop_states` items:**
-- `announced: Boolean` - One-time announcement flag
+- `crates/pipeline/detection/src/trace.rs`
+  - Replace the flat `TraceRecord` shape with grouped v2 structs.
+  - Add `previous_probability`, `announced`, `skip_on_reentry`, and
+    `previous_distance_cm` to stop-state trace items.
+- `crates/pipeline/src/lib.rs`
+  - Build grouped `TraceRecord` values.
+  - Pass `GpsRecord.status` into `detection.status`.
+  - Derive `detection.off_route` only from `status == "off_route"`.
+  - Move corridor fields into the `corridor` group.
+- `crates/pipeline/src/detection_state.rs`
+  - Keep tracking `off_route_last_s_cm`.
+  - Expand trace emission to active stops, announced stops, and skipped stops.
+  - Snapshot `previous_probability` before stop state update.
 
-### Debugging Value
+### Android
 
-- Confirms whether stop was already announced (prevents duplicate arrivals)
-- Visible in trace even after departure (due to expanded emission logic)
+- `android/app/src/main/java/com/busarrival/app/service/TraceTick.kt`
+  - Replace the flat trace data class with grouped v2 data classes.
+  - Add stop-state diagnostic fields.
+- `android/app/src/main/java/com/busarrival/app/service/DetectionPipeline.kt`
+  - Build grouped `TraceTick` values.
+  - Keep Android trace-specific state inside `DetectionPipeline.kt`; do not add a
+    new Android `DetectionState` abstraction for this work.
+  - Expand stop-state emission using the same diagnostic superset semantics.
+  - Snapshot `previous_probability` before each stop state update.
 
-### Files
+---
 
-**Rust:**
-- `crates/pipeline/detection/src/trace.rs` - Add field
-- `crates/pipeline/src/lib.rs` - Pass from `StopState.announced`
+## Consumer Migration
 
-**Android:**
-- `TraceTick.kt` - Add field
-- `DetectionPipeline.kt` - Populate from `StopState.announced`
+All consumers that currently read flat `trace.jsonl` must migrate to
+`trace_v2.jsonl` and grouped paths.
+
+### Files and Tools
+
+- `crates/trace_validator`
+  - Parse grouped `TraceRecord` structs.
+  - Read fields from `gps.time_ms`, `kalman.s_cm`, `kalman.v_cms`,
+    `corridor.active_stops`, `detection.off_route`, and `stop_states`.
+- `tools/arrival_from_trace.sh`
+  - Read grouped v2 fields and emit the same arrival JSONL output.
+- `tools/announce_from_trace.sh`
+  - Read `corridor.active_stops`, `gps.time_ms`, `kalman.s_cm`, and
+    `kalman.v_cms`.
+- Rust scenario tests
+  - Update JSON paths from flat fields to grouped fields.
+  - Use `detection.off_route` for confirmed off-route episodes.
+  - Use `detection.status` when tests need suspect/off-route distinction.
+- Android scenario tests
+  - Update `TraceTick` loading and assertions for grouped v2.
+  - Preserve validation behavior while reading grouped fields.
+
+### Fixture Naming
+
+Generated trace fixtures must use `_trace_v2.jsonl` suffixes.
+
+Examples:
+
+- `ty225_short_detour_android_trace_v2.jsonl`
+- `tz_23_short_trace_v2.jsonl`
+
+The runtime/default trace filename for the new schema is `trace_v2.jsonl`.
+
+---
+
+## Verification
+
+Each implementation phase must include tests that prove:
+
+- Rust and Android serialize grouped v2 records.
+- `trace_validator` parses grouped v2 records.
+- Shell tools read grouped v2 records.
+- Scenario tests no longer depend on flat top-level trace fields.
+- `detection.off_route` is false for `"suspect_off_route"`.
+- `corridor.active_stops` is corridor-only.
+- `stop_states` can include announced or skipped inactive stops.
+- `previous_probability` is the pre-update value, while `probability` is the
+  current tick value.
+
+Full verification commands:
+
+```bash
+rtk gradle -p android testDebugUnitTest
+rtk cargo test
+```
 
 ---
 
 ## Implementation Order
 
-1. **Phase 1** - Core state visibility + grouped structure (highest ROI)
-2. **Phase 2** - Detour debugging + expanded stop emission
-3. **Phase 3** - Announcement debugging
+1. Define grouped v2 structs in Rust and Android.
+2. Migrate Rust trace emission and `trace_validator`.
+3. Migrate Android trace emission and scenario tests.
+4. Migrate shell tools and Rust scenario tests.
+5. Rename generated fixtures to `_trace_v2.jsonl`.
+6. Run full Android and Rust verification.
 
-Each phase is independently testable and can be verified before proceeding to next.
-
----
-
-## Data Flow Summary
-
-```
-GpsRecord.status → detection.status (source of truth)
-GpsRecord.status → detection.off_route (derived: status == "off_route")
-
-DetectionState.off_route_last_s_cm → detection.off_route_last_s_cm
-
-StopState.last_probability → stop_states[].last_probability
-StopState.skip_on_reentry → stop_states[].skip_on_reentry
-StopState.previous_distance_cm → stop_states[].previous_distance_cm
-StopState.announced → stop_states[].announced
-
-StopState + expanded emission logic → stop_states[] (active + meaningful inactive)
-```
+Each step should remove reliance on flat trace fields instead of adding v1/v2
+compatibility.
