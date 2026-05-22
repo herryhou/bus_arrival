@@ -14,35 +14,12 @@
 
 	let { traceData, currentTime, v_cms, selectedStop, onSeek, onStopSelect, onEventClick }: Props = $props();
 
-	type EventType = 'JUMP' | 'RECOVERY' | 'TRANSITION' | 'ARRIVAL';
-
 	interface LogEvent {
 		time: number;
-		type: EventType;
 		message: string;
 		stopIdx?: number;
 		state?: FsmState;
-		index: number; // For alternating row colors
-	}
-
-	// Helper: Get event type label (3-char abbreviation)
-	function getEventTypeLabel(type: EventType): string {
-		switch (type) {
-			case 'ARRIVAL': return 'ARR';
-			case 'TRANSITION': return 'TRN';
-			case 'JUMP': return 'JMP';
-			case 'RECOVERY': return 'REC';
-		}
-	}
-
-	// Helper: Get event type color
-	function getEventTypeColor(type: EventType): string {
-		switch (type) {
-			case 'ARRIVAL': return '#22c55e';
-			case 'TRANSITION': return '#eab308';
-			case 'JUMP': return '#ef4444';
-			case 'RECOVERY': return '#f59e0b';
-		}
+		index: number;
 	}
 
 	// Helper: Format event time (locale-independent)
@@ -75,7 +52,6 @@
 	function handleEventRowClick(event: LogEvent) {
 		highlightedEventTime = event.time;
 		onSeek(event.time);
-		const eventState = event.state || (event.type === 'ARRIVAL' ? 'AtStop' : undefined);
 
 		// Find the trace record at this event time to get lat/lon
 		const record = traceData.find(r => Math.abs(r.gps.time_ms - event.time) < 500);
@@ -84,7 +60,7 @@
 		onEventClick?.({
 			time: event.time,
 			stopIdx: event.stopIdx,
-			state: eventState,
+			state: event.state,
 			lat: record?.gps.lat,
 			lon: record?.gps.lon
 		});
@@ -102,73 +78,52 @@
 		return '#ef4444';
 	}
 
-	// Derived: Events list
-	let events = $derived.by(() => {
-		const log: LogEvent[] = [];
-		let lastStates = new Map<number, FsmState>();
-		let index = 0;
+		// Derived: Events list
+		let events = $derived.by(() => {
+			const log: LogEvent[] = [];
+			let lastStates = new Map<number, FsmState>();
+			let index = 0;
 
-		traceData.forEach((record) => {
-			// GPS Jump
-			if (record.detection.gps_jump) {
-				log.push({
-					time: record.gps.time_ms,
-					type: 'JUMP',
-					message: `GPS Jump: dist > 200m`,
-					index: index++
-				});
-			}
+			traceData.forEach((record) => {
+				// GPS Jump
+				if (record.detection.gps_jump) {
+					log.push({
+						time: record.gps.time_ms,
+						message: `GPS Jump: dist > 200m`,
+						index: index++
+					});
+				}
 
-			// Recovery
-			if (record.detection.recovery_idx !== null) {
-				log.push({
-					time: record.gps.time_ms,
-					type: 'RECOVERY',
-					message: `Recovery: stop ${record.detection.recovery_idx}`,
-					index: index++
-				});
-			}
+				// Recovery
+				if (record.detection.recovery_idx != null) {
+					log.push({
+						time: record.gps.time_ms,
+						message: `Recovery: stop ${record.detection.recovery_idx}`,
+						index: index++
+					});
+				}
 
-			// Stop events
-			record.stop_states.forEach((stop) => {
-				const lastState = lastStates.get(stop.stop_idx);
+				// Stop events
+				record.stop_states.forEach((stop) => {
+					const lastState = lastStates.get(stop.stop_idx);
 
-				// Track if this stop has an arrival event in this record
-				const hasArrival = stop.just_arrived;
-
-				// Only log transition if NOT redundant with arrival
-				// (TRANSITION to AtStop is redundant when ARRIVAL also occurs)
-				if (lastState && lastState !== stop.fsm_state) {
-					const isRedundant = hasArrival && stop.fsm_state === 'AtStop';
-					if (!isRedundant) {
+					// Log state changes
+					if (lastState && lastState !== stop.fsm_state) {
 						log.push({
 							time: record.gps.time_ms,
-							type: 'TRANSITION',
 							message: `Stop ${stop.stop_idx}`,
 							stopIdx: stop.stop_idx,
 							state: stop.fsm_state,
 							index: index++
 						});
 					}
-				}
-				lastStates.set(stop.stop_idx, stop.fsm_state);
-
-				if (stop.just_arrived) {
-					log.push({
-						time: record.gps.time_ms,
-						type: 'ARRIVAL',
-						message: `Stop ${stop.stop_idx}: ARRIVED`,
-						stopIdx: stop.stop_idx,
-						state: 'AtStop',
-						index: index++
-					});
-				}
+					lastStates.set(stop.stop_idx, stop.fsm_state);
+				});
 			});
-		});
 
-		// traceData is already sorted by time, so events are in chronological order
-		return log;
-	});
+			// traceData is already sorted by time, so events are in chronological order
+			return log;
+		});
 
 	// Derived: Event count
 	let eventCount = $derived.by(() => events.length);
@@ -202,12 +157,8 @@
 					class:current={isEventAtCurrentTime(event.time)}
 					class:highlighted={isEventHighlighted(event.time)}
 					onclick={() => handleEventRowClick(event)}
-					data-type={event.type}
 				>
 					<span class="event-time">{formatEventTime(event.time)}</span>
-					<span class="event-type-badge" style="color: {getEventTypeColor(event.type)};">
-						{getEventTypeLabel(event.type)}
-					</span>
 					{#if event.stopIdx !== undefined}
 						<span class="event-stop">#{event.stopIdx + 1}</span>
 					{/if}
@@ -387,15 +338,6 @@
 		flex-shrink: 0;
 	}
 
-	.event-type-badge {
-		font-weight: bold;
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		padding: 1px 4px;
-		border-radius: 2px;
-		background-color: rgba(0, 0, 0, 0.4);
-		flex-shrink: 0;
-	}
 
 	.event-stop {
 		color: #3b82f6;
