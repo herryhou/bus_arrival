@@ -1,13 +1,13 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import type { RouteData } from '$lib/types';
-	import { getRouteGeometry, getStopPositions } from '$lib/parsers/routeData';
-	import { projectCmToLatLon } from '$lib/parsers/projection';
-	import maplibregl from 'maplibre-gl';
-	import 'maplibre-gl/dist/maplibre-gl.css';
-	import { FSM_STATE_COLORS } from '$lib/constants/fsmColors';
-	import { getStopLatLon } from '$lib/parsers/routeData';
-	import type { FsmState } from '$lib/types';
+	import { onMount, onDestroy } from "svelte";
+	import type { RouteData } from "$lib/types";
+	import { getRouteGeometry, getStopPositions } from "$lib/parsers/routeData";
+	import { projectCmToLatLon } from "$lib/parsers/projection";
+	import maplibregl from "maplibre-gl";
+	import "maplibre-gl/dist/maplibre-gl.css";
+	import { FSM_STATE_COLORS } from "$lib/constants/fsmColors";
+	import { getStopLatLon } from "$lib/parsers/routeData";
+	import type { FsmState } from "$lib/types";
 
 	// Constants for stop arrival zone circles (50m radius)
 	const EARTH_RADIUS = 6378137; // meters
@@ -22,9 +22,15 @@
 	 * Therefore: meters_per_pixel = (EARTH_CIRCUMFERENCE * cos(lat)) / (256 * 2^zoom)
 	 * And: radius_pixels = radius_meters / meters_per_pixel
 	 */
-	function metersToMapPixels(meters: number, lat: number, zoom: number): number {
-		const latRad = lat * Math.PI / 180;
-		const metersPerPixel = (EARTH_CIRCUMFERENCE * Math.cos(latRad)) / (256 * Math.pow(2, zoom));
+	function metersToMapPixels(
+		meters: number,
+		lat: number,
+		zoom: number,
+	): number {
+		const latRad = (lat * Math.PI) / 180;
+		const metersPerPixel =
+			(EARTH_CIRCUMFERENCE * Math.cos(latRad)) /
+			(256 * Math.pow(2, zoom));
 		return meters / metersPerPixel;
 	}
 
@@ -32,13 +38,20 @@
 	 * Get stop lat/lon by interpolating along route nodes
 	 * Wrapper for getStopLatLon that handles the grid_origin parameter
 	 */
-	function getStopPosition(stopProgressCm: number, routeData: RouteData): [number, number] | null {
+	function getStopPosition(
+		stopProgressCm: number,
+		routeData: RouteData,
+	): [number, number] | null {
 		return getStopLatLon(stopProgressCm, routeData);
 	}
 
 	interface Props {
 		routeData: RouteData;
-		busPosition?: { lat: number; lon: number; heading?: number | undefined } | null;
+		busPosition?: {
+			lat: number;
+			lon: number;
+			heading?: number | undefined;
+		} | null;
 		selectedStop?: number | null;
 		onStopClick?: (stopIndex: number) => void;
 		highlightedEvent?: {
@@ -57,17 +70,19 @@
 		onStopClick = () => {},
 		highlightedEvent = null,
 		onClearHighlight = () => {},
-		eventLocation = null
+		eventLocation = null,
 	}: Props = $props();
 
 	let mapContainer: HTMLDivElement;
 	let map: maplibregl.Map | null = null;
 	let mapLoaded = false;
-	let routeSourceId = 'route';
-	let stopsSourceId = 'stops';
-	let busSourceId = 'bus';
+	let routeSourceId = "route";
+	let stopsSourceId = "stops";
+	let busSourceId = "bus";
 	let currentPanTarget = $state<number | null>(null);
-	let currentEventLocation = $state<{ lat: number; lon: number } | null>(null);
+	let currentEventLocation = $state<{ lat: number; lon: number } | null>(
+		null,
+	);
 	let handleKeyDownRef: ((e: KeyboardEvent) => void) | null = null;
 
 	onMount(() => {
@@ -79,260 +94,290 @@
 			style: {
 				version: 8,
 				sources: {
-					'osm-tiles': {
-						type: 'raster',
-						tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+					"osm-tiles": {
+						type: "raster",
+						tiles: [
+							"https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+						],
 						tileSize: 256,
-						attribution: '© OpenStreetMap contributors'
-					}
+						attribution: "© OpenStreetMap contributors",
+					},
 				},
 				layers: [
 					{
-						id: 'osm-tiles',
-						type: 'raster',
-						source: 'osm-tiles',
+						id: "osm-tiles",
+						type: "raster",
+						source: "osm-tiles",
 						minzoom: 0,
-						maxzoom: 19
-					}
-				]
+						maxzoom: 19,
+					},
+				],
 			},
 			center: [initialLon, initialLat],
 			zoom: 13,
-			keyboard: false // Disable built-in keyboard controls (app has its own)
+			keyboard: false, // Disable built-in keyboard controls (app has its own)
 		});
 
 		// Add scale control
-		map.addControl(new maplibregl.ScaleControl({
-			maxWidth: 100,
-			unit: 'metric'
-		}));
+		map.addControl(
+			new maplibregl.ScaleControl({
+				maxWidth: 100,
+				unit: "metric",
+			}),
+		);
 
-		map.on('load', async () => {
+		map.on("load", async () => {
 			if (!map) return;
 			const mapRef = map;
 
-				// Add custom arrow icon for bus (when heading is available)
-				const svgArrow = `
+			// Add custom arrow icon for bus (when heading is available)
+			const svgArrow = `
 					<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
 						<circle cx="20" cy="20" r="18" fill="#22c55e" stroke="white" stroke-width="3"/>
 						<path d="M20 5 L32 30 L20 22 L8 30 Z" fill="white"/>
 					</svg>
 				`;
-				const blobArrow = new Blob([svgArrow], { type: 'image/svg+xml' });
-				const urlArrow = URL.createObjectURL(blobArrow);
-				const imageArrow = await new Promise<HTMLImageElement>((resolve) => {
+			const blobArrow = new Blob([svgArrow], { type: "image/svg+xml" });
+			const urlArrow = URL.createObjectURL(blobArrow);
+			const imageArrow = await new Promise<HTMLImageElement>(
+				(resolve) => {
 					const img = new Image();
 					img.onload = () => resolve(img);
 					img.src = urlArrow;
-				});
-				mapRef.addImage('bus-arrow', imageArrow);
+				},
+			);
+			mapRef.addImage("bus-arrow", imageArrow);
 
-				// Add question mark icon for bus (when heading is unknown)
-				const svgQuestion = `
+			// Add question mark icon for bus (when heading is unknown)
+			const svgQuestion = `
 					<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
 						<circle cx="20" cy="20" r="18" fill="#f59e0b" stroke="white" stroke-width="3"/>
 						<text x="20" y="28" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="white" text-anchor="middle">?</text>
 					</svg>
 				`;
-				const blobQuestion = new Blob([svgQuestion], { type: 'image/svg+xml' });
-				const urlQuestion = URL.createObjectURL(blobQuestion);
-				const imageQuestion = await new Promise<HTMLImageElement>((resolve) => {
+			const blobQuestion = new Blob([svgQuestion], {
+				type: "image/svg+xml",
+			});
+			const urlQuestion = URL.createObjectURL(blobQuestion);
+			const imageQuestion = await new Promise<HTMLImageElement>(
+				(resolve) => {
 					const img = new Image();
 					img.onload = () => resolve(img);
 					img.src = urlQuestion;
-				});
-				mapRef.addImage('bus-question', imageQuestion);
+				},
+			);
+			mapRef.addImage("bus-question", imageQuestion);
 
-			console.log('Map loaded, setting mapLoaded = true');
+			console.log("Map loaded, setting mapLoaded = true");
 			mapLoaded = true;
 
 			// Add route line
 			const routeGeo = getRouteGeometry(routeData, projectCmToLatLon);
 			mapRef.addSource(routeSourceId, {
-				type: 'geojson',
+				type: "geojson",
 				data: {
-					type: 'Feature',
+					type: "Feature",
 					properties: {},
 					geometry: {
-						type: 'LineString',
-						coordinates: routeGeo
-					}
-				}
+						type: "LineString",
+						coordinates: routeGeo,
+					},
+				},
 			});
 
 			mapRef.addLayer({
-				id: 'route-line',
-				type: 'line',
+				id: "route-line",
+				type: "line",
 				source: routeSourceId,
 				layout: {
-					'line-join': 'round',
-					'line-cap': 'round'
+					"line-join": "round",
+					"line-cap": "round",
 				},
 				paint: {
-					'line-color': '#3b82f6',
-					'line-width': 4,
-					'line-opacity': 0.8
-				}
+					"line-color": "#3b82f6",
+					"line-width": 4,
+					"line-opacity": 0.8,
+				},
 			});
 
 			// Add stops
 			const stops = getStopPositions(routeData, projectCmToLatLon);
 			const stopFeatures: any[] = stops.map((stop) => ({
-				type: 'Feature',
+				type: "Feature",
 				properties: {
 					index: stop.index,
 					label: `${stop.index + 1}`, // 1-indexed for display
-					progress_cm: stop.progress_cm
+					progress_cm: stop.progress_cm,
 				},
 				geometry: {
-					type: 'Point',
-					coordinates: [stop.lon, stop.lat]
-				}
+					type: "Point",
+					coordinates: [stop.lon, stop.lat],
+				},
 			}));
 
 			mapRef.addSource(stopsSourceId, {
-				type: 'geojson',
+				type: "geojson",
 				data: {
-					type: 'FeatureCollection',
-					features: stopFeatures
-				}
+					type: "FeatureCollection",
+					features: stopFeatures,
+				},
 			});
 
 			mapRef.addLayer({
-				id: 'stops-circle',
-				type: 'circle',
+				id: "stops-circle",
+				type: "circle",
 				source: stopsSourceId,
 				paint: {
-					'circle-radius': 8,
-					'circle-color': '#ef4444',
-					'circle-stroke-width': 2,
-					'circle-stroke-color': '#ffffff'
-				}
+					"circle-radius": 8,
+					"circle-color": "#ef4444",
+					"circle-stroke-width": 2,
+					"circle-stroke-color": "#ffffff",
+				},
 			});
 
 			// Calculate exact 50m radius at each zoom level using the correct formula
 			// radius_pixels = radius_meters / meters_per_pixel
 			// where meters_per_pixel = (EARTH_CIRCUMFERENCE * cos(lat)) / (256 * 2^zoom)
-			const calcRadius = (zoom: number) => metersToMapPixels(STOP_RADIUS_M, routeData.lat_avg_deg, zoom);
+			const calcRadius = (zoom: number) =>
+				metersToMapPixels(STOP_RADIUS_M, routeData.lat_avg_deg, zoom);
 
 			mapRef.addLayer({
-				id: 'stops-accuracy-circles',
-				type: 'circle',
+				id: "stops-accuracy-circles",
+				type: "circle",
 				source: stopsSourceId,
 				paint: {
 					// Use exponential zoom interpolation for proper scaling
 					// Circles scale by factor of 2 for each zoom level (Web Mercator projection)
-					'circle-radius': [
-						'interpolate',
-						['exponential', 2],
-						['zoom'],
-						10, calcRadius(10),
-						11, calcRadius(11),
-						12, calcRadius(12),
-						13, calcRadius(13),
-						14, calcRadius(14),
-						15, calcRadius(15),
-						16, calcRadius(16),
-						17, calcRadius(17),
-						18, calcRadius(18),
-						19, calcRadius(19),
-						20, calcRadius(20)
+					"circle-radius": [
+						"interpolate",
+						["exponential", 2],
+						["zoom"],
+						10,
+						calcRadius(10),
+						11,
+						calcRadius(11),
+						12,
+						calcRadius(12),
+						13,
+						calcRadius(13),
+						14,
+						calcRadius(14),
+						15,
+						calcRadius(15),
+						16,
+						calcRadius(16),
+						17,
+						calcRadius(17),
+						18,
+						calcRadius(18),
+						19,
+						calcRadius(19),
+						20,
+						calcRadius(20),
 					],
-					'circle-color': '#3b82f6',
-					'circle-opacity': 0.2,
-					'circle-stroke-width': 1.5,
-					'circle-stroke-color': '#3b82f6',
-					'circle-stroke-opacity': 0.4
-				}
+					"circle-color": "#3b82f6",
+					"circle-opacity": 0.2,
+					"circle-stroke-width": 1.5,
+					"circle-stroke-color": "#3b82f6",
+					"circle-stroke-opacity": 0.4,
+				},
 			});
 
-			mapRef.addSource('event-marker', {
-				type: 'geojson',
-				data: { type: 'FeatureCollection', features: [] }
-			});
-
-			mapRef.addLayer({
-				id: 'event-marker-pulse',
-				type: 'circle',
-				source: 'event-marker',
-				paint: {
-					'circle-radius': 20,
-					'circle-color': ['get', 'color'],
-					'circle-opacity': 0.3
-				}
+			mapRef.addSource("event-marker", {
+				type: "geojson",
+				data: { type: "FeatureCollection", features: [] },
 			});
 
 			mapRef.addLayer({
-				id: 'event-marker',
-				type: 'circle',
-				source: 'event-marker',
+				id: "event-marker-pulse",
+				type: "circle",
+				source: "event-marker",
 				paint: {
-					'circle-radius': 12,
-					'circle-color': ['get', 'color'],
-					'circle-stroke-width': 3,
-					'circle-stroke-color': '#ffffff',
-					'circle-opacity': 1
-				}
+					"circle-radius": 20,
+					"circle-color": ["get", "color"],
+					"circle-opacity": 0.3,
+				},
+			});
+
+			mapRef.addLayer({
+				id: "event-marker",
+				type: "circle",
+				source: "event-marker",
+				paint: {
+					"circle-radius": 12,
+					"circle-color": ["get", "color"],
+					"circle-stroke-width": 3,
+					"circle-stroke-color": "#ffffff",
+					"circle-opacity": 1,
+				},
 			});
 
 			// Add stop numbers
 			mapRef.addLayer({
-				id: 'stops-label',
-				type: 'symbol',
+				id: "stops-label",
+				type: "symbol",
 				source: stopsSourceId,
 				layout: {
-					'text-field': ['get', 'label'],
-					'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
-					'text-size': 12,
-					'text-anchor': 'top',
-					'text-offset': [0, 0.5]
+					"text-field": ["get", "label"],
+					"text-font": [
+						"Open Sans Regular",
+						"Arial Unicode MS Regular",
+					],
+					"text-size": 12,
+					"text-anchor": "top",
+					"text-offset": [0, 0.5],
 				},
 				paint: {
-					'text-color': '#000000',
-					'text-halo-color': '#ffffff',
-					'text-halo-width': 2
-				}
+					"text-color": "#000000",
+					"text-halo-color": "#ffffff",
+					"text-halo-width": 2,
+				},
 			});
 
 			// Add click handler for stops
-			mapRef.on('click', 'stops-circle', (e) => {
+			mapRef.on("click", "stops-circle", (e) => {
 				if (e.features && e.features[0]) {
 					const stopIndex = e.features[0].properties?.index as number;
 					onStopClick(stopIndex);
 				}
 			});
 
-			mapRef.on('click', (e) => {
-				const features = mapRef.queryRenderedFeatures(e.point, { layers: ['stops-circle'] });
+			mapRef.on("click", (e) => {
+				const features = mapRef.queryRenderedFeatures(e.point, {
+					layers: ["stops-circle"],
+				});
 				if (features.length === 0 && onClearHighlight) {
 					onClearHighlight();
 				}
 			});
 
-			mapRef.on('mouseenter', 'stops-circle', () => {
-				mapRef.getCanvas().style.cursor = 'pointer';
+			mapRef.on("mouseenter", "stops-circle", () => {
+				mapRef.getCanvas().style.cursor = "pointer";
 			});
 
-			mapRef.on('mouseleave', 'stops-circle', () => {
-				mapRef.getCanvas().style.cursor = '';
+			mapRef.on("mouseleave", "stops-circle", () => {
+				mapRef.getCanvas().style.cursor = "";
 			});
 
 			// Fit map to route bounds
 			if (routeGeo.length > 0) {
 				const bounds = routeGeo.reduce(
 					(bounds, coord) => bounds.extend(coord as [number, number]),
-					new maplibregl.LngLatBounds(routeGeo[0] as [number, number], routeGeo[0] as [number, number])
+					new maplibregl.LngLatBounds(
+						routeGeo[0] as [number, number],
+						routeGeo[0] as [number, number],
+					),
 				);
 				mapRef.fitBounds(bounds, { padding: 50 });
 			}
 		});
 
 		handleKeyDownRef = (e: KeyboardEvent) => {
-			if (e.key === 'Escape' && onClearHighlight) {
+			if (e.key === "Escape" && onClearHighlight) {
 				onClearHighlight();
 			}
 		};
-		document.addEventListener('keydown', handleKeyDownRef);
+		document.addEventListener("keydown", handleKeyDownRef);
 
 		return () => {
 			if (map) {
@@ -342,69 +387,71 @@
 		};
 	});
 
-		// Update bus position when it changes
-		$effect(() => {
-			if (!map || !busPosition || !mapLoaded) return;
+	// Update bus position when it changes
+	$effect(() => {
+		if (!map || !busPosition || !mapLoaded) return;
 
-			const { lat, lon, heading } = busPosition;
-			const hasHeading = heading !== undefined;
-			const iconName = hasHeading ? 'bus-arrow' : 'bus-question';
-			const rotation = hasHeading ? heading : 0;
+		const { lat, lon, heading } = busPosition;
+		const hasHeading = heading !== undefined;
+		const iconName = hasHeading ? "bus-arrow" : "bus-question";
+		const rotation = hasHeading ? heading : 0;
 
-			if (map.getSource(busSourceId)) {
-				(map.getSource(busSourceId) as maplibregl.GeoJSONSource).setData({
-					type: 'Feature',
+		if (map.getSource(busSourceId)) {
+			(map.getSource(busSourceId) as maplibregl.GeoJSONSource).setData({
+				type: "Feature",
+				properties: {
+					rotation,
+					icon: iconName,
+				},
+				geometry: {
+					type: "Point",
+					coordinates: [lon, lat],
+				},
+			});
+			// Update icon image when heading availability changes
+			map.setLayoutProperty("bus-marker", "icon-image", iconName);
+		} else {
+			map.addSource(busSourceId, {
+				type: "geojson",
+				data: {
+					type: "Feature",
 					properties: {
 						rotation,
-						icon: iconName
+						icon: iconName,
 					},
 					geometry: {
-						type: 'Point',
-						coordinates: [lon, lat]
-					}
-				});
-				// Update icon image when heading availability changes
-				map.setLayoutProperty('bus-marker', 'icon-image', iconName);
-			} else {
-				map.addSource(busSourceId, {
-					type: 'geojson',
-					data: {
-						type: 'Feature',
-						properties: {
-							rotation,
-							icon: iconName
-						},
-						geometry: {
-							type: 'Point',
-							coordinates: [lon, lat]
-						}
-					}
-				});
+						type: "Point",
+						coordinates: [lon, lat],
+					},
+				},
+			});
 
-				map.addLayer({
-					id: 'bus-marker',
-					type: 'symbol',
-					source: busSourceId,
-					layout: {
-						'icon-image': iconName,
-						'icon-size': 0.8,
-						'icon-rotate': ['get', 'rotation'],
-						'icon-allow-overlap': true,
-						'icon-ignore-placement': true,
-						'icon-rotation-alignment': 'map'
-					}
-				});
-			}
-		});
+			map.addLayer({
+				id: "bus-marker",
+				type: "symbol",
+				source: busSourceId,
+				layout: {
+					"icon-image": iconName,
+					"icon-size": 0.8,
+					"icon-rotate": ["get", "rotation"],
+					"icon-allow-overlap": true,
+					"icon-ignore-placement": true,
+					"icon-rotation-alignment": "map",
+				},
+			});
+		}
+	});
 
 	$effect(() => {
 		if (!map || !mapLoaded) return;
 
 		if (!highlightedEvent) {
-			(map.getSource('event-marker') as maplibregl.GeoJSONSource).setData({
-				type: 'FeatureCollection',
-				features: []
-			});
+			(map.getSource("event-marker") as maplibregl.GeoJSONSource).setData(
+				{
+					type: "FeatureCollection",
+					features: [],
+				},
+			);
 			return;
 		}
 
@@ -416,45 +463,57 @@
 
 		const color = FSM_STATE_COLORS[highlightedEvent.state];
 
-		(map.getSource('event-marker') as maplibregl.GeoJSONSource).setData({
-			type: 'FeatureCollection',
-			features: [{
-				type: 'Feature',
-				properties: { color },
-				geometry: {
-					type: 'Point',
-					coordinates: [latLon[1], latLon[0]]
-				}
-			}]
+		(map.getSource("event-marker") as maplibregl.GeoJSONSource).setData({
+			type: "FeatureCollection",
+			features: [
+				{
+					type: "Feature",
+					properties: { color },
+					geometry: {
+						type: "Point",
+						coordinates: [latLon[1], latLon[0]],
+					},
+				},
+			],
 		});
 	});
 
 	export function panToStop(stopIdx: number) {
-		console.log('MapView.panToStop called:', stopIdx);
+		console.log("MapView.panToStop called:", stopIdx);
 		currentPanTarget = stopIdx;
 	}
 
 	export function panToLocation(lat: number, lon: number) {
-		console.log('panToLocation called:', lat, lon);
+		console.log("panToLocation called:", lat, lon);
 		currentEventLocation = { lat, lon };
 	}
 
 	$effect(() => {
-		console.log('Pan effect checking:', { map: !!map, mapLoaded, currentPanTarget });
+		console.log("Pan effect checking:", {
+			map: !!map,
+			mapLoaded,
+			currentPanTarget,
+		});
 		if (!map || !mapLoaded || currentPanTarget === null) return;
 
-		console.log('Pan effect running, target:', currentPanTarget, 'mapLoaded:', mapLoaded);
+		console.log(
+			"Pan effect running, target:",
+			currentPanTarget,
+			"mapLoaded:",
+			mapLoaded,
+		);
 		const stop = routeData.stops[currentPanTarget];
 		if (!stop) return;
 
 		const latLon = getStopPosition(stop.progress_cm, routeData);
 		if (!latLon) return;
 
-		console.log('Panning map to:', latLon);
+		console.log("Panning map to:", latLon);
+		const currentZoom = map.getZoom();
 		map.easeTo({
 			center: [latLon[1], latLon[0]],
-			zoom: 16,
-			duration: 500
+			zoom: currentZoom,
+			duration: 500,
 		});
 
 		currentPanTarget = null;
@@ -463,11 +522,9 @@
 	$effect(() => {
 		if (!map || !mapLoaded || !currentEventLocation) return;
 
-		console.log('Panning to event location:', currentEventLocation);
-		map.easeTo({
-			center: [currentEventLocation.lon, currentEventLocation.lat],
-			zoom: 16,
-			duration: 500
+		console.log("Panning to event location:", currentEventLocation);
+		map.panTo([currentEventLocation.lon, currentEventLocation.lat], {
+			duration: 500,
 		});
 
 		currentEventLocation = null;
@@ -478,53 +535,61 @@
 		if (!map || !mapLoaded) return;
 
 		if (selectedStop !== null) {
-			map.setPaintProperty('stops-circle', 'circle-radius', [
-				'match',
-				['get', 'index'],
+			map.setPaintProperty("stops-circle", "circle-radius", [
+				"match",
+				["get", "index"],
 				selectedStop,
 				12,
-				8
+				8,
 			]);
-			map.setPaintProperty('stops-circle', 'circle-color', [
-				'match',
-				['get', 'index'],
+			map.setPaintProperty("stops-circle", "circle-color", [
+				"match",
+				["get", "index"],
 				selectedStop,
-				'#f59e0b',
-				'#ef4444'
+				"#f59e0b",
+				"#ef4444",
 			]);
 			// Highlight the selected stop's accuracy circle
-			map.setPaintProperty('stops-accuracy-circles', 'circle-opacity', [
-				'match',
-				['get', 'index'],
+			map.setPaintProperty("stops-accuracy-circles", "circle-opacity", [
+				"match",
+				["get", "index"],
 				selectedStop,
 				0.25,
-				0.1
+				0.1,
 			]);
-			map.setPaintProperty('stops-accuracy-circles', 'circle-stroke-opacity', [
-				'match',
-				['get', 'index'],
-				selectedStop,
-				0.6,
-				0.3
-			]);
-			map.setPaintProperty('stops-accuracy-circles', 'circle-stroke-width', [
-				'match',
-				['get', 'index'],
-				selectedStop,
-				2,
-				1
-			]);
+			map.setPaintProperty(
+				"stops-accuracy-circles",
+				"circle-stroke-opacity",
+				["match", ["get", "index"], selectedStop, 0.6, 0.3],
+			);
+			map.setPaintProperty(
+				"stops-accuracy-circles",
+				"circle-stroke-width",
+				["match", ["get", "index"], selectedStop, 2, 1],
+			);
 			// Show all accuracy circles
-			map.setFilter('stops-accuracy-circles', null);
+			map.setFilter("stops-accuracy-circles", null);
 		} else {
-			map.setPaintProperty('stops-circle', 'circle-radius', 8);
-			map.setPaintProperty('stops-circle', 'circle-color', '#ef4444');
+			map.setPaintProperty("stops-circle", "circle-radius", 8);
+			map.setPaintProperty("stops-circle", "circle-color", "#ef4444");
 			// Reset accuracy circle styling
-			map.setPaintProperty('stops-accuracy-circles', 'circle-opacity', 0.2);
-			map.setPaintProperty('stops-accuracy-circles', 'circle-stroke-opacity', 0.4);
-			map.setPaintProperty('stops-accuracy-circles', 'circle-stroke-width', 1.5);
+			map.setPaintProperty(
+				"stops-accuracy-circles",
+				"circle-opacity",
+				0.2,
+			);
+			map.setPaintProperty(
+				"stops-accuracy-circles",
+				"circle-stroke-opacity",
+				0.4,
+			);
+			map.setPaintProperty(
+				"stops-accuracy-circles",
+				"circle-stroke-width",
+				1.5,
+			);
 			// Show all accuracy circles
-			map.setFilter('stops-accuracy-circles', null);
+			map.setFilter("stops-accuracy-circles", null);
 		}
 	});
 
@@ -534,7 +599,7 @@
 			map = null;
 		}
 		if (handleKeyDownRef) {
-			document.removeEventListener('keydown', handleKeyDownRef);
+			document.removeEventListener("keydown", handleKeyDownRef);
 			handleKeyDownRef = null;
 		}
 	});
