@@ -559,18 +559,7 @@ class DetourScenarioGoldenTest {
      */
     private fun validateAnnounceEvents() {
         println("\n=== VALIDATION 9: Announce Events ===")
-        val announceContent = testDataFile("ty225_short_detour_announce.jsonl").readText()
-        val announceStops = announceContent
-            .lines()
-            .filter { it.isNotBlank() }
-            .map {
-                Regex("\"stop_idx\"\\s*:\\s*(\\d+)")
-                    .find(it)
-                    ?.groupValues
-                    ?.get(1)
-                    ?.toInt()
-                    ?: error("Failed to parse stop_idx from announce line: $it")
-            }
+        val announceStops = extractAnnounceStopsFromTrace()
         val collapsed = validateAnnounceSequence(announceStops)
         for (skipped in SKIPPED_DETOUR_STOPS) {
             assertFalse(
@@ -592,6 +581,22 @@ class DetourScenarioGoldenTest {
             collapsed
         )
         return collapsed
+    }
+
+    private fun extractAnnounceStopsFromTrace(): List<Int> {
+        val traceFile = testDataFile(ANDROID_TRACE_FILENAME)
+        return TraceLoader.load(traceFile)
+            .flatMap { tick ->
+                tick.stop_states.filter { it.announced }.map { it.stop_idx }
+            }
+    }
+
+    private fun extractAnnounceEventsFromTrace(): List<Pair<Long, Int>> {
+        val traceFile = testDataFile(ANDROID_TRACE_FILENAME)
+        return TraceLoader.load(traceFile)
+            .flatMap { tick ->
+                tick.stop_states.filter { it.announced }.map { tick.gps.time_ms to it.stop_idx }
+            }
     }
 
     private fun validateNoSkippedStopFsmStates(stopIdx: Int) {
@@ -820,24 +825,7 @@ class DetourScenarioGoldenTest {
     @Test
     fun test_announce_precedes_arrival() {
         val run = processScenario(SHORT_DETOUR)
-        val announceEvents = testDataFile("ty225_short_detour_announce.jsonl").readText()
-            .lines()
-            .filter { it.isNotBlank() }
-            .map { line ->
-                val time = Regex("\"time\"\\s*:\\s*(\\d+)")
-                    .find(line)
-                    ?.groupValues
-                    ?.get(1)
-                    ?.toLong()
-                    ?: error("Failed to parse time from announce line: $line")
-                val stop = Regex("\"stop_idx\"\\s*:\\s*(\\d+)")
-                    .find(line)
-                    ?.groupValues
-                    ?.get(1)
-                    ?.toInt()
-                    ?: error("Failed to parse stop_idx from announce line: $line")
-                (time * 1000) to stop
-            }
+        val announceEvents = extractAnnounceEventsFromTrace()
 
         for ((arrivalStop, arrivalTime) in run.arrivals) {
             val matchingAnnounce = announceEvents.firstOrNull { (announceTime, announceStop) ->
