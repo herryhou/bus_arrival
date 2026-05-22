@@ -190,9 +190,9 @@ golden:
 	$(MAKE) gen_nmea ROUTE_NAME=$(ROUTE_NAME) SCENARIO=normal
 	$(MAKE) pipeline ROUTE_NAME=$(ROUTE_NAME) SCENARIO=normal
 	@mkdir -p test_data/golden
-	@cp $(TRACE_OUT) test_data/golden/$(ROUTE_NAME)_normal_trace.jsonl
+	@cp $(TRACE_OUT) test_data/golden/$(ROUTE_NAME)_normal_trace_v2.jsonl
 	@echo "Golden files updated in test_data/golden/"
-	@echo "Generated: test_data/golden/$(ROUTE_NAME)_normal_trace.jsonl"
+	@echo "Generated: test_data/golden/$(ROUTE_NAME)_normal_trace_v2.jsonl"
 
 
 # Run unified pipeline without generating NMEA (uses existing NMEA file)
