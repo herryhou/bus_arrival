@@ -27,12 +27,12 @@
 		let lastTime = 0;
 
 		traceData.forEach((record, i) => {
-			const timeDiff = record.time_ms - lastTime;
-			lastTime = record.time_ms;
+			const timeDiff = record.gps.time_ms - lastTime;
+			lastTime = record.gps.time_ms;
 			// 1. GPS Jump
-			if (record.gps_jump) {
+			if (record.detection.gps_jump) {
 				log.push({
-					time: record.time_ms,
+					time: record.gps.time_ms,
 					timeDiff,
 					type: 'JUMP',
 					message: `GPS Jump detected: dist > 200m`
@@ -40,12 +40,12 @@
 			}
 
 			// 2. Recovery
-			if (record.recovery_idx !== null) {
+			if (record.detection.recovery_idx !== null) {
 				log.push({
-					time: record.time_ms,
+					time: record.gps.time_ms,
 					timeDiff,
 					type: 'RECOVERY',
-					message: `Recovery: Switched to stop ${record.recovery_idx}`
+					message: `Recovery: Switched to stop ${record.detection.recovery_idx}`
 				});
 			}
 
@@ -55,7 +55,7 @@
 				const lastState = lastStates.get(stop.stop_idx);
 				if (lastState && lastState !== stop.fsm_state) {
 					log.push({
-						time: record.time_ms,
+						time: record.gps.time_ms,
 						timeDiff,
 						type: 'TRANSITION',
 						message: `Stop ${stop.stop_idx}: ${lastState} → ${stop.fsm_state}`,
@@ -68,7 +68,7 @@
 				// Arrival
 				if (stop.just_arrived) {
 					log.push({
-						time: record.time_ms,
+						time: record.gps.time_ms,
 						timeDiff,
 						type: 'ARRIVAL',
 						message: `Stop ${stop.stop_idx}: ARRIVED!`,

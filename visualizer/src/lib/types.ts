@@ -2,7 +2,7 @@
  * Trace data types from Rust arrival detector
  *
  * These types must match the serde serialization format from Rust:
- * - arrival_detector/src/trace.rs
+ * - arrival_detector/src/trace.rs (v2 grouped schema)
  * - shared/src/lib.rs (FsmState)
  */
 
@@ -12,6 +12,11 @@
  * v8.5: Added Idle and TripComplete states
  */
 export type FsmState = 'Idle' | 'Approaching' | 'Arriving' | 'AtStop' | 'Departed' | 'TripComplete';
+
+/**
+ * Detection status - GPS processing state
+ */
+export type DetectionStatus = 'valid' | 'normal' | 'off_route' | 'dr_outage' | 'suspect_off_route';
 
 /**
  * Individual feature scores from Bayesian probability model
@@ -43,67 +48,88 @@ export interface StopTraceState {
 	dwell_time_s: number;
 	/** Arrival probability (0-255) */
 	probability: number;
+	/** Previous probability before this tick's update */
+	previous_probability: number;
 	/** Individual feature scores */
 	features: FeatureScores;
 	/** Just arrived this frame? */
 	just_arrived: boolean;
+	/** Has this stop been announced? */
+	announced: boolean;
+	/** Skip this stop on detour re-entry? */
+	skip_on_reentry: boolean;
+	/** Previous distance to stop (cm) - for re-acquisition debugging */
+	previous_distance_cm: number;
 }
 
 /**
- * Trace record for debugging visualization
- * One line per GPS update in trace.jsonl
- *
- * Input format supports canonical 'time_ms' (milliseconds) and legacy 'time'
- * (seconds) fields. The parser exposes millisecond semantics as 'time_ms'.
+ * Trace record v2 - grouped schema for debugging visualization
+ * One line per GPS update in trace_v2.jsonl
  */
 export interface TraceRecord {
-	/** GPS timestamp in milliseconds */
-	time_ms: number;
-	/** Latitude */
-	lat: number;
-	/** Longitude */
-	lon: number;
-	/** Route progress (cm) */
-	s_cm: number;
-	/** Velocity (cm/s) */
-	v_cms: number;
-	/** Heading in 0.01 degrees (0-35999) */
-	heading_cdeg?: number;
-	/** Active stop indices (corridor filter) */
-	active_stops: number[];
-	/** Per-stop detailed state (only for active stops) */
+	/** GPS input and quality fields */
+	gps: {
+		/** GPS timestamp in milliseconds */
+		time_ms: number;
+		/** Latitude */
+		lat: number;
+		/** Longitude */
+		lon: number;
+		/** Heading in 0.01 degrees (0-35999) */
+		heading_cdeg?: number;
+		/** GPS quality: HDOP */
+		hdop?: number | null;
+		/** GPS accuracy estimate (cm) */
+		accuracy_cm?: number | null;
+		/** Number of satellites */
+		num_sats?: number | null;
+		/** Fix type - "none", "2d", "3d" */
+		fix_type?: string | null;
+	};
+	/** Filtered route position, velocity, uncertainty */
+	kalman: {
+		/** Route progress (cm) */
+		s_cm: number;
+		/** Velocity (cm/s) */
+		v_cms: number;
+		/** Position variance (cm²) */
+		variance_cm2: number;
+		/** Raw GPS divergence from Kalman estimate (cm) */
+		divergence_cm: number;
+	};
+	/** Route segment matching diagnostics */
+	map_matching: {
+		/** Which route segment we're matched to (null if off-route) */
+		segment_idx: number | null;
+		/** Did the heading constraint pass? (±90° rule) */
+		heading_constraint_met: boolean;
+	};
+	/** GPS processing status and detection mode flags */
+	detection: {
+		/** GPS processing state */
+		status: DetectionStatus;
+		/** Confirmed off-route mode (derived from status == "off_route") */
+		off_route: boolean;
+		/** GPS jump detected? */
+		gps_jump: boolean;
+		/** Recovery: new stop index if jumped */
+		recovery_idx: number | null;
+		/** Last valid route position before off-route (cm) */
+		off_route_last_s_cm: number | null;
+	};
+	/** Corridor filter output and next-stop summary */
+	corridor: {
+		/** Active stop indices (corridor filter output) */
+		active_stops: number[];
+		/** Corridor start position (cm) */
+		corridor_start_cm: number | null;
+		/** Corridor end position (cm) */
+		corridor_end_cm: number | null;
+		/** Next stop index and probability (even if not in corridor) */
+		next_stop: [number, number] | null;
+	};
+	/** Per-stop detailed state (diagnostic superset) */
 	stop_states: StopTraceState[];
-	/** GPS jump detected? */
-	gps_jump: boolean;
-	/** Recovery: new stop index if jumped */
-	recovery_idx: number | null;
-
-	// === New: Map matching ===
-	/** Which route segment we're matched to (null if off-route) */
-	segment_idx?: number | null;
-	/** Did the heading constraint pass? (±90° rule) */
-	heading_constraint_met: boolean;
-	// === New: Divergence ===
-	/** Raw GPS projection - Kalman filtered position (cm) */
-	divergence_cm: number;
-	// === New: GPS quality ===
-	/** GPS quality: HDOP */
-	hdop?: number | null;
-	/** GPS quality: number of satellites */
-	num_sats?: number | null;
-	/** GPS quality: fix type - "none", "2d", "3d" */
-	fix_type?: string | null;
-	// === New: Kalman state ===
-	/** Position variance (cm²), represents filter uncertainty */
-	variance_cm2: number;
-	// === New: Corridor info ===
-	/** Corridor start position (cm) */
-	corridor_start_cm?: number | null;
-	/** Corridor end position (cm) */
-	corridor_end_cm?: number | null;
-	// === New: Next stop (outside corridor) ===
-	/** Next stop index and probability (even if not in corridor) */
-	next_stop?: [number, number] | null;
 }
 
 /**

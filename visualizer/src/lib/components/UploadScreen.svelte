@@ -25,8 +25,8 @@
   let useFileSystemAPI = $state(isFileSystemAccessAPISupported());
 
   // Traditional file input fallbacks
-  let routeFileInput = $state<HTMLInputElement | null>(null);
-  let traceFileInput = $state<HTMLInputElement | null>(null);
+  let routeFileInput: HTMLInputElement | null = null;
+  let traceFileInput: HTMLInputElement | null = null;
 
   async function handleSmartRoutePick() {
     loading = true;
@@ -70,15 +70,21 @@
 
   async function handleRouteUpload() {
     const file = routeFileInput?.files?.[0];
-    if (!file) return;
+    if (!file) {
+      console.log('handleRouteUpload: no file selected');
+      return;
+    }
 
     loading = true;
     error = null;
 
     try {
+      console.log('Loading route file:', file.name, 'size:', file.size);
       routeData = await loadRouteData(file);
+      console.log('Route loaded successfully:', routeData ? `nodes=${routeData.node_count}, stops=${routeData.stop_count}` : 'null');
       checkAndLoad();
     } catch (e) {
+      console.error('Route load error:', e);
       error = `Failed to load route: ${e instanceof Error ? e.message : String(e)}`;
     } finally {
       loading = false;
@@ -87,15 +93,21 @@
 
   async function handleTraceUpload() {
     const file = traceFileInput?.files?.[0];
-    if (!file) return;
+    if (!file) {
+      console.log('handleTraceUpload: no file selected');
+      return;
+    }
 
     loading = true;
     error = null;
 
     try {
+      console.log('Loading trace file:', file.name, 'size:', file.size);
       traceData = await loadTraceFile(file);
+      console.log('Trace loaded successfully:', traceData ? `${traceData.length} records` : 'null');
       checkAndLoad();
     } catch (e) {
+      console.error('Trace load error:', e);
       error = `Failed to load trace: ${e instanceof Error ? e.message : String(e)}`;
     } finally {
       loading = false;
@@ -176,18 +188,18 @@
       <!-- Traditional file input mode -->
       <div class="upload-section">
         <div class="upload-item">
-          <label for="route-file" class="file-label">
+          <label for="route-file-input" class="file-label">
             <div class="label-text">Route Data (.bin)</div>
           </label>
-          <input bind:this={routeFileInput} id="route-file" type="file" accept=".bin" onchange={handleRouteUpload} class="file-input" />
+          <input bind:this={routeFileInput} id="route-file-input" type="file" accept=".bin" onchange={handleRouteUpload} class="file-input" />
           {#if routeData}<div class="status-badge success">READY</div>{/if}
         </div>
 
         <div class="upload-item">
-          <label for="trace-file" class="file-label">
+          <label for="trace-file-input" class="file-label">
             <div class="label-text">Trace Data (.jsonl)</div>
           </label>
-          <input bind:this={traceFileInput} id="trace-file" type="file" accept=".jsonl" onchange={handleTraceUpload} class="file-input" />
+          <input bind:this={traceFileInput} id="trace-file-input" type="file" accept=".jsonl" onchange={handleTraceUpload} class="file-input" />
           {#if traceData}<div class="status-badge success">READY</div>{/if}
         </div>
       </div>

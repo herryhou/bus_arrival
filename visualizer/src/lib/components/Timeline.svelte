@@ -24,10 +24,10 @@
 
 	// Get time range
 	let timeMin = $derived.by(() =>
-		traceData.length > 0 ? traceData[0].time_ms : 0,
+		traceData.length > 0 ? traceData[0].gps.time_ms : 0,
 	);
 	let timeMax = $derived.by(() =>
-		traceData.length > 0 ? traceData[traceData.length - 1].time_ms : 0,
+		traceData.length > 0 ? traceData[traceData.length - 1].gps.time_ms : 0,
 	);
 	let currentTimePercent = $derived.by(() =>
 		timeMax > timeMin

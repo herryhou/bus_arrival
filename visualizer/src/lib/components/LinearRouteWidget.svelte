@@ -86,7 +86,7 @@
   const currentRecord = $derived.by(() => {
     if (!traceData || traceData.length === 0) return null;
     return traceData.reduce((prev: TraceRecord, curr: TraceRecord) =>
-      Math.abs(curr.time_ms - currentTime) < Math.abs(prev.time_ms - currentTime)
+      Math.abs(curr.gps.time_ms - currentTime) < Math.abs(prev.gps.time_ms - currentTime)
         ? curr
         : prev,
     );
@@ -163,10 +163,12 @@
 
   function handleStopHover(idx: number, event: CustomEvent) {
     hoveredStop = idx;
-    // Get the target element from the event to calculate position
-    const target = event.target as HTMLElement;
-    const rect = target.getBoundingClientRect();
-    tooltipPos = { x: rect.left + rect.width / 2, y: rect.bottom + 8 };
+    // Find the stop wrapper element using data attribute
+    const target = document.querySelector(`[data-stop-index="${idx}"]`) as HTMLElement;
+    if (target) {
+      const rect = target.getBoundingClientRect();
+      tooltipPos = { x: rect.left + rect.width / 2, y: rect.bottom + 8 };
+    }
   }
 
   function handleStopHoverEnd() {
@@ -321,6 +323,7 @@
 
           <div
             class="stop-wrapper"
+            data-stop-index={stopIndex}
             style="left: {progressToPixel(stop.progress_cm)}px"
           >
             <StopMarker
@@ -371,7 +374,7 @@
     <StopTooltip
       stopIndex={hoveredStop}
       {stopState}
-      vCms={currentRecord?.v_cms ?? 0}
+      vCms={currentRecord?.kalman.v_cms ?? 0}
       x={tooltipPos.x}
       y={tooltipPos.y}
     />
