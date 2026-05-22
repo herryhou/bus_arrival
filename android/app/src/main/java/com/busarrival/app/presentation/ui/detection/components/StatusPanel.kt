@@ -88,10 +88,6 @@ fun StatusPanel(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            SectionHeader(text = "Debug")
-
-            Spacer(modifier = Modifier.height(8.dp))
-
             Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -131,7 +127,8 @@ fun StatusPanel(
                     Switch(
                             checked = gpsLoggingEnabled,
                             onCheckedChange = { onToggleGpsLogging() },
-                            modifier = Modifier.semantics { contentDescription = "Toggle GPS logging" }
+                            modifier =
+                                    Modifier.semantics { contentDescription = "Toggle GPS logging" }
                     )
                 }
             }
