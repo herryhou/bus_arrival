@@ -131,3 +131,6 @@ android/app/src/main/res/drawable-/navigation.json
 android/gradle/
 android/gradlew
 android/gradlew.bat
+
+# Archived docs (stale, kept for reference but not tracked)
+docs/archive/
