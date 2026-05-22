@@ -26,7 +26,7 @@ fn test_detour_reentry_snap_behavior() {
     .expect("Pipeline processing failed");
 
     // Read trace to verify off-route behavior
-    let trace_file = std::fs::File::open(super::common::test_data_dir().join("ty225_short_detour_trace.jsonl"))
+    let trace_file = std::fs::File::open(super::common::test_data_dir().join("ty225_short_detour_trace_v2.jsonl"))
         .expect("Failed to open trace file");
     let trace_reader = std::io::BufReader::new(trace_file);
 
@@ -36,14 +36,15 @@ fn test_detour_reentry_snap_behavior() {
     let mut reentry_tick = 0;
     let mut reentry_s_cm = 0;
     let s_cm_before_offroute = 0;
+    let mut found_reentry_transition = false;
 
     for line in trace_reader.lines() {
         let line = line.expect("Failed to read trace line");
         let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
 
-        let time = trace["time_ms"].as_u64().unwrap();
-        let s_cm = trace["s_cm"].as_i64().unwrap();
-        let off_route = trace["off_route"].as_bool().unwrap();
+        let time = trace["gps"]["time_ms"].as_u64().unwrap();
+        let s_cm = trace["kalman"]["s_cm"].as_i64().unwrap();
+        let off_route = trace["detection"]["off_route"].as_bool().unwrap();
 
         // Detect off-route episode
         if off_route && !off_route_detected {
@@ -58,7 +59,11 @@ fn test_detour_reentry_snap_behavior() {
         }
 
         // Detect re-entry (transition from off_route=true to off_route=false)
-        if off_route_detected && reentry_tick == 0 && !off_route {
+        // In trace_v2, position snap happens on the tick AFTER re-entry transition
+        if off_route_detected && !found_reentry_transition && !off_route {
+            found_reentry_transition = true;
+        } else if found_reentry_transition && reentry_tick == 0 {
+            // This is the tick after re-entry - capture the snapped position
             reentry_tick = time;
             reentry_s_cm = s_cm;
         }
@@ -72,7 +77,7 @@ fn test_detour_reentry_snap_behavior() {
 
     // Verify position was frozen during off-route
     let mut frozen_count = 0;
-    let trace_file = std::fs::File::open(super::common::test_data_dir().join("ty225_short_detour_trace.jsonl"))
+    let trace_file = std::fs::File::open(super::common::test_data_dir().join("ty225_short_detour_trace_v2.jsonl"))
         .expect("Failed to open trace file");
     let trace_reader = std::io::BufReader::new(trace_file);
 
@@ -80,15 +85,15 @@ fn test_detour_reentry_snap_behavior() {
         let line = line.expect("Failed to read trace line");
         let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
 
-        let off_route = trace["off_route"].as_bool().unwrap();
-        let s_cm = trace["s_cm"].as_i64().unwrap();
+        let off_route = trace["detection"]["off_route"].as_bool().unwrap();
+        let s_cm = trace["kalman"]["s_cm"].as_i64().unwrap();
 
         if off_route {
             frozen_count += 1;
             assert_eq!(
                 s_cm, frozen_s_cm,
                 "Position should remain frozen at {} during off-route (found {} at tick {})",
-                frozen_s_cm, s_cm, trace["time_ms"]
+                frozen_s_cm, s_cm, trace["gps"]["time_ms"]
             );
         }
     }
@@ -173,7 +178,7 @@ fn test_no_arrivals_during_offroute() {
     .expect("Pipeline processing failed");
 
     // Read trace to find off-route episode time range
-    let trace_file = std::fs::File::open(super::common::test_data_dir().join("ty225_short_detour_trace.jsonl"))
+    let trace_file = std::fs::File::open(super::common::test_data_dir().join("ty225_short_detour_trace_v2.jsonl"))
         .expect("Failed to open trace file");
     let trace_reader = std::io::BufReader::new(trace_file);
 
@@ -185,8 +190,8 @@ fn test_no_arrivals_during_offroute() {
         let line = line.expect("Failed to read trace line");
         let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
 
-        let time = trace["time_ms"].as_u64().unwrap();
-        let off_route = trace["off_route"].as_bool().unwrap();
+        let time = trace["gps"]["time_ms"].as_u64().unwrap();
+        let off_route = trace["detection"]["off_route"].as_bool().unwrap();
 
         if off_route && off_route_start_time.is_none() {
             off_route_start_time = Some(time);
@@ -234,7 +239,7 @@ fn test_reentry_immediate_snap_not_gradual() {
     .expect("Pipeline processing failed");
 
     // Read trace to verify immediate snap behavior
-    let trace_file = std::fs::File::open(super::common::test_data_dir().join("ty225_short_detour_trace.jsonl"))
+    let trace_file = std::fs::File::open(super::common::test_data_dir().join("ty225_short_detour_trace_v2.jsonl"))
         .expect("Failed to open trace file");
     let trace_reader = std::io::BufReader::new(trace_file);
 
@@ -244,18 +249,22 @@ fn test_reentry_immediate_snap_not_gradual() {
         let line = line.expect("Failed to read trace line");
         let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
 
-        let time = trace["time_ms"].as_u64().unwrap();
-        let s_cm = trace["s_cm"].as_i64().unwrap();
-        let off_route = trace["off_route"].as_bool().unwrap();
+        let time = trace["gps"]["time_ms"].as_u64().unwrap();
+        let s_cm = trace["kalman"]["s_cm"].as_i64().unwrap();
+        let off_route = trace["detection"]["off_route"].as_bool().unwrap();
 
         ticks.push((time, s_cm, off_route));
     }
 
     // Find off-route to re-entry transition
     let mut reentry_idx = 0;
+    let mut found_reentry_transition = false;
     for (i, (_time, _s, off_route)) in ticks.iter().enumerate() {
-        if !off_route && i > 0 && ticks[i - 1].2 {
-            // Found first non-off-route tick after off-route
+        if !found_reentry_transition && !off_route && i > 0 && ticks[i - 1].2 {
+            // Found re-entry transition (off_route -> !off_route)
+            found_reentry_transition = true;
+        } else if found_reentry_transition && reentry_idx == 0 {
+            // This is the tick after re-entry - capture the snapped position
             reentry_idx = i;
             break;
         }
@@ -268,8 +277,8 @@ fn test_reentry_immediate_snap_not_gradual() {
 
     // The key check: after re-entry, s_cm should NOT gradually increase
     // from the frozen position. Instead, it should jump immediately.
-    let frozen_s_cm = ticks[reentry_idx - 1].1;
-    let reentry_s_cm = ticks[reentry_idx].1;
+    let frozen_s_cm = ticks[reentry_idx - 2].1; // Two ticks back: last frozen position
+    let reentry_s_cm = ticks[reentry_idx].1; // Current tick: snapped position
 
     // Check for significant jump (not gradual)
     let jump = (reentry_s_cm - frozen_s_cm).unsigned_abs();
