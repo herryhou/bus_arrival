@@ -1,9 +1,9 @@
 //! Arrival detection state machine
 
-use shared::{DistCm, PositionSignals, Prob8, TimestampMs};
+use crate::{gps::GpsRecord, ArrivalEvent, DepartureEvent, PipelineResult, StopTraceState};
+use detection::state_machine::{StopEvent, StopState};
 use shared::binfile::RouteData;
-use crate::{PipelineResult, ArrivalEvent, DepartureEvent, gps::GpsRecord, StopTraceState};
-use detection::state_machine::{StopState, StopEvent};
+use shared::{DistCm, PositionSignals, Prob8, TimestampMs};
 
 /// Detection state (Phase 3: Arrival detection)
 pub struct DetectionState {
@@ -70,21 +70,27 @@ impl DetectionState {
         let v_cms = record.v_cms;
         let stops = route_data.stops();
 
-        // Update off-route state
+        // Update off-route state and compute the detection gate for this tick.
+        let mut detection_gate_open = record.status == "valid";
         match record.status {
             "off_route" => {
                 self.off_route = true;
                 self.off_route_last_s_cm = Some(record.s_cm);
+                detection_gate_open = false;
+            }
+            "suspect_off_route" => {
+                detection_gate_open = false;
             }
             "valid" => {
                 let just_reentered = self.off_route;
-                let large_forward_jump = self.off_route_last_s_cm
+                let large_forward_jump = self
+                    .off_route_last_s_cm
                     .is_some_and(|off_route_s| record.s_cm > off_route_s + 10000);
 
                 self.off_route = false;
                 self.off_route_last_s_cm = None;
 
-                // Mark intermediate stops to skip on re-entry with large jump
+                // Mark intermediate stops to skip on re-entry with large jump.
                 if just_reentered && large_forward_jump {
                     for (idx, stop) in stops.iter().enumerate() {
                         if stop.progress_cm < record.s_cm {
@@ -92,16 +98,31 @@ impl DetectionState {
                         }
                     }
                 }
+
+                // The direct off-route -> valid re-entry tick is not trusted for
+                // arrival detection; detection resumes on the next clean valid tick.
+                if just_reentered {
+                    detection_gate_open = false;
+                }
             }
             "dr_outage" => {
-                // Keep off_route state
+                // Keep off_route state. DR outage may continue existing host-pipeline
+                // detection only when the pipeline is not already in an off-route episode.
+                detection_gate_open = !self.off_route;
             }
-            _ => {}
+            _ => {
+                detection_gate_open = false;
+            }
+        }
+
+        if !detection_gate_open {
+            return;
         }
 
         // Find active stops (corridor filter)
         for (idx, stop) in stops.iter().enumerate() {
-            if s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm
+            if s_cm >= stop.corridor_start_cm
+                && s_cm <= stop.corridor_end_cm
                 && !self.stop_states[idx].skip_on_reentry
             {
                 self.active_indices.push(idx);
@@ -164,50 +185,58 @@ impl DetectionState {
     }
 
     /// Get trace information for the last processed GPS record
-    pub fn get_trace_info(&self, record: &GpsRecord, route_data: &RouteData) -> (Vec<u8>, Vec<StopTraceState>) {
+    pub fn get_trace_info(
+        &self,
+        record: &GpsRecord,
+        route_data: &RouteData,
+    ) -> (Vec<u8>, Vec<StopTraceState>) {
         let stops = route_data.stops();
 
         let active_stops: Vec<u8> = self.active_indices.iter().map(|i| *i as u8).collect();
 
         let z_gps_cm = record.s_cm + record.divergence_cm;
 
-        let stop_states: Vec<StopTraceState> = self.active_indices.iter().map(|&idx| {
-            let stop = &stops[idx];
-            let stop_state = &self.stop_states[idx];
+        let stop_states: Vec<StopTraceState> = self
+            .active_indices
+            .iter()
+            .map(|&idx| {
+                let stop = &stops[idx];
+                let stop_state = &self.stop_states[idx];
 
-            let signals = PositionSignals::new(record.s_cm, record.s_cm);
+                let signals = PositionSignals::new(record.s_cm, record.s_cm);
 
-            let features = detection::probability::compute_feature_scores(
-                signals,
-                record.v_cms,
-                stop,
-                stop_state.dwell_time_s,
-                detection::probability::gaussian_lut(),
-                detection::probability::logistic_lut(),
-            );
+                let features = detection::probability::compute_feature_scores(
+                    signals,
+                    record.v_cms,
+                    stop,
+                    stop_state.dwell_time_s,
+                    detection::probability::gaussian_lut(),
+                    detection::probability::logistic_lut(),
+                );
 
-            let probability = detection::probability::compute_probability(
-                record.s_cm,
-                record.v_cms,
-                stop.progress_cm,
-                stop_state.dwell_time_s,
-            );
+                let probability = detection::probability::compute_probability(
+                    record.s_cm,
+                    record.v_cms,
+                    stop.progress_cm,
+                    stop_state.dwell_time_s,
+                );
 
-            StopTraceState {
-                stop_idx: idx as u8,
-                gps_distance_cm: z_gps_cm - stop.progress_cm,
-                progress_distance_cm: record.s_cm - stop.progress_cm,
-                fsm_state: stop_state.fsm_state,
-                dwell_time_s: stop_state.dwell_time_s,
-                probability,
-                previous_probability: self.previous_probabilities[idx],
-                features,
-                announced: stop_state.announced,
-                skip_on_reentry: stop_state.skip_on_reentry,
-                previous_distance_cm: stop_state.previous_distance_cm,
-                just_arrived: self.arrived_this_frame.contains(&(idx as u8)),
-            }
-        }).collect();
+                StopTraceState {
+                    stop_idx: idx as u8,
+                    gps_distance_cm: z_gps_cm - stop.progress_cm,
+                    progress_distance_cm: record.s_cm - stop.progress_cm,
+                    fsm_state: stop_state.fsm_state,
+                    dwell_time_s: stop_state.dwell_time_s,
+                    probability,
+                    previous_probability: self.previous_probabilities[idx],
+                    features,
+                    announced: stop_state.announced,
+                    skip_on_reentry: stop_state.skip_on_reentry,
+                    previous_distance_cm: stop_state.previous_distance_cm,
+                    just_arrived: self.arrived_this_frame.contains(&(idx as u8)),
+                }
+            })
+            .collect();
 
         (active_stops, stop_states)
     }
@@ -234,14 +263,58 @@ mod tests {
     use std::fs;
 
     fn load_route_data() -> RouteData<'static> {
-        let route_bytes = fs::read("../../test_data/ty225_normal.bin")
-            .expect("Failed to load ty225_normal.bin");
+        let route_bytes =
+            fs::read("../../test_data/ty225_normal.bin").expect("Failed to load ty225_normal.bin");
         let route_bytes: &'static [u8] = Box::leak(route_bytes.into_boxed_slice());
         RouteData::load(route_bytes).expect("Failed to parse ty225_normal.bin")
     }
 
     fn gps_record(status: &'static str, s_cm: DistCm) -> GpsRecord {
         GpsRecord::new(1_234_567, 25.0, 121.0, s_cm, 250, Some(9000), status)
+    }
+
+    #[test]
+    fn process_gps_record_keeps_stop_fsm_closed_for_off_route_gate() {
+        let route_data = load_route_data();
+        let mut state = DetectionState::new(&route_data);
+        let mut result = PipelineResult::new();
+        let stop = &route_data.stops()[0];
+        let s_cm = stop.corridor_start_cm;
+
+        let suspect = gps_record("suspect_off_route", s_cm);
+        state.process_gps_record(&suspect, &route_data, &mut result);
+        assert!(state.active_indices().is_empty());
+        assert_eq!(state.stop_states[0].fsm_state, shared::FsmState::Idle);
+        assert_eq!(state.stop_states[0].dwell_time_s, 0);
+        assert_eq!(state.stop_states[0].last_probability, 0);
+
+        let off_route = gps_record("off_route", s_cm);
+        state.process_gps_record(&off_route, &route_data, &mut result);
+        assert!(state.active_indices().is_empty());
+        assert!(state.is_off_route());
+        assert_eq!(state.stop_states[0].fsm_state, shared::FsmState::Idle);
+
+        let outage_while_off_route = gps_record("dr_outage", s_cm);
+        state.process_gps_record(&outage_while_off_route, &route_data, &mut result);
+        assert!(state.active_indices().is_empty());
+        assert!(state.is_off_route());
+        assert_eq!(state.stop_states[0].fsm_state, shared::FsmState::Idle);
+
+        let reentry = gps_record("valid", s_cm);
+        state.process_gps_record(&reentry, &route_data, &mut result);
+        assert!(state.active_indices().is_empty());
+        assert!(!state.is_off_route());
+        assert_eq!(state.stop_states[0].fsm_state, shared::FsmState::Idle);
+        assert_eq!(state.stop_states[0].dwell_time_s, 0);
+
+        let trusted = gps_record("valid", s_cm);
+        state.process_gps_record(&trusted, &route_data, &mut result);
+        assert_eq!(state.active_indices(), &[0]);
+        assert_eq!(
+            state.stop_states[0].fsm_state,
+            shared::FsmState::Approaching
+        );
+        assert_eq!(state.stop_states[0].dwell_time_s, 1);
     }
 
     #[test]
@@ -309,6 +382,9 @@ mod tests {
             state.stop_states[0].last_probability, expected_previous_probability,
             "test requires the second update to change probability"
         );
-        assert_eq!(trace_state.previous_probability, expected_previous_probability);
+        assert_eq!(
+            trace_state.previous_probability,
+            expected_previous_probability
+        );
     }
 }

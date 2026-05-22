@@ -37,9 +37,9 @@ pub fn load_nmea(scenario: &str) -> Vec<String> {
     reader.lines().map(|l| l.unwrap()).collect()
 }
 
-/// Load trace file as a buffered reader
+/// Load trace file as a buffered reader (trace v2 format)
 pub fn load_trace_reader(scenario: &str) -> BufReader<fs::File> {
-    let filename = format!("ty225_{}_trace.jsonl", scenario);
+    let filename = format!("ty225_{}_trace_v2.jsonl", scenario);
     let mut path = test_data_dir();
     path.push(&filename);
     let file = fs::File::open(&path)
