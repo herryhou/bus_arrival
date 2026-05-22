@@ -1,5 +1,12 @@
 # CLAUDE.md
 
+## When Ask User questions for Clarification
+- Keep your question clear yet short
+- Give options to your question when possible
+- List PROS and CONS for each option if applicable
+- Always give a recommendation based on the tradeoffs
+- If the user provides an answer, ask follow-up questions to clarify any ambiguities or details
+
 ## Working Style
 
 ### 1. Think Before Coding
@@ -44,7 +51,7 @@ Define success criteria. Loop until verified.
 # Build all
 make build
 
-# Run pipeline (NMEA + route_data → trace.jsonl)
+# Run pipeline (NMEA + route_data → trace_v2.jsonl)
 make run ROUTE_NAME=ty225 SCENARIO=normal
 
 # Generate route data from GeoJSON
@@ -54,8 +61,8 @@ cargo run -p preprocessor -- route.json stops.json output.bin
 cargo run -p pipeline -- nmea.txt route.bin
 
 # Extract from trace
-./tools/arrival_from_trace.sh trace.jsonl > arrivals.jsonl
-./tools/announce_from_trace.sh trace.jsonl > announce.jsonl
+./tools/arrival_from_trace.sh trace_v2.jsonl > arrivals.jsonl
+./tools/announce_from_trace.sh trace_v2.jsonl > announce.jsonl
 
 # Tests
 cargo test
@@ -64,7 +71,7 @@ cargo test -p pipeline
 
 ## Architecture
 
-3-phase pipeline: NMEA → GPS localization (Kalman + map matching) → Bayesian arrival detection → `trace.jsonl`
+3-phase pipeline: NMEA → GPS localization (Kalman + map matching) → Bayesian arrival detection → `trace_v2.jsonl`
 
 ```
 crates/
@@ -92,7 +99,7 @@ The system processes GPS NMEA data to detect bus arrivals using a 3-phase pipeli
 - Stop corridor filtering, state machine (Approaching → Arriving → AtStop → Departed)
 - Stop index recovery after GPS anomalies
 
-**Output:** `trace.jsonl` (complete state machine trace with arrivals, departures, and all intermediate states)
+**Output:** `trace_v2.jsonl` (complete state machine trace with arrivals, departures, and all intermediate states)
 
 ## Workspace Structure
 
