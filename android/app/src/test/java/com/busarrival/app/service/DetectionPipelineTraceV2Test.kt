@@ -1,6 +1,12 @@
 package com.busarrival.app.service
 
+import android.location.Location
 import com.busarrival.app.data.pipeline.binary.RouteDataParser
+import com.busarrival.app.domain.model.GridCell
+import com.busarrival.app.domain.model.RouteData
+import com.busarrival.app.domain.model.RouteNode
+import com.busarrival.app.domain.model.SpatialGrid
+import com.busarrival.app.domain.model.Stop
 import com.busarrival.app.scenarios.common.NmeaParser
 import com.busarrival.app.scenarios.common.TraceLoader
 import java.io.File
@@ -109,6 +115,54 @@ class DetectionPipelineTraceV2Test {
         }
     }
 
+
+    @Test
+    fun process_gateClosedDoesNotAdvanceStopFsmState() {
+        val traceFile = File.createTempFile("trace-v2-gate-closed", ".jsonl")
+        val pipeline = DetectionPipeline()
+
+        try {
+            pipeline.initialize(straightSyntheticRoute(), traceFile = traceFile)
+
+            listOf(
+                syntheticLocation(xCm = 10_000, yCm = 6_000, timeMs = 1_000),
+                syntheticLocation(xCm = 10_000, yCm = 6_000, timeMs = 2_000),
+                syntheticLocation(xCm = 10_000, yCm = 6_000, timeMs = 3_000),
+                syntheticLocation(xCm = 10_000, yCm = 6_000, timeMs = 4_000),
+                syntheticLocation(xCm = 10_000, yCm = 0, timeMs = 5_000)
+            ).forEach { pipeline.process(it) }
+            pipeline.close()
+
+            val ticks = TraceLoader.load(traceFile)
+            assertEquals(5, ticks.size)
+
+            ticks.take(4).forEachIndexed { idx, tick ->
+                assertTrue(
+                    "gate-closed tick[$idx] must not expose stop states",
+                    tick.stop_states.isEmpty()
+                )
+                assertTrue(
+                    "gate-closed tick[$idx] must not expose active stops",
+                    tick.corridor.active_stops.isEmpty()
+                )
+            }
+
+            val firstVisibleState = ticks[4].stop_states.single()
+            assertEquals(0, firstVisibleState.stop_idx)
+            assertEquals("Approaching", firstVisibleState.fsm_state)
+            assertEquals(
+                "FSM dwell time should start at first gate-open tick, not include hidden closed ticks",
+                1,
+                firstVisibleState.dwell_time_s
+            )
+            assertEquals(0, firstVisibleState.previous_probability)
+            assertEquals(null, firstVisibleState.previous_distance_cm)
+        } finally {
+            pipeline.close()
+            traceFile.delete()
+        }
+    }
+
     @Test
     fun process_tpF805TraceV2StopStatesMatchCurrentActiveStops() {
         val routeData = RouteDataParser.loadFromFile(testDataFile("tpF805_normal.bin").absolutePath)
@@ -132,6 +186,70 @@ class DetectionPipelineTraceV2Test {
             pipeline.close()
             traceFile.delete()
         }
+    }
+
+
+    private fun straightSyntheticRoute(): RouteData {
+        return RouteData(
+            originLat = 20_000_000,
+            originLon = 120_000_000,
+            avgLat = 24_000_000,
+            x0Cm = 0,
+            y0Cm = 0,
+            nodes = listOf(
+                RouteNode(
+                    xCm = 0,
+                    yCm = 0,
+                    cumDistCm = 0,
+                    segLenMm = 300_000,
+                    dxCm = 30_000,
+                    dyCm = 0,
+                    headingCdeg = 0
+                ),
+                RouteNode(
+                    xCm = 30_000,
+                    yCm = 0,
+                    cumDistCm = 30_000,
+                    segLenMm = 0,
+                    dxCm = 0,
+                    dyCm = 0,
+                    headingCdeg = 0
+                )
+            ),
+            stops = listOf(
+                Stop(
+                    progressCm = 20_000,
+                    corridorStartCm = 0,
+                    corridorEndCm = 24_000
+                )
+            ),
+            grid = SpatialGrid(
+                cellSizeCm = 100_000,
+                rows = 1,
+                cols = 1,
+                cells = listOf(GridCell(bitmask = 0UL, offsets = listOf(0)))
+            )
+        )
+    }
+
+    private fun syntheticLocation(xCm: Int, yCm: Int, timeMs: Long): Location {
+        val (lat, lon) = gridToLatLon(xCm, yCm)
+        return Location("synthetic").apply {
+            latitude = lat
+            longitude = lon
+            time = timeMs
+            speed = 5.0f
+            bearing = 0.0f
+            accuracy = 5.0f
+        }
+    }
+
+    private fun gridToLatLon(xCm: Int, yCm: Int): Pair<Double, Double> {
+        val earthRadiusCm = 637_100_000.0
+        val avgLatRad = Math.toRadians(24.0)
+        val lat = 20.0 + Math.toDegrees(yCm / earthRadiusCm)
+        val lon = 120.0 + Math.toDegrees(xCm / (earthRadiusCm * kotlin.math.cos(avgLatRad)))
+        return lat to lon
     }
 
     private fun testDataFile(filename: String): File {
