@@ -30,39 +30,33 @@ object ModeMachine {
      * @param state Current mode state
      * @param matchDist2 Map match distance² (indicates divergence from route)
      * @param sCm Current route position (cm)
-     * @param isFirstFix True if this is the first GPS fix (warmup period)
-     * @return Updated mode state
+     * @return Updated mode state and whether arrival detection may run
      */
     fun update(
         state: ModeState,
         matchDist2: Dist2,
-        sCm: DistCm,
-        isFirstFix: Boolean = false
-    ): ModeState {
-        return when (state.mode) {
-            Mode.Normal -> updateNormal(state, matchDist2, sCm, isFirstFix)
+        sCm: DistCm
+    ): ModeUpdate {
+        val updatedState = when (state.mode) {
+            Mode.Normal -> updateNormal(state, matchDist2, sCm)
             Mode.OffRoute -> updateOffRoute(state, matchDist2, sCm)
             Mode.Recovering -> updateRecovering(state)
         }
+        return ModeUpdate(
+            state = updatedState,
+            detectionAllowed = updatedState.mode == Mode.Normal && updatedState.suspectTicks == 0
+        )
     }
 
     /**
      * Update Normal mode.
      * Transition to OffRoute if divergence > 50m for 5 consecutive ticks.
-     * During warmup (isFirstFix=true), off-route detection is disabled.
      */
     private fun updateNormal(
         state: ModeState,
         matchDist2: Dist2,
-        sCm: DistCm,
-        isFirstFix: Boolean
+        sCm: DistCm
     ): ModeState {
-        // Warmup guard: skip off-route detection on first fix
-        // Matches Rust: if !is_first_fix { check_off_route }
-        if (isFirstFix) {
-            return state.copy(suspectTicks = 0)
-        }
-
         val isOffRoute = matchDist2 > OFF_ROUTE_D2_THRESHOLD
 
         return if (isOffRoute) {
@@ -161,4 +155,12 @@ data class ModeState(
     val suspectTicks: Int = 0,    // Consecutive high-divergence ticks
     val clearTicks: Int = 0,      // Consecutive low-divergence ticks
     val frozenSCm: DistCm = 0     // Frozen position during OffRoute
+)
+
+/**
+ * Result of applying route-trust policy for one tick.
+ */
+data class ModeUpdate(
+    val state: ModeState,
+    val detectionAllowed: Boolean
 )

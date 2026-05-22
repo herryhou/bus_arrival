@@ -6,29 +6,28 @@ import com.busarrival.app.scenarios.common.TraceLoader
 import com.busarrival.app.service.DetectionPipeline
 import com.busarrival.app.service.PipelineResult
 import com.busarrival.app.service.TraceTick
+import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
-import org.junit.Assert.*
 import org.junit.After
+import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import java.io.File
 
 /**
- * Test for tz_23_short scenario with JSONL GPS input.
- * Route: 9 stops, normal operation validation.
+ * Test for tz_23_short scenario with JSONL GPS input. Route: 9 stops, normal operation validation.
  */
 @RunWith(RobolectricTestRunner::class)
 class Tz23ScenarioTest {
     private companion object {
         const val ROUTE_DATA_FILENAME = "tz_23_short.bin"
         const val GPS_FILENAME = "tz_23-gps.jsonl"
-        const val TRACE_FILENAME = "tz_23_short_trace_v2.jsonl"
+        const val TRACE_FILENAME = "tz_23_short_android_trace_v2.jsonl"
         const val MAX_ALLOWED_BACKTRACK_CM = 5_000L
     }
 
@@ -72,8 +71,8 @@ class Tz23ScenarioTest {
         println("Total unique stops: ${detectedStops.size}")
 
         assertTrue(
-            "Should detect multiple stops. Got ${detectedStops.size} stops: $detectedStops",
-            detectedStops.size >= 3
+                "Should detect multiple stops. Got ${detectedStops.size} stops: $detectedStops",
+                detectedStops.size >= 3
         )
     }
 
@@ -87,7 +86,9 @@ class Tz23ScenarioTest {
         for (tick in ticks) {
             if (prevSCm != null && tick.s_cm < prevSCm - MAX_ALLOWED_BACKTRACK_CM) {
                 backwardJumps++
-                println("Backward jump at tick.time_ms=${tick.time_ms}: $prevSCm -> ${tick.s_cm} (${prevSCm - tick.s_cm}cm)")
+                println(
+                        "Backward jump at tick.time_ms=${tick.time_ms}: $prevSCm -> ${tick.s_cm} (${prevSCm - tick.s_cm}cm)"
+                )
             }
             prevSCm = tick.s_cm
         }
@@ -105,29 +106,27 @@ class Tz23ScenarioTest {
         for (tick in ticks) {
             tick.stop_states.forEach { state ->
                 stopStates
-                    .getOrPut(state.stop_idx) { mutableSetOf() }
-                    .let { it as MutableSet }
-                    .add(state.fsm_state)
+                        .getOrPut(state.stop_idx) { mutableSetOf() }
+                        .let { it as MutableSet }
+                        .add(state.fsm_state)
             }
         }
 
         println("\n=== FSM States by Stop ===")
-        stopStates.forEach { (stopIdx, states) ->
-            println("Stop $stopIdx: $states")
-        }
+        stopStates.forEach { (stopIdx, states) -> println("Stop $stopIdx: $states") }
 
         val stopsWithStates = stopStates.filter { it.value.isNotEmpty() }
         assertTrue(
-            "Should have FSM states for multiple stops. Got: ${stopsWithStates.keys}",
-            stopsWithStates.size >= 3
+                "Should have FSM states for multiple stops. Got: ${stopsWithStates.keys}",
+                stopsWithStates.size >= 3
         )
 
         stopsWithStates.forEach { (stopIdx, states) ->
             val hasApproaching = states.contains("Approaching")
             val hasAtStop = states.contains("AtStop")
             assertTrue(
-                "Stop $stopIdx should have Approaching state. States: $states",
-                hasApproaching || hasAtStop
+                    "Stop $stopIdx should have Approaching state. States: $states",
+                    hasApproaching || hasAtStop
             )
         }
     }
@@ -137,10 +136,7 @@ class Tz23ScenarioTest {
         processScenario()
 
         val destFile = testDataFile(TRACE_FILENAME)
-        assertTrue(
-            "Trace should be written to test_data/$TRACE_FILENAME",
-            destFile.exists()
-        )
+        assertTrue("Trace should be written to test_data/$TRACE_FILENAME", destFile.exists())
 
         val traceLines = destFile.readLines().filter { it.isNotBlank() }.size
         println("Trace lines written: $traceLines")
@@ -154,8 +150,8 @@ class Tz23ScenarioTest {
 
         for (i in 1 until arrivals.size) {
             assertTrue(
-                "Arrivals should be in increasing stop index order. Got: $arrivals",
-                arrivals[i] > arrivals[i - 1]
+                    "Arrivals should be in increasing stop index order. Got: $arrivals",
+                    arrivals[i] > arrivals[i - 1]
             )
         }
     }
@@ -167,8 +163,8 @@ class Tz23ScenarioTest {
 
         for (i in 1 until ticks.size) {
             assertTrue(
-                "Timestamps should be monotonic. tick[$i-1]=${ticks[i-1].time_ms}, tick[$i]=${ticks[i].time_ms}",
-                ticks[i].time_ms >= ticks[i - 1].time_ms
+                    "Timestamps should be monotonic. tick[$i-1]=${ticks[i-1].time_ms}, tick[$i]=${ticks[i].time_ms}",
+                    ticks[i].time_ms >= ticks[i - 1].time_ms
             )
         }
     }
@@ -177,45 +173,69 @@ class Tz23ScenarioTest {
     fun test_tz23_short_trace_uses_grouped_v2_schema() {
         processScenario()
 
-        val firstTrace = Json.parseToJsonElement(
-            testDataFile(TRACE_FILENAME).useLines { lines ->
-                lines.first { it.isNotBlank() }
-            }
-        ).jsonObject
+        val firstTrace =
+                Json.parseToJsonElement(
+                                testDataFile(TRACE_FILENAME).useLines { lines ->
+                                    lines.first { it.isNotBlank() }
+                                }
+                        )
+                        .jsonObject
 
         assertEquals(
-            setOf("gps", "kalman", "map_matching", "detection", "corridor", "stop_states"),
-            firstTrace.keys
+                setOf("gps", "kalman", "map_matching", "detection", "corridor", "stop_states"),
+                firstTrace.keys
         )
         assertFalse(firstTrace.containsKey("time"))
         assertFalse(firstTrace.containsKey("s_cm"))
+        assertTrue(
+                "First trace tick should not include stop state entries before detection updates",
+                firstTrace.getValue("stop_states").jsonArray.isEmpty()
+        )
 
-        val tickWithStopState = testDataFile(TRACE_FILENAME).useLines { lines ->
-            lines
-                .filter { it.isNotBlank() }
-                .map { Json.parseToJsonElement(it).jsonObject }
-                .first { trace -> trace.getValue("stop_states").jsonArray.isNotEmpty() }
-        }
+        val tickWithStopState =
+                testDataFile(TRACE_FILENAME).useLines { lines ->
+                    lines
+                            .filter { it.isNotBlank() }
+                            .map { Json.parseToJsonElement(it).jsonObject }
+                            .first { trace -> trace.getValue("stop_states").jsonArray.isNotEmpty() }
+                }
         val firstStopState = tickWithStopState.getValue("stop_states").jsonArray.first().jsonObject
         assertEquals(
-            setOf(
-                "stop_idx",
-                "gps_distance_cm",
-                "progress_distance_cm",
-                "fsm_state",
-                "dwell_time_s",
-                "probability",
-                "previous_probability",
-                "features",
-                "announced",
-                "skip_on_reentry",
-                "previous_distance_cm",
-                "just_arrived"
-            ),
-            firstStopState.keys
+                setOf(
+                        "stop_idx",
+                        "gps_distance_cm",
+                        "progress_distance_cm",
+                        "fsm_state",
+                        "dwell_time_s",
+                        "probability",
+                        "previous_probability",
+                        "features",
+                        "announced",
+                        "skip_on_reentry",
+                        "previous_distance_cm",
+                        "just_arrived"
+                ),
+                firstStopState.keys
         )
         assertTrue(firstTrace.getValue("gps").jsonObject.getValue("time_ms").jsonPrimitive.long > 0)
-        assertNotNull(firstTrace.getValue("detection").jsonObject.getValue("status").jsonPrimitive.content)
+        assertNotNull(
+                firstTrace.getValue("detection").jsonObject.getValue("status").jsonPrimitive.content
+        )
+    }
+
+    @Test
+    fun test_tz23_short_suppresses_stop_states_before_initial_off_route_confirmation() {
+        val run = processScenario()
+        val ticks = run.ticks
+        val firstOffRouteIdx = ticks.indexOfFirst { it.detection.off_route }
+
+        assertTrue("Scenario should confirm off-route near startup", firstOffRouteIdx > 0)
+        ticks.take(firstOffRouteIdx).forEachIndexed { idx, tick ->
+            assertTrue(
+                    "tick[$idx] should not expose stop state before initial off-route confirmation",
+                    tick.stop_states.isEmpty()
+            )
+        }
     }
 
     private fun testDataFile(filename: String): File {
@@ -241,10 +261,11 @@ class Tz23ScenarioTest {
 
     private fun processScenario(): ScenarioRun {
         val scenarioTraceFile = File.createTempFile("tz23-trace", ".jsonl")
-        val scenarioPipeline = DetectionPipeline().apply {
-            initialize(routeData, traceFile = scenarioTraceFile)
-            pipeline = this
-        }
+        val scenarioPipeline =
+                DetectionPipeline().apply {
+                    initialize(routeData, traceFile = scenarioTraceFile)
+                    pipeline = this
+                }
         val arrivals = mutableListOf<Pair<Int, Long>>()
         val locations = JsonGpsParser.parseJsonl(testDataFile(GPS_FILENAME).readText())
 
@@ -257,10 +278,7 @@ class Tz23ScenarioTest {
                     }
                 }
             }
-            return ScenarioRun(
-                ticks = TraceLoader.load(scenarioTraceFile),
-                arrivals = arrivals
-            )
+            return ScenarioRun(ticks = TraceLoader.load(scenarioTraceFile), arrivals = arrivals)
         } finally {
             scenarioPipeline.close()
             val destFile = testDataFile(TRACE_FILENAME)
@@ -271,8 +289,8 @@ class Tz23ScenarioTest {
     }
 
     private data class ScenarioRun(
-        val ticks: List<TraceTick>,
-        val arrivals: List<Pair<Int, Long>>,
+            val ticks: List<TraceTick>,
+            val arrivals: List<Pair<Int, Long>>,
     )
 
     private val TraceTick.time_ms: Long

@@ -27,7 +27,9 @@ class DetectionPipeline {
 
     private var lastGpsTime: TimestampMs = 0
     private var lastSCm: DistCm = 0
+    private var firstFixProcessed = false
     private var traceWriter: TraceWriter? = null
+    private var tracedStopStateIndices: Set<Int> = emptySet()
 
     /**
      * Initialize pipeline with route data.
@@ -38,6 +40,8 @@ class DetectionPipeline {
         this.stopStates = routeData.stops.mapIndexed { idx, _ ->
             idx to StateMachine.initialState(idx)
         }.toMap()
+        this.firstFixProcessed = false
+        this.tracedStopStateIndices = emptySet()
 
         // Initialize trace writer if file provided
         traceWriter = traceFile?.let { TraceWriter(it) }
@@ -108,15 +112,15 @@ class DetectionPipeline {
         )
 
         // Phase 3.5: Mode machine update (now we have sCm from Kalman)
-        // Warmup guard: pass isFirstFix to disable off-route detection on first fix
-        val isFirstFix = lastGpsTime == 0L
         val previousMode = modeState.mode
-        modeState = ModeMachine.update(
+        val modeUpdate = ModeMachine.update(
             state = modeState,
             matchDist2 = matchResult.dist2,
-            sCm = sCm,
-            isFirstFix = isFirstFix
+            sCm = sCm
         )
+        modeState = modeUpdate.state
+        val detectionAllowed = modeUpdate.detectionAllowed && firstFixProcessed && previousMode == Mode.Normal
+        firstFixProcessed = true
 
         val positionSignals = if (previousMode == Mode.OffRoute && modeState.mode == Mode.Recovering) {
             kalmanState!!.sCm = sCm
@@ -136,10 +140,14 @@ class DetectionPipeline {
             } else {
                 positionSignals.sCm
             }
-            val activeEntries = stopStates
-                .filterValues { state ->
-                    state.fsmState != FsmState.Idle && state.fsmState != FsmState.Departed
-                }
+            val activeEntries = if (!detectionAllowed) {
+                emptyMap()
+            } else {
+                stopStates
+                    .filterValues { state ->
+                        state.fsmState != FsmState.Idle && state.fsmState != FsmState.Departed
+                    }
+            }
             val corridorStartCm = activeEntries.keys.minOrNull()?.let { route.stops[it].corridorStartCm }
             val corridorEndCm = activeEntries.keys.minOrNull()?.let { route.stops[it].corridorEndCm }
             val nextStop = corridorEndCm?.let { end ->
@@ -158,6 +166,44 @@ class DetectionPipeline {
                 Mode.OffRoute -> "off_route"
                 Mode.Recovering -> "recovering"
             }
+            val stopStateEntries = activeEntries
+                .toSortedMap()
+                .map { (idx, state) ->
+                    val stop = route.stops[idx]
+                    val detectionSignals = PositionSignals(
+                        zGpsCm = positionSignals.sCm,
+                        sCm = positionSignals.sCm
+                    )
+                    val features = ProbabilityModel.computeFeatures(
+                        signals = detectionSignals,
+                        stop = stop,
+                        vCms = kalmanState!!.vCms,
+                        dwellS = state.dwellTimeS
+                    )
+                    val hasPreviousTraceEntry = tracedStopStateIndices.contains(idx)
+
+                    StopStateEntry(
+                        stop_idx = idx,
+                        gps_distance_cm = detectionSignals.zGpsCm - stop.progressCm,
+                        progress_distance_cm = detectionSignals.sCm - stop.progressCm,
+                        fsm_state = state.fsmState.name,
+                        dwell_time_s = state.dwellTimeS,
+                        probability = state.lastProbability.value,
+                        previous_probability =
+                            if (hasPreviousTraceEntry) state.previousProbability.value else 0,
+                        features = TraceFeatureScores(
+                            p1 = features.p1.value,
+                            p2 = features.p2.value,
+                            p3 = features.p3.value,
+                            p4 = features.p4.value
+                        ),
+                        announced = state.announced,
+                        skip_on_reentry = state.skipOnReentry,
+                        previous_distance_cm =
+                            if (hasPreviousTraceEntry) state.previousTraceDistanceCm else null,
+                        just_arrived = justArrivedStops.contains(idx)
+                    )
+                }
 
             traceWriter?.write(TraceTick(
                 gps = GpsTraceTick(
@@ -193,42 +239,9 @@ class DetectionPipeline {
                     corridor_end_cm = corridorEndCm,
                     next_stop = nextStop
                 ),
-                stop_states = activeEntries
-                    .toSortedMap()
-                    .map { (idx, state) ->
-                        val stop = route.stops[idx]
-                        val detectionSignals = PositionSignals(
-                            zGpsCm = positionSignals.sCm,
-                            sCm = positionSignals.sCm
-                        )
-                        val features = ProbabilityModel.computeFeatures(
-                            signals = detectionSignals,
-                            stop = stop,
-                            vCms = kalmanState!!.vCms,
-                            dwellS = state.dwellTimeS
-                        )
-
-                        StopStateEntry(
-                            stop_idx = idx,
-                            gps_distance_cm = detectionSignals.zGpsCm - stop.progressCm,
-                            progress_distance_cm = detectionSignals.sCm - stop.progressCm,
-                            fsm_state = state.fsmState.name,
-                            dwell_time_s = state.dwellTimeS,
-                            probability = state.lastProbability.value,
-                            previous_probability = state.previousProbability.value,
-                            features = TraceFeatureScores(
-                                p1 = features.p1.value,
-                                p2 = features.p2.value,
-                                p3 = features.p3.value,
-                                p4 = features.p4.value
-                            ),
-                            announced = state.announced,
-                            skip_on_reentry = state.skipOnReentry,
-                            previous_distance_cm = state.previousTraceDistanceCm,
-                            just_arrived = justArrivedStops.contains(idx)
-                        )
-                    }
+                stop_states = stopStateEntries
             ))
+            tracedStopStateIndices = tracedStopStateIndices + activeEntries.keys
         }
 
         // Handle OffRoute mode: skip detection, preserve state
@@ -260,6 +273,18 @@ class DetectionPipeline {
                 modeState = ModeMachine.toNormal()
             }
             // Skip detection during recovery
+            lastGpsTime = gps.timestamp
+            lastSCm = positionSignals.sCm
+            writeTrace()
+            return PipelineResult.Success(
+                sCm = positionSignals.sCm,
+                vCms = kalmanState!!.vCms,
+                arrivals = emptyList(),
+                departures = emptyList()
+            )
+        }
+
+        if (!detectionAllowed) {
             lastGpsTime = gps.timestamp
             lastSCm = positionSignals.sCm
             writeTrace()
@@ -356,6 +381,8 @@ class DetectionPipeline {
         stopStates = routeData?.stops?.mapIndexed { idx, _ ->
             idx to StateMachine.initialState(idx)
         }?.toMap() ?: emptyMap()
+        firstFixProcessed = false
+        tracedStopStateIndices = emptySet()
         modeState = ModeMachine.toNormal()
         lastGpsTime = 0
         lastSCm = 0
