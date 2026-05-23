@@ -24,14 +24,14 @@ fun VehicleHeadingMarker(
 
     if (bearing != null) {
         val markerSize = 32.dp
-        val markerColor = MaterialTheme.colorScheme.primary
+        val markerColor = Color(0xFF2196F3) // Bright blue for visibility on map
 
         Canvas(modifier = modifier.size(markerSize)) {
             val size = size.width
             val center = Offset(size / 2, size / 2)
 
             rotate(degrees = bearing.toFloat(), pivot = center) {
-                // Draw arrow pointing up (north)
+                // Draw filled arrow pointing up (north)
                 val path = androidx.compose.ui.graphics.Path().apply {
                     moveTo(center.x, center.y - size / 2) // Top
                     lineTo(center.x - size / 4, center.y) // Left
@@ -40,10 +40,17 @@ fun VehicleHeadingMarker(
                     close()
                 }
 
+                // Fill with solid color for better visibility
                 drawPath(
                     path = path,
-                    color = markerColor,
-                    style = Stroke(width = 3f)
+                    color = markerColor
+                )
+
+                // Add white outline for contrast
+                drawPath(
+                    path = path,
+                    color = Color.White,
+                    style = Stroke(width = 2f)
                 )
             }
         }
