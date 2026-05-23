@@ -90,56 +90,56 @@ fun DetectionScreen(
     } else if (activeRoute == null) {
         NoRouteContent()
     } else {
-        Column(modifier = Modifier.fillMaxSize()) {
-            MapView(
-                routeData = activeRoute,
-                currentSCm = uiState.sCm,
-                isCameraFollowEnabled = uiState.isCameraFollowEnabled,
-                replayState = replayState,
-                viewModel = viewModel,
-                gpsFixState = gpsFixState,
-                modifier = Modifier.weight(0.6f)
-            )
-
-            StatusPanel(
-                uiState = uiState,
-                events = events,
-                routeName = activeRouteMetadata?.name,
-                gpsLoggingEnabled = gpsLoggingEnabled,
-                gpsFixState = gpsFixState,
-                onStartStop = {
-                    if (uiState.isRunning) {
-                        viewModel.stopDetection()
-                    } else {
-                        viewModel.startDetection()
-                    }
-                },
-                onToggleCamera = { viewModel.toggleCameraFollow() },
-                onToggleGpsLogging = { viewModel.toggleGpsLogging() },
-                modifier = Modifier
-                    .weight(0.4f)
-                    .fillMaxWidth()
-            )
-
-            // Timeline scrubber for replay mode
-            if (replayState.traceFile != null) {
-                TimelineScrubber(
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                MapView(
+                    routeData = activeRoute,
+                    currentSCm = uiState.sCm,
+                    isCameraFollowEnabled = uiState.isCameraFollowEnabled,
                     replayState = replayState,
-                    onPlayPause = { viewModel.playPause() },
-                    onSeek = { viewModel.seekTo(it) },
-                    onSpeedChange = { viewModel.setPlaybackSpeed(it) },
-                    onToggleCameraFollow = { viewModel.toggleReplayCameraFollow() },
-                    modifier = Modifier.fillMaxWidth()
+                    viewModel = viewModel,
+                    gpsFixState = gpsFixState,
+                    modifier = Modifier.weight(0.6f)
                 )
+
+                StatusPanel(
+                    uiState = uiState,
+                    events = events,
+                    routeName = activeRouteMetadata?.name,
+                    gpsLoggingEnabled = gpsLoggingEnabled,
+                    gpsFixState = gpsFixState,
+                    onStartStop = {
+                        if (uiState.isRunning) {
+                            viewModel.stopDetection()
+                        } else {
+                            viewModel.startDetection()
+                        }
+                    },
+                    onToggleCamera = { viewModel.toggleCameraFollow() },
+                    onToggleGpsLogging = { viewModel.toggleGpsLogging() },
+                    modifier = Modifier
+                        .weight(0.4f)
+                        .fillMaxWidth()
+                )
+
+                // Timeline scrubber for replay mode
+                if (replayState.traceFile != null) {
+                    TimelineScrubber(
+                        replayState = replayState,
+                        onPlayPause = { viewModel.playPause() },
+                        onSeek = { viewModel.seekTo(it) },
+                        onSpeedChange = { viewModel.setPlaybackSpeed(it) },
+                        onToggleCameraFollow = { viewModel.toggleReplayCameraFollow() },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
 
-            // Event hints overlay
-            Box(modifier = Modifier.fillMaxSize()) {
-                EventToastHost(
-                    hint = eventHints,
-                    modifier = Modifier.align(Alignment.TopCenter)
-                )
-            }
+            // Event hints overlay (outside Column to avoid blocking touches)
+            EventToastHost(
+                hint = eventHints,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
         }
     }
 
