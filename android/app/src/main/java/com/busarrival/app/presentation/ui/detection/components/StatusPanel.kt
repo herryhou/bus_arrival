@@ -31,17 +31,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.busarrival.app.presentation.viewmodel.DetectionUiState
 import com.busarrival.app.service.PipelineEvent
+import com.busarrival.app.domain.model.GpsFixState
 
 @Composable
 fun StatusPanel(
-        uiState: DetectionUiState,
-        events: List<PipelineEvent>,
-        routeName: String?,
-        gpsLoggingEnabled: Boolean,
-        onStartStop: () -> Unit,
-        onToggleCamera: () -> Unit,
-        onToggleGpsLogging: () -> Unit,
-        modifier: Modifier = Modifier
+    uiState: DetectionUiState,
+    events: List<PipelineEvent>,
+    routeName: String?,
+    gpsLoggingEnabled: Boolean,
+    gpsFixState: GpsFixState,
+    onStartStop: () -> Unit,
+    onToggleCamera: () -> Unit,
+    onToggleGpsLogging: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Card(
             modifier = modifier.fillMaxWidth(),
@@ -62,29 +64,12 @@ fun StatusPanel(
                 Spacer(modifier = Modifier.height(4.dp))
             }
 
-            // Current position info
-            Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text(
-                            text = "Position:",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(text = "${uiState.sCm} cm", style = MaterialTheme.typography.bodyMedium)
-                }
-
-                Column {
-                    Text(
-                            text = "Speed:",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(text = "${uiState.vCms} cm/s", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
+            // GPS Status, Position, Speed row
+            GpsStatusRow(
+                gpsFixState = gpsFixState,
+                positionCm = uiState.sCm,
+                speedCms = uiState.vCms
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
