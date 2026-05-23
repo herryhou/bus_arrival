@@ -27,6 +27,9 @@ import androidx.lifecycle.ViewModelProvider
 import com.busarrival.app.presentation.ui.detection.components.MapView
 import com.busarrival.app.presentation.ui.detection.components.StatusPanel
 import com.busarrival.app.presentation.ui.detection.components.TimelineScrubber
+import com.busarrival.app.presentation.ui.detection.components.EventToastHost
+import com.busarrival.app.domain.model.GpsFixState
+import com.busarrival.app.domain.model.EventHint
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
@@ -53,6 +56,8 @@ fun DetectionScreen(
     val activeRouteMetadata by viewModel.activeRouteMetadata.collectAsState()
     val replayState by viewModel.replayState.collectAsState()
     val gpsLoggingEnabled by viewModel.gpsLoggingEnabled.collectAsState()
+    val gpsFixState by viewModel.gpsFixState.collectAsState()
+    val eventHints by viewModel.eventHints.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.refreshMapLabelZoomBias()
@@ -92,6 +97,7 @@ fun DetectionScreen(
                 isCameraFollowEnabled = uiState.isCameraFollowEnabled,
                 replayState = replayState,
                 viewModel = viewModel,
+                gpsFixState = gpsFixState,
                 modifier = Modifier.weight(0.6f)
             )
 
@@ -100,6 +106,7 @@ fun DetectionScreen(
                 events = events,
                 routeName = activeRouteMetadata?.name,
                 gpsLoggingEnabled = gpsLoggingEnabled,
+                gpsFixState = gpsFixState,
                 onStartStop = {
                     if (uiState.isRunning) {
                         viewModel.stopDetection()
@@ -123,6 +130,14 @@ fun DetectionScreen(
                     onSpeedChange = { viewModel.setPlaybackSpeed(it) },
                     onToggleCameraFollow = { viewModel.toggleReplayCameraFollow() },
                     modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // Event hints overlay
+            Box(modifier = Modifier.fillMaxSize()) {
+                EventToastHost(
+                    hint = eventHints,
+                    modifier = Modifier.align(Alignment.TopCenter)
                 )
             }
         }
