@@ -129,3 +129,4 @@ When creating or updating module specs:
 - **`spatial_grid_binary_format.md`** - Binary format details
 - **`dev_guide.md`** - Embedded Rust development guide
 - **`arrival_detector_test.md`** - BDD-style test plan
+- **`porting/00-algorithm-spec.md`** - Platform-agnostic algorithm specs, data formats, and testing guides for iOS/ESP32 porting
