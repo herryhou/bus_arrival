@@ -14,6 +14,13 @@
 iOS doesn't provide raw NMEA. Create adapter:
 
 ```swift
+private let formatter: DateFormatter = {
+    let fmt = DateFormatter()
+    fmt.dateFormat = "HHmmss.SS"
+    fmt.timeZone = TimeZone(secondsFromGMT: 0)!
+    return fmt
+}()
+
 extension CLLocation {
     func toNMEA() -> String {
         let time = formatter.string(from: timestamp)
@@ -30,11 +37,21 @@ extension CLLocation {
         let speedKnots = speed * 1.94384
         let heading = course >= 0 ? course : 0
 
-        return "$GPRMC,\(time),A,"
-             + "\(latDeg)\(String(format: "%.4f", latMin)),\(latHem),"
-             + "\(lonDeg)\(String(format: "%.4f", lonMin)),\(lonHem),"
-             + "\(String(format: "%.1f", speedKnots)),\(heading),,"
-             + ",,,D"
+        let sentence = "$GPRMC,\(time),A,"
+                     + "\(latDeg)\(String(format: "%.4f", latMin)),\(latHem),"
+                     + "\(lonDeg)\(String(format: "%.4f", lonMin)),\(lonHem),"
+                     + "\(String(format: "%.1f", speedKnots)),\(heading),,"
+                     + ",,,D"
+        return sentence + computeChecksum(sentence)
+    }
+
+    private func computeChecksum(_ sentence: String) -> String {
+        let data = sentence.data(using: .utf8)!
+        var checksum: UInt8 = 0
+        for byte in data.dropFirst() {  // Skip '$'
+            checksum ^= byte
+        }
+        return "*\(String(format: "%02X", checksum))"
     }
 }
 ```
@@ -76,7 +93,12 @@ queue.qualityOfService = .userInitiated
 
 func processGPS(location: CLLocation) {
     queue.addOperation {
-        self.pipeline.tick(location.toNMEA())
+        do {
+            try self.pipeline.tick(location.toNMEA())
+        } catch {
+            os_log(.error, "Pipeline error: %@", error.localizedDescription)
+            // Handle error: restart pipeline, notify user, etc.
+        }
     }
 }
 ```
@@ -86,17 +108,44 @@ func processGPS(location: CLLocation) {
 actor PipelineActor {
     var pipeline: BusArrivalPipeline
 
-    func tick(_ nmea: String) async {
-        await pipeline.process(nmea)
+    func tick(_ nmea: String) async throws {
+        try await pipeline.process(nmea)
+    }
+    
+    func handleRecovery() async {
+        // Reinitialize pipeline on error
+        pipeline = BusArrivalPipeline()
     }
 }
 ```
 
 ### Memory Management
 
-- Route data: Load from JSON, convert to Swift structs
-- LUTs: Precompute as `[UInt8]` arrays
+**Memory Budget (device-dependent):**
+- Route data: ~12 KB (load from JSON, convert to Swift structs)
+- LUTs: ~1 KB (precompute as `[UInt8]` arrays)
 - Runtime state: < 1 KB (single struct instance)
+- **Total: ~14 KB** (well within iOS limits, even on older devices)
+
+**Memory Safety:**
+```swift
+// Use value types (structs) for automatic memory management
+struct RouteData {
+    let nodes: [RouteNode]
+    let stops: [Stop]
+    let grid: SpatialGrid
+}
+
+// Avoid retain cycles with closures
+class LocationManager {
+    var pipeline: BusArrivalPipeline?
+    
+    func setupCallback() {
+        // [weak self] prevents retain cycle
+        locationManager.delegate = self
+    }
+}
+```
 
 ## ESP32 Porting
 
@@ -124,13 +173,25 @@ void gps_init() {
 
 **NMEA Parsing:**
 ```c
-char nmea_buffer[256];
+#define GPS_QUEUE_SIZE 32
+#define GPS_TASK_STACK 4096
+
+static QueueHandle_t gps_queue;
 
 void gps_task(void* arg) {
+    char nmea_buffer[256];
+    
     while (1) {
         int len = uart_read_bytes(GPS_UART_NUM, nmea_buffer, sizeof(nmea_buffer), 100 / portTICK_PERIOD_MS);
         if (len > 0 && validate_nmea(nmea_buffer, len)) {
-            pipeline_tick(nmea_buffer);
+            NMEAMessage msg = {0};
+            strncpy(msg.data, nmea_buffer, sizeof(msg.data) - 1);
+            msg.len = len;
+            
+            // Send to pipeline task (non-blocking)
+            if (xQueueSend(gps_queue, &msg, 0) != pdTRUE) {
+                ESP_LOGW("GPS", "Queue full, dropping NMEA message");
+            }
         }
     }
 }
@@ -154,7 +215,15 @@ void gps_task(void* arg) {
 
 const RouteNode* load_route_nodes(size_t* count) {
     const RouteHeader* header = (const RouteHeader*)ROUTE_FLASH_ADDR;
+    
+    // Validate header magic number
+    if (header->magic != ROUTE_MAGIC) {
+        ESP_LOGE("ROUTE", "Invalid route data (magic mismatch)");
+        return NULL;
+    }
+    
     *count = header->node_count;
+    ESP_LOGI("ROUTE", "Loaded %zu nodes", *count);
     return (const RouteNode*)(ROUTE_FLASH_ADDR + sizeof(RouteHeader));
 }
 ```
@@ -184,8 +253,15 @@ void pipeline_task(void* arg) {
 }
 
 void app_main() {
+    // Create queue for GPS → Pipeline communication
+    gps_queue = xQueueCreate(GPS_QUEUE_SIZE, sizeof(NMEAMessage));
+    if (gps_queue == NULL) {
+        ESP_LOGE("APP", "Failed to create GPS queue");
+        return;
+    }
+
     // Create GPS task
-    xTaskCreate(gps_task, "gps", 4096, NULL, 5, NULL);
+    xTaskCreate(gps_task, "gps", GPS_TASK_STACK, NULL, 5, NULL);
 
     // Create pipeline task
     xTaskCreate(pipeline_task, "pipeline", 8192, NULL, 4, NULL);
@@ -303,3 +379,182 @@ func emitTrace(_ state: PipelineState) -> String {
     return jsonString + "\n"
 }
 ```
+
+**Note:** `PipelineState` is defined in `01-data-formats.md` — refer to that document for the complete structure.
+
+## Platform-Specific Testing
+
+### iOS Testing
+
+**Unit Tests:**
+```swift
+import XCTest
+
+class KalmanFilterTests: XCTestCase {
+    func testKalmanConvergence() {
+        var kf = KalmanState()
+        
+        // Feed constant velocity
+        for i in 0..<100 {
+            kf.update(z_cm: i * 100, v_gps: 100)
+        }
+        
+        // Should converge to ~100 cm/s
+        XCTAssertEqual(kf.v_cms, 100, accuracy: 5)
+    }
+    
+    func testNMEAEmulation() {
+        let loc = CLLocation(coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+                            altitude: 0, horizontalAccuracy: 5, verticalAccuracy: 0,
+                            course: 90.0, speed: 10.0, timestamp: Date())
+        
+        let nmea = loc.toNMEA()
+        XCTAssertTrue(nmea.hasPrefix("$GPRMC"))
+        XCTAssertTrue(nmea.contains("*"))  // Has checksum
+    }
+}
+```
+
+**Integration Tests:**
+- Test CoreLocation callback flow
+- Verify background execution permission
+- Test memory allocation under load
+
+### ESP32 Testing
+
+**Unit Tests (host-based):**
+```c
+void test_kalman_prediction() {
+    KalmanState kf;
+    kalman_init(&kf);
+    
+    // Test prediction step
+    int32_t s_pred = kf.s_cm + kf.v_cms;
+    TEST_ASSERT_EQUAL_INT32(s_pred, kalman_predict(&kf));
+}
+
+void test_gaussian_lut() {
+    // Test LUT bounds checking
+    TEST_ASSERT_EQUAL_UINT8(255, gaussian_lut(0, 1));      // Peak
+    TEST_ASSERT_EQUAL_UINT8(0, gaussian_lut(1000000, 1)); // Overflow
+}
+```
+
+**Integration Tests (on-device):**
+```c
+void test_pipeline_tick() {
+    PipelineState pipeline;
+    pipeline_init(&pipeline);
+    
+    const char* test_nmea = "$GPRMC,123456.00,A,3744.1234,N,12225.1234,W,10.0,90.0,,,,,D*42";
+    
+    esp_err_t err = pipeline_tick(&pipeline, test_nmea);
+    TEST_ASSERT_ESP_OK(err);
+    
+    // Verify state updated
+    TEST_ASSERT_NOT_EQUAL(0, pipeline.kalman.s_cm);
+}
+```
+
+## Performance Considerations
+
+### Timing Constraints
+
+**1 Hz Pipeline Tick:**
+- **Budget:** 1000 ms per tick
+- **Typical usage:** 1-5 ms per tick
+- **Headroom:** > 995 ms available for other tasks
+
+**GPS Processing:**
+- NMEA parsing: < 1 ms
+- Kalman update: < 0.5 ms
+- Map matching: < 2 ms
+- Bayesian detection: < 1 ms
+
+### iOS Performance
+
+**Best Practices:**
+```swift
+// Use background queue for heavy computation
+DispatchQueue.global(qos: .userInitiated).async {
+    let result = self.pipeline.process(nmea)
+    
+    // Update UI on main queue
+    DispatchQueue.main.async {
+        self.updateUI(result)
+    }
+}
+
+// Profile with Instruments
+// - Time Profiler: Check CPU usage
+// - Allocations: Verify memory budget
+// - Leaks: Detect retain cycles
+```
+
+**Common Pitfalls:**
+- **Main thread blocking:** Never run pipeline on UI thread
+- **Memory leaks:** Use `[weak self]` in closures
+- **Battery drain:** Minimize location update frequency
+
+### ESP32 Performance
+
+**CPU Monitoring:**
+```c
+void monitor_cpu_usage() {
+    static uint32_t idle_ticks = 0;
+    static uint32_t total_ticks = 0;
+    
+    uint32_t current_idle = xTaskGetIdleRunTimeCounter();
+    uint32_t current_total = xTaskGetTickCount();
+    
+    uint32_t idle_delta = current_idle - idle_ticks;
+    uint32_t total_delta = current_total - total_ticks;
+    
+    uint8_t cpu_usage = 100 - (idle_delta * 100 / total_delta);
+    ESP_LOGI("PERF", "CPU: %d%%", cpu_usage);
+    
+    idle_ticks = current_idle;
+    total_ticks = current_total;
+}
+```
+
+**Memory Monitoring:**
+```c
+void check_memory() {
+    ESP_LOGI("MEM", "Free heap: %d bytes", esp_get_free_heap_size());
+    ESP_LOGI("MEM", "Min free: %d bytes", esp_get_minimum_free_heap_size());
+    
+    // Alert if memory is low
+    if (esp_get_minimum_free_heap_size() < 10240) {
+        ESP_LOGW("MEM", "Low memory condition detected!");
+    }
+}
+```
+
+**Timing Verification:**
+```c
+void profile_pipeline_tick() {
+    uint32_t start = esp_timer_get_time();
+    
+    pipeline_tick(&pipeline, &nmea_msg);
+    
+    uint32_t elapsed = esp_timer_get_time() - start;
+    ESP_LOGI("PERF", "Pipeline tick: %lu us", elapsed);
+    
+    // Should be < 5000 us (5 ms)
+    if (elapsed > 5000) {
+        ESP_LOGW("PERF", "Pipeline tick exceeded budget!");
+    }
+}
+```
+
+### Optimization Checklist
+
+- [ ] Profile before optimizing (measure actual bottlenecks)
+- [ ] Use integer math on embedded platforms
+- [ ] Precompute LUTs at startup (not runtime)
+- [ ] Minimize memory allocations in hot paths
+- [ ] Use queue-based messaging (avoid polling)
+- [ ] Set appropriate task priorities
+- [ ] Monitor CPU usage under load
+- [ ] Verify no memory leaks (long-running tests)
