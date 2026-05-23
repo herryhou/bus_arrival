@@ -91,17 +91,20 @@ Extract arrival events from both traces:
 
 ```python
 import json
+from collections import defaultdict
 
 def extract_arrivals(trace_file):
+    """Extract arrival events from trace_v2.jsonl format."""
     arrivals = []
     with open(trace_file) as f:
         for line in f:
             tick = json.loads(line)
-            for stop in tick['detection_state']['stop_states']:
-                if stop['fsm_state'] == 'AtStop' and stop.get('just_arrived'):
+            time_s = tick['gps']['time_ms'] / 1000  # Convert ms to seconds
+            for stop in tick['stop_states']:
+                if stop.get('just_arrived'):
                     arrivals.append({
-                        'stop_idx': stop['index'],
-                        'time': tick['time'],
+                        'stop_idx': stop['stop_idx'],
+                        'time_s': time_s,
                         'dwell_s': stop.get('dwell_time_s', 0)
                     })
     return arrivals
@@ -113,35 +116,63 @@ port_arrivals = extract_arrivals('ported_trace.jsonl')
 Compare against ground truth:
 
 ```python
-def validate(arrivals, gt_file):
-    with open(gt_file) as f:
-        gt = json.load(f)
+def validate(arrivals, gt_file, time_tolerance_s=5):
+    """
+    Validate arrivals against ground truth.
 
-    gt_by_stop = {s['stop_idx']: s['arrivals'] for s in gt['stops']}
+    Args:
+        arrivals: List of arrival dicts from extract_arrivals()
+        gt_file: Path to ground truth JSON (flat list format)
+        time_tolerance_s: Time matching tolerance in seconds
+
+    Returns:
+        Dict with accuracy metrics
+    """
+    with open(gt_file) as f:
+        gt = json.load(f)  # Flat list: [{'stop_idx': 0, 'timestamp': ..., ...}, ...]
+
+    # Group arrivals by stop_idx
+    arrivals_by_stop = defaultdict(list)
+    for arr in arrivals:
+        arrivals_by_stop[arr['stop_idx']].append(arr)
+
+    # Group ground truth by stop_idx
+    gt_by_stop = defaultdict(list)
+    for gt_arr in gt:
+        gt_by_stop[gt_arr['stop_idx']].append(gt_arr)
 
     correct = 0
     false_pos = 0
     false_neg = 0
 
-    for stop_idx, stop_arrivals in enumerate(arrivals_by_stop):
+    # Check each stop that has arrivals
+    for stop_idx, stop_arrivals in arrivals_by_stop.items():
         expected = gt_by_stop.get(stop_idx, [])
 
         # Match arrivals by time (±5 seconds)
+        matched_expected = set()
         for arr in stop_arrivals:
             matched = False
-            for exp in expected:
-                if abs(arr['time'] - exp['time']) <= 5:
+            for i, exp in enumerate(expected):
+                if i in matched_expected:
+                    continue
+                if abs(arr['time_s'] - exp['timestamp']) <= time_tolerance_s:
                     correct += 1
                     matched = True
+                    matched_expected.add(i)
                     break
             if not matched:
                 false_pos += 1
 
-        for exp in expected:
-            matched = any(abs(arr['time'] - exp['time']) <= 5
-                         for arr in stop_arrivals)
-            if not matched:
+        # Check for unmatched expected arrivals
+        for i, exp in enumerate(expected):
+            if i not in matched_expected:
                 false_neg += 1
+
+    # Check for stops in GT but not in arrivals
+    for stop_idx, expected in gt_by_stop.items():
+        if stop_idx not in arrivals_by_stop:
+            false_neg += len(expected)
 
     total = correct + false_pos + false_neg
     accuracy = correct / total if total > 0 else 0
@@ -160,24 +191,27 @@ When validation fails, compare per-tick state:
 
 ```python
 def compare_traces(ref_trace, port_trace):
+    """Compare two trace_v2.jsonl files tick-by-tick."""
     with open(ref_trace) as rf, open(port_trace) as pf:
         for r_line, p_line in zip(rf, pf):
             r_tick = json.loads(r_line)
             p_tick = json.loads(p_line)
 
             # Compare Kalman state
-            s_diff = abs(r_tick['kalman_state']['s_cm'] -
-                        p_tick['kalman_state']['s_cm'])
+            s_diff = abs(r_tick['kalman']['s_cm'] -
+                        p_tick['kalman']['s_cm'])
             if s_diff > 1000:  # 10m threshold
-                print(f"Tick {r_tick['time']}: s_cm diff = {s_diff} cm")
+                time_s = r_tick['gps']['time_ms'] / 1000
+                print(f"Tick {time_s}s: s_cm diff = {s_diff} cm")
 
             # Compare stop states
             for r_stop, p_stop in zip(
-                r_tick['detection_state']['stop_states'],
-                p_tick['detection_state']['stop_states']
+                r_tick['stop_states'],
+                p_tick['stop_states']
             ):
                 if r_stop['fsm_state'] != p_stop['fsm_state']:
-                    print(f"Stop {r_stop['index']}: "
+                    stop_idx = r_stop['stop_idx']
+                    print(f"Stop {stop_idx}: "
                           f"{r_stop['fsm_state']} → {p_stop['fsm_state']}")
 ```
 
