@@ -4,9 +4,18 @@
 
 **目標受眾：** Embedded Rust 開發團隊  
 **硬體平台：** Raspberry Pi Pico 2（RP2350）  
-**文件版本：** v9.0（二層架構重構：控制/估計分離）
+**文件版本：** v9.1（Kalman Gain 優化）
 
 ### 版本更新記錄（Changelog）
+
+#### v9.1（2026-05-23）- Kalman Gain 優化：降低優良 GPS 之滯後
+**問題：** 於優良 GPS 條件下（accuracy < 8m），觀察到 5-10m Kalman 滯後，導致原始 GPS 位置明顯領先於路線投影位置。
+**解決方案：** 提高 `AccuracyQuality.EXCELLENT` 位置增益從 77/256（≈0.30）至 128/256（≈0.50）
+- 於 < 8m accuracy 時提升 GPS 信任度至 50%，減少滯後
+- GOOD/FAIR/POOR 等級增益保持不變（51/26/13）
+- 詳見設計文件 `docs/superpowers/specs/2026-05-21-accuracy-quality-kalman-gain-design.md`
+
+---
 
 #### v8.10（2026-04-29）- 估計就緒與檢測門控分離
 - 將單一 warmup 計數器分離為獨立的「估計就緒」與「檢測門控」

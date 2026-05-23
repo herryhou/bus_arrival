@@ -82,7 +82,7 @@ enum class HdopQuality(val ks: Int, val kv: Int = 77) {
 
 // Kalman gains (Android accuracy-adaptive, in meters)
 enum class AccuracyQuality(val ks: Int, val kv: Int = 77) {
-    EXCELLENT(77),   // < 8m accuracy
+    EXCELLENT(128),  // < 8m accuracy (increased from 77 to reduce lag)
     GOOD(51),        // 8m - 20m accuracy
     FAIR(26),        // >20m - 50m accuracy
     POOR(13)         // >50m accuracy or missing quality fallback
