@@ -520,41 +520,44 @@ fun MapView(
                 }
             }
 
-            busScreenPosition?.let { pos ->
-                val markerLabel =
-                        formatBusMarkerLabel(
-                                stopIndex = uiState.currentStop,
-                                stopState = uiState.currentStopState
+            // Positioned elements layer (without center alignment affecting offsets)
+            Box(modifier = Modifier.fillMaxSize()) {
+                busScreenPosition?.let { pos ->
+                    val markerLabel =
+                            formatBusMarkerLabel(
+                                    stopIndex = uiState.currentStop,
+                                    stopState = uiState.currentStopState
+                            )
+                    Box(
+                            modifier =
+                                    Modifier.offset {
+                                                IntOffset((pos.x + 14f).toInt(), (pos.y - 42f).toInt())
+                                            }
+                                            .background(
+                                                    color =
+                                                            busStateColor(uiState.currentStopState)
+                                                                    .copy(alpha = 0.86f),
+                                                    shape = RoundedCornerShape(10.dp)
+                                            )
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                                text = markerLabel,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White
                         )
-                Box(
-                        modifier =
-                                Modifier.offset {
-                                            IntOffset((pos.x + 14f).toInt(), (pos.y - 42f).toInt())
-                                        }
-                                        .background(
-                                                color =
-                                                        busStateColor(uiState.currentStopState)
-                                                                .copy(alpha = 0.86f),
-                                                shape = RoundedCornerShape(10.dp)
-                                        )
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                            text = markerLabel,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color.White
-                    )
-                }
-            }
-
-            // Draw vehicle heading arrow when GPS is ready with bearing
-            busScreenPosition?.let { pos ->
-                Box(
-                    modifier = Modifier.offset {
-                        IntOffset(pos.x.toInt() - 16, pos.y.toInt() - 16)
                     }
-                ) {
-                    VehicleHeadingMarker(gpsFixState = gpsFixState)
+                }
+
+                // Draw vehicle heading arrow when GPS is ready with bearing
+                busScreenPosition?.let { pos ->
+                    Box(
+                        modifier = Modifier.offset {
+                            IntOffset(pos.x.toInt() - 16, pos.y.toInt() - 16)
+                        }
+                    ) {
+                        VehicleHeadingMarker(gpsFixState = gpsFixState)
+                    }
                 }
             }
 
