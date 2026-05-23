@@ -185,7 +185,10 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                     vCms = event.vCms,
                     mode = event.mode,
                     currentStop = event.activeStopIndex,
-                    currentStopState = event.activeStopState
+                    currentStopState = event.activeStopState,
+                    gpsLat = event.lat,
+                    gpsLon = event.lon,
+                    gpsBearing = event.bearing
                 )
                 // Update GPS fix state
                 _gpsFixState.value = computeGpsFixState(
@@ -600,5 +603,8 @@ data class DetectionUiState(
         val vCms: Int = 0,
         val isCameraFollowEnabled: Boolean = true,
         val mode: String = "Normal",
-        val error: String? = null
+        val error: String? = null,
+        val gpsLat: Double = 0.0,
+        val gpsLon: Double = 0.0,
+        val gpsBearing: Float? = null
 )

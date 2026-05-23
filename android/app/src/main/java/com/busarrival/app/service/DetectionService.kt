@@ -281,8 +281,10 @@ class DetectionService : Service() {
                     activeStopIndex = primaryStopState.first,
                     activeStopState = primaryStopState.second,
                     accuracyM = gps.accuracyM ?: Float.MAX_VALUE,
-                    satellites = gps.hdop?.toInt() ?: 0, // Approximate: use HDOP as satellite count proxy
-                    bearing = gps.headingCdeg?.toFloat()?.div(100f) // Convert centidegrees to degrees
+                    satellites = gps.hdop?.toInt() ?: 0,
+                    bearing = gps.headingCdeg?.toFloat()?.div(100f),
+                    lat = gps.lat,
+                    lon = gps.lon
                 )
 
                 lastGpsTime = gps.timestamp
@@ -379,6 +381,8 @@ sealed class PipelineEvent {
         val activeStopState: String = "Idle",
         val accuracyM: Float = Float.MAX_VALUE,
         val satellites: Int = 0,
-        val bearing: Float? = null
+        val bearing: Float? = null,
+        val lat: Double = 0.0,
+        val lon: Double = 0.0
     ) : PipelineEvent()
 }

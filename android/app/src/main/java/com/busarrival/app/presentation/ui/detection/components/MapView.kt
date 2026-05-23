@@ -116,6 +116,9 @@ fun MapView(
     replayState: ReplayState = ReplayState(),
     viewModel: DetectionViewModel,
     gpsFixState: GpsFixState,
+    gpsLat: Double,
+    gpsLon: Double,
+    gpsBearing: Float?,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -205,7 +208,25 @@ fun MapView(
                     }
                 }
             }
+    // Raw GPS position (for bus icon)
     val busScreenPosition by
+            remember(routeData, centerLatLon, gpsLat, gpsLon, scale, offset, canvasSize.value) {
+                derivedStateOf {
+                    val center = centerLatLon ?: return@derivedStateOf null
+                    val size = canvasSize.value
+                    if (size.width <= 0 || size.height <= 0) return@derivedStateOf null
+                    if (gpsLat == 0.0 || gpsLon == 0.0) return@derivedStateOf null
+
+                    val worldX = lonToPixelX(gpsLon, BASE_Z) - lonToPixelX(center.lon, BASE_Z)
+                    val worldY = latToPixelY(gpsLat, BASE_Z) - latToPixelY(center.lat, BASE_Z)
+                    val x = worldX * scale + offset.x + size.width / 2f
+                    val y = worldY * scale + offset.y + size.height / 2f
+                    if (x.isFinite() && y.isFinite()) Offset(x, y) else null
+                }
+            }
+
+    // Snapped route position (for stop marker)
+    val snappedScreenPosition by
             remember(routeData, centerLatLon, currentSCm, scale, offset, canvasSize.value) {
                 derivedStateOf {
                     val route = routeData ?: return@derivedStateOf null
@@ -522,7 +543,8 @@ fun MapView(
 
             // Positioned elements layer (without center alignment affecting offsets)
             Box(modifier = Modifier.fillMaxSize()) {
-                busScreenPosition?.let { pos ->
+                // Stop marker at snapped route position
+                snappedScreenPosition?.let { pos ->
                     val markerLabel =
                             formatBusMarkerLabel(
                                     stopIndex = uiState.currentStop,
@@ -531,7 +553,7 @@ fun MapView(
                     Box(
                             modifier =
                                     Modifier.offset {
-                                                IntOffset((pos.x + 14f).toInt(), (pos.y - 42f).toInt())
+                                                IntOffset((pos.x + 14f + 50f).toInt(), (pos.y - 42f).toInt())
                                             }
                                             .background(
                                                     color =
@@ -556,7 +578,7 @@ fun MapView(
                             IntOffset(pos.x.toInt() - 16, pos.y.toInt() - 16)
                         }
                     ) {
-                        VehicleHeadingMarker(gpsFixState = gpsFixState)
+                        VehicleHeadingMarker(bearing = gpsBearing)
                     }
                 }
             }

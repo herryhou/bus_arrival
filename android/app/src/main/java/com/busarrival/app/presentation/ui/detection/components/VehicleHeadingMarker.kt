@@ -1,58 +1,52 @@
 package com.busarrival.app.presentation.ui.detection.components
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
-import com.busarrival.app.domain.model.GpsFixState
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun VehicleHeadingMarker(
-    gpsFixState: GpsFixState,
+    bearing: Float?,
     modifier: Modifier = Modifier
 ) {
-    val bearing = when (gpsFixState) {
-        is GpsFixState.Ready -> gpsFixState.bearing
-        else -> null
-    }
+    val markerSize = 32.dp
+    val arrowColor = Color(0xFF2196F3)
+    val questionColor = Color.Red
 
     if (bearing != null) {
-        val markerSize = 32.dp
-        val markerColor = Color(0xFF2196F3) // Bright blue for visibility on map
-
-        Canvas(modifier = modifier.size(markerSize)) {
-            val size = size.width
-            val center = Offset(size / 2, size / 2)
-
-            rotate(degrees = bearing.toFloat(), pivot = center) {
-                // Draw filled arrow pointing up (north)
-                val path = androidx.compose.ui.graphics.Path().apply {
-                    moveTo(center.x, center.y - size / 2) // Top
-                    lineTo(center.x - size / 4, center.y) // Left
-                    lineTo(center.x, center.y + size / 4) // Bottom center (indent)
-                    lineTo(center.x + size / 4, center.y) // Right
-                    close()
-                }
-
-                // Fill with solid color for better visibility
-                drawPath(
-                    path = path,
-                    color = markerColor
-                )
-
-                // Add white outline for contrast
-                drawPath(
-                    path = path,
-                    color = Color.White,
-                    style = Stroke(width = 2f)
-                )
-            }
+        Icon(
+            imageVector = Icons.Default.ArrowForward,
+            contentDescription = "Vehicle heading",
+            tint = arrowColor,
+            modifier = modifier
+                .size(markerSize)
+                .rotate(bearing)
+        )
+    } else {
+        Box(
+            modifier = modifier.size(markerSize),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "?",
+                color = questionColor,
+                fontSize = 28.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+            )
         }
     }
 }
