@@ -61,6 +61,8 @@ import com.busarrival.app.data.cache.TileResolution
 import com.busarrival.app.domain.model.ReplayState
 import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.domain.model.RouteNode
+import com.busarrival.app.domain.model.GpsFixState
+import com.busarrival.app.presentation.ui.detection.components.VehicleHeadingMarker
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 import kotlin.math.PI
 import kotlin.math.ceil
@@ -108,12 +110,13 @@ fun RouteData.cmToLatLon(xCm: Int, yCm: Int): LatLon {
 
 @Composable
 fun MapView(
-        routeData: RouteData?,
-        currentSCm: Int,
-        isCameraFollowEnabled: Boolean,
-        replayState: ReplayState = ReplayState(),
-        viewModel: DetectionViewModel,
-        modifier: Modifier = Modifier
+    routeData: RouteData?,
+    currentSCm: Int,
+    isCameraFollowEnabled: Boolean,
+    replayState: ReplayState = ReplayState(),
+    viewModel: DetectionViewModel,
+    gpsFixState: GpsFixState,
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val tileDiskCache = remember { TileCache(context) }
@@ -541,6 +544,17 @@ fun MapView(
                             style = MaterialTheme.typography.labelMedium,
                             color = Color.White
                     )
+                }
+            }
+
+            // Draw vehicle heading arrow when GPS is ready with bearing
+            busScreenPosition?.let { pos ->
+                Box(
+                    modifier = Modifier.offset {
+                        IntOffset(pos.x.toInt() - 16, pos.y.toInt() - 16)
+                    }
+                ) {
+                    VehicleHeadingMarker(gpsFixState = gpsFixState)
                 }
             }
 
