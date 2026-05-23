@@ -22,6 +22,9 @@ import com.busarrival.app.service.DetectionService
 import com.busarrival.app.service.GpsLogActions
 import com.busarrival.app.service.GpsLogStatus
 import com.busarrival.app.service.PipelineEvent
+import com.busarrival.app.domain.model.GpsFixState
+import com.busarrival.app.domain.model.EventHint
+import com.busarrival.app.domain.model.HintType
 import java.util.LinkedHashMap
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -76,6 +79,12 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _tileCache = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
     val tileCache: StateFlow<Map<String, ImageBitmap>> = _tileCache.asStateFlow()
+
+    private val _gpsFixState = MutableStateFlow<com.busarrival.app.domain.model.GpsFixState>(com.busarrival.app.domain.model.GpsFixState.NoSignal)
+    val gpsFixState: StateFlow<com.busarrival.app.domain.model.GpsFixState> = _gpsFixState.asStateFlow()
+
+    private val _eventHints = MutableStateFlow<com.busarrival.app.domain.model.EventHint?>(null)
+    val eventHints: StateFlow<com.busarrival.app.domain.model.EventHint?> = _eventHints.asStateFlow()
 
     // Playback state
     private var playbackJob: Job? = null
@@ -154,24 +163,51 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    private fun computeGpsFixState(
+        accuracyM: Float,
+        satellites: Int,
+        bearing: Float?
+    ): com.busarrival.app.domain.model.GpsFixState {
+        return when {
+            accuracyM == Float.MAX_VALUE -> com.busarrival.app.domain.model.GpsFixState.NoSignal
+            accuracyM > 20f -> com.busarrival.app.domain.model.GpsFixState.Searching
+            satellites < 6 -> com.busarrival.app.domain.model.GpsFixState.Acquiring(satellites)
+            else -> com.busarrival.app.domain.model.GpsFixState.Ready(accuracyM, satellites, bearing)
+        }
+    }
+
     /** Handle events from DetectionService. */
     private fun handleServiceEvent(event: PipelineEvent) {
         when (event) {
             is PipelineEvent.PositionUpdate -> {
-                _uiState.value =
-                        _uiState.value.copy(
-                                sCm = event.sCm,
-                                vCms = event.vCms,
-                                mode = event.mode,
-                                currentStop = event.activeStopIndex,
-                                currentStopState = event.activeStopState
-                        )
+                _uiState.value = _uiState.value.copy(
+                    sCm = event.sCm,
+                    vCms = event.vCms,
+                    mode = event.mode,
+                    currentStop = event.activeStopIndex,
+                    currentStopState = event.activeStopState
+                )
+                // Update GPS fix state
+                _gpsFixState.value = computeGpsFixState(
+                    accuracyM = event.accuracyM,
+                    satellites = event.satellites,
+                    bearing = event.bearing
+                )
             }
             is PipelineEvent.Arrival -> {
                 _uiState.value = _uiState.value.copy(currentStop = event.stopIndex)
+                // Emit event hint
+                _eventHints.value = com.busarrival.app.domain.model.EventHint(
+                    type = com.busarrival.app.domain.model.HintType.ARRIVING,
+                    stopIndex = event.stopIndex
+                )
             }
             is PipelineEvent.Departure -> {
-                // Departure handled via event list
+                // Emit event hint
+                _eventHints.value = com.busarrival.app.domain.model.EventHint(
+                    type = com.busarrival.app.domain.model.HintType.DEPART,
+                    stopIndex = event.stopIndex
+                )
             }
         }
 
