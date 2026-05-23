@@ -92,3 +92,17 @@ class LocationManager(private val context: Context) {
         }
     }
 }
+
+data class GpsMetadata(
+    val accuracyM: Float,
+    val satellites: Int,
+    val bearing: Float?
+)
+
+fun extractGpsMetadata(location: android.location.Location): GpsMetadata {
+    return GpsMetadata(
+        accuracyM = if (location.hasAccuracy()) location.accuracy else Float.MAX_VALUE,
+        satellites = location.extras?.getInt("satellites", 0) ?: 0,
+        bearing = if (location.hasBearing()) location.bearing else null
+    )
+}
