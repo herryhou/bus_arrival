@@ -16,7 +16,7 @@ class AccuracyQualityTest {
 
     @Test
     fun `accuracy quality uses existing fixed point gains`() {
-        assertEquals(77, AccuracyQuality.EXCELLENT.ks)
+        assertEquals(128, AccuracyQuality.EXCELLENT.ks)  // Increased from 77
         assertEquals(51, AccuracyQuality.GOOD.ks)
         assertEquals(26, AccuracyQuality.FAIR.ks)
         assertEquals(13, AccuracyQuality.POOR.ks)

@@ -52,4 +52,25 @@ class KalmanFilterQualityTest {
 
         assertEquals(10_050, state.sCm)
     }
+
+    @Test
+    fun `excellent accuracy uses highest gain for minimum lag`() {
+        val state = KalmanState(sCm = 10_000, vCms = 0, lastSegIdx = 0)
+
+        KalmanFilter.update(
+            state = state,
+            zCm = 11_000,
+            vGpsCms = 0,
+            accuracyM = 5.0f,  // < 8m = EXCELLENT
+            hdopX10 = null,
+            isSoftResync = false
+        )
+
+        // Ks = 128/256 = 0.50
+        // s_cm = 10_000 + (128 * (11_000 - 10_000)) / 256
+        //       = 10_000 + 128000 / 256
+        //       = 10_000 + 500
+        //       = 10_500
+        assertEquals(10_500, state.sCm)
+    }
 }

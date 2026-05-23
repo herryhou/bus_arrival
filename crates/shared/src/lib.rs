@@ -324,7 +324,7 @@ impl KalmanState {
 
     fn ks_from_accuracy_cm(accuracy_cm: DistCm) -> i32 {
         match accuracy_cm {
-            i32::MIN..=799 => 77,
+            i32::MIN..=799 => 128,  // EXCELLENT: increased from 77 to reduce lag
             800..=2000 => 51,
             2001..=5000 => 26,
             _ => 13,
@@ -595,12 +595,12 @@ mod tests {
 
     #[test]
     fn test_accuracy_quality_gain_boundaries() {
-        assert_eq!(KalmanState::ks_from_accuracy_cm(799), 77);
-        assert_eq!(KalmanState::ks_from_accuracy_cm(800), 51);
+        assert_eq!(KalmanState::ks_from_accuracy_cm(799), 128);  // EXCELLENT
+        assert_eq!(KalmanState::ks_from_accuracy_cm(800), 51);   // GOOD
         assert_eq!(KalmanState::ks_from_accuracy_cm(2000), 51);
-        assert_eq!(KalmanState::ks_from_accuracy_cm(2001), 26);
+        assert_eq!(KalmanState::ks_from_accuracy_cm(2001), 26);  // FAIR
         assert_eq!(KalmanState::ks_from_accuracy_cm(5000), 26);
-        assert_eq!(KalmanState::ks_from_accuracy_cm(5001), 13);
+        assert_eq!(KalmanState::ks_from_accuracy_cm(5001), 13);  // POOR
     }
 
     #[test]
