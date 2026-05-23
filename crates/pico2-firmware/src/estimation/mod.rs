@@ -200,7 +200,7 @@ pub fn estimate(
     let (s_cm, v_cms) = if input.is_first_fix {
         // First fix: initialize Kalman
         state.kalman.s_cm = z_raw;
-        let v_gps = input.gps.speed_cms.unwrap_or(0).clamp(0, 1667);
+        let v_gps = input.gps.speed_cms.unwrap_or(0).clamp(0, gps_processor::V_MAX_CMS);
         state.kalman.v_cms = state.kalman.v_cms + 3 * (v_gps - state.kalman.v_cms) / 10;
         state.kalman.last_seg_idx = seg_idx;
 

@@ -2,7 +2,7 @@
 
 ## How to Use This Spec
 
-**For LLMs (Claude, etc.):**
+**For LLMs (Claude, Codex etc.):**
 1. ALWAYS read `specs/00-constraints.md` first — it applies to ALL modules
 2. Read module-specific specs before working on that module
 3. Do NOT rely on `bus_arrival_tech_report_v8.md` for implementation rules
