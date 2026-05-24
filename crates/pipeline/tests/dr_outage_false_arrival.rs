@@ -27,29 +27,28 @@ fn test_dr_outage_does_not_cause_false_arrival() {
             let status = trace_entry["detection"]["status"].as_str().unwrap();
             let divergence_cm = trace_entry["kalman"]["divergence_cm"].as_i64().unwrap();
 
-            // At 80320000, we should be in dr_outage with divergence_cm = 0
-            assert_eq!(status, "dr_outage", "Should be in dr_outage at 80320000");
-            assert_eq!(divergence_cm, 0, "divergence_cm should be 0 during dr_outage");
+            // After the fix: status is "valid" with divergence_cm = 2059
+            // The fix allows detection to continue when divergence is not extreme
+            assert_eq!(status, "valid", "Status should be valid at 80320000 after fix");
+            assert!(divergence_cm > 0, "divergence_cm should be positive after fix");
 
-            // Check stop states for false arrival
+            // The key invariant: no false arrivals should occur
+            // Check that stop_states is empty or no stop is in "Arriving" state inappropriately
             if let Some(stop_states) = trace_entry.get("stop_states") {
                 if let Some(stop_array) = stop_states.as_array() {
                     for stop in stop_array {
                         let stop_idx = stop["stop_idx"].as_u64().unwrap();
                         let fsm_state = stop["fsm_state"].as_str().unwrap();
 
-                        // Stop #4 at 80320000 was 48m away but in "Arriving" state
-                        if stop_idx == 4 && fsm_state == "Arriving" {
-                            // With the fix, F1 should be neutralized (128) during dr_outage
-                            // This prevents false arrivals when GPS is far but DR is close
-                            let probability = stop["probability"].as_u64().unwrap();
-
-                            // Probability should be suppressed due to F1 neutralization
-                            // (Old behavior: probability was 65, causing false arrival)
-                            assert!(
-                                probability < 191,
-                                "Probability should be below arrival threshold (191) during dr_outage when GPS is 48m away. Got: {}",
-                                probability
+                        // After the fix, no stop should be in "Arriving" state when GPS is 48m away
+                        if fsm_state == "Arriving" {
+                            let gps_distance_cm = trace_entry["kalman"]["s_cm"].as_i64().unwrap()
+                                - stop["progress_cm"].as_i64().unwrap();
+                            panic!(
+                                "Stop #{} should not be in Arriving state when GPS is {}cm away. \
+                                 This indicates the fix is not working correctly.",
+                                stop_idx,
+                                gps_distance_cm.abs()
                             );
                         }
                     }

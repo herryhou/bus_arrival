@@ -21,6 +21,27 @@
 - [ ] Adaptive weights (close stop < 120 m): (14, 7, 11, 0) — remove p4
 - [ ] Gaussian LUT: 256 entries, index = (x/sigma) × 64
 - [ ] Logistic LUT: 128 entries, index = v / 10
+- [ ] **DR Outage Protection (v9.2)**: When `gps_status != Valid` AND `divergence > PHANTOM_DIVERGENCE_CM`, neutralize F1 and F3 to 128 (no effect)
+
+## DR Outage Protection (v9.2)
+
+During `dr_outage` or `off_route` states, when `divergence > PHANTOM_DIVERGENCE_CM`:
+
+```rust
+let p1 = if gps_status != GpsStatus::Valid && divergence > PHANTOM_DIVERGENCE_CM {
+    128 // neutral: neither confirms nor denies arrival
+} else {
+    // Normal F1 calculation
+};
+
+let p3 = if gps_status != GpsStatus::Valid && divergence > PHANTOM_DIVERGENCE_CM {
+    128 // neutral: neither confirms nor denies arrival
+} else {
+    // Normal F3 calculation
+};
+```
+
+**Rationale:** During dr_outage, DR position may differ significantly from actual GPS position (e.g., GPS jump triggers dr_outage). Using DR position for distance calculation causes false arrivals when GPS is far but DR has drifted close. Neutralization prevents this while preserving detection capability for low-divergence cases.
 
 ## Formulas
 
@@ -49,6 +70,7 @@ fn build_gaussian_lut() -> [u8; 256] {
 
 ## Version Notes
 
+- v9.2: DR Outage Protection — neutralize F1/F3 when gps_status != Valid AND divergence > PHANTOM_DIVERGENCE_CM
 - v8.6: Adaptive weights for close stops (remove dwell time penalty)
 - v8.4: PositionSignals separation (F1 vs F3)
 
