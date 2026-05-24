@@ -89,13 +89,27 @@ object ProbabilityModel {
      * P(d|A) = exp(-0.5 * (d/σ_d)²)
      * σ_d = 2750 cm
      */
-    private fun computeDistanceLikelihood(zCm: DistCm, stopProgressCm: DistCm): Prob8 {
-        val dCm = zCm - stopProgressCm
-        val absDCm = if (dCm < 0) -dCm else dCm
+    private fun computeDistanceLikelihood(
+        zGpsCm: DistCm,
+        sCm: DistCm,
+        stopProgressCm: DistCm,
+        gpsStatus: GpsStatus
+    ): Prob8 {
+        val divergence = kotlin.math.abs(zGpsCm - sCm)
 
-        val idx = (absDCm * 64 / PhysicalConstants.SIGMA_D_CM)
-            .coerceIn(0, GAUSSIAN_LUT_SIZE - 1)
+        // Neutralize F1 during dr_outage/off_route when divergence > threshold
+        if (gpsStatus != GpsStatus.Valid && divergence > PhysicalConstants.PHANTOM_DIVERGENCE_CM) {
+            return Prob8(128)  // neutral: neither confirms nor denies arrival
+        }
 
+        // Fallback to s_cm when valid GPS has high divergence (poor map matching)
+        // Matches Rust: gps_status == Valid && divergence > 2000 → use s_cm
+        val d1Cm = if (gpsStatus == GpsStatus.Valid && divergence > 2000) {
+            kotlin.math.abs(sCm - stopProgressCm)  // Use Kalman position
+        } else {
+            kotlin.math.abs(zGpsCm - stopProgressCm)  // Use raw GPS
+        }
+        val idx = (d1Cm * 64 / PhysicalConstants.SIGMA_D_CM).coerceIn(0, GAUSSIAN_LUT_SIZE - 1)
         return Prob8(gaussianLut[idx])
     }
 
