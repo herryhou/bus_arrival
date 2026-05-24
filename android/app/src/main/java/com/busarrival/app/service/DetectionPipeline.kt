@@ -25,6 +25,8 @@ class DetectionPipeline {
     private var stopStates: Map<Int, StopState> = emptyMap()
     private var modeState = ModeMachine.toNormal()
 
+    private var previousGpsStatus: GpsStatus = GpsStatus.Valid
+
     private var lastGpsTime: TimestampMs = 0
     private var lastSCm: DistCm = 0
     private var firstFixProcessed = false
