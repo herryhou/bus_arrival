@@ -52,9 +52,10 @@ object ProbabilityModel {
         signals: PositionSignals,
         stop: Stop,
         vCms: SpeedCms,
-        dwellS: Int
+        dwellS: Int,
+        gpsStatus: GpsStatus
     ): Prob8 {
-        val features = computeFeatures(signals, stop, vCms, dwellS)
+        val features = computeFeatures(signals, stop, vCms, dwellS, gpsStatus)
         val p = if (features.isClose) {
             (W1_ADAPT * features.p1.value + W2_ADAPT * features.p2.value + W3_ADAPT * features.p3.value + W4_ADAPT * features.p4.value) / 32
         } else {
@@ -68,15 +69,16 @@ object ProbabilityModel {
         signals: PositionSignals,
         stop: Stop,
         vCms: SpeedCms,
-        dwellS: Int
+        dwellS: Int,
+        gpsStatus: GpsStatus
     ): ProbabilityFeatures {
         val dCm = stop.distanceTo(signals.sCm)
         val absDCm = if (dCm < 0) -dCm else dCm
 
         return ProbabilityFeatures(
-            p1 = computeDistanceLikelihood(signals.zGpsCm, stop.progressCm),
+            p1 = computeDistanceLikelihood(signals.zGpsCm, signals.sCm, stop.progressCm, gpsStatus),
             p2 = computeSpeedLikelihood(vCms),
-            p3 = computeProgressLikelihood(signals.sCm, stop.progressCm),
+            p3 = computeProgressLikelihood(signals.sCm, signals.zGpsCm, stop.progressCm, gpsStatus),
             p4 = computeDwellLikelihood(dwellS),
             isClose = absDCm < 12000
         )
