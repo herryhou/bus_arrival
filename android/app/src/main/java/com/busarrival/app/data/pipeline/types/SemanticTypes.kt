@@ -58,6 +58,13 @@ object PhysicalConstants {
     // Recovery
     const val RECOVERY_JUMP_THRESHOLD: DistCm = 20000 // 200 m
     const val RECOVERY_INDEX_PENALTY: Int = 5000
+
+    // DR outage protection
+    // Divergence threshold above which s_cm is considered phantom (50 m).
+    // When z_gps_cm and s_cm diverge by more than this, the Kalman state
+    // has likely drifted from actual bus position (detour / DR drift).
+    // Per spec: 2×SIGMA_D_CM ≈ 55 m, rounded to 50 m for clean threshold.
+    const val PHANTOM_DIVERGENCE_CM: DistCm = 5000
 }
 
 // Kalman gains (HDOP-adaptive, from specs/02-kalman_filter.md)
@@ -98,6 +105,25 @@ enum class AccuracyQuality(val ks: Int, val kv: Int = 77) {
             }
         }
     }
+}
+
+/**
+ * GPS processing status for phantom arrival detection.
+ *
+ * Used to control probability model behavior during GPS degradation:
+ * - [Valid]: GPS is being processed normally
+ * - [DrOutage]: GPS is being rejected (dr_outage mode)
+ * - [OffRoute]: GPS is off-route (position frozen)
+ */
+enum class GpsStatus {
+    /** GPS is being processed normally */
+    Valid,
+
+    /** GPS is being rejected (dr_outage) */
+    DrOutage,
+
+    /** GPS is off-route (position frozen) */
+    OffRoute
 }
 
 // Extension functions for unit conversions
