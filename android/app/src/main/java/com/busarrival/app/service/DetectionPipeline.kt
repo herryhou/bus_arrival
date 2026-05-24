@@ -333,7 +333,7 @@ class DetectionPipeline {
             // Rust golden detection uses the filtered route position for both
             // probability distance inputs; keep Android runtime aligned.
             val detectionSignals = PositionSignals(
-                zGpsCm = positionSignals.sCm,
+                zGpsCm = positionSignals.zGpsCm,  // FIXED: Use actual raw GPS
                 sCm = positionSignals.sCm
             )
             val probability = ProbabilityModel.compute(
@@ -341,7 +341,7 @@ class DetectionPipeline {
                 stop = stop,
                 vCms = kalmanState!!.vCms,
                 dwellS = state.dwellTimeS,
-                gpsStatus = deriveGpsStatus()
+                gpsStatus = previousGpsStatus  // NEW: use captured GPS status
             )
 
             // Update state machine
