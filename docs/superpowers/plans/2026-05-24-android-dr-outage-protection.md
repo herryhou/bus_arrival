@@ -445,6 +445,8 @@ import com.busarrival.app.domain.model.RouteData
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import java.io.File
 
 /**
@@ -456,6 +458,7 @@ import java.io.File
  * causing F1 to use DR position instead of raw GPS distance.
  * Fix: Neutralize F1 to 128 during dr_outage when divergence > PHANTOM_DIVERGENCE_CM.
  */
+@RunWith(RobolectricTestRunner::class)
 class DrOutageFalseArrivalTest {
 
     private lateinit var routeData: RouteData
@@ -467,7 +470,7 @@ class DrOutageFalseArrivalTest {
         val routeFile = File("../../test_data/ty225_normal.bin")
         assertTrue("Route file should exist", routeFile.exists())
 
-        routeData = RouteDataParser.parse(routeFile)
+        routeData = RouteDataParser.loadFromFile(routeFile.absolutePath)
         pipeline = DetectionPipeline()
         pipeline.initialize(routeData)
     }

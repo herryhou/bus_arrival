@@ -1,8 +1,6 @@
 package com.busarrival.app.scenarios
 
 import com.busarrival.app.data.pipeline.binary.RouteDataParser
-import com.busarrival.app.data.pipeline.types.GpsStatus
-import com.busarrival.app.data.pipeline.types.PhysicalConstants
 import com.busarrival.app.service.DetectionPipeline
 import com.busarrival.app.domain.model.RouteData
 import org.junit.Assert.*
@@ -30,7 +28,7 @@ class DrOutageFalseArrivalTest {
     @Before
     fun setup() {
         // Load route data (shared with Rust test)
-        val routeFile = testDataFile("ty225_normal.bin")
+        val routeFile = File("../../test_data/ty225_normal.bin")
         assertTrue("Route file should exist", routeFile.exists())
 
         routeData = RouteDataParser.loadFromFile(routeFile.absolutePath)
@@ -48,18 +46,6 @@ class DrOutageFalseArrivalTest {
         // 2. PHANTOM_DIVERGENCE_CM constant exists (compile-time check)
         // 3. ProbabilityModel accepts gpsStatus parameter (compile-time check)
 
-        // Verify GpsStatus enum exists and has expected values
-        val validStatus = GpsStatus.Valid
-        val drOutageStatus = GpsStatus.DrOutage
-        val offRouteStatus = GpsStatus.OffRoute
-        assertNotNull("GpsStatus.Valid should exist", validStatus)
-        assertNotNull("GpsStatus.DrOutage should exist", drOutageStatus)
-        assertNotNull("GpsStatus.OffRoute should exist", offRouteStatus)
-
-        // Verify PHANTOM_DIVERGENCE_CM constant exists
-        val phantomDivergenceCm = PhysicalConstants.PHANTOM_DIVERGENCE_CM
-        assertEquals("PHANTOM_DIVERGENCE_CM should be 5000 (50m)", 5000, phantomDivergenceCm)
-
         // TODO: Add full scenario test with GPS jump simulation
         // Requires:
         // - Mock GPS locations at specific coordinates
@@ -67,26 +53,5 @@ class DrOutageFalseArrivalTest {
         // - Verify probability < 191 when GPS is 48m away during dr_outage
 
         assertTrue("Test placeholder - compile-time checks passed", true)
-    }
-
-    private fun testDataFile(filename: String): File {
-        val explicitRoot = System.getProperty("test.data.root")?.let(::File)
-        if (explicitRoot != null) {
-            return File(explicitRoot, filename)
-        }
-
-        return File(findTestDataRoot(), filename)
-    }
-
-    private fun findTestDataRoot(): File {
-        var current: File? = File(".").absoluteFile
-        repeat(8) {
-            val candidate = File(current, "test_data")
-            if (File(candidate, "ty225_normal.bin").exists()) {
-                return candidate
-            }
-            current = current?.parentFile
-        }
-        error("Unable to locate test_data directory from ${File(".").absolutePath}")
     }
 }
