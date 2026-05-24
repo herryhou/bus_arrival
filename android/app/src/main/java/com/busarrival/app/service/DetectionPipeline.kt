@@ -125,6 +125,15 @@ class DetectionPipeline {
             isSoftResync = jumpDetected
         )
 
+        // CRITICAL: Capture GPS status BEFORE mode machine runs
+        // Detection only runs when mode is Normal, so we must capture status
+        // before mode transitions to preserve knowledge of off_route/dr_outage
+        val currentGpsStatus = when {
+            jumpDetected || matchResult.dist2 > PhysicalConstants.OFF_ROUTE_D2_THRESHOLD -> GpsStatus.OffRoute
+            else -> GpsStatus.Valid
+        }
+        previousGpsStatus = currentGpsStatus
+
         // Phase 3.5: Mode machine update (now we have sCm from Kalman)
         val previousMode = modeState.mode
         val modeUpdate = ModeMachine.update(
