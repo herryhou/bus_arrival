@@ -71,5 +71,5 @@ Full reference: `~/.claude/RTK.md` or `rtk gain --history`
 - `get_impact_radius` — Understand blast radius
 - `query_graph` — Trace callers, callees, tests
 
-Fall back to Grep/Glob/Read only when graph doesn't cover it.
+Fall back to rg/Grep/Glob/Read only when graph doesn't cover it.
 <!-- /code-review-graph -->
