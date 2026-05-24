@@ -84,14 +84,19 @@ private fun computeDistanceLikelihood(
 ): Prob8 {
     val divergence = kotlin.math.abs(zGpsCm - sCm)
 
+    // Neutralize F1 during dr_outage/off_route when divergence > threshold
     if (gpsStatus != GpsStatus.Valid && divergence > PhysicalConstants.PHANTOM_DIVERGENCE_CM) {
         return Prob8(128)  // neutral
     }
 
-    // Normal Gaussian LUT calculation
-    val dCm = zGpsCm - stopProgressCm
-    val absDCm = if (dCm < 0) -dCm else dCm
-    val idx = (absDCm * 64 / PhysicalConstants.SIGMA_D_CM).coerceIn(0, GAUSSIAN_LUT_SIZE - 1)
+    // Fallback to s_cm when valid GPS has high divergence (poor map matching)
+    // Matches Rust: gps_status == Valid && divergence > 2000 → use s_cm
+    val d1Cm = if (gpsStatus == GpsStatus.Valid && divergence > 2000) {
+        kotlin.math.abs(sCm - stopProgressCm)  // Use Kalman position
+    } else {
+        kotlin.math.abs(zGpsCm - stopProgressCm)  // Use raw GPS
+    }
+    val idx = (d1Cm * 64 / PhysicalConstants.SIGMA_D_CM).coerceIn(0, GAUSSIAN_LUT_SIZE - 1)
     return Prob8(gaussianLut[idx])
 }
 ```
@@ -193,22 +198,87 @@ val detectionSignals = PositionSignals(
 **File:** `DrOutageFalseArrivalTest.kt` (new)
 
 Regression test matching Rust `dr_outage_false_arrival.rs`:
+
+**Test Strategy:**
+1. Use `ty225_normal.bin` route data (same as Rust test)
+2. Simulate GPS jump → dr_outage scenario
+3. Verify stop #4 does NOT arrive when GPS is 48m away
+
 ```kotlin
 class DrOutageFalseArrivalTest {
 
     @Test
     fun testDrOutageDoesNotCauseFalseArrival() {
-        val routeData = loadRouteData("ty225_normal.bin")
+        // Load route data
+        val routeData = RouteDataParser.parse(File("test_data/ty225_normal.bin"))
         val pipeline = DetectionPipeline()
         pipeline.initialize(routeData)
 
-        // Process NMEA and verify no false arrival at 80320000
-        // ... implementation
+        // Simulate GPS scenario:
+        // 1. Normal GPS at position near stop #4
+        // 2. GPS jump (48m away) → triggers dr_outage
+        // 3. DR position drifts close to stop #4
+        // 4. Verify no false arrival
 
-        // Verify stop #4 does NOT arrive when GPS is 48m away during dr_outage
+        val stop4 = routeData.stops[4]
+
+        // Step 1: Normal GPS near stop #4
+        val normalLocation = createLocation(
+            lat = 24.995707,
+            lon = 121.294798,
+            accuracy = 5.0f,
+            time = 80320000L
+        )
+        var result = pipeline.process(normalLocation)
+        assertEquals(0, result.arrivals.size)  // No arrival yet
+
+        // Step 2: GPS jump 48m away (simulates dr_outage trigger)
+        val jumpedLocation = createLocation(
+            lat = 24.996200,  // ~48m away
+            lon = 121.295300,
+            accuracy = 5.0f,
+            time = 80321000L
+        )
+        result = pipeline.process(jumpedLocation)
+
+        // Step 3: Verify no false arrival
+        val falseArrival = result.arrivals.find { it.stopIndex == 4 }
+        assertNull(
+            falseArrival,
+            "Stop #4 should NOT arrive when GPS jumped 48m away during dr_outage. " +
+            "DR position may be close, but actual GPS is far."
+        )
+
+        // Step 4: Verify probability was suppressed
+        // (access internal state via test hook or trace inspection)
+    }
+
+    private fun createLocation(
+        lat: Double,
+        lon: Double,
+        accuracy: Float,
+        time: Long
+    ): Location {
+        val loc = Location("gps").apply {
+            this.latitude = lat
+            this.longitude = lon
+            this.accuracy = accuracy
+            this.time = time
+        }
+        return loc
     }
 }
 ```
+
+**Test Fixture Requirements:**
+- `test_data/ty225_normal.bin` - route data (shared with Rust)
+- Mock GPS locations at specific coordinates (defined above)
+- Test hook to inspect `previousGpsStatus` or trace output
+
+**Verification:**
+1. No arrival for stop #4 when GPS is 48m away
+2. `previousGpsStatus` was `OffRoute` or `DrOutage` during jump
+3. Probability for stop #4 < 191 (arrival threshold)
 
 ### 5. Documentation
 
@@ -274,7 +344,8 @@ This design achieves full parity with Rust v9.2 implementation in `crates/pipeli
 
 - Same enum values (Valid, DrOutage, OffRoute)
 - Same threshold (PHANTOM_DIVERGENCE_CM = 5000)
-- Same neutralization logic (return 128)
+- Same neutralization logic (return 128 when gpsStatus != Valid && divergence > 5000)
+- Same F1 fallback logic (use s_cm when gpsStatus == Valid && divergence > 2000)
 - Same divergence calculation (|zGpsCm - sCm|)
 
 **Android Difference:** Rust derives GpsStatus from GPS record status field. Android captures GPS status from Kalman output before mode transitions, because detection only runs when mode is Normal.
