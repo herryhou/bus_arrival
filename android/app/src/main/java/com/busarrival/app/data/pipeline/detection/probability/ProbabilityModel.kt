@@ -130,13 +130,23 @@ object ProbabilityModel {
      * P(p|A) = exp(-0.5 * (p/σ_p)²)
      * σ_p = 2000 cm
      */
-    private fun computeProgressLikelihood(sCm: DistCm, stopProgressCm: DistCm): Prob8 {
+    private fun computeProgressLikelihood(
+        sCm: DistCm,
+        zGpsCm: DistCm,
+        stopProgressCm: DistCm,
+        gpsStatus: GpsStatus
+    ): Prob8 {
+        val divergence = kotlin.math.abs(zGpsCm - sCm)
+
+        // Neutralize F3 during dr_outage/off_route when divergence > threshold
+        if (gpsStatus != GpsStatus.Valid && divergence > PhysicalConstants.PHANTOM_DIVERGENCE_CM) {
+            return Prob8(128)  // neutral: neither confirms nor denies arrival
+        }
+
+        // Normal F3 calculation
         val pCm = sCm - stopProgressCm
         val absPCm = if (pCm < 0) -pCm else pCm
-
-        val idx = (absPCm * 64 / PhysicalConstants.SIGMA_P_CM)
-            .coerceIn(0, GAUSSIAN_LUT_SIZE - 1)
-
+        val idx = (absPCm * 64 / PhysicalConstants.SIGMA_P_CM).coerceIn(0, GAUSSIAN_LUT_SIZE - 1)
         return Prob8(gaussianLut[idx])
     }
 

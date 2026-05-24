@@ -15,6 +15,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.busarrival.app.R
 import com.busarrival.app.data.pipeline.types.TimestampMs
+import com.busarrival.app.data.pipeline.types.GpsStatus
 import com.busarrival.app.data.pipeline.detection.probability.ProbabilityModel
 import com.busarrival.app.data.pipeline.detection.statemachine.StateMachine
 import com.busarrival.app.data.pipeline.localization.kalman.KalmanFilter
@@ -230,11 +231,13 @@ class DetectionService : Service() {
                     val state = stopStates[idx] ?: continue
 
                     // Compute probability
+                    // TODO: DetectionService needs proper GPS status tracking (Task 6)
                     val probability = ProbabilityModel.compute(
                         signals = signals,
                         stop = stop,
                         vCms = kalmanState!!.vCms,
-                        dwellS = state.dwellTimeS
+                        dwellS = state.dwellTimeS,
+                        gpsStatus = GpsStatus.Valid  // Temporary workaround
                     )
 
                     // Update state machine

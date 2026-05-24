@@ -48,6 +48,18 @@ class DetectionPipeline {
     }
 
     /**
+     * Derive GPS status from current mode.
+     * TODO: This is a temporary workaround until Task 6 implements proper GPS status capture.
+     */
+    private fun deriveGpsStatus(): GpsStatus {
+        return when (modeState.mode) {
+            Mode.Normal -> GpsStatus.Valid
+            Mode.OffRoute -> GpsStatus.OffRoute
+            Mode.Recovering -> GpsStatus.DrOutage
+        }
+    }
+
+    /**
      * Process location update through full pipeline.
      */
     fun process(location: Location): PipelineResult {
@@ -178,7 +190,8 @@ class DetectionPipeline {
                         signals = detectionSignals,
                         stop = stop,
                         vCms = kalmanState!!.vCms,
-                        dwellS = state.dwellTimeS
+                        dwellS = state.dwellTimeS,
+                        gpsStatus = deriveGpsStatus()
                     )
                     val hasPreviousTraceEntry = tracedStopStateIndices.contains(idx)
 
@@ -316,7 +329,8 @@ class DetectionPipeline {
                 signals = detectionSignals,
                 stop = stop,
                 vCms = kalmanState!!.vCms,
-                dwellS = state.dwellTimeS
+                dwellS = state.dwellTimeS,
+                gpsStatus = deriveGpsStatus()
             )
 
             // Update state machine
