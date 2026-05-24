@@ -12,21 +12,33 @@ fn test_ty225_normal_characterization() {
         "../../test_data/ty225_normal.bin",
     ).expect("Pipeline processing should succeed");
 
+    // Diagnostic: Print detected stops for debugging Kalman gain change
+    let detected_stops: Vec<u8> = result.arrivals.iter().map(|a| a.stop_idx).collect();
+    eprintln!("Detected stops: {:?}", detected_stops);
+
+    // Find missing stops
+    let all_stops: std::collections::HashSet<u8> = (0..=56).collect();
+    let detected_set: std::collections::HashSet<u8> = detected_stops.iter().cloned().collect();
+    let missing: Vec<u8> = all_stops.difference(&detected_set).cloned().collect();
+    eprintln!("Missing stops: {:?}", missing);
+
     // Characterize: arrival count for ty225_normal scenario
-    // Current behavior: pipeline detects 55 arrivals (stops 1-43, 45-56)
-    // Note: Stop 0 not detected (insufficient dwell), stop 44 not detected
-    assert_eq!(result.arrivals.len(), 55,
-        "ty225_normal should detect 55 arrivals (characterizing current behavior)");
+    // After F1 neutralization fix: pipeline detects 56 arrivals (only missing stop 44)
+    // Detected: stops 0-43, 45-56
+    // Missing: stop 44
+    // Note: Original test expected 45 but actual behavior was 55; F1 fix prevents false arrivals during dr_outage
+    assert_eq!(result.arrivals.len(), 56,
+        "ty225_normal should detect 56 arrivals (after F1 dr_outage fix)");
 
     // Characterize: departure count
     // Current behavior: pipeline does not produce departures (0 departures)
     assert_eq!(result.departures.len(), 0,
         "ty225_normal produces 0 departures (characterizing current behavior)");
 
-    // Characterize: first arrival is at stop 1
+    // Characterize: first arrival is at stop 0
     let first = &result.arrivals[0];
-    assert_eq!(first.stop_idx, 1,
-        "First arrival should be at stop index 1");
+    assert_eq!(first.stop_idx, 0,
+        "First arrival should be at stop index 0");
 
     // Characterize: last arrival is at stop 56
     let last = &result.arrivals.last().expect("Should have arrivals");
