@@ -194,7 +194,7 @@ class DetectionPipeline {
                 .map { (idx, state) ->
                     val stop = route.stops[idx]
                     val detectionSignals = PositionSignals(
-                        zGpsCm = positionSignals.sCm,
+                        zGpsCm = positionSignals.zGpsCm,  // FIXED: Use actual raw GPS
                         sCm = positionSignals.sCm
                     )
                     val features = ProbabilityModel.computeFeatures(
