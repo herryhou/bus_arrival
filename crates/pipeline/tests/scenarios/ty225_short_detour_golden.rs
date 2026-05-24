@@ -7,11 +7,11 @@
 //! ## Validations Performed
 //!
 //! ### 1. Arrival Sequence Validation (PRD Requirement)
-//! - Expected arrivals: [0, 6, 7, 8, 9] or [0, 1, 6, 7, 8, 9] if stop 1 completes before off-route
+//! - Expected arrivals: [0, 7, 8, 9] or [0, 1, 7, 8, 9] if stop 1 completes before off-route
 //! - Stops 2, 3, 4, 5 MUST be skipped (completely absent from arrivals)
 //!   - Stop 1: off-route triggered before dwell completes
 //!   - Stops 2, 3, 4, 5: intermediate stops during detour
-//!   - Stop 6: IS detected as re-acquisition snap point with dwell
+//!   - Stop 6: re-acquisition snap point verified separately in the snap test
 //!
 //! ### 2. GPS Position Monotonicity Constraint
 //! - Position (s_cm) may move backward by at most 50m during normal operation
@@ -72,10 +72,9 @@ const MIN_REENTRY_JUMP_CM: i64 = 10_000;
 const MAX_REENTRY_TO_STOP6_MS: u64 = 10_000;
 const MAX_ALLOWED_BACKTRACK_CM: i64 = 5_000;
 const DETOUR_PHASE_TRANSITION_CM: i64 = 10_000;
-// Current behavior: stops 1 and 6 reach Arriving state but not AtStop due to
-// off-route detour interrupting dwell completion. Only [0, 7, 8, 9] complete.
+// Current behavior: stop 1 may or may not complete before detour starts, but
+// the detour contract still requires 0 and the post-detour arrivals 7, 8, 9.
 const EXPECTED_DETOUR_ARRIVALS: [usize; 4] = [0, 7, 8, 9];
-const EXPECTED_DETOUR_ARRIVALS_WITH_STOP1: [usize; 6] = [0, 1, 6, 7, 8, 9];
 const SKIPPED_DETOUR_STOPS: [usize; 4] = [2, 3, 4, 5];
 // Trace v2 only includes active stops. Stop 1 is announced but not in trace
 // after bus leaves its corridor, so we extract only what's visible.
@@ -96,6 +95,7 @@ fn detect_off_route_episode(scenario: &str) -> OffRouteEpisode {
     let mut start_time: Option<u64> = None;
     let mut frozen_s_cm: Option<i64> = None;
     let mut episode: Option<OffRouteEpisode> = None;
+    let mut awaiting_reentry = false;
 
     for line in trace_reader.lines() {
         let line = line.expect("Failed to read trace line");
@@ -120,11 +120,22 @@ fn detect_off_route_episode(scenario: &str) -> OffRouteEpisode {
                 start_time: start_time.expect("Off-route start should be detected before re-entry"),
                 end_time: time,
                 frozen_s_cm: frozen_s_cm.expect("Frozen position should be captured"),
-                reentry_s_cm: s_cm,
-                reentry_time: time,
+                reentry_s_cm: 0,
+                reentry_time: 0,
             });
             start_time = None;
             frozen_s_cm = None;
+            awaiting_reentry = true;
+            prev_off_route = off_route;
+            continue;
+        }
+
+        if awaiting_reentry && !off_route {
+            if let Some(episode) = &mut episode {
+                episode.reentry_s_cm = s_cm;
+                episode.reentry_time = time;
+            }
+            awaiting_reentry = false;
         }
 
         prev_off_route = off_route;
@@ -235,27 +246,30 @@ fn validate_detour_arrival_sequence(
         );
     }
 
-    if detected_stops == EXPECTED_DETOUR_ARRIVALS {
-        return;
+    let mut normalized_stops = Vec::with_capacity(detected_stops.len());
+    for &stop in detected_stops {
+        if stop == 1 {
+            let stop_1_time = stop_1_arrival_time
+                .expect("Stop 1 arrival time should exist when stop 1 is in detected arrivals");
+            assert!(
+                stop_1_time < off_route_start_time,
+                "Optional stop 1 arrival is only valid before off-route starts. stop1={}, off_route_start={}",
+                stop_1_time,
+                off_route_start_time
+            );
+            continue;
+        }
+
+        normalized_stops.push(stop);
     }
 
-    if detected_stops == EXPECTED_DETOUR_ARRIVALS_WITH_STOP1 {
-        let stop_1_time = stop_1_arrival_time
-            .expect("Stop 1 arrival time should exist when stop 1 is in detected arrivals");
-        assert!(
-            stop_1_time < off_route_start_time,
-            "Optional stop 1 arrival is only valid before off-route starts. stop1={}, off_route_start={}",
-            stop_1_time,
-            off_route_start_time
-        );
-        return;
-    }
-
-    panic!(
-        "Arrival sequence must be exactly {:?}, or {:?} when stop 1 completes before off-route. Detected: {:?}",
+    assert_eq!(
+        normalized_stops.as_slice(),
+        EXPECTED_DETOUR_ARRIVALS.as_slice(),
+        "Arrival sequence must be {:?} with optional stop 1 before off-route. Detected: {:?} (normalized: {:?})",
         EXPECTED_DETOUR_ARRIVALS,
-        EXPECTED_DETOUR_ARRIVALS_WITH_STOP1,
-        detected_stops
+        detected_stops,
+        normalized_stops
     );
 }
 
@@ -266,7 +280,7 @@ fn test_detour_arrival_sequence_accepts_documented_sequence() {
 
 #[test]
 fn test_detour_arrival_sequence_accepts_stop_1_before_off_route() {
-    validate_detour_arrival_sequence(&[0, 1, 6, 7, 8, 9], Some(99), 100);
+    validate_detour_arrival_sequence(&[0, 1, 7, 8, 9], Some(99), 100);
 }
 
 #[test]
@@ -276,19 +290,19 @@ fn test_detour_arrival_sequence_rejects_stop_1_during_off_route() {
 }
 
 #[test]
-#[should_panic(expected = "Arrival sequence must be exactly")]
+#[should_panic(expected = "Arrival sequence must be")]
 fn test_detour_arrival_sequence_rejects_duplicate_arrivals() {
     validate_detour_arrival_sequence(&[0, 7, 7, 8, 9], None, 100);
 }
 
 #[test]
-#[should_panic(expected = "Arrival sequence must be exactly")]
+#[should_panic(expected = "Arrival sequence must be")]
 fn test_detour_arrival_sequence_rejects_reordered_arrivals() {
     validate_detour_arrival_sequence(&[7, 0, 8, 9], None, 100);
 }
 
 #[test]
-#[should_panic(expected = "Arrival sequence must be exactly")]
+#[should_panic(expected = "Arrival sequence must be")]
 fn test_detour_arrival_sequence_rejects_unexpected_extra_arrivals() {
     validate_detour_arrival_sequence(&[0, 10, 6, 7, 8, 9], None, 100);
 }
@@ -387,12 +401,10 @@ fn test_ty225_short_detour_golden_standard() {
     );
     println!("✓ skipped Stops: {:?}", SKIPPED_DETOUR_STOPS);
 
-    // Must include stop 0 (before detour), stop 6 (re-acquisition snap point), and stops 7+ (after)
+    // Must include stop 0 (before detour) and stops 7+ (after re-entry)
     // Note: Stop 1 is NOT detected because off-route is triggered before dwell completes
-    // The detour waypoint (stop 6) is ~300m from stop 1, causing off-route detection
-    // before stop 1 arrival can be confirmed. This is expected behavior.
-    // Per ground truth and trace, stop 6 IS detected with ~8s dwell at re-acquisition.
-    // Expected sequence: [0, 6, 7, 8, 9], or [0, 1, 6, 7, 8, 9] if stop 1 completes before off-route.
+    // The detour waypoint (stop 6) is verified separately in the snap test.
+    // Expected sequence: [0, 7, 8, 9], or [0, 1, 7, 8, 9] if stop 1 completes before off-route.
     println!("✓ Arrival sequence: {:?}", detected_stops);
 
     // ============================================================
@@ -636,10 +648,7 @@ fn test_ty225_short_detour_golden_standard() {
     // Extract announce events from trace (trace v2 includes announced flag in stop_states)
     let mut announce_stops: Vec<usize> = Vec::new();
     let trace_reader = load_trace_reader(SHORT_DETOUR);
-    let mut line_count = 0;
     for line in trace_reader.lines() {
-        if line_count > 200 { break; } // Check first 200 lines
-        line_count += 1;
         let line = line.expect("Failed to read trace line");
         let trace: serde_json::Value = serde_json::from_str(&line).expect("Failed to parse trace");
 
@@ -1028,7 +1037,7 @@ fn test_off_route_reentry_skips_intermediate_stops() {
     );
 
     // Verify that stops after the detour (7, 8, 9) ARE detected
-    for &stop in &EXPECTED_DETOUR_ARRIVALS[2..] {
+    for &stop in &EXPECTED_DETOUR_ARRIVALS[1..] {
         assert!(
             detected_stops.contains(&stop),
             "Stop {} should be detected (ahead of snap position). Detected: {:?}",
@@ -1039,7 +1048,7 @@ fn test_off_route_reentry_skips_intermediate_stops() {
 
     println!(
         "  ✓ Stops after detour {:?} correctly detected",
-        &EXPECTED_DETOUR_ARRIVALS[2..]
+        &EXPECTED_DETOUR_ARRIVALS[1..]
     );
     println!("  ✓ Arrival sequence: {:?}", detected_stops);
 }
