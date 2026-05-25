@@ -100,11 +100,14 @@ run-detour-no-gen: build preprocess
 	@echo "L-shaped detour: stop 1 → 10m east → south to waypoint → east to stop 6"
 	$(MAKE) pipeline-no-gen ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.992071 DETOUR_WAYPOINT_LON=121.295621 DETOUR_DURATION_S=60
 
-# Run tz_23_short scenario with real GPS data
+# Run tz_23_short scenario with real GPS data (Rust + Android traces)
 tz_23_short: build
 	@echo "=== Running tz_23_short scenario ==="
 	$(PREPROCESSOR) test_data/tz_23_short_route.json test_data/tz_23_short_stops.json test_data/tz_23_short.bin
 	cargo run -p pipeline -- test_data/tz_23-gps.jsonl test_data/tz_23_short.bin --output test_data/tz_23_short_trace_v2.jsonl
+	@echo "=== Generating Android trace ==="
+	cd android && ./gradlew testDebugUnitTest --tests "com.busarrival.app.scenarios.Tz23ScenarioTest.test_tz23_short_trace_output_written" --quiet
+	@echo "=== Rust + Android traces complete ==="
 
 # Legacy two-step workflow (deprecated - use 'make run' instead)
 run-legacy: build gen_nmea preprocess simulate detect
