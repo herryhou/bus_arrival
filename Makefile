@@ -106,7 +106,7 @@ tz_23_short: build
 	$(PREPROCESSOR) test_data/tz_23_short_route.json test_data/tz_23_short_stops.json test_data/tz_23_short.bin
 	cargo run -p pipeline -- test_data/tz_23-gps.jsonl test_data/tz_23_short.bin --output test_data/tz_23_short_trace_v2.jsonl
 	@echo "=== Generating Android trace ==="
-	cd android && ./gradlew testDebugUnitTest --tests "com.busarrival.app.scenarios.Tz23ScenarioTest.test_tz23_short_trace_output_written" --quiet
+	cd android && ./gradlew testDebugUnitTest --tests "com.busarrival.app.scenarios.Tz23ScenarioTest.test_tz23_short_trace_output_written" --rerun-tasks --quiet
 	@echo "=== Rust + Android traces complete ==="
 
 # Legacy two-step workflow (deprecated - use 'make run' instead)
