@@ -1,7 +1,8 @@
 # Bus Arrival Detection Pipeline Makefile
 #
 # Usage:
-#   make run ROUTE_NAME=ty225 SCENARIO=normal          # Run full pipeline
+#   make run ROUTE_NAME=ty225 SCENARIO=normal          # Run pipeline (uses existing NMEA)
+#   make gen_run ROUTE_NAME=ty225 SCENARIO=normal      # Run full pipeline with NMEA generation
 #   make gen_nmea ROUTE_NAME=ty225 SCENARIO=normal     # Generate NMEA test data only
 #   make preprocess ROUTE_NAME=ty225                   # Generate route_data.bin only
 #   make simulate ROUTE_NAME=ty225 SCENARIO=normal     # Run simulator only
@@ -57,13 +58,13 @@ TRACE_OUT := $(DATA_DIR)/$(ROUTE_NAME)_$(SCENARIO)_trace_v2.jsonl
 # Node.js executable
 NODE := node
 
-.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour run-detour-no-gen regression-test regression-save update-fixtures
+.PHONY: all run gen_nmea preprocess simulate detect pipeline clean help build validate-trace validate-ty225 validate-all build-firmware firmware-uf2 flash-firmware run-detour run-detour-no-gen regression-test regression-save update-fixtures tz_23_short
 
 # Default target
 all: run
 
-# Main pipeline: run unified pipeline (recommended)
-run: build gen_nmea preprocess pipeline
+# Main pipeline: run unified pipeline without regenerating NMEA (uses existing NMEA)
+run: build preprocess pipeline-no-gen
 	@echo ""
 	@echo "=== Pipeline Complete ==="
 	@echo "Route: $(ROUTE_NAME)"
@@ -81,11 +82,29 @@ run-detour:
 	@echo "L-shaped detour: stop 1 → 10m east → south to waypoint → east to stop 6"
 	$(MAKE) run ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.992071 DETOUR_WAYPOINT_LON=121.295621 DETOUR_DURATION_S=60
 
+# Run with NMEA generation (full pipeline including gen_nmea)
+gen_run: build gen_nmea preprocess pipeline
+	@echo ""
+	@echo "=== Pipeline Complete ==="
+	@echo "Route: $(ROUTE_NAME)"
+	@echo "Scenario: $(SCENARIO)"
+	@echo "NMEA output: $(NMEA_OUT)"
+	@echo "Route data: $(ROUTE_DATA_BIN)"
+	@echo "Trace output: $(TRACE_OUT)"
+	@echo ""
+	@echo "Extract arrivals: ./tools/arrival_from_trace.sh $(TRACE_OUT) > arrivals.jsonl"
+	@echo "Extract announce: ./tools/announce_from_trace.sh $(TRACE_OUT) > announce.jsonl"
+
 # Run detour scenario without generating NMEA (uses existing NMEA file)
 run-detour-no-gen: build preprocess
-	@echo "=== Running detour scenario (ty225_short) - skipping gen_nmea ==="
 	@echo "L-shaped detour: stop 1 → 10m east → south to waypoint → east to stop 6"
 	$(MAKE) pipeline-no-gen ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.992071 DETOUR_WAYPOINT_LON=121.295621 DETOUR_DURATION_S=60
+
+# Run tz_23_short scenario with real GPS data
+tz_23_short: build
+	@echo "=== Running tz_23_short scenario ==="
+	$(PREPROCESSOR) test_data/tz_23_short_route.json test_data/tz_23_short_stops.json test_data/tz_23_short.bin
+	cargo run -p pipeline -- test_data/tz_23-gps.jsonl test_data/tz_23_short.bin --output test_data/tz_23_short_trace_v2.jsonl
 
 # Legacy two-step workflow (deprecated - use 'make run' instead)
 run-legacy: build gen_nmea preprocess simulate detect
@@ -171,7 +190,7 @@ detect: simulate
 	@echo "  make pipeline ROUTE_NAME=$(ROUTE_NAME) SCENARIO=$(SCENARIO)"
 	@false
 
-# Run unified pipeline: NMEA + route_data → trace (single binary)
+# Run unified pipeline: NMEA + route_data → trace (single binary, regenerates NMEA)
 pipeline: gen_nmea preprocess
 	@echo "=== Running unified pipeline ==="
 	@echo "Binary: $(PIPELINE)"
@@ -228,11 +247,12 @@ help:
 	@echo "Bus Arrival Detection Pipeline"
 	@echo ""
 	@echo "Pipeline Usage:"
-	@echo "  make run ROUTE_NAME=<route> SCENARIO=<name>     Run full unified pipeline"
+	@echo "  make run ROUTE_NAME=<route> SCENARIO=<name>     Run pipeline (uses existing NMEA)"
 	@echo "                                                    (default: ROUTE_NAME=ty225 SCENARIO=normal)"
+	@echo "  make gen_run ROUTE_NAME=<route> SCENARIO=<name> Run full pipeline with NMEA generation"
 	@echo "  make run-detour                                  Run detour scenario (ty225_short)"
 	@echo "  make run-detour-no-gen                           Run detour scenario without regenerating NMEA"
-	@echo "  make pipeline ROUTE_NAME=<route> SCENARIO=<name> Run unified pipeline (same as 'run')"
+	@echo "  make pipeline ROUTE_NAME=<route> SCENARIO=<name> Run unified pipeline (regenerates NMEA)"
 	@echo "  make gen_nmea ROUTE_NAME=<route> SCENARIO=<name> Generate NMEA test data"
 	@echo "  make preprocess ROUTE_NAME=<route>               Generate route_data.bin"
 	@echo ""

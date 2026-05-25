@@ -43,6 +43,18 @@ data class GpsPoint(
 }
 
 // Extension functions for Location conversion
-private fun Double.toCdeg(): Short = kotlin.math.round(this * 100).toInt().toShort()
-private fun Float.toCdeg(): Short? = if (this >= 0) kotlin.math.round(this * 100).toInt().toShort() else null
+// Note: Android Location.bearing uses 0.0 to indicate "no bearing" (not valid heading 0°)
+// Normalize to [-180°, +180°] range to match Rust json_bearing_to_cdeg() behavior
+private fun Float.toCdeg(): Short? {
+    if (this <= 0) return null  // 0.0 means "no bearing" in Android Location API
+    var heading = kotlin.math.round(this * 100).toInt()
+    if (heading > 18000) heading -= 36000  // Normalize to [-180°, +180°]
+    return heading.toShort()
+}
+private fun Double.toCdeg(): Short? {
+    if (this <= 0) return null
+    var heading = kotlin.math.round(this * 100).toInt()
+    if (heading > 18000) heading -= 36000
+    return heading.toShort()
+}
 private fun Float.toCms(): Int? = if (this >= 0) (this * 100).toInt() else null

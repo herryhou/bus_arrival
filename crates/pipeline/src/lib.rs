@@ -202,7 +202,7 @@ impl LocalizationState {
                     gps.lon,
                     last_valid_s,
                     last_valid_v,
-                    None,
+                    gps.heading_cdeg,
                     "off_route",
                 ).with_diagnostics(
                     localization::GpsDiagnostics::new().with_accuracy_cm(accuracy_cm)
@@ -215,7 +215,7 @@ impl LocalizationState {
                     gps.lon,
                     s_cm,
                     v_cms,
-                    None,
+                    gps.heading_cdeg,
                     "suspect_off_route",
                 ).with_diagnostics(
                     localization::GpsDiagnostics::new().with_accuracy_cm(accuracy_cm)
