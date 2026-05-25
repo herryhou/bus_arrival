@@ -401,7 +401,7 @@
 		if (!map || !busPosition || !mapLoaded) return;
 
 		const { lat, lon, heading } = busPosition;
-		const hasHeading = heading !== undefined;
+		const hasHeading = heading != null;
 		const iconName = hasHeading ? "bus-arrow" : "bus-question";
 		const rotation = hasHeading ? heading : 0;
 

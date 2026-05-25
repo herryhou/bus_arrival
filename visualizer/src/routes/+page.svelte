@@ -109,7 +109,7 @@
 		return {
 			lat: currentRecord.gps.lat,
 			lon: currentRecord.gps.lon,
-			heading: currentRecord.gps.heading_cdeg !== undefined
+			heading: currentRecord.gps.heading_cdeg != null
 				? currentRecord.gps.heading_cdeg / 100 // GPS heading in degrees
 				: undefined,
 		};
