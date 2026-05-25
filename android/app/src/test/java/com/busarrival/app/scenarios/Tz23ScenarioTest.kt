@@ -98,6 +98,22 @@ class Tz23ScenarioTest {
     }
 
     @Test
+    fun test_tz23_short_does_not_resegment_at_loop_crossing() {
+        val run = processScenario()
+        val beforeJump = run.ticks.first { it.time_ms == 1779172948240L }
+        val atJump = run.ticks.first { it.time_ms == 1779172949214L }
+
+        assertEquals("Before loop crossing should be on segment 130", 130, beforeJump.map_matching.segment_idx)
+        assertEquals("Loop crossing should remain on segment 130", 130, atJump.map_matching.segment_idx)
+        assertTrue(
+                "Loop crossing should not jump backward by more than ${MAX_ALLOWED_BACKTRACK_CM}cm",
+                atJump.s_cm >= beforeJump.s_cm - MAX_ALLOWED_BACKTRACK_CM
+        )
+        assertEquals(listOf(8), atJump.corridor.active_stops)
+        assertTrue("Stop state should remain active through loop crossing", atJump.stop_states.isNotEmpty())
+    }
+
+    @Test
     fun test_tz23_short_fsm_state_progression() {
         val run = processScenario()
         val ticks = run.ticks
