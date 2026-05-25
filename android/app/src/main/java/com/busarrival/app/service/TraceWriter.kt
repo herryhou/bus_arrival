@@ -20,7 +20,7 @@ class TraceWriter(
 
     private val json = Json {
         ignoreUnknownKeys = true
-        encodeDefaults = true
+        encodeDefaults = false
     }
 
     /**

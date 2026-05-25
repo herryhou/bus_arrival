@@ -1,6 +1,7 @@
 package com.busarrival.app.service
 
 import com.busarrival.app.data.pipeline.types.TimestampMs
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -10,6 +11,7 @@ data class TraceTick(
     val map_matching: MapMatchingTraceTick,
     val detection: DetectionTraceTick,
     val corridor: CorridorTraceTick,
+    @EncodeDefault
     val stop_states: List<StopStateEntry> = emptyList()
 )
 
@@ -50,6 +52,7 @@ data class DetectionTraceTick(
 
 @Serializable
 data class CorridorTraceTick(
+    @EncodeDefault
     val active_stops: List<Int> = emptyList(),
     val corridor_start_cm: Int? = null,
     val corridor_end_cm: Int? = null,
