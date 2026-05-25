@@ -115,8 +115,16 @@ class DetectionService : Service() {
         // Initialize stop state machines
         initializePipeline()
 
-        // Start foreground service
-        startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        // Start foreground service with the service type only on API 29+.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                createNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, createNotification())
+        }
 
         if (preferences.gpsLoggingEnabled) {
             gpsLogWriter = GpsLogWriter(createGpsLogStore())
