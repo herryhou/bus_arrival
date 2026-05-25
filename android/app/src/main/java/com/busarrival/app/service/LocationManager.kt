@@ -1,5 +1,6 @@
 package com.busarrival.app.service
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -37,6 +38,7 @@ class LocationManager(private val context: Context) {
     /**
      * Start location updates with 1Hz frequency.
      */
+    @SuppressLint("MissingPermission")
     fun startLocationUpdates(onUpdate: (android.location.Location) -> Unit) {
         if (!hasLocationPermission()) {
             throw SecurityException("Location permission not granted")

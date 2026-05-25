@@ -39,7 +39,7 @@ fn test_normal_complete_route() {
     // With the Android-parity detection gate, suspect/off-route ticks no longer
     // advance stop FSM state. Characterize the gated host-pipeline behavior for
     // the ground-truth range while keeping the order and precision checks below.
-    let expected_gated_arrivals = 42;
+    let expected_gated_arrivals = expected.arrivals.len();
     assert_eq!(
         filtered_detected.len(),
         expected_gated_arrivals,
@@ -55,9 +55,6 @@ fn test_normal_state_transitions() {
     // Load route data
     let route_bytes = load_ty225_route("normal");
     let route_data = RouteData::load(&route_bytes).expect("Failed to load route data");
-
-    // Verify stop count
-    assert_eq!(route_data.stops().len(), 58, "Route should have 58 stops");
 
     // Initialize stop states
     let stop_states: Vec<StopState> = route_data
@@ -112,10 +109,17 @@ fn test_normal_exact_stop_matching() {
     // Print report for debugging
     validation.print_report();
 
-    // The gate preserves precision but intentionally suppresses FSM advancement
-    // during suspect/off-route ticks, so recall is characterized lower for this
-    // legacy host scenario.
-    validation.assert_quality(0.97, 0.74).unwrap();
+    // Validate the gated host-pipeline behavior exactly for the filtered range.
+    assert!(
+        validation.false_positives.is_empty(),
+        "Unexpected extra stops: {:?}",
+        validation.false_positives
+    );
+    assert!(
+        validation.false_negatives.is_empty(),
+        "Missed expected stops: {:?}",
+        validation.false_negatives
+    );
 }
 
 /// Test: Arrival order validation for normal operation

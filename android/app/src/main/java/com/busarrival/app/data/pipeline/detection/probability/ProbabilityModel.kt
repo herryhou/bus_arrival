@@ -52,9 +52,10 @@ object ProbabilityModel {
         signals: PositionSignals,
         stop: Stop,
         vCms: SpeedCms,
-        dwellS: Int
+        dwellS: Int,
+        gpsStatus: GpsStatus
     ): Prob8 {
-        val features = computeFeatures(signals, stop, vCms, dwellS)
+        val features = computeFeatures(signals, stop, vCms, dwellS, gpsStatus)
         val p = if (features.isClose) {
             (W1_ADAPT * features.p1.value + W2_ADAPT * features.p2.value + W3_ADAPT * features.p3.value + W4_ADAPT * features.p4.value) / 32
         } else {
@@ -68,15 +69,16 @@ object ProbabilityModel {
         signals: PositionSignals,
         stop: Stop,
         vCms: SpeedCms,
-        dwellS: Int
+        dwellS: Int,
+        gpsStatus: GpsStatus
     ): ProbabilityFeatures {
         val dCm = stop.distanceTo(signals.sCm)
         val absDCm = if (dCm < 0) -dCm else dCm
 
         return ProbabilityFeatures(
-            p1 = computeDistanceLikelihood(signals.zGpsCm, stop.progressCm),
+            p1 = computeDistanceLikelihood(signals.zGpsCm, signals.sCm, stop.progressCm, gpsStatus),
             p2 = computeSpeedLikelihood(vCms),
-            p3 = computeProgressLikelihood(signals.sCm, stop.progressCm),
+            p3 = computeProgressLikelihood(signals.sCm, signals.zGpsCm, stop.progressCm, gpsStatus),
             p4 = computeDwellLikelihood(dwellS),
             isClose = absDCm < 12000
         )
@@ -87,13 +89,27 @@ object ProbabilityModel {
      * P(d|A) = exp(-0.5 * (d/σ_d)²)
      * σ_d = 2750 cm
      */
-    private fun computeDistanceLikelihood(zCm: DistCm, stopProgressCm: DistCm): Prob8 {
-        val dCm = zCm - stopProgressCm
-        val absDCm = if (dCm < 0) -dCm else dCm
+    private fun computeDistanceLikelihood(
+        zGpsCm: DistCm,
+        sCm: DistCm,
+        stopProgressCm: DistCm,
+        gpsStatus: GpsStatus
+    ): Prob8 {
+        val divergence = kotlin.math.abs(zGpsCm - sCm)
 
-        val idx = (absDCm * 64 / PhysicalConstants.SIGMA_D_CM)
-            .coerceIn(0, GAUSSIAN_LUT_SIZE - 1)
+        // Neutralize F1 during dr_outage/off_route when divergence > threshold
+        if (gpsStatus != GpsStatus.Valid && divergence > PhysicalConstants.PHANTOM_DIVERGENCE_CM) {
+            return Prob8(128)  // neutral: neither confirms nor denies arrival
+        }
 
+        // Fallback to s_cm when valid GPS has high divergence (poor map matching)
+        // Matches Rust: gps_status == Valid && divergence > 2000 → use s_cm
+        val d1Cm = if (gpsStatus == GpsStatus.Valid && divergence > 2000) {
+            kotlin.math.abs(sCm - stopProgressCm)  // Use Kalman position
+        } else {
+            kotlin.math.abs(zGpsCm - stopProgressCm)  // Use raw GPS
+        }
+        val idx = (d1Cm * 64 / PhysicalConstants.SIGMA_D_CM).coerceIn(0, GAUSSIAN_LUT_SIZE - 1)
         return Prob8(gaussianLut[idx])
     }
 
@@ -114,13 +130,23 @@ object ProbabilityModel {
      * P(p|A) = exp(-0.5 * (p/σ_p)²)
      * σ_p = 2000 cm
      */
-    private fun computeProgressLikelihood(sCm: DistCm, stopProgressCm: DistCm): Prob8 {
+    private fun computeProgressLikelihood(
+        sCm: DistCm,
+        zGpsCm: DistCm,
+        stopProgressCm: DistCm,
+        gpsStatus: GpsStatus
+    ): Prob8 {
+        val divergence = kotlin.math.abs(zGpsCm - sCm)
+
+        // Neutralize F3 during dr_outage/off_route when divergence > threshold
+        if (gpsStatus != GpsStatus.Valid && divergence > PhysicalConstants.PHANTOM_DIVERGENCE_CM) {
+            return Prob8(128)  // neutral: neither confirms nor denies arrival
+        }
+
+        // Normal F3 calculation
         val pCm = sCm - stopProgressCm
         val absPCm = if (pCm < 0) -pCm else pCm
-
-        val idx = (absPCm * 64 / PhysicalConstants.SIGMA_P_CM)
-            .coerceIn(0, GAUSSIAN_LUT_SIZE - 1)
-
+        val idx = (absPCm * 64 / PhysicalConstants.SIGMA_P_CM).coerceIn(0, GAUSSIAN_LUT_SIZE - 1)
         return Prob8(gaussianLut[idx])
     }
 

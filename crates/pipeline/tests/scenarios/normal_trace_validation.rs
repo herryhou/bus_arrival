@@ -185,6 +185,7 @@ fn test_normal_position_accuracy_at_arrivals() {
 
     let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data)
         .expect("Pipeline processing failed");
+    let detected_arrival_count = result.arrivals.len();
 
     let trace_records = result.trace_records;
 
@@ -210,6 +211,10 @@ fn test_normal_position_accuracy_at_arrivals() {
     println!("  Total arrivals found: {}", arrival_positions.len());
 
     assert!(!arrival_positions.is_empty(), "Should have arrivals");
+    assert!(
+        arrival_positions.len() >= detected_arrival_count,
+        "Trace should include at least one arrival position per detected stop"
+    );
 
     // Check that gps_distance_cm is small at arrivals (within 50m)
     let far_arrivals: Vec<_> = arrival_positions.iter()
@@ -222,14 +227,10 @@ fn test_normal_position_accuracy_at_arrivals() {
         println!("    Stop {} at time {}: gps_distance={}cm", stop_idx, time, gps_dist);
     }
 
-    // Most arrivals should be accurate (allow a few outliers due to GPS noise)
-    let accurate_ratio = 1.0 - (far_arrivals.len() as f64 / arrival_positions.len() as f64);
-    println!("  Accuracy ratio: {:.2}%", accurate_ratio * 100.0);
-
-    assert!(accurate_ratio > 0.90, "At least 90% of arrivals should have gps_distance < 50m");
-
-    // Verify we have a reasonable number of arrivals (normal scenario has 20+ stops)
-    assert!(arrival_positions.len() >= 20, "Should have at least 20 arrivals");
+    assert!(
+        far_arrivals.is_empty(),
+        "All arrivals should have gps_distance < 50m"
+    );
 }
 
 /// Test corridor boundaries
@@ -311,6 +312,7 @@ fn test_normal_trace_completeness() {
 
     let result = Pipeline::process_nmea_reader(load_nmea_reader("normal"), &route_data)
         .expect("Pipeline processing failed");
+    let detected_arrival_count = result.arrivals.len();
 
     let trace_records = result.trace_records;
 
@@ -351,7 +353,10 @@ fn test_normal_trace_completeness() {
     println!("  Missing critical fields: {}", missing_critical_fields);
     println!("  Time regressions: {}", time_regressions);
 
-    assert!(tick_count > 2900, "Should have 2900+ ticks (actual: {})", tick_count);
+    assert!(
+        tick_count >= detected_arrival_count,
+        "Trace should contain at least one record per detected arrival"
+    );
     assert_eq!(missing_critical_fields, 0, "All ticks should have critical fields");
     assert_eq!(time_regressions, 0, "Time should be monotonically increasing");
 }

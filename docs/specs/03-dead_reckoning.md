@@ -121,6 +121,14 @@ This prevents excessive decay during long gaps between GPS updates.
 
 The `in_recovery` flag is set **even for long outages** (> 10s) to allow relaxed heading filter on first GPS fix. This improves map matching when GPS heading is unreliable after extended signal loss, even though dead-reckoning stops after 10 seconds.
 
+### Arrival Detection During DR Outage (v9.2)
+
+**Critical Interaction:** During `dr_outage` or `off_route` states, the arrival probability model neutralizes F1 (distance) and F3 (progress) features to 128 (no effect) when `divergence > PHANTOM_DIVERGENCE_CM`.
+
+**Reason:** DR-extrapolated position (`s_cm`) may differ significantly from actual GPS position. Using DR position for distance calculation causes false arrivals when GPS is far but DR has drifted close to a stop.
+
+**See:** `specs/05-arrival_probability.md` for full specification of DR outage protection.
+
 ## Testing
 
 Dead-reckoning behavior is validated in `crates/pipeline/gps_processor/src/kalman.rs` tests:

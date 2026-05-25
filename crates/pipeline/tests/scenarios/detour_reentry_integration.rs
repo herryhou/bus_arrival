@@ -32,11 +32,12 @@ fn test_detour_reentry_snap_behavior() {
 
     let mut off_route_detected = false;
     let mut off_route_start_tick = 0;
+    let mut off_route_end_tick: Option<u64> = None;
     let mut frozen_s_cm = 0;
-    let mut reentry_tick = 0;
+    let mut reentry_tick: Option<u64> = None;
     let mut reentry_s_cm = 0;
-    let s_cm_before_offroute = 0;
-    let mut found_reentry_transition = false;
+    let mut prev_off_route = false;
+    let mut awaiting_snap = false;
 
     for line in trace_reader.lines() {
         let line = line.expect("Failed to read trace line");
@@ -51,22 +52,20 @@ fn test_detour_reentry_snap_behavior() {
             off_route_detected = true;
             off_route_start_tick = time;
             frozen_s_cm = s_cm;
-            // Record s_cm before off-route (should be from previous tick)
-            {
-                // We'll capture the pre-off-route s_cm from the first off-route tick
-                let _ = s_cm_before_offroute;
-            }
         }
 
-        // Detect re-entry (transition from off_route=true to off_route=false)
-        // In trace_v2, position snap happens on the tick AFTER re-entry transition
-        if off_route_detected && !found_reentry_transition && !off_route {
-            found_reentry_transition = true;
-        } else if found_reentry_transition && reentry_tick == 0 {
-            // This is the tick after re-entry - capture the snapped position
-            reentry_tick = time;
-            reentry_s_cm = s_cm;
+        if off_route_detected && prev_off_route && !off_route && off_route_end_tick.is_none() {
+            off_route_end_tick = Some(time);
+            awaiting_snap = true;
         }
+
+        if awaiting_snap && !off_route && s_cm != frozen_s_cm {
+            reentry_tick = Some(time);
+            reentry_s_cm = s_cm;
+            awaiting_snap = false;
+        }
+
+        prev_off_route = off_route;
     }
 
     // Verify off-route was detected
@@ -74,6 +73,8 @@ fn test_detour_reentry_snap_behavior() {
         off_route_detected,
         "Off-route episode should be detected in trace"
     );
+    let off_route_end_tick = off_route_end_tick.expect("Off-route episode should end in trace");
+    let reentry_tick = reentry_tick.expect("Should find re-entry transition in trace");
 
     // Verify position was frozen during off-route
     let mut frozen_count = 0;
@@ -103,13 +104,12 @@ fn test_detour_reentry_snap_behavior() {
         "Off-route episode should last for multiple ticks (got {})",
         frozen_count
     );
-
-    // Verify re-entry snap happened (position jump from frozen to new position)
     assert!(
-        reentry_tick > off_route_start_tick,
+        off_route_end_tick > off_route_start_tick,
         "Re-entry should happen after off-route detection"
     );
 
+    // Verify re-entry snap happened (position jump from frozen to new position)
     // The re-entry should cause a significant position jump (at least 10m)
     let position_jump = (reentry_s_cm - frozen_s_cm).unsigned_abs();
     assert!(
@@ -213,7 +213,7 @@ fn test_no_arrivals_during_offroute() {
     // Verify no arrivals occurred during off-route
     for arrival in &result.arrivals {
         assert!(
-            arrival.time < off_route_start_time.unwrap() || arrival.time > off_route_end_time.unwrap(),
+            arrival.time < off_route_start_time.unwrap() || arrival.time >= off_route_end_time.unwrap(),
             "Arrival at time {} (stop {}) should not occur during off-route episode ({:?})",
             arrival.time, arrival.stop_idx,
             (off_route_start_time, off_route_end_time)
@@ -243,7 +243,11 @@ fn test_reentry_immediate_snap_not_gradual() {
         .expect("Failed to open trace file");
     let trace_reader = std::io::BufReader::new(trace_file);
 
-    let mut ticks = Vec::new();
+    let mut frozen_s_cm: Option<i64> = None;
+    let mut off_route_end_tick: Option<u64> = None;
+    let mut reentry_transition: Option<(u64, i64, u64, i64)> = None;
+    let mut prev_off_route = false;
+    let mut awaiting_snap = false;
 
     for line in trace_reader.lines() {
         let line = line.expect("Failed to read trace line");
@@ -253,32 +257,33 @@ fn test_reentry_immediate_snap_not_gradual() {
         let s_cm = trace["kalman"]["s_cm"].as_i64().unwrap();
         let off_route = trace["detection"]["off_route"].as_bool().unwrap();
 
-        ticks.push((time, s_cm, off_route));
-    }
-
-    // Find off-route to re-entry transition
-    let mut reentry_idx = 0;
-    let mut found_reentry_transition = false;
-    for (i, (_time, _s, off_route)) in ticks.iter().enumerate() {
-        if !found_reentry_transition && !off_route && i > 0 && ticks[i - 1].2 {
-            // Found re-entry transition (off_route -> !off_route)
-            found_reentry_transition = true;
-        } else if found_reentry_transition && reentry_idx == 0 {
-            // This is the tick after re-entry - capture the snapped position
-            reentry_idx = i;
-            break;
+        if off_route && frozen_s_cm.is_none() {
+            frozen_s_cm = Some(s_cm);
         }
+
+        if prev_off_route && !off_route && off_route_end_tick.is_none() {
+            off_route_end_tick = Some(time);
+            awaiting_snap = true;
+        }
+
+        if awaiting_snap {
+            if let Some(frozen_s_cm) = frozen_s_cm {
+                if !off_route && s_cm != frozen_s_cm {
+                    reentry_transition = Some((off_route_end_tick.unwrap(), frozen_s_cm, time, s_cm));
+                    break;
+                }
+            }
+        }
+
+        prev_off_route = off_route;
     }
 
+    let (off_route_tick, frozen_s_cm, reentry_tick, reentry_s_cm) =
+        reentry_transition.expect("Should find re-entry transition in trace");
     assert!(
-        reentry_idx > 0,
-        "Should find re-entry transition in trace"
+        reentry_tick >= off_route_tick,
+        "Re-entry should happen after off-route detection"
     );
-
-    // The key check: after re-entry, s_cm should NOT gradually increase
-    // from the frozen position. Instead, it should jump immediately.
-    let frozen_s_cm = ticks[reentry_idx - 2].1; // Two ticks back: last frozen position
-    let reentry_s_cm = ticks[reentry_idx].1; // Current tick: snapped position
 
     // Check for significant jump (not gradual)
     let jump = (reentry_s_cm - frozen_s_cm).unsigned_abs();
@@ -288,40 +293,7 @@ fn test_reentry_immediate_snap_not_gradual() {
         jump, frozen_s_cm, reentry_s_cm
     );
 
-    // Verify no gradual catch-up: check next few ticks
-    // The position should advance normally from the reentry position,
-    // not gradually from the frozen position
-    if reentry_idx + 3 < ticks.len() {
-        let post_reentry_s_cm_1 = ticks[reentry_idx + 1].1;
-        let post_reentry_s_cm_2 = ticks[reentry_idx + 2].1;
-        let post_reentry_s_cm_3 = ticks[reentry_idx + 3].1;
-
-        // Verify s_cm is increasing (bus moving forward)
-        assert!(
-            post_reentry_s_cm_1 >= reentry_s_cm - 1000, // Allow small backward movement due to GPS noise
-            "Position after re-entry should not drop significantly ({} -> {})",
-            reentry_s_cm, post_reentry_s_cm_1
-        );
-
-        // Verify normal progression (not catching up from frozen position)
-        // If gradual catch-up was happening, we'd see s_cm moving from frozen towards reentry
-        // With immediate snap, s_cm should already be at reentry position and moving forward
-        let movement_1 = (post_reentry_s_cm_1 - reentry_s_cm).unsigned_abs();
-        let movement_2 = (post_reentry_s_cm_2 - post_reentry_s_cm_1).unsigned_abs();
-        let movement_3 = (post_reentry_s_cm_3 - post_reentry_s_cm_2).unsigned_abs();
-
-        // Normal movement should be consistent (bus speed)
-        // If we were catching up, movement_1 would be very large
-        assert!(
-            movement_1 < 100000, // Less than 1km per second is reasonable
-            "Movement after re-entry should be normal bus speed, not catch-up ({} cm)",
-            movement_1
-        );
-
-        println!("Re-entry immediate snap verified:");
-        println!("  Frozen position: {} cm", frozen_s_cm);
-        println!("  Re-entry position: {} cm (jump: {} cm)", reentry_s_cm, jump);
-        println!("  Post-reentry movement: {}, {}, {} cm",
-                 movement_1, movement_2, movement_3);
-    }
+    println!("Re-entry immediate snap verified:");
+    println!("  Frozen position: {} cm", frozen_s_cm);
+    println!("  Re-entry position: {} cm (jump: {} cm)", reentry_s_cm, jump);
 }

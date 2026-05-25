@@ -57,16 +57,24 @@ fn compute_features(
     // Defensive: blend z_gps_cm and s_cm based on divergence to handle
     // cases where map matcher produces poor projections during normal operation
     let divergence = signals.divergence_cm();
-    let (d1_cm, _use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
-        // When z_gps_cm and s_cm diverge significantly, use s_cm for p1
-        // This prevents poor map matching from dragging down probability
-        ((signals.s_cm - stop.progress_cm).abs(), true)
+    let p1 = if gps_status != GpsStatus::Valid && divergence > PHANTOM_DIVERGENCE_CM {
+        // CRITICAL: During dr_outage/off_route, neutralize F1 to prevent false arrivals
+        // DR-extrapolated position (s_cm) may not reflect actual GPS location
+        // Using DR position for distance calculation causes false arrivals when GPS is
+        // far from stop but DR has drifted close. See: F1 protection requires raw GPS.
+        128 // neutral: neither confirms nor denies arrival
     } else {
-        // Normal case: use z_gps_cm as per spec
-        ((signals.z_gps_cm - stop.progress_cm).abs(), false)
+        let (d1_cm, _use_fallback) = if gps_status == GpsStatus::Valid && divergence > 2000 {
+            // When z_gps_cm and s_cm diverge significantly, use s_cm for p1
+            // This prevents poor map matching from dragging down probability
+            ((signals.s_cm - stop.progress_cm).abs(), true)
+        } else {
+            // Normal case: use z_gps_cm as per spec
+            ((signals.z_gps_cm - stop.progress_cm).abs(), false)
+        };
+        let idx1 = ((d1_cm as i64 * 64) / SIGMA_D_CM as i64).min(255) as usize;
+        gaussian_lut[idx1] as u32
     };
-    let idx1 = ((d1_cm as i64 * 64) / SIGMA_D_CM as i64).min(255) as usize;
-    let p1 = gaussian_lut[idx1] as u32;
 
     // Feature 2: Speed likelihood (near 0 -> higher, v_stop = 200 cm/s)
     let idx2 = (v_cms / 10).max(0).min(SPEED_LUT_MAX_IDX as SpeedCms) as usize;

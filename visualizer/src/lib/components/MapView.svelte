@@ -1,7 +1,11 @@
 <script lang="ts">
 	import { onMount, onDestroy } from "svelte";
 	import type { RouteData } from "$lib/types";
-	import { getRouteGeometry, getStopPositions } from "$lib/parsers/routeData";
+	import {
+		getRouteGeometry,
+		getStopPositions,
+		getInterpolatedBusState,
+	} from "$lib/parsers/routeData";
 	import { projectCmToLatLon } from "$lib/parsers/projection";
 	import maplibregl from "maplibre-gl";
 	import "maplibre-gl/dist/maplibre-gl.css";
@@ -52,6 +56,10 @@
 			lon: number;
 			heading?: number | undefined;
 		} | null;
+		snappedPosition?: {
+			lat: number;
+			lon: number;
+		} | null;
 		selectedStop?: number | null;
 		onStopClick?: (stopIndex: number) => void;
 		highlightedEvent?: {
@@ -66,6 +74,7 @@
 	let {
 		routeData,
 		busPosition = null,
+		snappedPosition = null,
 		selectedStop = null,
 		onStopClick = () => {},
 		highlightedEvent = null,
@@ -437,6 +446,48 @@
 					"icon-allow-overlap": true,
 					"icon-ignore-placement": true,
 					"icon-rotation-alignment": "map",
+				},
+			});
+		}
+	});
+
+	// Update snapped position (green dot for Kalman-filtered position)
+	$effect(() => {
+		if (!map || !snappedPosition || !mapLoaded) return;
+
+		const { lat, lon } = snappedPosition;
+
+		if (map.getSource("snapped-position")) {
+			(
+				map.getSource("snapped-position") as maplibregl.GeoJSONSource
+			).setData({
+				type: "Feature",
+				geometry: {
+					type: "Point",
+					coordinates: [lon, lat],
+				},
+			});
+		} else {
+			map.addSource("snapped-position", {
+				type: "geojson",
+				data: {
+					type: "Feature",
+					geometry: {
+						type: "Point",
+						coordinates: [lon, lat],
+					},
+				},
+			});
+
+			map.addLayer({
+				id: "snapped-position-dot",
+				type: "circle",
+				source: "snapped-position",
+				paint: {
+					"circle-radius": 5,
+					"circle-color": "#c52020",
+					"circle-stroke-width": 2,
+					"circle-stroke-color": "#ffffff",
 				},
 			});
 		}

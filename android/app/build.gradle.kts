@@ -7,6 +7,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+
 android {
     namespace = "com.busarrival.app"
     compileSdk = 34
@@ -27,7 +29,6 @@ android {
     signingConfigs {
         create("release") {
             // Load keystore properties from keystore.properties file
-            val keystorePropertiesFile = rootProject.file("keystore.properties")
             if (keystorePropertiesFile.exists()) {
                 val keystoreProperties = Properties()
                 keystoreProperties.load(keystorePropertiesFile.inputStream())
@@ -37,11 +38,8 @@ android {
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
             } else {
-                // Fallback to debug signing for CI
-                storeFile = file("debug.keystore")
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
+                // Fallback to the built-in debug signing config when no release keystore exists.
+                initWith(signingConfigs.getByName("debug"))
             }
         }
     }

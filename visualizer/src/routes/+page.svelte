@@ -10,6 +10,8 @@
 	import UploadScreen from "$lib/components/UploadScreen.svelte";
 	import type { RouteData, TraceData, FsmState } from "$lib/types";
 	import { getTraceTimeRange } from "$lib/parsers/trace";
+	import { getInterpolatedBusState } from "$lib/parsers/routeData";
+	import { projectCmToLatLon } from "$lib/parsers/projection";
 
 	let routeData = $state<RouteData | null>(null);
 	let traceData = $state<TraceData | null>(null);
@@ -113,6 +115,13 @@
 		};
 	});
 
+	const snappedPosition = $derived.by(() => {
+		if (!currentRecord || !routeData) return null;
+		const { x_cm, y_cm } = getInterpolatedBusState(currentRecord.kalman.s_cm, routeData);
+		const [lat, lon] = projectCmToLatLon(x_cm, y_cm, routeData.lat_avg_deg);
+		return { lat, lon };
+	});
+
 	const activeStopState = $derived.by(() => {
 		if (!currentRecord || selectedStop === null) return null;
 		return (
@@ -188,6 +197,7 @@
 						<MapView
 							{routeData}
 							{busPosition}
+							{snappedPosition}
 							{selectedStop}
 							{highlightedEvent}
 							onStopClick={(idx: number) => (selectedStop = idx)}

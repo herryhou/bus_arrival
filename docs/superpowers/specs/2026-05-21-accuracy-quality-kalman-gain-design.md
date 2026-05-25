@@ -26,7 +26,7 @@ Add an `AccuracyQuality` enum on both Kotlin and Rust paths.
 
 | Android accuracy | Quality | Position gain `Ks` | Rationale |
 | --- | --- | ---: | --- |
-| `< 8m` | `EXCELLENT` | `77` | High confidence; trust GPS projection. |
+| `< 8m` | `EXCELLENT` | `128` | High confidence; reduced lag. Increased from 77 after observing 5-10m lag at Ks=77. |
 | `8m..20m` | `GOOD` | `51` | Matches current `SIGMA_GPS_CM` of 20m. |
 | `20m..50m` | `FAIR` | `26` | Significant noise; trust prediction more. |
 | `> 50m` | `POOR` | `13` | Near the off-route threshold; minimize GPS impact. |
@@ -58,7 +58,7 @@ Add `AccuracyQuality` next to `HdopQuality` in `SemanticTypes.kt`:
 
 ```kotlin
 enum class AccuracyQuality(val ks: Int, val kv: Int = 77) {
-    EXCELLENT(77),
+    EXCELLENT(128),  // Increased from 77 to reduce Kalman lag
     GOOD(51),
     FAIR(26),
     POOR(13);
@@ -135,7 +135,7 @@ Add an `AccuracyQuality` helper near existing Kalman gain logic. It may be an en
 ```rust
 fn ks_from_accuracy_cm(accuracy_cm: DistCm) -> i32 {
     if accuracy_cm < 800 {
-        77
+        128  // Increased from 77 to reduce Kalman lag
     } else if accuracy_cm <= 2000 {
         51
     } else if accuracy_cm <= 5000 {

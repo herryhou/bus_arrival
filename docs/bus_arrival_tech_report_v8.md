@@ -4,9 +4,29 @@
 
 **目標受眾：** Embedded Rust 開發團隊  
 **硬體平台：** Raspberry Pi Pico 2（RP2350）  
-**文件版本：** v9.0（二層架構重構：控制/估計分離）
+**文件版本：** v9.1（Kalman Gain 優化）
 
 ### 版本更新記錄（Changelog）
+
+#### v9.2（2026-05-24）- DR Outage 虛假到站防護
+**問題：** 於 dr_outage 期間，當 GPS 實際位置距離站點 >48m 時，仍觸發「Arriving」狀態。
+**根本原因：** dr_outage 期間 `PositionSignals` 使用 DR 位置（`s_cm`）作為 `z_gps_cm`，導致 F1 特徵使用 DR 位置而非原始 GPS 距離。當 GPS 跳躍進入 dr_outage 時，DR 位置可能接近站點但實際 GPS 位置甚遠。
+**解決方案：** 於 dr_outage/off_route 且 `divergence > PHANTOM_DIVERGENCE_CM` 時，將 F1 和 F3 特徵中性化至 128（無影響）。
+- 防止 DR 位置與實際 GPS 位置大幅差異時之虛假到站
+- 保留檢測能力於低差異情況（divergence ≤ 閾值）
+- 測試：`crates/pipeline/tests/dr_outage_false_arrival.rs`
+- 詳見 [Section 13.2](#132-特徵定義與似然函數) F1 特徵說明
+
+---
+
+#### v9.1（2026-05-23）- Kalman Gain 優化：降低優良 GPS 之滯後
+**問題：** 於優良 GPS 條件下（accuracy < 8m），觀察到 5-10m Kalman 滯後，導致原始 GPS 位置明顯領先於路線投影位置。
+**解決方案：** 提高 `AccuracyQuality.EXCELLENT` 位置增益從 77/256（≈0.30）至 128/256（≈0.50）
+- 於 < 8m accuracy 時提升 GPS 信任度至 50%，減少滯後
+- GOOD/FAIR/POOR 等級增益保持不變（51/26/13）
+- 詳見設計文件 `docs/superpowers/specs/2026-05-21-accuracy-quality-kalman-gain-design.md`
+
+---
 
 #### v8.10（2026-04-29）- 估計就緒與檢測門控分離
 - 將單一 warmup 計數器分離為獨立的「估計就緒」與「檢測門控」
@@ -1175,6 +1195,21 @@ $$p_1 = \text{gaussian\_lut}(|z_\text{gps} - s_i|,\; \sigma_d = 2750\ \text{cm})
 
 使用**未經 Kalman 平滑的原始 GPS 投影** $z_\text{gps}$，反映 GPS 感測器對站點位置的直接觀測。$\sigma_d = 2750$ cm 較寬，容納 GPS 原始雜訊（±30 m）。
 
+**DR Outage 防護（v9.2 新增）：**
+
+於 `dr_outage` 或 `off_route` 狀態且 `divergence > PHANTOM_DIVERGENCE_CM` 時，F1 特徵中性化至 128（無影響）：
+
+```rust
+let p1 = if gps_status != GpsStatus::Valid && divergence > PHANTOM_DIVERGENCE_CM {
+    128 // neutral: neither confirms nor denies arrival
+} else {
+    // Normal F1 calculation using z_gps_cm or s_cm based on divergence
+    ...
+};
+```
+
+**原因：** DR 位置可能與實際 GPS 位置大幅差異（GPS 跳躍進入 dr_outage），若使用 DR 位置計算距離會導致虛假到站。中性化 F1 防止此問題，同時於低差異情況（divergence ≤ 閾值）保留檢測能力。
+
 #### 特徵 F₂：速度似然
 
 $$p_2 = \text{logistic\_lut}(v_\text{cms},\; v_\text{stop} = 200\ \text{cm/s}) \qquad \text{（u8，128 項 LUT）}$$
@@ -2227,6 +2262,28 @@ let (d1_cm, use_fallback) = if divergence > 2000 {
 - 確定性規則：基於 divergence 閾值
 - 防止不良地圖匹配拖累概率
 - 閾值 (2000 cm = 20 m) 經實驗驗證
+
+**DR Outage 防護（v9.2 新增）：**
+
+於 `dr_outage` 或 `off_route` 狀態且 `divergence > PHANTOM_DIVERGENCE_CM` 時，F1 與 F3 特徵中性化至 128（無影響）：
+
+```rust
+let p1 = if gps_status != GpsStatus::Valid && divergence > PHANTOM_DIVERGENCE_CM {
+    128 // neutral: neither confirms nor denies arrival
+} else {
+    // Normal F1 calculation
+    ...
+};
+
+let p3 = if gps_status != GpsStatus::Valid && divergence > PHANTOM_DIVERGENCE_CM {
+    128 // neutral: neither confirms nor denies arrival
+} else {
+    // Normal F3 calculation
+    ...
+};
+```
+
+**原因：** DR 位置可能與實際 GPS 位置大幅差異（GPS 跳躍進入 dr_outage），若使用 DR 位置計算距離會導致虛假到站。中性化防止此問題，同時於低差異情況保留檢測能力。
 
 #### 22.7.3 位置選擇契約
 

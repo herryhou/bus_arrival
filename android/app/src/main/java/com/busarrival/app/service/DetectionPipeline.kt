@@ -25,6 +25,8 @@ class DetectionPipeline {
     private var stopStates: Map<Int, StopState> = emptyMap()
     private var modeState = ModeMachine.toNormal()
 
+    private var previousGpsStatus: GpsStatus = GpsStatus.Valid
+
     private var lastGpsTime: TimestampMs = 0
     private var lastSCm: DistCm = 0
     private var firstFixProcessed = false
@@ -45,6 +47,18 @@ class DetectionPipeline {
 
         // Initialize trace writer if file provided
         traceWriter = traceFile?.let { TraceWriter(it) }
+    }
+
+    /**
+     * Derive GPS status from current mode.
+     * TODO: This is a temporary workaround until Task 6 implements proper GPS status capture.
+     */
+    private fun deriveGpsStatus(): GpsStatus {
+        return when (modeState.mode) {
+            Mode.Normal -> GpsStatus.Valid
+            Mode.OffRoute -> GpsStatus.OffRoute
+            Mode.Recovering -> GpsStatus.DrOutage
+        }
     }
 
     /**
@@ -111,6 +125,15 @@ class DetectionPipeline {
             isSoftResync = jumpDetected
         )
 
+        // CRITICAL: Capture GPS status BEFORE mode machine runs
+        // Detection only runs when mode is Normal, so we must capture status
+        // before mode transitions to preserve knowledge of off_route/dr_outage
+        val currentGpsStatus = when {
+            jumpDetected || matchResult.dist2 > PhysicalConstants.OFF_ROUTE_D2_THRESHOLD -> GpsStatus.OffRoute
+            else -> GpsStatus.Valid
+        }
+        previousGpsStatus = currentGpsStatus
+
         // Phase 3.5: Mode machine update (now we have sCm from Kalman)
         val previousMode = modeState.mode
         val modeUpdate = ModeMachine.update(
@@ -171,14 +194,15 @@ class DetectionPipeline {
                 .map { (idx, state) ->
                     val stop = route.stops[idx]
                     val detectionSignals = PositionSignals(
-                        zGpsCm = positionSignals.sCm,
+                        zGpsCm = positionSignals.zGpsCm,  // FIXED: Use actual raw GPS
                         sCm = positionSignals.sCm
                     )
                     val features = ProbabilityModel.computeFeatures(
                         signals = detectionSignals,
                         stop = stop,
                         vCms = kalmanState!!.vCms,
-                        dwellS = state.dwellTimeS
+                        dwellS = state.dwellTimeS,
+                        gpsStatus = deriveGpsStatus()
                     )
                     val hasPreviousTraceEntry = tracedStopStateIndices.contains(idx)
 
@@ -309,14 +333,15 @@ class DetectionPipeline {
             // Rust golden detection uses the filtered route position for both
             // probability distance inputs; keep Android runtime aligned.
             val detectionSignals = PositionSignals(
-                zGpsCm = positionSignals.sCm,
+                zGpsCm = positionSignals.zGpsCm,  // FIXED: Use actual raw GPS
                 sCm = positionSignals.sCm
             )
             val probability = ProbabilityModel.compute(
                 signals = detectionSignals,
                 stop = stop,
                 vCms = kalmanState!!.vCms,
-                dwellS = state.dwellTimeS
+                dwellS = state.dwellTimeS,
+                gpsStatus = previousGpsStatus  // NEW: use captured GPS status
             )
 
             // Update state machine
