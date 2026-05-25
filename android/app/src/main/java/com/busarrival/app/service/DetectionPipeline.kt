@@ -124,6 +124,7 @@ class DetectionPipeline {
             hdopX10 = null,
             isSoftResync = jumpDetected
         )
+        kalmanState!!.lastSegIdx = matchResult.segIdx
 
         // CRITICAL: Capture GPS status BEFORE mode machine runs
         // Detection only runs when mode is Normal, so we must capture status

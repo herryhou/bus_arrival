@@ -164,6 +164,27 @@ class DetectionPipelineTraceV2Test {
     }
 
     @Test
+    fun process_updatesLastSegmentIndexAfterNormalMatch() {
+        val traceFile = File.createTempFile("trace-v2-last-seg", ".jsonl")
+        val pipeline = DetectionPipeline()
+
+        try {
+            pipeline.initialize(twoSegmentSyntheticRoute(), traceFile = traceFile)
+
+            pipeline.process(syntheticLocation(xCm = 10_000, yCm = 0, timeMs = 1_000))
+            pipeline.process(syntheticLocation(xCm = 40_000, yCm = 0, timeMs = 2_000))
+            pipeline.close()
+
+            val lastTick = TraceLoader.load(traceFile).last()
+            assertEquals(1, lastTick.map_matching.segment_idx)
+            assertEquals(1, pipeline.lastSegmentIndexForTest())
+        } finally {
+            pipeline.close()
+            traceFile.delete()
+        }
+    }
+
+    @Test
     fun process_tpF805TraceV2StopStatesMatchCurrentActiveStops() {
         val routeData = RouteDataParser.loadFromFile(testDataFile("tpF805_normal.bin").absolutePath)
         val locations = NmeaParser.parseFile(testDataFile("tpF805_normal_nmea.txt").readText())
@@ -232,6 +253,52 @@ class DetectionPipelineTraceV2Test {
         )
     }
 
+    private fun twoSegmentSyntheticRoute(): RouteData {
+        return RouteData(
+            originLat = 20_000_000,
+            originLon = 120_000_000,
+            avgLat = 24_000_000,
+            x0Cm = 0,
+            y0Cm = 0,
+            nodes = listOf(
+                RouteNode(
+                    xCm = 0,
+                    yCm = 0,
+                    cumDistCm = 0,
+                    segLenMm = 300_000,
+                    dxCm = 30_000,
+                    dyCm = 0,
+                    headingCdeg = 0
+                ),
+                RouteNode(
+                    xCm = 30_000,
+                    yCm = 0,
+                    cumDistCm = 30_000,
+                    segLenMm = 300_000,
+                    dxCm = 30_000,
+                    dyCm = 0,
+                    headingCdeg = 0
+                ),
+                RouteNode(
+                    xCm = 60_000,
+                    yCm = 0,
+                    cumDistCm = 60_000,
+                    segLenMm = 0,
+                    dxCm = 0,
+                    dyCm = 0,
+                    headingCdeg = 0
+                )
+            ),
+            stops = emptyList(),
+            grid = SpatialGrid(
+                cellSizeCm = 100_000,
+                rows = 1,
+                cols = 1,
+                cells = listOf(GridCell(bitmask = 0UL, offsets = listOf(0, 1)))
+            )
+        )
+    }
+
     private fun syntheticLocation(xCm: Int, yCm: Int, timeMs: Long): Location {
         val (lat, lon) = gridToLatLon(xCm, yCm)
         return Location("synthetic").apply {
@@ -263,5 +330,14 @@ class DetectionPipelineTraceV2Test {
             current = current?.parentFile
         }
         error("Unable to locate test_data/$filename from ${File(".").absolutePath}")
+    }
+
+    private fun DetectionPipeline.lastSegmentIndexForTest(): Int {
+        val stateField = DetectionPipeline::class.java.getDeclaredField("kalmanState")
+        stateField.isAccessible = true
+        val state = stateField.get(this)
+        val segmentField = state.javaClass.getDeclaredField("lastSegIdx")
+        segmentField.isAccessible = true
+        return segmentField.getInt(state)
     }
 }
