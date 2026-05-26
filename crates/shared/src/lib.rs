@@ -254,6 +254,8 @@ pub struct KalmanState {
     pub off_route_freeze_time: Option<TimestampMs>,
     /// Off-route freeze context for spatial anchoring during recovery
     pub freeze_ctx: Option<FreezeContext>,
+    /// Cold boot flag: true during initial acquisition before first route snap
+    pub is_cold_boot: bool,
 }
 
 impl Default for KalmanState {
@@ -273,6 +275,7 @@ impl KalmanState {
             frozen_s_cm: None,
             off_route_freeze_time: None,
             freeze_ctx: None,
+            is_cold_boot: false,
         }
     }
 
@@ -288,6 +291,7 @@ impl KalmanState {
             frozen_s_cm: None,
             off_route_freeze_time: None,
             freeze_ctx: None,
+            is_cold_boot: true,
         }
     }
 
