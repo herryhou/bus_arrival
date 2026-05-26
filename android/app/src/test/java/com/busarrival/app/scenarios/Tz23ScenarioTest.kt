@@ -266,6 +266,26 @@ class Tz23ScenarioTest {
         }
     }
 
+    @Test
+    fun test_tz23_short_stop_states_match_active_stops() {
+        val run = processScenario()
+        val ticks = run.ticks
+
+        for ((idx, tick) in ticks.withIndex()) {
+            val stopStateIndices = tick.stop_states.map { it.stop_idx }.sorted()
+            val activeStops = tick.corridor.active_stops.sorted()
+
+            assertEquals(
+                "tick[$idx] at time=${tick.time_ms}, s_cm=${tick.s_cm}: " +
+                "stop_state_indices should match active_stops. " +
+                "stop_states=[${stopStateIndices.joinToString()}], " +
+                "active_stops=[${activeStops.joinToString()}]",
+                activeStops,
+                stopStateIndices
+            )
+        }
+    }
+
     private fun testDataFile(filename: String): File {
         val explicitRoot = System.getProperty("test.data.root")?.let(::File)
         if (explicitRoot != null) {
