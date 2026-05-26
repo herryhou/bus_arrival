@@ -343,6 +343,7 @@ fn scenario_monotonicity_tolerance(route_data: &RouteData, start_x: i32, start_y
         ProcessResult::Outage => panic!("Should not return outage"),
         ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
         ProcessResult::SuspectOffRoute { .. } => panic!("Should not return suspect off_route"),
+        ProcessResult::Acquiring { .. } => panic!("Should not return acquiring"),
     }
 }
 
@@ -382,6 +383,7 @@ fn scenario_max_speed_rejection(route_data: &RouteData, start_x: i32, start_y: i
         ProcessResult::DrOutage { .. } => panic!("Should not return DR outage"),
         ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
         ProcessResult::SuspectOffRoute { .. } => panic!("Should not return suspect off_route"),
+        ProcessResult::Acquiring { .. } => panic!("Should not return acquiring"),
     }
 }
 
@@ -450,6 +452,9 @@ fn scenario_normal_forward_movement(route_data: &RouteData, start_x: i32, start_
         ProcessResult::Rejected(reason) => {
             panic!("Update failed: got Rejected: {}", reason);
         }
+        ProcessResult::Acquiring { .. } => {
+            panic!("Update failed: got Acquiring (unexpected)");
+        }
     }
 
     // When: Moving forward with GPS noise. GPS says 2500cm.
@@ -504,6 +509,7 @@ fn scenario_handle_gps_jump(route_data: &RouteData, start_x: i32, start_y: i32) 
         ProcessResult::DrOutage { .. } => panic!("Should not return DR outage"),
         ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
         ProcessResult::SuspectOffRoute { .. } => panic!("Should not return suspect off_route"),
+        ProcessResult::Acquiring { .. } => panic!("Should not return acquiring"),
     }
 }
 
@@ -685,6 +691,7 @@ fn scenario_large_backward_jump_rejection(route_data: &RouteData, start_x: i32, 
         ProcessResult::Outage => panic!("Should not return outage"),
         ProcessResult::OffRoute { .. } => panic!("Should not return off_route"),
         ProcessResult::SuspectOffRoute { .. } => panic!("Should not return suspect off_route"),
+        ProcessResult::Acquiring { .. } => panic!("Should not return acquiring"),
     }
 }
 

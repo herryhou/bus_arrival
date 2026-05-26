@@ -223,6 +223,7 @@ impl LocalizationState {
             }
             gps_processor::kalman::ProcessResult::Rejected(_) => None,
             gps_processor::kalman::ProcessResult::Outage => None,
+            gps_processor::kalman::ProcessResult::Acquiring { .. } => None,
         }
     }
 }
