@@ -3,6 +3,7 @@ package com.busarrival.app.data.pipeline.detection.probability
 import com.busarrival.app.data.pipeline.types.*
 import com.busarrival.app.domain.model.PositionSignals
 import com.busarrival.app.domain.model.Stop
+import kotlin.math.roundToInt
 
 /**
  * 4-feature probability model for arrival detection.
@@ -163,40 +164,46 @@ object ProbabilityModel {
     /**
      * Build Gaussian LUT: 256 entries.
      * exp(-0.5 * x²) for x = 0..4.0
+     * Rust: crates/pipeline/detection/src/probability.rs:23 (uses .round())
      */
     private fun buildGaussianLut(): IntArray {
         val lut = IntArray(GAUSSIAN_LUT_SIZE)
         for (i in 0 until GAUSSIAN_LUT_SIZE) {
             val x = i / 64.0  // 0 to 4.0
             val g = kotlin.math.exp(-0.5 * x * x)
-            lut[i] = (g * 255).toInt().coerceIn(0, 255)
+            lut[i] = (g * 255.0).roundToInt().coerceIn(0, 255)
         }
         return lut
     }
 
     /**
      * Build speed LUT: 128 entries.
-     * Logistic: 1 / (1 + exp((v - 200) / 50))
+     * Logistic: 1 / (1 + exp(k * (v - 200))) where k = 0.01
+     * Rust: crates/pipeline/detection/src/bin/gen_luts.rs:16
      */
     private fun buildSpeedLut(): IntArray {
         val lut = IntArray(SPEED_LUT_MAX_IDX + 1)
         for (i in 0..SPEED_LUT_MAX_IDX) {
             val v = i * 10  // 0 to 1270 cm/s
-            val logistic = 1.0 / (1.0 + kotlin.math.exp((v - PhysicalConstants.V_STOP_CMS) / 50.0))
-            lut[i] = (logistic * 255).toInt().coerceIn(0, 255)
+            val k = 0.01  // CRITICAL: Match Rust (gen_luts.rs line 16)
+            val logistic = 1.0 / (1.0 + kotlin.math.exp(k * (v - PhysicalConstants.V_STOP_CMS)))
+            lut[i] = (logistic * 255).roundToInt().coerceIn(0, 255)
         }
         return lut
     }
 
     /**
      * Build dwell time LUT: 20 entries (0..20s).
-     * Linear ramp: min(t / 10, 1.0)
+     * Linear ramp using INTEGER DIVISION: min((t * 255) / 10, 255)
+     * Rust: crates/pipeline/detection/src/probability.rs:95
+     * Verification: dwell=1 → (1 * 255) / 10 = 25 (not 26)
      */
     private fun buildDwellLut(): IntArray {
         val lut = IntArray(DWELL_REF_S * 2 + 1)
         for (i in 0..DWELL_REF_S * 2) {
-            val t = i / DWELL_REF_S.toDouble()
-            lut[i] = ((t.coerceAtMost(1.0)) * 255).toInt()
+            // Integer division like Rust: (dwell_time * 255) / 10
+            val dwellScaled = (i * 255) / DWELL_REF_S
+            lut[i] = dwellScaled.coerceIn(0, 255)
         }
         return lut
     }

@@ -7,8 +7,7 @@ import com.busarrival.app.data.pipeline.localization.mapmatcher.MapMatcher
 import com.busarrival.app.data.pipeline.detection.probability.ProbabilityModel
 import com.busarrival.app.data.pipeline.detection.recovery.Recovery
 import com.busarrival.app.data.pipeline.detection.statemachine.StateMachine
-import com.busarrival.app.data.pipeline.detection.mode.ModeMachine
-import com.busarrival.app.data.pipeline.detection.mode.Mode
+import com.busarrival.app.data.pipeline.detection.hysteresis.Hysteresis
 import com.busarrival.app.data.pipeline.types.*
 import com.busarrival.app.domain.model.*
 import java.io.File
@@ -23,7 +22,7 @@ class DetectionPipeline {
     private var kalmanState: KalmanState? = null
     private var drState: DrState? = null
     private var stopStates: Map<Int, StopState> = emptyMap()
-    private var modeState = ModeMachine.toNormal()
+    private var hysteresisState = Hysteresis.State()
 
     private var previousGpsStatus: GpsStatus = GpsStatus.Valid
 
@@ -50,19 +49,18 @@ class DetectionPipeline {
     }
 
     /**
-     * Derive GPS status from current mode.
-     * TODO: This is a temporary workaround until Task 6 implements proper GPS status capture.
+     * Derive GPS status from hysteresis state.
      */
     private fun deriveGpsStatus(): GpsStatus {
-        return when (modeState.mode) {
-            Mode.Normal -> GpsStatus.Valid
-            Mode.OffRoute -> GpsStatus.OffRoute
-            Mode.Recovering -> GpsStatus.DrOutage
+        return when (hysteresisState.frozenSCm) {
+            null -> GpsStatus.Valid
+            else -> GpsStatus.OffRoute
         }
     }
 
     /**
      * Process location update through full pipeline.
+     * Rust: crates/pipeline/gps_processor/src/kalman/mod.rs:32-145
      */
     fun process(location: Location): PipelineResult {
         val route = routeData ?: return PipelineResult.NotInitialized
@@ -70,22 +68,15 @@ class DetectionPipeline {
         // Convert to GpsPoint
         val gps = GpsPoint.fromLocation(location)
 
-        // Check for GPS jump (recovery trigger)
-        val jumpDetected = if (modeState.mode == Mode.Normal && lastGpsTime > 0) {
-            Recovery.isJumpDetected(lastSCm, kalmanState?.sCm ?: 0)
-        } else false
-
         // Phase 1: Convert lat/lon to grid coordinates
         val (gpsX, gpsY) = GeoCoordinateConverter.toGridCoordinates(
-            lat = gps.lat,  // Already in degrees (Double)
-            lon = gps.lon,  // Already in degrees (Double)
+            lat = gps.lat,
+            lon = gps.lon,
             routeData = route
         )
 
-        // Phase 2: Project to route for sCm
+        // Phase 2: Map matching (heading-constrained)
         val lastIdx = kalmanState?.lastSegIdx ?: 0
-
-        // Phase 3: Map matching (heading-constrained) - do BEFORE Kalman
         val matchResult = MapMatcher.match(
             gpsX = gpsX,
             gpsY = gpsY,
@@ -96,23 +87,75 @@ class DetectionPipeline {
             isFirstFix = lastGpsTime == 0L
         )
 
-        // Phase 2b: Project to route using matched segment for better sCm
-        val (sCm, _) = GeoCoordinateConverter.projectToRoute(
+        // Phase 3: Hysteresis (BEFORE projection/Kalman)
+        // Use current Kalman position or 0 for first fix
+        val currentSCm = kalmanState?.sCm ?: 0
+        val hysteresisResult = Hysteresis.update(
+            matchDist2 = matchResult.dist2,
+            lastState = hysteresisState,
+            currentSCm = currentSCm,
+            currentTime = gps.timestamp
+        )
+
+        // Store previous state for transition detection
+        val hadFrozenPosition = hysteresisState.frozenSCm != null
+        hysteresisState = hysteresisResult.state
+
+        // Handle OffRoute: return with frozen position
+        // Rust: mod.rs:139-145
+        if (hysteresisResult.status == Hysteresis.Status.OffRoute) {
+            lastGpsTime = gps.timestamp
+            val frozenSCm = hysteresisState.frozenSCm ?: currentSCm
+            // Need positionSignals for trace - use frozen position
+            val posSignals = PositionSignals(zGpsCm = frozenSCm, sCm = frozenSCm)
+            writeTraceCore(gps, matchResult, posSignals, "off_route", true, emptySet(), frozenSCm, false)
+            return PipelineResult.Success(
+                sCm = frozenSCm,
+                vCms = kalmanState?.vCms ?: 0,
+                arrivals = emptyList(),
+                departures = emptyList()
+            )
+        }
+
+        // Handle Suspect: ALSO skip projection/Kalman
+        // Rust: mod.rs:139-145
+        if (hysteresisResult.status == Hysteresis.Status.Suspect) {
+            lastGpsTime = gps.timestamp
+            val frozenSCm = hysteresisState.frozenSCm ?: currentSCm
+            val posSignals = PositionSignals(zGpsCm = frozenSCm, sCm = frozenSCm)
+            writeTraceCore(gps, matchResult, posSignals, "suspect", false, emptySet(), frozenSCm, false)
+            return PipelineResult.Success(
+                sCm = frozenSCm,
+                vCms = kalmanState?.vCms ?: 0,
+                arrivals = emptyList(),
+                departures = emptyList()
+            )
+        }
+
+        // Phase 3.5: Recovery snap (just transitioned from frozen to Normal)
+        // Rust: mod.rs:150-207
+        if (hadFrozenPosition && hysteresisResult.state.suspectTicks.toInt() == 0) {
+            val recovered = handleRecovery(gpsX, gpsY, matchResult.segIdx, route)
+            if (recovered) {
+                // Snap successful, frozenSCm cleared
+            }
+            // If snap failed, position stays frozen (hysteresisState retains frozenSCm)
+        }
+
+        // Phase 4: Project to route (only if Normal)
+        val (sCm, segIdx) = GeoCoordinateConverter.projectToRoute(
             xCm = gpsX,
             yCm = gpsY,
             routeData = route,
             lastSegIdx = matchResult.segIdx
         )
 
-        // Phase 3.5: Mode machine update (after Kalman, need sCm)
-        // Defer until after Phase 4
-
-        // Phase 4: Kalman filter
+        // Phase 5: Kalman filter
         if (kalmanState == null) {
             kalmanState = KalmanState.init(
                 zCm = sCm,
                 vGpsCms = gps.speedCms ?: 0,
-                segIdx = matchResult.segIdx  // Use MapMatcher result, not projectToRoute
+                segIdx = segIdx
             )
         }
 
@@ -122,197 +165,25 @@ class DetectionPipeline {
             vGpsCms = gps.speedCms ?: 0,
             accuracyM = gps.accuracyM,
             hdopX10 = null,
-            isSoftResync = jumpDetected
+            isSoftResync = false
         )
-        kalmanState!!.lastSegIdx = matchResult.segIdx
+        kalmanState!!.lastSegIdx = segIdx
 
-        // CRITICAL: Capture GPS status BEFORE mode machine runs
-        // Detection only runs when mode is Normal, so we must capture status
-        // before mode transitions to preserve knowledge of off_route/dr_outage
+        // CRITICAL: Capture GPS status BEFORE detection
         val currentGpsStatus = when {
-            jumpDetected || matchResult.dist2 > PhysicalConstants.OFF_ROUTE_D2_THRESHOLD -> GpsStatus.OffRoute
+            matchResult.dist2 > PhysicalConstants.OFF_ROUTE_D2_THRESHOLD -> GpsStatus.OffRoute
             else -> GpsStatus.Valid
         }
         previousGpsStatus = currentGpsStatus
 
-        // Phase 3.5: Mode machine update (now we have sCm from Kalman)
-        val previousMode = modeState.mode
-        val modeUpdate = ModeMachine.update(
-            state = modeState,
-            matchDist2 = matchResult.dist2,
-            sCm = sCm
-        )
-        modeState = modeUpdate.state
-        val detectionAllowed = modeUpdate.detectionAllowed && firstFixProcessed && previousMode == Mode.Normal
+        val positionSignals = signals
+        val detectionAllowed = firstFixProcessed
         firstFixProcessed = true
-
-        val positionSignals = if (previousMode == Mode.OffRoute && modeState.mode == Mode.Recovering) {
-            kalmanState!!.sCm = sCm
-            kalmanState!!.lastSegIdx = matchResult.segIdx
-            resetStopStatesFrom(recoverStopIndex(sCm))
-            modeState = ModeMachine.toNormal()
-            PositionSignals(zGpsCm = sCm, sCm = sCm)
-        } else {
-            signals
-        }
-
-        // Helper function to write trace tick
-        fun writeTrace(justArrivedStops: Set<Int> = emptySet()) {
-            // Use frozen position during off-route, Kalman output otherwise
-            val positionSCm = if (modeState.mode == Mode.OffRoute) {
-                modeState.frozenSCm
-            } else {
-                positionSignals.sCm
-            }
-            val activeEntries = if (!detectionAllowed) {
-                emptyMap()
-            } else {
-                stopStates
-                    .filterValues { state ->
-                        state.fsmState != FsmState.Idle && state.fsmState != FsmState.Departed
-                    }
-            }
-            val corridorStartCm = activeEntries.keys.minOrNull()?.let { route.stops[it].corridorStartCm }
-            val corridorEndCm = activeEntries.keys.minOrNull()?.let { route.stops[it].corridorEndCm }
-            val nextStop = corridorEndCm?.let { end ->
-                route.stops
-                    .withIndex()
-                    .firstOrNull { (idx, stop) ->
-                        idx < route.stops.lastIndex && stop.progressCm > end
-                    }
-                    ?.let { indexedStop ->
-                        val probability = stopStates[indexedStop.index]?.lastProbability?.value ?: 0
-                        listOf(indexedStop.index, probability)
-                    }
-            }
-            val detectionStatus = when (modeState.mode) {
-                Mode.Normal -> "normal"
-                Mode.OffRoute -> "off_route"
-                Mode.Recovering -> "recovering"
-            }
-            val stopStateEntries = activeEntries
-                .toSortedMap()
-                .map { (idx, state) ->
-                    val stop = route.stops[idx]
-                    val detectionSignals = PositionSignals(
-                        zGpsCm = positionSignals.zGpsCm,  // FIXED: Use actual raw GPS
-                        sCm = positionSignals.sCm
-                    )
-                    val features = ProbabilityModel.computeFeatures(
-                        signals = detectionSignals,
-                        stop = stop,
-                        vCms = kalmanState!!.vCms,
-                        dwellS = state.dwellTimeS,
-                        gpsStatus = deriveGpsStatus()
-                    )
-                    val hasPreviousTraceEntry = tracedStopStateIndices.contains(idx)
-
-                    StopStateEntry(
-                        stop_idx = idx,
-                        gps_distance_cm = detectionSignals.zGpsCm - stop.progressCm,
-                        progress_distance_cm = detectionSignals.sCm - stop.progressCm,
-                        fsm_state = state.fsmState.name,
-                        dwell_time_s = state.dwellTimeS,
-                        probability = state.lastProbability.value,
-                        previous_probability =
-                            if (hasPreviousTraceEntry) state.previousProbability.value else 0,
-                        features = TraceFeatureScores(
-                            p1 = features.p1.value,
-                            p2 = features.p2.value,
-                            p3 = features.p3.value,
-                            p4 = features.p4.value
-                        ),
-                        announced = state.announced,
-                        skip_on_reentry = state.skipOnReentry,
-                        previous_distance_cm =
-                            if (hasPreviousTraceEntry) state.previousTraceDistanceCm else null,
-                        just_arrived = justArrivedStops.contains(idx)
-                    )
-                }
-
-            traceWriter?.write(TraceTick(
-                gps = GpsTraceTick(
-                    time_ms = gps.timestamp,
-                    lat = gps.lat,
-                    lon = gps.lon,
-                    heading_cdeg = gps.headingCdeg,
-                    hdop = gps.hdop,
-                    accuracy_cm = gps.accuracyCm
-                ),
-                kalman = KalmanTraceTick(
-                    s_cm = positionSCm.toLong(),
-                    v_cms = kalmanState!!.vCms,
-                    variance_cm2 = 0,
-                    divergence_cm = sCm - positionSCm
-                ),
-                map_matching = MapMatchingTraceTick(
-                    segment_idx = matchResult.segIdx,
-                    heading_constraint_met = matchResult.dist2 != Long.MAX_VALUE
-                ),
-                detection = DetectionTraceTick(
-                    status = detectionStatus,
-                    // off_route=true only in confirmed OffRoute mode.
-                    // Suspect ticks are transitional and should not create detour episodes in trace.
-                    off_route = modeState.mode == Mode.OffRoute,
-                    gps_jump = jumpDetected,
-                    recovery_idx = null,
-                    off_route_last_s_cm = if (modeState.mode == Mode.Normal) null else modeState.frozenSCm.toLong()
-                ),
-                corridor = CorridorTraceTick(
-                    active_stops = activeEntries.keys.sorted(),
-                    corridor_start_cm = corridorStartCm,
-                    corridor_end_cm = corridorEndCm,
-                    next_stop = nextStop
-                ),
-                stop_states = stopStateEntries
-            ))
-            tracedStopStateIndices = tracedStopStateIndices + activeEntries.keys
-        }
-
-        // Handle OffRoute mode: skip detection, preserve state
-        if (modeState.mode == Mode.OffRoute) {
-            lastGpsTime = gps.timestamp
-            lastSCm = modeState.frozenSCm  // Use frozen position
-            writeTrace()
-            return PipelineResult.Success(
-                sCm = modeState.frozenSCm,  // Return frozen position
-                vCms = kalmanState!!.vCms,
-                arrivals = emptyList(),
-                departures = emptyList()
-            )
-        }
-
-        // Handle Recovering mode: search for stop index
-        if (modeState.mode == Mode.Recovering) {
-            val dt = if (lastGpsTime > 0) ((gps.timestamp - lastGpsTime) / 1000).toInt() else 1
-            val recoveredIdx = Recovery.recover(
-                sCm = positionSignals.sCm,
-                lastIdx = kalmanState!!.lastSegIdx,
-                dt = dt,
-                routeData = route,
-                frozenSCm = modeState.frozenSCm
-            )
-            if (recoveredIdx != null) {
-                // Reset stop states from recovered index
-                resetStopStatesFrom(recoveredIdx)
-                modeState = ModeMachine.toNormal()
-            }
-            // Skip detection during recovery
-            lastGpsTime = gps.timestamp
-            lastSCm = positionSignals.sCm
-            writeTrace()
-            return PipelineResult.Success(
-                sCm = positionSignals.sCm,
-                vCms = kalmanState!!.vCms,
-                arrivals = emptyList(),
-                departures = emptyList()
-            )
-        }
 
         if (!detectionAllowed) {
             lastGpsTime = gps.timestamp
             lastSCm = positionSignals.sCm
-            writeTrace()
+            writeTraceCore(gps, matchResult, positionSignals, "normal", false, emptySet(), positionSignals.sCm, false)
             return PipelineResult.Success(
                 sCm = positionSignals.sCm,
                 vCms = kalmanState!!.vCms,
@@ -321,12 +192,22 @@ class DetectionPipeline {
             )
         }
 
-        // Phase 5: Detection
+        // Phase 6: Detection
         val arrivals = mutableListOf<ArrivalEvent>()
         val departures = mutableListOf<DepartureEvent>()
 
-        for ((idx, stop) in route.stops.withIndex()) {
-            val state = stopStates[idx] ?: continue
+        // Active corridor filtering: only process stops where current position is within corridor
+        // Rust: crates/pipeline/src/detection_state.rs:123-129
+        val activeStops = route.stops.mapIndexedNotNull { idx, stop ->
+            val state = stopStates[idx] ?: return@mapIndexedNotNull null
+            val inCorridor = positionSignals.sCm >= stop.corridorStartCm && positionSignals.sCm <= stop.corridorEndCm
+            val notSkipped = !state.skipOnReentry
+            if (inCorridor && notSkipped) idx else null
+        }
+
+        for (idx in activeStops) {
+            val stop = route.stops[idx]
+            val state = stopStates[idx]!!
             state.previousProbability = state.lastProbability
             state.previousTraceDistanceCm = state.previousDistanceCm
 
@@ -360,7 +241,7 @@ class DetectionPipeline {
 
         lastGpsTime = gps.timestamp
         lastSCm = positionSignals.sCm
-        writeTrace(arrivals.map { it.stopIndex }.toSet())
+        writeTraceCore(gps, matchResult, positionSignals, "normal", false, arrivals.map { it.stopIndex }.toSet(), positionSignals.sCm, true)
 
         return PipelineResult.Success(
             sCm = positionSignals.sCm,
@@ -368,6 +249,119 @@ class DetectionPipeline {
             arrivals = arrivals,
             departures = departures
         )
+    }
+
+    /**
+     * Write trace tick - core logic.
+     */
+    private fun writeTraceCore(
+        gps: GpsPoint,
+        matchResult: com.busarrival.app.data.pipeline.localization.mapmatcher.MapMatcher.MatchResult,
+        posSignals: PositionSignals,
+        detectionStatus: String,
+        offRoute: Boolean,
+        justArrivedStops: Set<Int>,
+        positionSCm: DistCm = posSignals.sCm,
+        detectionAllowed: Boolean
+    ) {
+        val route = routeData ?: return
+        val activeEntries = if (!detectionAllowed) {
+            emptyMap()
+        } else {
+            stopStates
+                .filterValues { state ->
+                    state.fsmState != FsmState.Idle && state.fsmState != FsmState.Departed
+                }
+        }
+        val corridorStartCm = activeEntries.keys.minOrNull()?.let { route.stops[it].corridorStartCm }
+        val corridorEndCm = activeEntries.keys.maxOrNull()?.let { route.stops[it].corridorEndCm }
+        val nextStop = corridorEndCm?.let { end ->
+            route.stops
+                .withIndex()
+                .firstOrNull { (idx, stop) ->
+                    idx < route.stops.lastIndex && stop.progressCm > end
+                }
+                ?.let { indexedStop ->
+                    val probability = stopStates[indexedStop.index]?.lastProbability?.value ?: 0
+                    listOf(indexedStop.index, probability)
+                }
+        }
+
+        val stopStateEntries = activeEntries
+            .toSortedMap()
+            .map { (idx, state) ->
+                val stop = route.stops[idx]
+                val detectionSignals = PositionSignals(
+                    zGpsCm = posSignals.zGpsCm,
+                    sCm = posSignals.sCm
+                )
+                val features = ProbabilityModel.computeFeatures(
+                    signals = detectionSignals,
+                    stop = stop,
+                    vCms = kalmanState!!.vCms,
+                    dwellS = state.dwellTimeS,
+                    gpsStatus = deriveGpsStatus()
+                )
+                val hasPreviousTraceEntry = tracedStopStateIndices.contains(idx)
+
+                StopStateEntry(
+                    stop_idx = idx,
+                    gps_distance_cm = detectionSignals.zGpsCm - stop.progressCm,
+                    progress_distance_cm = detectionSignals.sCm - stop.progressCm,
+                    fsm_state = state.fsmState.name,
+                    dwell_time_s = state.dwellTimeS,
+                    probability = state.lastProbability.value,
+                    previous_probability =
+                        if (hasPreviousTraceEntry) state.previousProbability.value else 0,
+                    features = TraceFeatureScores(
+                        p1 = features.p1.value,
+                        p2 = features.p2.value,
+                        p3 = features.p3.value,
+                        p4 = features.p4.value
+                    ),
+                    announced = state.announced,
+                    skip_on_reentry = state.skipOnReentry,
+                    previous_distance_cm =
+                        if (hasPreviousTraceEntry) state.previousTraceDistanceCm else null,
+                    just_arrived = justArrivedStops.contains(idx)
+                )
+            }
+
+        traceWriter?.write(TraceTick(
+            gps = GpsTraceTick(
+                time_ms = gps.timestamp,
+                lat = gps.lat,
+                lon = gps.lon,
+                heading_cdeg = gps.headingCdeg,
+                hdop = gps.hdop,
+                accuracy_cm = gps.accuracyCm
+            ),
+            kalman = KalmanTraceTick(
+                s_cm = positionSCm.toLong(),
+                v_cms = kalmanState!!.vCms,
+                variance_cm2 = 0,
+                divergence_cm = posSignals.sCm - positionSCm
+            ),
+            map_matching = MapMatchingTraceTick(
+                segment_idx = matchResult.segIdx,
+                heading_constraint_met = matchResult.dist2 != Long.MAX_VALUE
+            ),
+            detection = DetectionTraceTick(
+                status = detectionStatus,
+                off_route = offRoute,
+                gps_jump = false,
+                recovery_idx = null,
+                off_route_last_s_cm = hysteresisState.frozenSCm?.toLong()
+            ),
+            corridor = CorridorTraceTick(
+                active_stops = activeEntries.keys.sorted(),
+                corridor_start_cm = corridorStartCm,
+                corridor_end_cm = corridorEndCm,
+                next_stop = nextStop
+            ),
+            stop_states = stopStateEntries
+        ))
+        tracedStopStateIndices = tracedStopStateIndices + activeEntries.keys
     }
 
     /**
@@ -391,13 +385,6 @@ class DetectionPipeline {
         }
     }
 
-    private fun recoverStopIndex(sCm: DistCm): Int {
-        val route = routeData ?: return 0
-        return route.stops.indexOfFirst { stop -> sCm <= stop.corridorEndCm }
-            .takeIf { it >= 0 }
-            ?: route.stops.lastIndex.coerceAtLeast(0)
-    }
-
     /**
      * Reset pipeline state.
      */
@@ -409,9 +396,55 @@ class DetectionPipeline {
         }?.toMap() ?: emptyMap()
         firstFixProcessed = false
         tracedStopStateIndices = emptySet()
-        modeState = ModeMachine.toNormal()
+        hysteresisState = Hysteresis.State()
         lastGpsTime = 0
         lastSCm = 0
+    }
+
+    /**
+     * Handle recovery snap after returning from frozen state.
+     * Rust: crates/pipeline/gps_processor/src/kalman/mod.rs:150-207
+     */
+    private fun handleRecovery(gpsX: Int, gpsY: Int, lastSegIdx: Int, route: RouteData): Boolean {
+        val frozenSCm = hysteresisState.frozenSCm ?: return false
+
+        // Use relaxed heading grid search with min_s and max_s constraints
+        // Rust: mod.rs:162-175
+        val maxSCm = frozenSCm + 500_000  // 5km forward
+
+        // TODO: Implement MapMatcher.findBestSegmentGridOnly(minSCm, maxSCm)
+        // For now, use the projection we already have
+        val (sCm, segIdx) = GeoCoordinateConverter.projectToRoute(
+            xCm = gpsX,
+            yCm = gpsY,
+            routeData = route,
+            lastSegIdx = lastSegIdx
+        )
+
+        // CRITICAL: Only snap if re-entry is forward (no backward snaps)
+        // Rust: mod.rs:182 - "if z_reentry >= frozen_s"
+        if (sCm >= frozenSCm) {
+            // Safe to snap
+            kalmanState?.sCm = sCm
+            hysteresisState = hysteresisState.copy(frozenSCm = null)
+            resetStopStatesFrom(recoverStopIndex(sCm))
+
+            // EMA blend for velocity (M3 fix)
+            // Rust: mod.rs:188-189
+            val vGps = 0  // TODO: get from GPS
+            kalmanState?.vCms = kalmanState?.vCms?.plus(3 * (vGps - kalmanState!!.vCms) / 10) ?: 0
+            return true
+        }
+
+        // If z_reentry < frozen_s_cm, fall through - position stays frozen
+        return false
+    }
+
+    private fun recoverStopIndex(sCm: DistCm): Int {
+        val route = routeData ?: return 0
+        return route.stops.indexOfFirst { stop -> sCm <= stop.corridorEndCm }
+            .takeIf { it >= 0 }
+            ?: route.stops.lastIndex.coerceAtLeast(0)
     }
 
     /**
