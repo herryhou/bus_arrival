@@ -392,20 +392,23 @@ class DetourScenarioGoldenTest {
     }
 
     private fun detectOffRouteEpisode(ticks: List<TraceTick>): OffRouteEpisode {
-        var prevOffRoute = false
+        var inOffRouteEpisode = false
         var startTick: Int? = null
         var startTime: Long? = null
         var frozenSCm: Long? = null
         var episode: OffRouteEpisode? = null
 
         for ((idx, tick) in ticks.withIndex()) {
-            if (tick.off_route && startTick == null) {
+            if (tick.off_route && !inOffRouteEpisode) {
+                // Start of off-route episode
+                inOffRouteEpisode = true
                 startTick = idx
                 startTime = tick.time_ms
                 frozenSCm = tick.s_cm
             }
 
-            if (prevOffRoute && !tick.off_route) {
+            // Detect re-entry when in off-route episode AND status becomes normal
+            if (inOffRouteEpisode && tick.status == "normal") {
                 assertNull("Expected exactly one contiguous off-route episode", episode)
                 episode = OffRouteEpisode(
                     startTick = startTick ?: error("Missing off-route start tick"),
@@ -416,12 +419,11 @@ class DetourScenarioGoldenTest {
                     reentrySCm = tick.s_cm,
                     reentryTime = tick.time_ms
                 )
+                inOffRouteEpisode = false
                 startTick = null
                 startTime = null
                 frozenSCm = null
             }
-
-            prevOffRoute = tick.off_route
         }
 
         return episode ?: error("Expected an off-route episode with a re-entry transition")
@@ -948,6 +950,9 @@ class DetourScenarioGoldenTest {
 
     private val TraceTick.off_route: Boolean
         get() = detection.off_route
+
+    private val TraceTick.status: String
+        get() = detection.status
 
     private val TraceTick.gps_jump: Boolean
         get() = detection.gps_jump

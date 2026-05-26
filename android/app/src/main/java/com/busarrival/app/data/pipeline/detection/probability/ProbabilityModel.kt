@@ -23,17 +23,11 @@ object ProbabilityModel {
     private const val SPEED_LUT_MAX_IDX = 127
     private const val DWELL_REF_S = 10
 
-    // Standard weights: (13, 6, 10, 3) sums to 32
-    private const val W1_STD = 13
-    private const val W2_STD = 6
-    private const val W3_STD = 10
-    private const val W4_STD = 3
-
-    // Adaptive weights for close stops: (14, 7, 11, 0) - remove p4
-    private const val W1_ADAPT = 14
-    private const val W2_ADAPT = 7
-    private const val W3_ADAPT = 11
-    private const val W4_ADAPT = 0
+    // Fixed weights: (13, 6, 10, 3) sums to 32
+    private const val W1 = 13
+    private const val W2 = 6
+    private const val W3 = 10
+    private const val W4 = 3
 
     // LUTs
     private val gaussianLut = buildGaussianLut()
@@ -57,11 +51,7 @@ object ProbabilityModel {
         gpsStatus: GpsStatus
     ): Prob8 {
         val features = computeFeatures(signals, stop, vCms, dwellS, gpsStatus)
-        val p = if (features.isClose) {
-            (W1_ADAPT * features.p1.value + W2_ADAPT * features.p2.value + W3_ADAPT * features.p3.value + W4_ADAPT * features.p4.value) / 32
-        } else {
-            (W1_STD * features.p1.value + W2_STD * features.p2.value + W3_STD * features.p3.value + W4_STD * features.p4.value) / 32
-        }
+        val p = (W1 * features.p1.value + W2 * features.p2.value + W3 * features.p3.value + W4 * features.p4.value) / 32
 
         return Prob8(p.coerceIn(0, 255))
     }

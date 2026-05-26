@@ -25,12 +25,12 @@ data class GpsPoint(
                 timestamp = location.time,
                 lat = location.latitude,  // Keep as Double (degrees)
                 lon = location.longitude,  // Keep as Double (degrees)
-                headingCdeg = location.bearing.toCdeg(),
+                headingCdeg = location.bearing.toCdeg(location),
                 speedCms = location.speed.toCms(),
                 accuracyM = if (location.hasAccuracy()) location.accuracy else null,
                 hdop = null, // Location API doesn't provide HDOP directly
                 accuracyCm = if (location.hasAccuracy()) (location.accuracy * 100).toInt() else null,
-                hasFix = true // Location API only provides valid fixes
+                hasFix = location.latitude != 0.0 && location.longitude != 0.0  // Infer from Location state
             )
             // Debug: Log first 5 conversions
             if (callCount < 5) {
@@ -43,16 +43,17 @@ data class GpsPoint(
 }
 
 // Extension functions for Location conversion
-// Note: Android Location.bearing uses 0.0 to indicate "no bearing" (not valid heading 0°)
-// Normalize to [-180°, +180°] range to match Rust json_bearing_to_cdeg() behavior
-private fun Float.toCdeg(): Short? {
-    if (this <= 0) return null  // 0.0 means "no bearing" in Android Location API
+// CRITICAL: Use hasBearing() to distinguish missing bearing from valid 0°
+// Android Location.bearing defaults to 0.0 when no bearing, but 0° is also a valid heading
+// Rust: crates/shared/src/lib.rs:199 - uses Option<HeadCdeg> where 0° is valid
+private fun Float.toCdeg(location: Location): Short? {
+    if (!location.hasBearing()) return null  // Use hasBearing() to detect missing
     var heading = kotlin.math.round(this * 100).toInt()
     if (heading > 18000) heading -= 36000  // Normalize to [-180°, +180°]
     return heading.toShort()
 }
-private fun Double.toCdeg(): Short? {
-    if (this <= 0) return null
+private fun Double.toCdeg(location: Location): Short? {
+    if (!location.hasBearing()) return null  // Use hasBearing() to detect missing
     var heading = kotlin.math.round(this * 100).toInt()
     if (heading > 18000) heading -= 36000
     return heading.toShort()

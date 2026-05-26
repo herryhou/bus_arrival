@@ -24,18 +24,31 @@ class GpsPointTest {
     }
 
     @Test
-    fun fromLocation_headingNull_whenBearingZero() {
+    fun fromLocation_headingNull_whenBearingNotSet() {
         val location = Location("test").apply {
             time = 1_700_000_000_123L
             latitude = 25.0
             longitude = 121.0
-            bearing = 0.0f  // Android uses 0.0 to indicate "no bearing"
+            // Don't set bearing - hasBearing() will return false
         }
 
         val gps = GpsPoint.fromLocation(location)
 
-        println("DEBUG: headingCdeg for bearing=0.0f: ${gps.headingCdeg}")
         assertEquals(null, gps.headingCdeg)
+    }
+
+    @Test
+    fun fromLocation_headingValid_whenBearingZeroDegrees() {
+        val location = Location("test").apply {
+            time = 1_700_000_000_123L
+            latitude = 25.0
+            longitude = 121.0
+            bearing = 0.0f  // Explicitly set to 0° (North)
+        }
+
+        val gps = GpsPoint.fromLocation(location)
+
+        assertEquals(0.toShort(), gps.headingCdeg)  // Valid 0° heading, not null
     }
 
     @Test
