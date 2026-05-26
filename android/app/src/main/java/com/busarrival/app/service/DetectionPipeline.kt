@@ -322,6 +322,9 @@ class DetectionPipeline {
                 .filterValues { state ->
                     state.fsmState != FsmState.Idle && state.fsmState != FsmState.Departed
                 }
+                .filter { (idx, _) ->
+                    route.stops[idx].isInCorridor(positionSCm)
+                }
         }
         val corridorStartCm = activeEntries.keys.minOrNull()?.let { route.stops[it].corridorStartCm }
         val corridorEndCm = activeEntries.keys.maxOrNull()?.let { route.stops[it].corridorEndCm }
