@@ -80,6 +80,9 @@ test_data/*.nmea
 # Added by code-review-graph
 .code-review-graph/
 
+# Claude Code worktrees (isolated development)
+.claude/worktrees/
+
 # Android
 *.apk
 *.ap_
