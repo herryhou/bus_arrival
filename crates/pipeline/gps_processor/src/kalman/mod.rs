@@ -74,6 +74,91 @@ pub enum ProcessResult {
     },
 }
 
+/// Handle cold boot acquisition: await 2 good matches with heading constraint
+fn handle_cold_boot_acquire(
+    state: &mut KalmanState,
+    dr: &mut DrState,
+    gps: &GpsPoint,
+    route_data: &RouteData,
+    _current_stop_idx: u8,
+) -> ProcessResult {
+    // Convert GPS to absolute coordinates
+    let (gps_x, gps_y) = crate::map_match::latlon_to_cm_absolute_with_lat_avg(
+        gps.lat,
+        gps.lon,
+        route_data.lat_avg_deg,
+    );
+
+    // Map match with relaxed heading (cold start)
+    let (seg_idx, match_d2) = crate::map_match::find_best_segment_restricted(
+        gps_x,
+        gps_y,
+        gps.heading_cdeg.unwrap_or(i16::MIN),
+        gps.speed_cms.unwrap_or(0),
+        route_data,
+        state.last_seg_idx,
+        true, // relaxed heading during cold boot
+    );
+
+    // Check heading constraint using map_match::heading_eligible
+    let seg_heading = route_data.get_node(seg_idx)
+        .map(|n| n.heading_cdeg)
+        .unwrap_or(i16::MIN);
+    let heading_constraint_met = crate::map_match::heading_eligible(
+        gps.heading_cdeg.unwrap_or(i16::MIN),
+        gps.speed_cms.unwrap_or(0),
+        seg_heading,
+        true, // relaxed heading during cold boot
+    );
+
+    // Increment clear counter on good match
+    if match_d2 <= OFF_ROUTE_D2_THRESHOLD && heading_constraint_met {
+        state.off_route_clear_ticks = state.off_route_clear_ticks.saturating_add(1);
+    } else {
+        state.off_route_clear_ticks = 0;
+    }
+
+    // After 2 consecutive good matches, snap to route and enter Valid
+    if state.off_route_clear_ticks >= 2 {
+        // Project to route for snap position
+        let z_reentry = crate::map_match::project_to_route(gps_x, gps_y, seg_idx, route_data);
+
+        // Snap: s_cm = z_reentry anywhere on route (no min_s constraint during cold boot)
+        state.s_cm = z_reentry;
+        state.is_cold_boot = false;  // Clear cold boot flag
+        state.frozen_s_cm = None;
+        state.off_route_suspect_ticks = 0;
+        state.off_route_clear_ticks = 0;
+
+        // Initialize velocity from GPS
+        let v_gps = gps.speed_cms.unwrap_or(0).clamp(0, V_MAX_CMS);
+        state.v_cms = state.v_cms + 3 * (v_gps - state.v_cms) / 10;
+        state.last_seg_idx = seg_idx;
+        dr.last_gps_time = Some(gps.timestamp);
+        dr.last_valid_s = state.s_cm;
+        dr.filtered_v = state.v_cms;
+
+        let signals = PositionSignals {
+            z_gps_cm: z_reentry,
+            s_cm: state.s_cm,
+        };
+        return ProcessResult::Valid {
+            signals,
+            v_cms: state.v_cms,
+            seg_idx,
+            snapped: true,
+        };
+    }
+
+    // Still acquiring: return Acquiring result
+    dr.last_gps_time = Some(gps.timestamp);
+    ProcessResult::Acquiring {
+        seg_idx,
+        match_d2,
+        heading_constraint_met,
+    }
+}
+
 /// Main processing pipeline for each GPS update
 pub fn process_gps_update(
     state: &mut KalmanState,
@@ -87,6 +172,11 @@ pub fn process_gps_update(
     // 1. Check for GPS outage
     if !gps.has_fix {
         return handle_outage(state, dr, gps.timestamp);
+    }
+
+    // 1.5. Handle cold boot acquiring state
+    if state.is_cold_boot {
+        return handle_cold_boot_acquire(state, dr, gps, route_data, current_stop_idx);
     }
 
     // Calculate time delta since last GPS update
@@ -351,6 +441,9 @@ fn handle_outage(state: &mut KalmanState, dr: &mut DrState, timestamp: Timestamp
         Some(t) => timestamp.saturating_sub(t) / 1000,
         None => return ProcessResult::Rejected("no previous fix"),
     };
+
+    // Clear cold boot flag on GPS outage (shouldn't happen, but safety)
+    state.is_cold_boot = false;
 
     if dt > 10 {
         // Set recovery flag even for long outages to allow relaxed heading filter
