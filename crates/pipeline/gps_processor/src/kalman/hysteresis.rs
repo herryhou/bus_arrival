@@ -135,6 +135,7 @@ mod tests {
             frozen_s_cm: None,
             off_route_freeze_time: None,
             freeze_ctx: None,
+            is_cold_boot: false,
         }
     }
 
@@ -149,6 +150,7 @@ mod tests {
             frozen_s_cm: Some(TEST_S_CM),
             off_route_freeze_time: Some(1000),
             freeze_ctx: None,
+            is_cold_boot: false,
         }
     }
 
@@ -242,6 +244,7 @@ mod tests {
             frozen_s_cm: Some(TEST_S_CM),
             off_route_freeze_time: None,
             freeze_ctx: None,
+            is_cold_boot: false,
         };
 
         // Good match: start clearing
@@ -293,6 +296,7 @@ mod tests {
             off_route_freeze_time: Some(TEST_TIMESTAMP),
             frozen_s_cm: Some(50_000),
             freeze_ctx: None,
+            is_cold_boot: false,
         };
 
         reset_off_route_state(&mut state);

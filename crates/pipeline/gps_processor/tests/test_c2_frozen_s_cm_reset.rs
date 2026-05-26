@@ -17,6 +17,7 @@ fn test_reset_off_route_state_clears_frozen_s_cm() {
         off_route_freeze_time: Some(12345),
         freeze_ctx: None,
         last_seg_idx: 0,
+        is_cold_boot: false,
     };
 
     reset_off_route_state(&mut state);
