@@ -169,6 +169,24 @@ pub fn write_output<W: Write>(
             gps_jump: false,
             recovery_idx: None,
         },
+        super::kalman::ProcessResult::Acquiring {
+            seg_idx,
+            match_d2: _,
+            heading_constraint_met: _,
+        } => OutputRecord {
+            time,
+            lat,
+            lon,
+            s_cm: 0,
+            v_cms: 0,
+            heading_cdeg: Some(heading_cdeg),
+            status: "acquiring".to_string(),
+            seg_idx: Some(*seg_idx),
+            active_stops,
+            stop_states,
+            gps_jump: false,
+            recovery_idx: None,
+        },
     };
 
     writeln!(output, "{}", serde_json::to_string(&record).unwrap())

@@ -66,6 +66,12 @@ pub enum ProcessResult {
         s_cm: DistCm,
         v_cms: SpeedCms,
     },
+    /// GPS is acquiring initial route lock (cold boot)
+    Acquiring {
+        seg_idx: usize,
+        match_d2: i64,
+        heading_constraint_met: bool,
+    },
 }
 
 /// Main processing pipeline for each GPS update
