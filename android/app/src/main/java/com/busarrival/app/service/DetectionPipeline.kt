@@ -338,7 +338,7 @@ class DetectionPipeline {
             ),
             kalman = KalmanTraceTick(
                 s_cm = positionSCm.toLong(),
-                v_cms = kalmanState!!.vCms,
+                v_cms = kalmanState?.vCms ?: 0,
                 variance_cm2 = 0,
                 divergence_cm = posSignals.sCm - positionSCm
             ),
