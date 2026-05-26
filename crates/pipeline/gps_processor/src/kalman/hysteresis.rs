@@ -37,6 +37,15 @@ pub enum OffRouteStatus {
     OffRoute,
 }
 
+/// Check if we're in cold start mode (acquiring initial route lock)
+///
+/// Returns `state.is_cold_boot`. This is the explicit marker for cold boot
+/// vs. off-route recovery. When true, snap logic allows re-entry anywhere
+/// on route (no min_s constraint). When false, snap forward only.
+pub fn is_cold_start(state: &KalmanState) -> bool {
+    state.is_cold_boot
+}
+
 /// Update off-route hysteresis state based on GPS match quality
 ///
 /// Returns the new off-route status after updating the state.

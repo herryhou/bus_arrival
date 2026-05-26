@@ -18,6 +18,7 @@ use shared::{DistCm, DrState, GpsPoint, KalmanState, PositionSignals, SpeedCms, 
 pub use hysteresis::{
     OFF_ROUTE_D2_THRESHOLD, OFF_ROUTE_CLEAR_TICKS, OFF_ROUTE_CONFIRM_TICKS,
     OffRouteStatus, update_off_route_hysteresis, reset_off_route_state,
+    is_cold_start,  // NEW export
 };
 
 pub use filters::{
