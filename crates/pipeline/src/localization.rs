@@ -14,6 +14,7 @@ pub struct GpsDiagnostics {
     pub num_sats: Option<u8>,
     pub fix_type: Option<String>,
     pub variance_cm2: i32,
+    pub match_d2: Option<i64>,
 }
 
 impl GpsDiagnostics {
@@ -67,6 +68,12 @@ impl GpsDiagnostics {
     /// Builder method for variance_cm2
     pub fn with_variance_cm2(mut self, var: i32) -> Self {
         self.variance_cm2 = var;
+        self
+    }
+
+    /// Builder method for match_d2
+    pub fn with_match_d2(mut self, d2: Option<i64>) -> Self {
+        self.match_d2 = d2;
         self
     }
 }

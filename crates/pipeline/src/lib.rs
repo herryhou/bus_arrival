@@ -134,11 +134,13 @@ pub struct LocalizationState {
 
 impl LocalizationState {
     pub fn new(_route_data: &RouteData) -> Self {
-        Self {
+        let mut state = Self {
             kalman: KalmanState::new(),
             dr: DrState::new(),
             is_first_fix: true,
-        }
+        };
+        state.kalman.is_cold_boot = true;
+        state
     }
 
     /// Process GPS point and return GpsRecord if valid
@@ -223,7 +225,23 @@ impl LocalizationState {
             }
             gps_processor::kalman::ProcessResult::Rejected(_) => None,
             gps_processor::kalman::ProcessResult::Outage => None,
-            gps_processor::kalman::ProcessResult::Acquiring { .. } => None,
+            gps_processor::kalman::ProcessResult::Acquiring { seg_idx, match_d2, heading_constraint_met } => {
+                Some(gps::GpsRecord::new(
+                    gps.timestamp,
+                    gps.lat,
+                    gps.lon,
+                    0, // s_cm = 0 during acquiring
+                    0, // v_cms = 0 during acquiring
+                    gps.heading_cdeg,
+                    "acquiring",
+                ).with_diagnostics(
+                    localization::GpsDiagnostics::new()
+                        .with_segment_idx(Some(seg_idx as u16))
+                        .with_heading_met(heading_constraint_met)
+                        .with_match_d2(Some(match_d2))
+                        .with_accuracy_cm(accuracy_cm)
+                ))
+            }
         }
     }
 }
