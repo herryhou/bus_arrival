@@ -63,6 +63,7 @@ pub fn write_output<W: Write>(
         super::kalman::ProcessResult::DrOutage { s_cm, .. } => Some(*s_cm),
         super::kalman::ProcessResult::OffRoute { last_valid_s, .. } => Some(*last_valid_s),
         super::kalman::ProcessResult::SuspectOffRoute { s_cm, .. } => Some(*s_cm),
+        super::kalman::ProcessResult::Acquiring { .. } => Some(0),
         _ => None,
     };
 
