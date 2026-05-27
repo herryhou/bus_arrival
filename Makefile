@@ -101,13 +101,21 @@ run-detour-no-gen: build preprocess
 	$(MAKE) pipeline-no-gen ROUTE_NAME=ty225_short SCENARIO=detour DETOUR_FROM_STOP=1 DETOUR_TO_STOP=6 DETOUR_WAYPOINT_LAT=24.992071 DETOUR_WAYPOINT_LON=121.295621 DETOUR_DURATION_S=60
 
 # Run tz_23_short scenario with real GPS data (Rust + Android traces)
-tz_23_short: build
-	@echo "=== Running tz_23_short scenario ==="
-	$(PREPROCESSOR) test_data/tz_23_short_route.json test_data/tz_23_short_stops.json test_data/tz_23_short.bin
+gen_all_trace: build
+	@echo "=== tz_23_short_trace_v2 ==="
+	# $(PREPROCESSOR) test_data/tz_23_short_route.json test_data/tz_23_short_stops.json test_data/tz_23_short.bin
 	cargo run -p pipeline -- test_data/tz_23-gps.jsonl test_data/tz_23_short.bin --output test_data/tz_23_short_trace_v2.jsonl
-	@echo "=== Generating Android trace ==="
-	cd android && ./gradlew testDebugUnitTest --tests "com.busarrival.app.scenarios.Tz23ScenarioTest.test_tz23_short_trace_output_written" --rerun-tasks --quiet
-	@echo "=== Rust + Android traces complete ==="
+	@echo "=== tz_23_short_android_trace_v2 ==="
+	# cd android && ./gradlew testDebugUnitTest --tests "com.busarrival.app.scenarios.Tz23ScenarioTest.test_tz23_short_trace_output_written" --rerun-tasks --quiet
+	cd android && ./gradlew testDebugUnitTest --rerun-tasks --quiet
+	@echo "=== ty225_short_detour_trace_v2 (Rust + Android) ==="
+	cargo run -p pipeline -- test_data/ty225_short_detour_nmea.txt test_data/ty225_short_detour.bin --output test_data/ty225_short_detour_trace_v2.jsonl
+# 	cd android && ./gradlew testDebugUnitTest --tests "com.busarrival.app.scenarios.Ty225ScenarioTest.test_short_detour_trace_output_written" --rerun-tasks --quiet
+	@echo "=== ty225_normal ==="
+	cargo run -p pipeline -- test_data/ty225_normal_nmea.txt test_data/ty225_normal.bin --output test_data/ty225_normal_trace_v2.jsonl
+	@echo "=== tpF805_normal ==="
+	cargo run -p pipeline -- test_data/tpF805_normal_nmea.txt test_data/tpF805_normal.bin --output test_data/tpF805_normal_trace_v2.jsonl
+	@echo "=== All jsonl traces complete ==="
 
 # Legacy two-step workflow (deprecated - use 'make run' instead)
 run-legacy: build gen_nmea preprocess simulate detect
