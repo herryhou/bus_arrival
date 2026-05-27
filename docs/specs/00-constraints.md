@@ -1,8 +1,11 @@
-# Cross-Cutting Constraints (MUST READ FIRST)
+# Cross-Cutting Constraints Reference
 
 ## Overview
 
-This document defines constraints that apply to ALL modules in the bus arrival detection system. Read this before any other spec.
+This document is a reference for shared constraints in the bus arrival detection
+system. It is not mandatory pre-reading for every task. Read the sections that
+are relevant when changing shared types, embedded resource budgets, physical
+constants, probability constants, or binary layout.
 
 ## Semantic Type System
 
@@ -243,4 +246,4 @@ pub struct Stop {
 - **Probability constants:** `crates/shared/src/probability_constants.rs`
 - **Binary format:** `docs/spatial_grid_binary_format.md`
 - **Kalman filter:** `crates/pipeline/gps_processor/src/kalman.rs`
-- **Tech report:** `docs/bus_arrival_tech_report_v8.md`
+- **Master spec:** `docs/SPEC.md`

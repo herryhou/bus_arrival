@@ -70,4 +70,4 @@ Constraints: Integer-only, XIP, < 8% CPU @ 150MHz, ~34 KB Flash, < 1 KB SRAM
 
 ## Related Docs
 
-See `docs/bus_arrival_tech_report_v8.md` for algorithms and rationale.
+See `docs/SPEC.md` and `docs/specs/` for algorithms and rationale.

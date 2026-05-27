@@ -19,4 +19,15 @@ This document is for HUMAN developers. LLMs should NOT read this spec — it con
 | SIGMA_P_CM | 2000 | 1500..2500 |
 | Probability weights | (13,6,10,3) | Sum = 32 |
 
-**See:** `docs/bus_arrival_tech_report_v8.md#appendix-b` for full procedure
+## Procedure
+
+1. Collect representative GPS traces for normal runs, close stops, GPS drift,
+   GPS outages, and off-route detours.
+2. Run the pipeline with trace output enabled.
+3. Compare `Announce`, `Arrival`, and `Departure` events against ground truth.
+4. Inspect trace fields for false positives and misses: active corridor,
+   `z_gps_cm`, `s_cm`, probability features, FSM state, GPS status, and
+   divergence.
+5. Tune one parameter group at a time and rerun the same traces.
+6. Keep changes only when normal-route accuracy remains at or above target and
+   edge scenarios do not regress.

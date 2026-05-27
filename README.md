@@ -244,7 +244,7 @@ cargo clippy             # Lint code
 ## Technical Documentation
 
 See `docs/` for detailed technical documentation:
-- `bus_arrival_tech_report_v8.md` - Complete technical specification
+- `SPEC.md` - Master specification index and current system contract
 - `core_data_flow.md` - Data flow overview
 - `dev_guide.md` - Development guide
 

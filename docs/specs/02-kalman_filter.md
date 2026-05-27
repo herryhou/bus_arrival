@@ -30,6 +30,8 @@
 - [ ] Standard Ks = 51/256 (position), Kv = 77/256 (velocity)
 - [ ] Adaptive Ks based on HDOP: 77 (good), 51 (fair), 26 (poor), 13 (bad)
 - [ ] Cold start: `s_cm = z_cm`, `v_cms = v_gps_cms`
+- [ ] Cold boot acquisition returns `ProcessResult::Acquiring` until the route
+      position is trusted
 
 ## Formulas
 
@@ -85,6 +87,22 @@ pub fn init(z_cm: DistCm, v_gps_cms: SpeedCms, seg_idx: usize) -> Self {
     }
 }
 ```
+
+## Cold Boot Acquisition
+
+Cold boot is explicit state: `KalmanState.is_cold_boot = true`.
+
+While cold boot is active:
+
+1. Match GPS with first-fix/recovery heading mode.
+2. Require two consecutive good matches:
+   - `match_d2 <= 25_000_000` (within 50 m squared).
+   - heading constraint passes.
+3. Return `ProcessResult::Acquiring` until the counter reaches two.
+4. Snap `s_cm` to the current GPS projection and clear `is_cold_boot`.
+
+Cold boot MUST NOT use the off-route re-entry `min_s` constraint because there
+is no trusted prior route progress.
 
 ## HDOP-Adaptive Kalman Gain
 

@@ -248,7 +248,6 @@ Source: `crates/pipeline/tests/nmea_burst_regression.rs`
 - **`00-constraints.md`** - Semantic types, integer arithmetic
 - **`02-kalman_filter.md`** - GPS update processing
 - **`05-arrival_probability.md`** - HDOP-dependent gains
-- **`bus_arrival_tech_report_v8.md`** - Algorithm background
 
 ## Version History
 
