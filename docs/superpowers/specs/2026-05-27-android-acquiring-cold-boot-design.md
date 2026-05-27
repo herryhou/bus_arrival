@@ -36,12 +36,10 @@ Android has:
 
 Add `isColdBoot: Boolean = false` to `android/app/src/main/java/com/busarrival/app/domain/model/StateModels.kt`.
 
-`KalmanState.init()` will set:
+Add explicit constructors:
 
-- `sCm = zCm`
-- `vCms = vGpsCms`
-- `lastSegIdx = segIdx`
-- `isColdBoot = true`
+- `KalmanState.coldBoot()` returns a zeroed state with `isColdBoot = true`.
+- `KalmanState.warmBoot(zCm, vGpsCms, segIdx)` returns a positioned state with `isColdBoot = false`.
 
 The default remains `false` so tests or manually constructed states are warm unless they opt in.
 
@@ -53,6 +51,8 @@ The default remains `false` so tests or manually constructed states are warm unl
 - `isColdBoot = true`
 
 This matches Rust's `LocalizationState::new()`, where cold boot exists before the first GPS fix is processed. The implementation should not seed emitted acquiring output from a projected first fix.
+
+`KalmanState.init()` may remain as a compatibility alias for `warmBoot(...)` while existing call sites are migrated.
 
 ### Hysteresis Parity Helper
 
@@ -75,6 +75,8 @@ It should not carry arrivals or departures.
 ### Cold-Boot Flow
 
 `DetectionPipeline.process()` should handle cold boot before normal hysteresis, projection, Kalman update, and detection.
+
+Cold boot bypasses `Hysteresis.update()` and uses `KalmanState.offRouteClearTicks` directly as the acquisition counter. After cold boot clears, normal off-route hysteresis resumes using `Hysteresis.State`.
 
 The flow:
 
@@ -99,7 +101,7 @@ The flow:
 6. If `offRouteClearTicks >= 2`:
    - project/snap to route at the matched segment
    - set `kalmanState.sCm` to the snapped position
-   - clear `isColdBoot`
+   - clear `isColdBoot` immediately after writing the snapped state and before returning success output
    - clear `frozenSCm`, `offRouteSuspectTicks`, and `offRouteClearTicks`
    - blend velocity with the Rust EMA formula: `v = v + 3 * (vGps - v) / 10`
    - update `lastSegIdx`, `lastGpsTime`, and `lastSCm`
@@ -121,13 +123,15 @@ Add focused Android tests around cold boot acquisition. Prefer small pipeline-le
 
 Required coverage:
 
-- `KalmanState.init()` sets `isColdBoot = true`.
+- `KalmanState.coldBoot()` sets `isColdBoot = true` with zero position and velocity.
+- `KalmanState.warmBoot(...)` sets `isColdBoot = false` with the provided position, velocity, and segment.
 - `Hysteresis.isColdStart()` returns the state field.
 - `DetectionPipeline.initialize()` starts with a zeroed cold-boot localization state.
 - First cold-boot tick returns `PipelineResult.Acquiring`.
 - Acquiring trace tick has `detection.status = "acquiring"`, `kalman.s_cm = 0`, `kalman.v_cms = 0`, and no stop states.
 - Two consecutive good matches clear cold boot and produce success output.
 - A bad match or failed heading resets the acquire counter.
+- `MapMatcher` exposes heading eligibility through a small callable wrapper, such as `checkHeadingEligible(...)`, so the pipeline can emit the same `headingConstraintMet` diagnostic it uses for acquisition.
 
 Keep existing detour and trace schema tests passing.
 
@@ -140,6 +144,5 @@ Keep existing detour and trace schema tests passing.
 
 ## Risks
 
-- Android `MapMatcher` may not expose exactly the same heading eligibility detail as Rust. If it does not, the implementation should add the smallest helper needed to compute the same boolean.
-- `KalmanState.init()` currently needs a projected route position. The implementation must avoid emitting that seed position during acquiring.
+- Existing `KalmanState.init()` call sites may expect warm-start behavior. Keep it as a warm-start alias or migrate call sites deliberately.
 - Existing scenario tests may assume immediate nonzero positions at startup. Those tests should be updated only if the new Rust-parity behavior changes their startup expectations.

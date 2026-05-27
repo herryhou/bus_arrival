@@ -252,15 +252,20 @@ class Tz23ScenarioTest {
     }
 
     @Test
-    fun test_tz23_short_suppresses_stop_states_before_initial_off_route_confirmation() {
+    fun test_tz23_short_suppresses_stop_states_during_initial_acquisition() {
         val run = processScenario()
         val ticks = run.ticks
-        val firstOffRouteIdx = ticks.indexOfFirst { it.detection.off_route }
+        val firstNonAcquiringIdx = ticks.indexOfFirst { it.detection.status != "acquiring" }
 
-        assertTrue("Scenario should confirm off-route near startup", firstOffRouteIdx > 0)
-        ticks.take(firstOffRouteIdx).forEachIndexed { idx, tick ->
+        assertTrue("Scenario should start with acquiring ticks", firstNonAcquiringIdx > 0)
+        ticks.take(firstNonAcquiringIdx).forEachIndexed { idx, tick ->
+            assertEquals(
+                    "tick[$idx] should remain acquiring before route lock",
+                    "acquiring",
+                    tick.detection.status
+            )
             assertTrue(
-                    "tick[$idx] should not expose stop state before initial off-route confirmation",
+                    "tick[$idx] should not expose stop state during initial acquisition",
                     tick.stop_states.isEmpty()
             )
         }

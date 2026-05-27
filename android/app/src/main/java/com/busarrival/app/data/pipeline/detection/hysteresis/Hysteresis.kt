@@ -1,6 +1,7 @@
 package com.busarrival.app.data.pipeline.detection.hysteresis
 
 import com.busarrival.app.data.pipeline.types.*
+import com.busarrival.app.domain.model.KalmanState
 
 /**
  * Off-route hysteresis state machine.
@@ -29,6 +30,10 @@ object Hysteresis {
     )
 
     enum class Status { Normal, Suspect, OffRoute }
+
+    fun isColdStart(state: KalmanState): Boolean {
+        return state.isColdBoot
+    }
 
     /**
      * Update hysteresis state based on match quality.

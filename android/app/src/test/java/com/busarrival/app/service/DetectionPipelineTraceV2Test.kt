@@ -52,7 +52,7 @@ class DetectionPipelineTraceV2Test {
                 setOf("gps", "kalman", "map_matching", "detection", "corridor", "stop_states"),
                 firstTrace.keys
             )
-            assertEquals("normal", firstTrace.getValue("detection").jsonObject.getValue("status").toString().trim('"'))
+            assertEquals("acquiring", firstTrace.getValue("detection").jsonObject.getValue("status").toString().trim('"'))
 
             val traceWithStopState = traceFile.useLines { lines ->
                 lines
@@ -112,6 +112,92 @@ class DetectionPipelineTraceV2Test {
         }
     }
 
+
+    @Test
+    fun process_firstColdBootTickReturnsAcquiringTraceWithZeroPosition() {
+        val traceFile = File.createTempFile("trace-v2-acquiring", ".jsonl")
+        val pipeline = DetectionPipeline()
+
+        try {
+            pipeline.initialize(straightSyntheticRoute(), traceFile = traceFile)
+
+            val result = pipeline.process(syntheticLocation(xCm = 10_000, yCm = 0, timeMs = 1_000))
+            pipeline.close()
+
+            assertTrue(result is PipelineResult.Acquiring)
+            val acquiring = result as PipelineResult.Acquiring
+            assertEquals(0, acquiring.segIdx)
+            assertTrue(acquiring.headingConstraintMet)
+
+            val tick = TraceLoader.load(traceFile).single()
+            assertEquals("acquiring", tick.detection.status)
+            assertFalse(tick.detection.off_route)
+            assertEquals(0, tick.kalman.s_cm)
+            assertEquals(0, tick.kalman.v_cms)
+            assertTrue(tick.corridor.active_stops.isEmpty())
+            assertTrue(tick.stop_states.isEmpty())
+        } finally {
+            pipeline.close()
+            traceFile.delete()
+        }
+    }
+
+    @Test
+    fun process_badColdBootMatchResetsAcquireCounter() {
+        val traceFile = File.createTempFile("trace-v2-acquiring-reset", ".jsonl")
+        val pipeline = DetectionPipeline()
+
+        try {
+            pipeline.initialize(straightSyntheticRoute(), traceFile = traceFile)
+
+            val firstGood = pipeline.process(syntheticLocation(xCm = 10_000, yCm = 0, timeMs = 1_000))
+            val badMatch = pipeline.process(syntheticLocation(xCm = 10_000, yCm = 6_000, timeMs = 2_000))
+            val secondGoodAfterReset = pipeline.process(syntheticLocation(xCm = 10_000, yCm = 0, timeMs = 3_000))
+            val thirdGood = pipeline.process(syntheticLocation(xCm = 12_000, yCm = 0, timeMs = 4_000))
+            pipeline.close()
+
+            assertTrue(firstGood is PipelineResult.Acquiring)
+            assertTrue(badMatch is PipelineResult.Acquiring)
+            assertTrue(secondGoodAfterReset is PipelineResult.Acquiring)
+            assertTrue(thirdGood is PipelineResult.Success)
+
+            val ticks = TraceLoader.load(traceFile)
+            assertEquals(listOf("acquiring", "acquiring", "acquiring", "normal"), ticks.map { it.detection.status })
+            assertEquals(0, ticks[0].kalman.s_cm)
+            assertEquals(0, ticks[1].kalman.s_cm)
+            assertEquals(0, ticks[2].kalman.s_cm)
+            assertTrue(ticks[3].kalman.s_cm > 0)
+        } finally {
+            pipeline.close()
+            traceFile.delete()
+        }
+    }
+
+    @Test
+    fun process_twoGoodColdBootMatchesClearAcquiring() {
+        val traceFile = File.createTempFile("trace-v2-acquiring-clear", ".jsonl")
+        val pipeline = DetectionPipeline()
+
+        try {
+            pipeline.initialize(straightSyntheticRoute(), traceFile = traceFile)
+
+            val firstGood = pipeline.process(syntheticLocation(xCm = 10_000, yCm = 0, timeMs = 1_000))
+            val secondGood = pipeline.process(syntheticLocation(xCm = 12_000, yCm = 0, timeMs = 2_000))
+            pipeline.close()
+
+            assertTrue(firstGood is PipelineResult.Acquiring)
+            assertTrue(secondGood is PipelineResult.Success)
+
+            val ticks = TraceLoader.load(traceFile)
+            assertEquals(listOf("acquiring", "normal"), ticks.map { it.detection.status })
+            assertEquals(0, ticks.first().kalman.s_cm)
+            assertTrue(ticks.last().kalman.s_cm > 0)
+            assertTrue(ticks.last().stop_states.isEmpty())
+        } finally {
+            pipeline.close()
+            traceFile.delete()
+        }
+    }
 
     @Test
     fun process_gateClosedDoesNotAdvanceStopFsmState() {

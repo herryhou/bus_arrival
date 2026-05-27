@@ -12,15 +12,25 @@ data class KalmanState(
     var lastSegIdx: Int = 0,          // Last matched segment
     var offRouteSuspectTicks: Int = 0, // Off-route detection counter
     var offRouteClearTicks: Int = 0,   // Off-route clear counter
-    var frozenSCm: DistCm? = null      // Frozen position during off-route
+    var frozenSCm: DistCm? = null,     // Frozen position during off-route
+    var isColdBoot: Boolean = false    // True while acquiring initial route lock
 ) {
     companion object {
-        fun init(zCm: DistCm, vGpsCms: SpeedCms, segIdx: Int): KalmanState {
+        fun coldBoot(): KalmanState {
+            return KalmanState(isColdBoot = true)
+        }
+
+        fun warmBoot(zCm: DistCm, vGpsCms: SpeedCms, segIdx: Int): KalmanState {
             return KalmanState(
                 sCm = zCm,
                 vCms = vGpsCms,
-                lastSegIdx = segIdx
+                lastSegIdx = segIdx,
+                isColdBoot = false
             )
+        }
+
+        fun init(zCm: DistCm, vGpsCms: SpeedCms, segIdx: Int): KalmanState {
+            return warmBoot(zCm, vGpsCms, segIdx)
         }
     }
 }

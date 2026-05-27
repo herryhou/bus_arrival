@@ -96,10 +96,19 @@ object MapMatcher {
         val gridResult = searchGrid(
             gpsX, gpsY, gpsHeading, gpsSpeed,
             routeData, nodes,
-            windowResult.bestIdx, windowResult.bestDist2, windowResult.eligibleFound
+            windowResult.bestIdx, windowResult.bestDist2, windowResult.eligibleFound, isFirstFix
         )
 
         return MatchResult(gridResult.bestIdx, gridResult.bestDist2)
+    }
+
+    fun checkHeadingEligible(
+        gpsHeading: HeadCdeg?,
+        gpsSpeed: SpeedCms,
+        segHeading: HeadCdeg,
+        isFirstFix: Boolean
+    ): Boolean {
+        return isHeadingEligible(gpsHeading, segHeading, headingThreshold(gpsSpeed, isFirstFix))
     }
 
     /**
@@ -164,7 +173,8 @@ object MapMatcher {
         nodes: List<RouteNode>,
         seedIdx: Int,
         seedDist2: Dist2,
-        seedEligibleFound: Boolean
+        seedEligibleFound: Boolean,
+        isFirstFix: Boolean
     ): SearchResult {
         val grid = routeData.grid
         val cellX = (gpsX - routeData.x0Cm) / grid.cellSizeCm
@@ -174,7 +184,7 @@ object MapMatcher {
         var bestDist2 = seedDist2
         var eligibleFound = seedEligibleFound
 
-        val headingThresh = headingThreshold(gpsSpeed, false)
+        val headingThresh = headingThreshold(gpsSpeed, isFirstFix)
 
         // Search 3×3 neighborhood
         for (dy in -1..1) {

@@ -39,11 +39,16 @@ class DetectionPipeline {
      */
     fun initialize(routeData: RouteData, traceFile: File? = null) {
         this.routeData = routeData
+        this.kalmanState = KalmanState.coldBoot()
+        this.drState = DrState()
         this.stopStates = routeData.stops.mapIndexed { idx, _ ->
             idx to StateMachine.initialState(idx)
         }.toMap()
         this.firstFixProcessed = false
         this.tracedStopStateIndices = emptySet()
+        this.hysteresisState = Hysteresis.State()
+        this.lastGpsTime = 0
+        this.lastSCm = 0
 
         // Initialize trace writer if file provided
         traceWriter = traceFile?.let { TraceWriter(it) }
@@ -78,6 +83,7 @@ class DetectionPipeline {
 
         // Phase 2: Map matching (heading-constrained)
         val lastIdx = kalmanState?.lastSegIdx ?: 0
+        val isColdBoot = kalmanState?.isColdBoot ?: true
         val matchResult = MapMatcher.match(
             gpsX = gpsX,
             gpsY = gpsY,
@@ -85,8 +91,10 @@ class DetectionPipeline {
             gpsSpeed = gps.speedCms ?: 0,
             routeData = route,
             lastIdx = lastIdx,
-            isFirstFix = lastGpsTime == 0L
+            isFirstFix = lastGpsTime == 0L || isColdBoot
         )
+
+        handleColdBootAcquiring(gps, gpsX, gpsY, matchResult, route)?.let { return it }
 
         // Phase 3: Hysteresis (BEFORE projection/Kalman)
         // Use current Kalman position or 0 for first fix
@@ -417,6 +425,109 @@ class DetectionPipeline {
         tracedStopStateIndices = tracedStopStateIndices + activeEntries.keys
     }
 
+    private fun handleColdBootAcquiring(
+        gps: GpsPoint,
+        gpsX: Int,
+        gpsY: Int,
+        matchResult: com.busarrival.app.data.pipeline.localization.mapmatcher.MapMatcher.MatchResult,
+        route: RouteData
+    ): PipelineResult? {
+        val state = kalmanState ?: KalmanState.coldBoot().also { kalmanState = it }
+        if (!Hysteresis.isColdStart(state)) return null
+
+        val headingConstraintMet = route.nodes
+            .getOrNull(matchResult.segIdx)
+            ?.let { node ->
+                MapMatcher.checkHeadingEligible(
+                    gpsHeading = gps.headingCdeg,
+                    gpsSpeed = gps.speedCms ?: 0,
+                    segHeading = node.headingCdeg,
+                    isFirstFix = true
+                )
+            }
+            ?: false
+
+        if (matchResult.dist2 <= Hysteresis.OFF_ROUTE_D2_THRESHOLD && headingConstraintMet) {
+            state.offRouteClearTicks = (state.offRouteClearTicks + 1).coerceAtMost(Int.MAX_VALUE)
+        } else {
+            state.offRouteClearTicks = 0
+        }
+
+        if (state.offRouteClearTicks < 2) {
+            lastGpsTime = gps.timestamp
+            writeAcquiringTrace(gps, matchResult, headingConstraintMet)
+            return PipelineResult.Acquiring(
+                segIdx = matchResult.segIdx,
+                matchD2 = matchResult.dist2,
+                headingConstraintMet = headingConstraintMet
+            )
+        }
+
+        val (sCm, segIdx) = GeoCoordinateConverter.projectToRoute(
+            xCm = gpsX,
+            yCm = gpsY,
+            routeData = route,
+            lastSegIdx = matchResult.segIdx
+        )
+        val vGps = (gps.speedCms ?: 0).coerceIn(0, PhysicalConstants.V_MAX_CMS)
+        state.sCm = sCm
+        state.vCms = state.vCms + 3 * (vGps - state.vCms) / 10
+        state.lastSegIdx = segIdx
+        state.isColdBoot = false
+        state.frozenSCm = null
+        state.offRouteSuspectTicks = 0
+        state.offRouteClearTicks = 0
+        hysteresisState = Hysteresis.State()
+        lastGpsTime = gps.timestamp
+        lastSCm = state.sCm
+        firstFixProcessed = true
+
+        val positionSignals = PositionSignals(zGpsCm = sCm, sCm = state.sCm)
+        writeTraceCore(gps, matchResult, positionSignals, "normal", false, emptySet(), state.sCm, false)
+        return PipelineResult.Success(
+            sCm = state.sCm,
+            vCms = state.vCms,
+            arrivals = emptyList(),
+            departures = emptyList()
+        )
+    }
+
+    private fun writeAcquiringTrace(
+        gps: GpsPoint,
+        matchResult: com.busarrival.app.data.pipeline.localization.mapmatcher.MapMatcher.MatchResult,
+        headingConstraintMet: Boolean
+    ) {
+        traceWriter?.write(TraceTick(
+            gps = GpsTraceTick(
+                time_ms = gps.timestamp,
+                lat = gps.lat,
+                lon = gps.lon,
+                heading_cdeg = gps.headingCdeg,
+                hdop = gps.hdop,
+                accuracy_cm = gps.accuracyCm
+            ),
+            kalman = KalmanTraceTick(
+                s_cm = 0,
+                v_cms = 0,
+                variance_cm2 = 0,
+                divergence_cm = 0
+            ),
+            map_matching = MapMatchingTraceTick(
+                segment_idx = matchResult.segIdx,
+                heading_constraint_met = headingConstraintMet
+            ),
+            detection = DetectionTraceTick(
+                status = "acquiring",
+                off_route = false,
+                gps_jump = false,
+                recovery_idx = null,
+                off_route_last_s_cm = null
+            ),
+            corridor = CorridorTraceTick(),
+            stop_states = emptyList()
+        ))
+    }
+
     /**
      * Reset stop states from recovered index.
      * Called after successful recovery in OffRoute → Recovering → Normal flow.
@@ -442,8 +553,8 @@ class DetectionPipeline {
      * Reset pipeline state.
      */
     fun reset() {
-        kalmanState = null
-        drState = null
+        kalmanState = KalmanState.coldBoot()
+        drState = DrState()
         stopStates = routeData?.stops?.mapIndexed { idx, _ ->
             idx to StateMachine.initialState(idx)
         }?.toMap() ?: emptyMap()
@@ -514,6 +625,11 @@ class DetectionPipeline {
  */
 sealed class PipelineResult {
     object NotInitialized : PipelineResult()
+    data class Acquiring(
+        val segIdx: Int,
+        val matchD2: Long,
+        val headingConstraintMet: Boolean
+    ) : PipelineResult()
     data class Success(
         val sCm: DistCm,
         val vCms: SpeedCms,
