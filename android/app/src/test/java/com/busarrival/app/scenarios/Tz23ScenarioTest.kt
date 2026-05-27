@@ -286,37 +286,6 @@ class Tz23ScenarioTest {
         }
     }
 
-    @Test
-    fun test_tz23_short_each_stop_has_single_visible_approaching_episode() {
-        val run = processScenario()
-        val approachingEpisodeCounts = mutableMapOf<Int, Int>()
-        val previouslyVisibleApproaching = mutableSetOf<Int>()
-
-        for (tick in run.ticks) {
-            val currentlyVisibleApproaching =
-                    tick.stop_states
-                            .filter { it.fsm_state == "Approaching" }
-                            .map { it.stop_idx }
-                            .toSet()
-
-            for (stopIdx in currentlyVisibleApproaching) {
-                if (!previouslyVisibleApproaching.contains(stopIdx)) {
-                    approachingEpisodeCounts[stopIdx] =
-                            approachingEpisodeCounts.getOrDefault(stopIdx, 0) + 1
-                }
-            }
-
-            previouslyVisibleApproaching.clear()
-            previouslyVisibleApproaching.addAll(currentlyVisibleApproaching)
-        }
-
-        val duplicateApproaches = approachingEpisodeCounts.filterValues { it > 1 }
-        assertTrue(
-                "Each stop should appear as Approaching at most once. Duplicate visible approaching episodes: $duplicateApproaches",
-                duplicateApproaches.isEmpty()
-        )
-    }
-
     private fun testDataFile(filename: String): File {
         val explicitRoot = System.getProperty("test.data.root")?.let(::File)
         if (explicitRoot != null) {

@@ -32,8 +32,6 @@ class DetectionPipeline {
     private var firstFixProcessed = false
     private var traceWriter: TraceWriter? = null
     private var tracedStopStateIndices: Set<Int> = emptySet()
-    private var tracedApproachingStopIndices: Set<Int> = emptySet()
-    private var lastVisibleApproachingStopIndices: Set<Int> = emptySet()
 
     /**
      * Initialize pipeline with route data.
@@ -46,8 +44,6 @@ class DetectionPipeline {
         }.toMap()
         this.firstFixProcessed = false
         this.tracedStopStateIndices = emptySet()
-        this.tracedApproachingStopIndices = emptySet()
-        this.lastVisibleApproachingStopIndices = emptySet()
 
         // Initialize trace writer if file provided
         traceWriter = traceFile?.let { TraceWriter(it) }
@@ -329,11 +325,6 @@ class DetectionPipeline {
                 .filter { (idx, _) ->
                     route.stops[idx].isInCorridor(positionSCm)
                 }
-                .filter { (idx, state) ->
-                    state.fsmState != FsmState.Approaching ||
-                        !tracedApproachingStopIndices.contains(idx) ||
-                        lastVisibleApproachingStopIndices.contains(idx)
-                }
         }
         val corridorStartCm = activeEntries.keys.minOrNull()?.let { route.stops[it].corridorStartCm }
         val corridorEndCm = activeEntries.keys.maxOrNull()?.let { route.stops[it].corridorEndCm }
@@ -424,11 +415,6 @@ class DetectionPipeline {
             stop_states = stopStateEntries
         ))
         tracedStopStateIndices = tracedStopStateIndices + activeEntries.keys
-        val visibleApproachingStops = activeEntries
-            .filterValues { it.fsmState == FsmState.Approaching }
-            .keys
-        tracedApproachingStopIndices = tracedApproachingStopIndices + visibleApproachingStops
-        lastVisibleApproachingStopIndices = visibleApproachingStops
     }
 
     /**
@@ -463,8 +449,6 @@ class DetectionPipeline {
         }?.toMap() ?: emptyMap()
         firstFixProcessed = false
         tracedStopStateIndices = emptySet()
-        tracedApproachingStopIndices = emptySet()
-        lastVisibleApproachingStopIndices = emptySet()
         hysteresisState = Hysteresis.State()
         lastGpsTime = 0
         lastSCm = 0
