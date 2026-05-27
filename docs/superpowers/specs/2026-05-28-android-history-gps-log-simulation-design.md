@@ -13,6 +13,7 @@ Success criteria:
 - Playback timing follows recorded GPS timestamps, scaled by playback speed.
 - Replaying a log does not create another GPS log.
 - Existing History share/delete behavior remains intact.
+- Simulation works within the current Detection screen and foreground-service permission model.
 
 ## Current Context
 
@@ -75,8 +76,9 @@ The parser should:
 - Skip malformed rows.
 - Return an error only when no valid fixes remain.
 - Preserve row order from the file.
+- Treat missing `m` as `false`; the mock flag is optional in JSON but non-null in memory.
 
-Conversion to Android `Location` should set optional fields only when present. The provider should default to a simulation-specific provider name when the row omits `p`.
+Conversion to Android `Location` should set optional fields only when present. The provider should default to a simulation-specific provider name when the row omits `p`. Mock-provider conversion must use the Android API setter (`setIsFromMockProvider(true)` on the target SDK used by this app) rather than trying to assign to `Location.isFromMockProvider`, which is read-only.
 
 ### Simulation Source in DetectionService
 
@@ -90,7 +92,7 @@ Simulation start should reuse the same route loading and pipeline initialization
 1. Load active route from preferences.
 2. Initialize stop state machines, Kalman state, and timing state.
 3. Load and parse GPS fixes from the selected log.
-4. Disable GPS logging for this run.
+4. Force GPS logging off for this run.
 5. Start foreground service.
 6. Launch a simulation coroutine that emits `Location` values to `processLocation`.
 
@@ -102,17 +104,21 @@ max(0, nextFix.timeMillis - previousFix.timeMillis) / playbackSpeed
 
 Negative timestamp deltas are clamped to zero. Playback speed should use the same choices as the existing replay controls where possible.
 
-Stop should cancel the simulation job, close any log writer, set running state false, reset the pipeline, and stop the foreground service just like live detection.
+Playback speed must be clamped to the supported positive set. Zero is not a valid speed; pause is represented by stopping the playback coroutine while preserving the current fix index.
+
+Stop should cancel the simulation job, close any log writer, set running state false, reset the pipeline, and stop the foreground service just like live detection. The service must guard `processLocation` with the current source generation or mode so a late emission after cancellation cannot update a stopped or newly restarted run.
+
+The simulation path must never call `gpsLogWriter.open()`. It should install or keep a `NoopGpsLogStore` writer for the run and set `GpsLogStatus.Disabled("Simulation mode")`, regardless of the user's GPS logging preference.
 
 ### UI and Navigation
 
-Prefer passing the selected log reference as a Detection navigation argument:
+Use a pending-simulation preference as the primary handoff from History to Detection:
 
-```text
-detection?simulateLog=<encoded reference>
-```
+1. History writes the selected log reference and display filename into preferences.
+2. History navigates to the existing Detection route.
+3. Detection consumes and clears the pending simulation request on resume.
 
-This keeps the flow explicit and one-shot. If encoded content URIs make the route awkward in Compose Navigation, use a small pending-simulation preference as a fallback; the Detection screen must consume and clear it.
+Do not pass the log reference through a navigation route. File paths and SAF content URIs can be long and heavily encoded; using preferences avoids fragile route encoding and keeps the existing navigation graph small.
 
 History UI changes:
 
@@ -125,19 +131,20 @@ Detection UI changes:
 - Distinguish mode in status text, such as `Simulating gps-log-...jsonl`.
 - Show playback controls when a GPS log simulation source is loaded.
 - Preserve existing live Start/Stop behavior for normal GPS.
-- Do not show simulation as a real GPS permission requirement beyond route availability. If current screen structure requires location permission before showing Detection content, relax that gate for simulation mode only.
+- Keep the existing location permission gate for Detection. The current service and screen structure are location-service oriented, and relaxing this only for simulation would require broader refactoring outside this feature.
+- Parse the selected log before showing duration-dependent controls. GPS log duration is known only after loading valid fixes.
 
 ### Seeking and Determinism
 
-Seeking in a raw GPS simulation cannot simply jump UI state forward because pipeline state depends on all prior fixes. Seek should:
+Seeking in a raw GPS simulation cannot simply jump UI state forward because pipeline state depends on all prior fixes. To keep the first implementation bounded, arbitrary scrub seeking is out of scope. The initial playback controls should support:
 
-1. Pause playback.
-2. Reset pipeline state.
-3. Replay fixes from the start through the requested timestamp without real-time delays.
-4. Set the current playback position.
-5. Resume only if playback was active before seeking.
+- Play.
+- Pause.
+- Stop/reset.
+- Positive playback-speed changes from the supported set.
+- Progress display based on parsed log timestamps.
 
-This is deterministic and avoids maintaining snapshot state.
+If later work adds seeking, it must avoid main-thread fast-forwarding. Acceptable designs are checkpointed pipeline snapshots or a background fast-forward operation with cancellation and progress. A direct replay from the start on every scrubber drag is not acceptable for long logs.
 
 ## Error Handling
 
@@ -147,6 +154,8 @@ This is deterministic and avoids maintaining snapshot state.
 - Non-monotonic timestamps: clamp negative delays to zero.
 - Active live detection: stop it before simulation starts.
 - Active simulation: stop it before live detection starts.
+- Stop during simulation: cancel the source job and ignore any late emission whose source generation no longer matches the active run.
+- Active recording log: disable simulation while the log reference equals `lastGpsLogReference`. Once recording stops, normal file close semantics are enough; no cooldown is required unless testing shows SAF/file writes remain visible after close.
 
 ## Testing
 
@@ -156,8 +165,10 @@ Add focused tests for:
 - Malformed rows are skipped, and all-invalid input reports failure.
 - Recorded fixes convert to `Location` with optional accuracy, speed, bearing, provider, and mock flag.
 - Timestamp delay calculation clamps negative deltas and scales by speed.
+- Playback speed rejects or clamps non-positive values.
 - History view model or UI state exposes a simulation action and disables it for the active recording log.
 - Detection simulation source feeds locations through the same processing entry point used by live GPS. If direct service testing is hard, isolate the source/timing loop behind a small testable class and keep service wiring thin.
+- Stop/cancel prevents late simulated fixes from updating a stopped run.
 
 Existing `GpsLogStorageManager` and History share/delete tests should remain valid.
 
