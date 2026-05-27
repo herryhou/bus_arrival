@@ -4,9 +4,22 @@
 
 **目標受眾：** Embedded Rust 開發團隊  
 **硬體平台：** Raspberry Pi Pico 2（RP2350）  
-**文件版本：** v9.1（Kalman Gain 優化）
+**文件版本：** v9.3（冷啟動獲取流程）
 
 ### 版本更新記錄（Changelog）
+
+#### v9.3（2026-05-27）- 冷啟動獲取流程
+**問題：** 系統啟動時 GPS 尚未穩定，直接進入常規 Kalman 更新會導致位置漂移與錯誤到站判定。
+
+**解決方案：** 新增「冷啟動獲取」模式，在初始階段以 first-fix/recovery heading 模式做 map matching，要求連續 2 筆良好匹配才確認路線鎖定。
+- 新增 `is_cold_boot` / `isColdBoot` 標誌於 `KalmanState`，明確區分冷啟動獲取與一般定位
+- Rust 新增 `ProcessResult::Acquiring`，Android 新增 `PipelineResult.Acquiring`，在尚未鎖定路線時回傳獲取狀態
+- 冷啟動期間使用 `is_first_fix = true` / `isFirstFix = true`，heading 閾值放寬為 180°
+- 要求 2 筆連續 `match_d2 <= 25_000_000` 且 heading constraint 通過才退出冷啟動
+- 退出時 snap 到目前 GPS 投影路線位置，不套用 off-route re-entry 的 `min_s` 約束
+- 詳見 [Section 10.7](#107-冷啟動獲取流程v93-新增) 完整說明
+
+---
 
 #### v9.2（2026-05-24）- DR Outage 虛假到站防護
 **問題：** 於 dr_outage 期間，當 GPS 實際位置距離站點 >48m 時，仍觸發「Arriving」狀態。
@@ -102,11 +115,11 @@
 
 ## 摘要（Abstract）
 
-本報告系統化整理一套適用於嵌入式車機環境之公車到站判定演算法架構。目標硬體為 Raspberry Pi Pico 2（RP2350，雙核 Cortex-M33，**無硬體 FPU**），GPS 更新頻率為 1 Hz（Δt = 1 s），已知完整路線 polyline 與停靠站 GPS 座標。
+本報告系統化整理一套適用於嵌入式車機環境之公車到站判定演算法架構。目標硬體為 Raspberry Pi Pico 2（RP2350，雙核 Cortex-M33，**無硬體 FPU**），GPS 更新頻率為 1 Hz（Δt ≈ 1 s），已知完整路線 polyline 與停靠站 GPS 座標。
 
 核心需求為解決 GPS 漂移、跳點（jump）、近距離站點混淆三類主要誤判場景，並支援**到站前語音播報**（提前 10–15 秒觸發）。本報告提出一套以確定性（deterministic）規則為基礎的工程化架構：以 Route Linearization 將問題降至一維，以**語義化整數型別（cm、0.01°、cm/s）取代浮點運算**以適應無 FPU 平台，以 Heading-Constrained Map Matching 進行路段篩選，以 1D Kalman Filter 平滑狀態估計，以 Dead-Reckoning 補償 GPS 斷訊，最終以 Stop Corridor（兼語音播報觸發）+ Probabilistic Arrival Model + Stop State Machine 三層機制完成到站判定。
 
-完整 pipeline 在 Pico 2 上之計算成本估計為 **CPU < 8%、SRAM < 1 KB（runtime）**，可達到 **≥ 97% 到站判定準確率**，並具備 GPS 斷訊 10 秒以內之持續追蹤能力。路線資料（含預算係數）Flash 佔用約 **~10-12 KB**（v8.8 優化後）。
+完整 pipeline 在 Pico 2 上之計算成本估計為 **CPU < 8%、SRAM < 1 KB（runtime）**，可達到 **≥ 97% 到站判定準確率**，並具備 GPS 斷訊 10 秒以內之持續追蹤能力。路線資料（含預算係數）Flash 佔用約 **~20-35 KB**（v8.8 優化後）。
 
 ---
 
@@ -129,6 +142,7 @@
 8. [路線進度投影（模組 ⑤）](#8-路線進度投影模組-)
 9. [速度約束過濾（模組 ⑥）](#9-速度約束過濾模組-)
 10. [一維卡爾曼濾波器（模組 ⑦）](#10-一維卡爾曼濾波器模組-)
+10.7. [冷啟動獲取流程（v9.3 新增）](#107-冷啟動獲取流程v93-新增)
 11. [航位推算補償（模組 ⑧）](#11-航位推算補償模組-)
 
 **第四部分：到站判定（模組 ⑨–⑫）**
@@ -165,7 +179,7 @@
 | SRAM | 520 KB（可用於 runtime 約 400–450 KB） |
 | Flash | 2 MB 內建 Flash（路線資料預載） |
 | FPU | **無硬體 FPU**（軟體浮點，比整數慢 3–5×） |
-| GPS 更新率 | **1 Hz（Δt = 1 s）** |
+| GPS 更新率 | **1 Hz（Δt ≈ 1 s）** |
 | GPS 誤差 | ±5–30 m（市區），跳點可達 ±100 m |
 | 已知資料 | 路線 polyline、所有停靠站 GPS 座標 |
 
@@ -221,6 +235,27 @@
   │                      Output: ŝ(t), v̂(t)                          │
   └──────────────────────────────────────────────────────────────────┘
 ```
+
+#### 冷啟動獲取流程（v9.3 新增）
+```txt
+  ┌───────────────────────────────────────────────────────────────────┐
+  │ COLD BOOT ACQUISITION (v9.3 新增)                                 │
+  ├───────────────────────────────────────────────────────────────────┤
+  │ 系統啟動 → KalmanState.is_cold_boot / isColdBoot = true          │
+  │    ↓                                                             │
+  │ GPS → map_match(is_first_fix / isFirstFix = true)                │
+  │    ↓                                                             │
+  │ 檢查：match_d2 ≤ 25M && heading_ok？                             │
+  │    ↓ Yes      ↓ No                                               │
+  │ clear_ticks++   clear_ticks=0                                    │
+  │    ↓                                                             │
+  │ clear_ticks ≥ 2？                                               │
+  │    ↓ Yes      ↓ No                                               │
+  │ snap to route → is_cold_boot=false → Valid/Success               │
+  │               │                                                  │
+  │               └──── 尚未達成時返回 Acquiring 狀態                 │
+  └───────────────────────────────────────────────────────────────────┘
+  ```
 
 #### 到站判定（GPS loop，1 Hz）
 ```txt
@@ -700,6 +735,39 @@ fn heading_eligible(gps_heading: HeadCdeg, gps_speed: SpeedCms, seg_heading: Hea
 - 停車時 heading 不可靠，所以不拒絕任何路段
 - GGA-only 模式（sentinel `i16::MIN`）保留原有行為
 
+#### 7.2.4 First-fix / Recovery Heading 模式（v9.3 新增）
+
+冷啟動、GPS 恢復、Off-route 恢復等場景下，GPS heading 可能尚未收斂。程式碼不新增第二套 map matching；而是沿用 `is_first_fix` / `isFirstFix` 參數，把 heading 閾值放寬到 180°。由於 `heading_diff_cdeg()` 的最大值也是 180°，這等效於接受任何已知 heading，同時保留 sentinel heading 與低速停車的既有行為。
+
+```rust
+/// Returns true if this segment is a plausible direction of travel.
+fn heading_eligible(
+    gps_heading: HeadCdeg,
+    gps_speed: SpeedCms,
+    seg_heading: HeadCdeg,
+    is_first_fix: bool,
+) -> bool {
+    if gps_heading == i16::MIN {
+        return true; // GGA-only: preserve existing sentinel behaviour
+    }
+    let w = heading_weight(gps_speed);
+    let threshold = if is_first_fix {
+        18_000 // first fix / recovery: 180° relaxed threshold
+    } else {
+        heading_threshold_cdeg(w)
+    };
+    heading_diff_cdeg(gps_heading, seg_heading) as u32 <= threshold
+}
+```
+
+**放寬模式使用時機：**
+
+| 場景 | 觸發條件 | 理由 |
+|------|----------|------|
+| 冷啟動獲取 | `is_cold_boot = true` / `isColdBoot = true` | 啟動初期 heading 不穩定，先取得穩定路線鎖定 |
+| GPS 斷訊後首筆定位 | `is_first_fix = true` | 恢復後 heading 可能尚未收斂 |
+| Off-route 恢復 | `dr.in_recovery = true` | 繞路或斷訊後重新進入路線時 heading 可能偏差 |
+
 ### 7.3 路段評分與選擇（Filter-then-Rank）
 
 **路段評分：純 Distance 平方**
@@ -966,6 +1034,126 @@ pub struct KalmanFull {
 | 過程雜訊（加速度） | $\sigma_a$ | 100 cm/s² |
 
 濾波效果：GPS progress 雜訊 ±3000 cm → Kalman 輸出 ±1000 cm。
+
+### 10.7 冷啟動獲取流程（v9.3 新增）
+
+系統啟動時，GPS 尚未穩定，直接進入常規 Kalman 更新會導致位置漂移與錯誤到站判定。冷啟動獲取流程在初始階段使用 first-fix/recovery heading 模式，要求連續 2 筆良好匹配才確認路線鎖定；確認前不允許到站檢測。
+
+#### 10.7.1 KalmanState 新增欄位
+
+```rust
+pub struct KalmanState {
+    pub s_cm: DistCm,
+    pub v_cms: SpeedCms,
+    pub last_seg_idx: usize,
+    pub off_route_suspect_ticks: u8,
+    pub off_route_clear_ticks: u8,
+    pub frozen_s_cm: Option<DistCm>,
+    pub off_route_freeze_time: Option<TimestampMs>,
+    pub freeze_ctx: Option<FreezeContext>,
+    /// Cold boot flag: true during initial acquisition before first route snap
+    pub is_cold_boot: bool,  // ← v9.3 新增
+}
+```
+
+#### 10.7.2 初始化：進入冷啟動模式
+
+```rust
+/// Cold start initialization from first valid GPS fix.
+pub fn init(z_cm: DistCm, v_gps_cms: SpeedCms, seg_idx: usize) -> Self {
+    KalmanState {
+        s_cm: z_cm,
+        v_cms: v_gps_cms,
+        last_seg_idx: seg_idx,
+        off_route_suspect_ticks: 0,
+        off_route_clear_ticks: 0,
+        frozen_s_cm: None,
+        off_route_freeze_time: None,
+        freeze_ctx: None,
+        is_cold_boot: true,  // ← 進入冷啟動獲取模式
+    }
+}
+```
+
+Android runtime 使用同一狀態語意，但初始化入口是 `KalmanState.coldBoot()`，它建立 `sCm = 0`、`vCms = 0`、`lastSegIdx = 0` 且 `isColdBoot = true` 的獲取狀態。這個差異只反映語言端 API 形狀不同；兩端都以 cold-boot flag 決定是否進入 acquiring flow。
+
+#### 10.7.3 ProcessResult 新增 Acquiring 變體
+
+```rust
+pub enum ProcessResult {
+    Valid { signals, v_cms, seg_idx, snapped },
+    Rejected(&'static str),
+    Outage,
+    DrOutage { s_cm, v_cms },
+    OffRoute { last_valid_s, last_valid_v, freeze_time },
+    SuspectOffRoute { s_cm, v_cms },
+    /// GPS is acquiring initial route lock (cold boot)
+    Acquiring {  // ← v9.3 新增
+        seg_idx: usize,
+        match_d2: i64,
+        heading_constraint_met: bool,
+    },
+}
+```
+
+Android 對應型別為 `PipelineResult.Acquiring(segIdx, matchD2, headingConstraintMet)`。Trace 輸出在 acquiring tick 使用 `detection.status = "acquiring"`、`kalman.s_cm = 0`、`kalman.v_cms = 0`，避免尚未鎖定路線時產生可被到站判定使用的位置。
+
+#### 10.7.4 獲取流程
+
+冷啟動期間的 GPS 處理流程：
+
+```
+1. 檢查 is_cold_boot 標誌
+   → 若 true，進入 handle_cold_boot_acquire()
+
+2. 執行 map matching（is_first_fix=true / isFirstFix=true）
+   → 使用 180° heading 閾值；實作上沿用既有 first-fix/recovery 參數
+   → 返回 (seg_idx, match_d2)
+
+3. 檢查 heading constraint
+   → sentinel heading、停止狀態與 first-fix/recovery 模式都會放寬；一般行駛仍使用速度相依 threshold
+
+4. 累積 clear counter
+   if (match_d2 ≤ 25,000,000 && heading_constraint_met) {
+       off_route_clear_ticks++
+   } else {
+       off_route_clear_ticks = 0  // 重置
+   }
+
+5. 確認退出條件
+   if (off_route_clear_ticks ≥ 2) {
+       // 執行 cold-boot snap to route
+       s_cm = z_reentry  // 不套用 off-route re-entry 的 min_s/max_s 約束
+       is_cold_boot = false
+       → ProcessResult::Valid { snapped: true }
+   } else {
+       → ProcessResult::Acquiring { ... }
+   }
+```
+
+#### 10.7.5 設計考量
+
+| 問題 | 解答 |
+|------|------|
+| 為何需要 2 筆確認？ | 單筆 GPS 可能為跳點，2 筆連續確認降低誤判風險 |
+| 為何使用 180° heading threshold？ | 啟動初期 GPS heading 不穩定；first-fix/recovery 模式讓 map matching 主要依賴距離取得初始路線鎖定 |
+| 為何無 `min_s` 約束？ | 冷啟動尚無可信的前一個 route progress；off-route re-entry 的「只能往前 snap」規則沒有可靠錨點 |
+
+#### 10.7.6 與其他模式的關係
+
+```
+系統狀態轉換：
+
+冷啟動（is_cold_boot=true）
+    ↓ 2 筆良好匹配
+常規模式（Normal）
+    ↓ 5 筆高 divergence
+OffRoute 模式
+    ↓ 2 筆良好匹配 + 大位移
+Recovering 模式
+    ↓ 恢復成功
+常規模式（Normal）
+```
 
 ---
 
