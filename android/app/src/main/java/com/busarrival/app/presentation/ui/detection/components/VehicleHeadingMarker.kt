@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,12 +29,12 @@ fun VehicleHeadingMarker(
 
     if (bearing != null) {
         Icon(
-            imageVector = Icons.Default.ArrowForward,
+            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
             contentDescription = "Vehicle heading",
             tint = arrowColor,
             modifier = modifier
                 .size(markerSize)
-                .rotate(bearing)
+                .rotate(vehicleHeadingRotationDegrees(bearing))
         )
     } else {
         Box(
@@ -50,3 +50,5 @@ fun VehicleHeadingMarker(
         }
     }
 }
+
+internal fun vehicleHeadingRotationDegrees(bearing: Float): Float = bearing - 90f
