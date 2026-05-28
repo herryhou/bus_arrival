@@ -25,6 +25,9 @@ import com.busarrival.app.service.DetectionService
 import com.busarrival.app.service.GpsLogActions
 import com.busarrival.app.service.GpsLogStatus
 import com.busarrival.app.service.PipelineEvent
+import com.busarrival.app.service.StopEventCallback
+import com.busarrival.app.service.StopUiEvent
+import com.busarrival.app.data.pipeline.detection.statemachine.StopLifecycleEvent
 import com.busarrival.app.domain.model.GpsFixState
 import com.busarrival.app.domain.model.EventHint
 import com.busarrival.app.domain.model.HintType
@@ -98,6 +101,12 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     private var service: DetectionService? = null
     private var serviceEventJob: Job? = null
     private var gpsLogStatusJob: Job? = null
+    private val stopEventCallback =
+        object : StopEventCallback {
+            override fun onStopEvent(event: StopUiEvent) {
+                handleStopUiEvent(event)
+            }
+        }
 
     private val serviceConnection =
             object : ServiceConnection {
@@ -105,6 +114,7 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                     val localBinder = binder as DetectionService.LocalBinder
                     service = localBinder.getService()
                     val connectedService = service ?: return
+                    connectedService.setStopEventCallback(stopEventCallback)
 
                     // Subscribe to service events
                     serviceEventJob?.cancel()
@@ -130,6 +140,7 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                 }
 
                 override fun onServiceDisconnected(name: ComponentName?) {
+                    service?.setStopEventCallback(null)
                     service = null
                     serviceEventJob?.cancel()
                     serviceEventJob = null
@@ -138,6 +149,22 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                     _uiState.value = _uiState.value.copy(isRunning = false)
                 }
             }
+
+    private fun handleStopUiEvent(event: StopUiEvent) {
+        val hintType =
+            when (event.event) {
+                StopLifecycleEvent.Approaching -> HintType.APPROACHING
+                StopLifecycleEvent.Arriving -> HintType.ARRIVING
+                StopLifecycleEvent.Arrived -> HintType.ATSTOP
+                StopLifecycleEvent.Departed -> HintType.DEPART
+                StopLifecycleEvent.None -> return
+            }
+        _eventHints.value = EventHint(
+            type = hintType,
+            stopIndex = event.stopIndex,
+            timestamp = event.timestamp
+        )
+    }
 
     init {
         loadActiveRoute()
@@ -208,18 +235,8 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
             }
             is PipelineEvent.Arrival -> {
                 _uiState.value = _uiState.value.copy(currentStop = event.stopIndex)
-                // Emit event hint
-                _eventHints.value = com.busarrival.app.domain.model.EventHint(
-                    type = com.busarrival.app.domain.model.HintType.ARRIVING,
-                    stopIndex = event.stopIndex
-                )
             }
             is PipelineEvent.Departure -> {
-                // Emit event hint
-                _eventHints.value = com.busarrival.app.domain.model.EventHint(
-                    type = com.busarrival.app.domain.model.HintType.DEPART,
-                    stopIndex = event.stopIndex
-                )
             }
         }
 
@@ -260,6 +277,7 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
 
     /** Stop detection service and unbind. */
     fun stopDetection() {
+        service?.setStopEventCallback(null)
         service?.let { getApplication<Application>().unbindService(serviceConnection) }
         service = null
         DetectionService.stopService(getApplication<Application>())
@@ -686,6 +704,7 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         playbackJob?.cancel()
         serviceEventJob?.cancel()
         gpsLogStatusJob?.cancel()
+        service?.setStopEventCallback(null)
         service?.let { getApplication<Application>().unbindService(serviceConnection) }
     }
 }

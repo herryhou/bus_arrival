@@ -8,6 +8,7 @@ import com.busarrival.app.data.pipeline.localization.gates.RejectionGates
 import com.busarrival.app.data.pipeline.detection.probability.ProbabilityModel
 import com.busarrival.app.data.pipeline.detection.recovery.Recovery
 import com.busarrival.app.data.pipeline.detection.statemachine.StateMachine
+import com.busarrival.app.data.pipeline.detection.statemachine.StopLifecycleEvent
 import com.busarrival.app.data.pipeline.detection.hysteresis.Hysteresis
 import com.busarrival.app.data.pipeline.types.*
 import com.busarrival.app.domain.model.*
@@ -265,14 +266,16 @@ class DetectionPipeline {
         // Phase 6: Detection
         val arrivals = mutableListOf<ArrivalEvent>()
         val departures = mutableListOf<DepartureEvent>()
+        val stopEvents = mutableListOf<StopUiEvent>()
 
         // Active corridor filtering: only process stops where current position is within corridor
         // Rust: crates/pipeline/src/detection_state.rs:123-129
         val activeStops = route.stops.mapIndexedNotNull { idx, stop ->
             val state = stopStates[idx] ?: return@mapIndexedNotNull null
             val inCorridor = positionSignals.sCm >= stop.corridorStartCm && positionSignals.sCm <= stop.corridorEndCm
+            val awaitingDeparture = state.fsmState == FsmState.Arriving || state.fsmState == FsmState.AtStop
             val notSkipped = !state.skipOnReentry
-            if (inCorridor && notSkipped) idx else null
+            if ((inCorridor || awaitingDeparture) && notSkipped) idx else null
         }
 
         for (idx in activeStops) {
@@ -297,7 +300,7 @@ class DetectionPipeline {
             )
 
             // Update state machine
-            val (arrival, departure) = StateMachine.update(
+            val update = StateMachine.update(
                 state = state,
                 stop = stop,
                 sCm = positionSignals.sCm,
@@ -305,8 +308,11 @@ class DetectionPipeline {
                 timestamp = gps.timestamp
             )
 
-            arrival?.let { arrivals.add(it) }
-            departure?.let { departures.add(it) }
+            if (update.lifecycleEvent != StopLifecycleEvent.None) {
+                stopEvents.add(StopUiEvent(idx, update.lifecycleEvent, gps.timestamp))
+            }
+            update.arrivalEvent?.let { arrivals.add(it) }
+            update.departureEvent?.let { departures.add(it) }
         }
 
         val primaryStopState =
@@ -329,7 +335,8 @@ class DetectionPipeline {
             activeStopIndex = primaryStopState.first,
             activeStopState = primaryStopState.second,
             arrivals = arrivals,
-            departures = departures
+            departures = departures,
+            stopEvents = stopEvents
         )
     }
 
@@ -645,6 +652,12 @@ class DetectionPipeline {
     }
 }
 
+data class StopUiEvent(
+    val stopIndex: Int,
+    val event: StopLifecycleEvent,
+    val timestamp: TimestampMs
+)
+
 /**
  * Pipeline result.
  */
@@ -662,6 +675,7 @@ sealed class PipelineResult {
         val activeStopIndex: Int = -1,
         val activeStopState: String = FsmState.Idle.name,
         val arrivals: List<ArrivalEvent>,
-        val departures: List<DepartureEvent>
+        val departures: List<DepartureEvent>,
+        val stopEvents: List<StopUiEvent> = emptyList()
     ) : PipelineResult()
 }

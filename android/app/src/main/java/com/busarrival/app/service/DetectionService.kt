@@ -62,9 +62,14 @@ class DetectionService : Service() {
     // Pipeline state
     private var activeRoute: com.busarrival.app.domain.model.RouteData? = null
     private var detectionPipeline = DetectionPipeline()
+    private var stopEventCallback: StopEventCallback? = null
 
     inner class LocalBinder : Binder() {
         fun getService(): DetectionService = this@DetectionService
+    }
+
+    fun setStopEventCallback(callback: StopEventCallback?) {
+        stopEventCallback = callback
     }
 
     override fun onCreate() {
@@ -291,6 +296,9 @@ class DetectionService : Service() {
                         )
                     }
                     is PipelineResult.Success -> {
+                        result.stopEvents.forEach { event ->
+                            stopEventCallback?.onStopEvent(event)
+                        }
                         result.arrivals.forEach { arrival ->
                             _events.value = PipelineEvent.Arrival(
                                 stopIndex = arrival.stopIndex,
@@ -423,6 +431,10 @@ private enum class DetectionSourceMode {
     Stopped,
     Live,
     Simulation
+}
+
+interface StopEventCallback {
+    fun onStopEvent(event: StopUiEvent)
 }
 
 private class NoopGpsLogStore : GpsLogStore {

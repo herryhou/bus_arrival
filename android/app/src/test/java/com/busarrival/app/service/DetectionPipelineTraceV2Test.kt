@@ -7,6 +7,7 @@ import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.domain.model.RouteNode
 import com.busarrival.app.domain.model.SpatialGrid
 import com.busarrival.app.domain.model.Stop
+import com.busarrival.app.data.pipeline.detection.statemachine.StopLifecycleEvent
 import com.busarrival.app.scenarios.common.NmeaParser
 import com.busarrival.app.scenarios.common.TraceLoader
 import java.io.File
@@ -196,6 +197,55 @@ class DetectionPipelineTraceV2Test {
         } finally {
             pipeline.close()
             traceFile.delete()
+        }
+    }
+
+    @Test
+    fun process_exposesStopLifecycleEventsWithoutUiDependency() {
+        val pipeline = DetectionPipeline()
+
+        try {
+            pipeline.initialize(straightSyntheticRoute())
+
+            assertTrue(pipeline.process(syntheticLocation(xCm = 10_000, yCm = 0, timeMs = 1_000)) is PipelineResult.Acquiring)
+            assertTrue(pipeline.process(syntheticLocation(xCm = 12_000, yCm = 0, timeMs = 2_000)) is PipelineResult.Success)
+
+            val result = pipeline.process(syntheticLocation(xCm = 13_000, yCm = 0, timeMs = 3_000))
+            assertTrue(result is PipelineResult.Success)
+
+            val success = result as PipelineResult.Success
+            assertEquals(1, success.stopEvents.size)
+            assertEquals(0, success.stopEvents.single().stopIndex)
+            assertEquals(StopLifecycleEvent.Approaching, success.stopEvents.single().event)
+            assertEquals(3_000, success.stopEvents.single().timestamp)
+        } finally {
+            pipeline.close()
+        }
+    }
+
+    @Test
+    fun process_emitsDepartedLifecycleAfterLeavingCorridorEnd() {
+        val pipeline = DetectionPipeline()
+
+        try {
+            pipeline.initialize(straightSyntheticRoute())
+
+            pipeline.process(syntheticLocation(xCm = 10_000, yCm = 0, timeMs = 1_000))
+            pipeline.process(syntheticLocation(xCm = 12_000, yCm = 0, timeMs = 2_000))
+            pipeline.process(syntheticLocation(xCm = 13_000, yCm = 0, timeMs = 3_000))
+            pipeline.process(syntheticLocation(xCm = 16_000, yCm = 0, timeMs = 4_000))
+
+            pipeline.process(syntheticLocation(xCm = 30_000, yCm = 0, timeMs = 5_000))
+            val result = pipeline.process(syntheticLocation(xCm = 30_000, yCm = 0, timeMs = 6_000))
+            assertTrue(result is PipelineResult.Success)
+
+            val success = result as PipelineResult.Success
+            assertTrue(
+                "Expected Departed lifecycle event after moving beyond corridor end; got ${success.stopEvents}",
+                success.stopEvents.any { it.stopIndex == 0 && it.event == StopLifecycleEvent.Departed }
+            )
+        } finally {
+            pipeline.close()
         }
     }
 

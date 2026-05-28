@@ -862,7 +862,9 @@ impl<'a> SystemState<'a> {
                         event_type: shared::ArrivalEventType::Departure,
                     });
                 }
-                detection::state_machine::StopEvent::None => {}
+                detection::state_machine::StopEvent::Approaching
+                | detection::state_machine::StopEvent::Arriving
+                | detection::state_machine::StopEvent::None => {}
             }
         }
 

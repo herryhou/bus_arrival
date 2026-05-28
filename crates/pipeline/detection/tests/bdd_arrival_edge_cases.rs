@@ -50,9 +50,11 @@ fn scenario_probability_threshold_edge_case() {
     let corridor_start_cm = stop_progress - 8000; // 2000
     state.update(9000, 100, stop_progress, corridor_start_cm, 0); // Enter corridor and Arriving zone
     let event_at_threshold = state.update(10000, 100, stop_progress, corridor_start_cm, probability);
+    assert_eq!(event_at_threshold, StopEvent::Arriving);
 
     // Then: arrival should NOT be triggered (must be > threshold)
-    assert_eq!(event_at_threshold, StopEvent::None, "Arrival should NOT trigger at exactly THETA_ARRIVAL");
+    let no_arrival_at_threshold = state.update(10000, 100, stop_progress, corridor_start_cm, probability);
+    assert_eq!(no_arrival_at_threshold, StopEvent::None, "Arrival should NOT trigger at exactly THETA_ARRIVAL");
 
     // When: probability is 192
     let event_above_threshold = state.update(10000, 100, stop_progress, corridor_start_cm, THETA_ARRIVAL + 1);

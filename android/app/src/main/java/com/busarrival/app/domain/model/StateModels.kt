@@ -83,7 +83,11 @@ data class StopState(
     var announced: Boolean = false,
     var previousTraceDistanceCm: DistCm? = null,
     var previousDistanceCm: DistCm? = null,
-    var skipOnReentry: Boolean = false
+    var skipOnReentry: Boolean = false,
+    var approachingEmitted: Boolean = false,
+    var arrivingEmitted: Boolean = false,
+    var arrivedEmitted: Boolean = false,
+    var departedEmitted: Boolean = false
 )
 
 /**

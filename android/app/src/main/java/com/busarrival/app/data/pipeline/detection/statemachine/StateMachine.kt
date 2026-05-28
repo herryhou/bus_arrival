@@ -7,6 +7,20 @@ import com.busarrival.app.domain.model.FsmState
 import com.busarrival.app.domain.model.ArrivalEvent
 import com.busarrival.app.domain.model.DepartureEvent
 
+enum class StopLifecycleEvent {
+    Approaching,
+    Arriving,
+    Arrived,
+    Departed,
+    None
+}
+
+data class StopMachineUpdate(
+    val lifecycleEvent: StopLifecycleEvent,
+    val arrivalEvent: ArrivalEvent?,
+    val departureEvent: DepartureEvent?
+)
+
 /**
  * Stop arrival/departure state machine.
  * Ported from crates/pipeline/detection/src/state_machine.rs
@@ -23,7 +37,7 @@ object StateMachine {
      * @param sCm Current route position (cm)
      * @param probability Arrival probability (0..255)
      * @param timestamp Current timestamp in milliseconds since epoch
-     * @return Pair of (arrivalEvent, departureEvent) - either can be null
+     * @return lifecycle event and domain arrival/departure events for this update
      */
     fun update(
         state: StopState,
@@ -31,7 +45,7 @@ object StateMachine {
         sCm: DistCm,
         probability: Prob8,
         timestamp: TimestampMs
-    ): Pair<ArrivalEvent?, DepartureEvent?> {
+    ): StopMachineUpdate {
         val distanceToStop = stop.distanceTo(sCm)
         val absDistance = if (distanceToStop < 0) -distanceToStop else distanceToStop
 
@@ -57,10 +71,8 @@ object StateMachine {
         absDistance: DistCm,
         probability: Prob8,
         timestamp: TimestampMs
-    ): Pair<ArrivalEvent?, DepartureEvent?> {
+    ): StopMachineUpdate {
         val oldState = state.fsmState
-        var arrivalEvent: ArrivalEvent? = null
-        var departureEvent: DepartureEvent? = null
 
         when (oldState) {
             FsmState.Idle -> {
@@ -68,6 +80,8 @@ object StateMachine {
                 if (sCm >= stop.corridorStartCm) {
                     state.fsmState = FsmState.Approaching
                     state.dwellTimeS = 1 // D5 fix: start counting from corridor entry
+                    state.lastProbability = probability
+                    return StopMachineUpdate(emitOnce(state, StopLifecycleEvent.Approaching), null, null)
                 }
             }
 
@@ -76,11 +90,16 @@ object StateMachine {
                 if (sCm < stop.corridorStartCm) {
                     state.fsmState = FsmState.Idle
                     state.dwellTimeS = 0
-                    return Pair(null, null)
+                    return StopMachineUpdate(StopLifecycleEvent.None, null, null)
                 }
                 // Approaching -> Arriving: d < 50m
                 if (absDistance < PhysicalConstants.ARRIVAL_DISTANCE_CM) {
                     state.fsmState = FsmState.Arriving
+                    if (sCm >= stop.corridorStartCm) {
+                        state.dwellTimeS++
+                    }
+                    state.lastProbability = probability
+                    return StopMachineUpdate(emitOnce(state, StopLifecycleEvent.Arriving), null, null)
                 }
                 // Update dwell time when in corridor (including first tick after transition)
                 if (sCm >= stop.corridorStartCm) {
@@ -93,7 +112,7 @@ object StateMachine {
                 if (sCm < stop.corridorStartCm) {
                     state.fsmState = FsmState.Idle
                     state.dwellTimeS = 0
-                    return Pair(null, null)
+                    return StopMachineUpdate(StopLifecycleEvent.None, null, null)
                 }
                 // Arriving -> AtStop: d < 50m AND probability > threshold
                 if (absDistance < PhysicalConstants.ARRIVAL_DISTANCE_CM &&
@@ -102,16 +121,16 @@ object StateMachine {
                     state.dwellTimeS++
                     state.lastProbability = probability
                     state.announced = true
-                    arrivalEvent = ArrivalEvent(timestamp, state.index, sCm, probability)
-                    return Pair(arrivalEvent, null)
+                    val arrivalEvent = ArrivalEvent(timestamp, state.index, sCm, probability)
+                    return StopMachineUpdate(emitOnce(state, StopLifecycleEvent.Arrived), arrivalEvent, null)
                 }
                 // Arriving -> Departed: d > 40m AND s > stop
                 if (distanceToStop > PhysicalConstants.DEPARTURE_DISTANCE_CM &&
                     sCm > stop.progressCm) {
                     state.fsmState = FsmState.Departed
                     state.lastProbability = probability
-                    departureEvent = DepartureEvent(timestamp, state.index, sCm, state.dwellTimeS)
-                    return Pair(null, departureEvent)
+                    val departureEvent = DepartureEvent(timestamp, state.index, sCm, state.dwellTimeS)
+                    return StopMachineUpdate(emitOnce(state, StopLifecycleEvent.Departed), null, departureEvent)
                 }
                 // Still in Arriving: increment dwell_time
                 state.dwellTimeS++
@@ -123,8 +142,8 @@ object StateMachine {
                     sCm > stop.progressCm) {
                     state.fsmState = FsmState.Departed
                     state.lastProbability = probability
-                    departureEvent = DepartureEvent(timestamp, state.index, sCm, state.dwellTimeS)
-                    return Pair(null, departureEvent)
+                    val departureEvent = DepartureEvent(timestamp, state.index, sCm, state.dwellTimeS)
+                    return StopMachineUpdate(emitOnce(state, StopLifecycleEvent.Departed), null, departureEvent)
                 }
                 // Don't increment dwell_time after departure
             }
@@ -139,7 +158,41 @@ object StateMachine {
         }
 
         state.lastProbability = probability
-        return Pair(arrivalEvent, departureEvent)
+        return StopMachineUpdate(StopLifecycleEvent.None, null, null)
+    }
+
+    private fun emitOnce(state: StopState, event: StopLifecycleEvent): StopLifecycleEvent {
+        return when (event) {
+            StopLifecycleEvent.Approaching ->
+                if (!state.approachingEmitted) {
+                    state.approachingEmitted = true
+                    StopLifecycleEvent.Approaching
+                } else {
+                    StopLifecycleEvent.None
+                }
+            StopLifecycleEvent.Arriving ->
+                if (!state.arrivingEmitted) {
+                    state.arrivingEmitted = true
+                    StopLifecycleEvent.Arriving
+                } else {
+                    StopLifecycleEvent.None
+                }
+            StopLifecycleEvent.Arrived ->
+                if (!state.arrivedEmitted) {
+                    state.arrivedEmitted = true
+                    StopLifecycleEvent.Arrived
+                } else {
+                    StopLifecycleEvent.None
+                }
+            StopLifecycleEvent.Departed ->
+                if (!state.departedEmitted) {
+                    state.departedEmitted = true
+                    StopLifecycleEvent.Departed
+                } else {
+                    StopLifecycleEvent.None
+                }
+            StopLifecycleEvent.None -> StopLifecycleEvent.None
+        }
     }
 
     /**
@@ -155,7 +208,11 @@ object StateMachine {
             lastAnnouncedStop = -1,
             announced = false,
             previousDistanceCm = null,
-            skipOnReentry = false
+            skipOnReentry = false,
+            approachingEmitted = false,
+            arrivingEmitted = false,
+            arrivedEmitted = false,
+            departedEmitted = false
         )
     }
 }

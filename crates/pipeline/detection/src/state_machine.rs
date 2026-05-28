@@ -5,6 +5,10 @@ use shared::{DistCm, FsmState, Prob8, SpeedCms};
 /// Event type returned by state machine update
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopEvent {
+    /// Bus has entered this stop's approach corridor
+    Approaching,
+    /// Bus is close to this stop but not yet confirmed arrived
+    Arriving,
     /// Bus has arrived at this stop
     Arrived,
     /// Bus has departed from this stop
@@ -34,6 +38,14 @@ pub struct StopState {
     /// Whether this stop should be skipped on off-route re-entry
     /// When true, the stop should not trigger any arrival events
     pub skip_on_reentry: bool,
+    /// Whether the approach lifecycle event has already been emitted
+    pub approaching_emitted: bool,
+    /// Whether the arriving lifecycle event has already been emitted
+    pub arriving_emitted: bool,
+    /// Whether the arrived lifecycle event has already been emitted
+    pub arrived_emitted: bool,
+    /// Whether the departed lifecycle event has already been emitted
+    pub departed_emitted: bool,
 }
 
 impl StopState {
@@ -47,6 +59,32 @@ impl StopState {
             announced: false,
             previous_distance_cm: None,
             skip_on_reentry: false,
+            approaching_emitted: false,
+            arriving_emitted: false,
+            arrived_emitted: false,
+            departed_emitted: false,
+        }
+    }
+
+    fn emit_once(&mut self, event: StopEvent) -> StopEvent {
+        match event {
+            StopEvent::Approaching if !self.approaching_emitted => {
+                self.approaching_emitted = true;
+                StopEvent::Approaching
+            }
+            StopEvent::Arriving if !self.arriving_emitted => {
+                self.arriving_emitted = true;
+                StopEvent::Arriving
+            }
+            StopEvent::Arrived if !self.arrived_emitted => {
+                self.arrived_emitted = true;
+                StopEvent::Arrived
+            }
+            StopEvent::Departed if !self.departed_emitted => {
+                self.departed_emitted = true;
+                StopEvent::Departed
+            }
+            _ => StopEvent::None,
         }
     }
 
@@ -85,12 +123,19 @@ impl StopState {
                 if s_cm >= corridor_start_cm {
                     self.fsm_state = FsmState::Approaching;
                     self.dwell_time_s += 1; // D5 fix: Start counting from corridor entry
+                    self.last_probability = probability;
+                    return self.emit_once(StopEvent::Approaching);
                 }
                 // Don't increment dwell_time when idle
             }
             FsmState::Approaching => {
                 if d_to_stop < 5000 {
                     self.fsm_state = FsmState::Arriving;
+                    if s_cm >= corridor_start_cm {
+                        self.dwell_time_s += 1;
+                    }
+                    self.last_probability = probability;
+                    return self.emit_once(StopEvent::Arriving);
                 }
 
                 // Can exit corridor back to Idle if we leave the corridor
@@ -109,13 +154,13 @@ impl StopState {
                     self.fsm_state = FsmState::AtStop;
                     self.dwell_time_s += 1;
                     self.last_probability = probability;
-                    self.announced = true;  // Mark as announced - one-time announcement rule
-                    return StopEvent::Arrived; // Just arrived!
+                    self.announced = true; // Mark as announced - one-time announcement rule
+                    return self.emit_once(StopEvent::Arrived); // Just arrived!
                 }
                 if d_to_stop > 4000 && s_cm > stop_progress {
                     self.fsm_state = FsmState::Departed;
                     self.last_probability = probability;
-                    return StopEvent::Departed; // Departed from Arriving state
+                    return self.emit_once(StopEvent::Departed); // Departed from Arriving state
                 }
                 // D4 fix: Corridor exit check (same logic as Approaching state)
                 if s_cm < corridor_start_cm {
@@ -130,7 +175,7 @@ impl StopState {
                 if d_to_stop > 4000 && s_cm > stop_progress {
                     self.fsm_state = FsmState::Departed;
                     self.last_probability = probability;
-                    return StopEvent::Departed; // Just departed!
+                    return self.emit_once(StopEvent::Departed); // Just departed!
                 }
                 // Don't increment dwell_time after departure
             }
@@ -179,7 +224,7 @@ impl StopState {
     /// This prevents duplicate arrivals caused by GPS noise or route loops.
     #[allow(dead_code)]
     pub fn can_reactivate(&self, _s_cm: DistCm, _stop_progress: DistCm) -> bool {
-        false  // Never allow reactivation - one-time announcement per trip
+        false // Never allow reactivation - one-time announcement per trip
     }
 
     /// Check if this is the terminal trip-completed state
@@ -247,7 +292,11 @@ mod tests {
         let event = state.update(200000, 500, stop_progress, corridor_start_cm, 255);
 
         // Should not trigger arrival (already at terminal state)
-        assert_eq!(event, StopEvent::None, "TripComplete should not trigger arrival");
+        assert_eq!(
+            event,
+            StopEvent::None,
+            "TripComplete should not trigger arrival"
+        );
         assert_eq!(state.fsm_state, FsmState::TripComplete);
     }
 
@@ -332,7 +381,60 @@ mod tests {
         // Enter corridor: should transition to Approaching
         state.update(2000, 100, stop_progress, corridor_start_cm, 0);
         assert_eq!(state.fsm_state, FsmState::Approaching);
-        assert_eq!(state.dwell_time_s, 1, "dwell_time_s should be 1 on corridor entry (D5 fix)");
+        assert_eq!(
+            state.dwell_time_s, 1,
+            "dwell_time_s should be 1 on corridor entry (D5 fix)"
+        );
+    }
+
+    #[test]
+    fn test_idle_to_approaching_emits_once() {
+        let mut state = StopState::new(0);
+        let stop_progress = 10000;
+        let corridor_start_cm = 2000;
+
+        let event = state.update(2000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(event, StopEvent::Approaching);
+
+        let event = state.update(3000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(event, StopEvent::None);
+
+        state.update(1000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(state.fsm_state, FsmState::Idle);
+
+        let event = state.update(2000, 100, stop_progress, corridor_start_cm, 0);
+        assert_eq!(event, StopEvent::None);
+    }
+
+    #[test]
+    fn test_approaching_to_arriving_emits_once() {
+        let mut state = StopState::new(0);
+        let stop_progress = 10000;
+        let corridor_start_cm = 2000;
+
+        state.update(2000, 100, stop_progress, corridor_start_cm, 0);
+
+        let event = state.update(6000, 100, stop_progress, corridor_start_cm, 100);
+        assert_eq!(event, StopEvent::Arriving);
+
+        let event = state.update(6500, 100, stop_progress, corridor_start_cm, 100);
+        assert_eq!(event, StopEvent::None);
+    }
+
+    #[test]
+    fn test_arrived_event_emits_once_after_backward_jump() {
+        let mut state = StopState::new(0);
+        let stop_progress = 10000;
+        let corridor_start_cm = 2000;
+
+        state.update(2000, 100, stop_progress, corridor_start_cm, 0);
+        state.update(6000, 100, stop_progress, corridor_start_cm, 100);
+
+        let event = state.update(10000, 100, stop_progress, corridor_start_cm, 200);
+        assert_eq!(event, StopEvent::Arrived);
+
+        let event = state.update(6000, 100, stop_progress, corridor_start_cm, 100);
+        assert_eq!(event, StopEvent::None);
     }
 
     #[test]
@@ -376,13 +478,19 @@ mod tests {
         // Enter corridor: first tick transitions AND increments dwell_time
         state.update(5000, 100, stop_progress, corridor_start_cm, 0);
         assert_eq!(state.fsm_state, FsmState::Approaching);
-        assert_eq!(state.dwell_time_s, 1, "First tick in corridor should count toward dwell");
+        assert_eq!(
+            state.dwell_time_s, 1,
+            "First tick in corridor should count toward dwell"
+        );
 
         // Subsequent ticks in corridor: dwell_time increments
         for _ in 0..5 {
             state.update(5000, 100, stop_progress, corridor_start_cm, 0);
         }
-        assert_eq!(state.dwell_time_s, 6, "First tick (1) + 5 subsequent ticks = 6 total");
+        assert_eq!(
+            state.dwell_time_s, 6,
+            "First tick (1) + 5 subsequent ticks = 6 total"
+        );
 
         // Exit corridor: resets to Idle
         state.update(1000, 100, stop_progress, corridor_start_cm, 0);
@@ -402,23 +510,29 @@ mod tests {
 
         // Enter corridor (Approaching)
         let event = state.update(2000, 100, stop_progress, corridor_start_cm, 0);
-        assert_eq!(event, StopEvent::None);
+        assert_eq!(event, StopEvent::Approaching);
         assert!(!state.announced);
 
         // Move to Arriving zone
         let event = state.update(6000, 100, stop_progress, corridor_start_cm, 100);
-        assert_eq!(event, StopEvent::None);
+        assert_eq!(event, StopEvent::Arriving);
         assert!(!state.announced);
 
         // First arrival should set announced flag
         let event = state.update(14050, 100, stop_progress, corridor_start_cm, 200);
         assert_eq!(event, StopEvent::Arrived);
-        assert!(state.announced, "announced flag should be set after arrival");
+        assert!(
+            state.announced,
+            "announced flag should be set after arrival"
+        );
 
         // Depart from stop
         let event = state.update(15000, 500, stop_progress, corridor_start_cm, 10);
         assert_eq!(event, StopEvent::Departed);
-        assert!(state.announced, "announced flag should remain true after departure");
+        assert!(
+            state.announced,
+            "announced flag should remain true after departure"
+        );
 
         // Even if we re-enter the corridor, can_reactivate returns false
         assert!(!state.can_reactivate(stop_progress, stop_progress));
@@ -436,13 +550,17 @@ mod tests {
 
         // Enter corridor - first time should announce
         state.fsm_state = FsmState::Approaching;
-        assert!(state.should_announce(2000, corridor_start_cm),
-            "Should announce on first corridor entry");
+        assert!(
+            state.should_announce(2000, corridor_start_cm),
+            "Should announce on first corridor entry"
+        );
         assert_eq!(state.last_announced_stop, 0);
 
         // Subsequent calls should not announce (already announced)
-        assert!(!state.should_announce(2000, corridor_start_cm),
-            "Should not announce again for same stop");
+        assert!(
+            !state.should_announce(2000, corridor_start_cm),
+            "Should not announce again for same stop"
+        );
     }
 
     #[test]
@@ -452,13 +570,17 @@ mod tests {
 
         // Even in corridor, Idle state should not announce
         state.fsm_state = FsmState::Idle;
-        assert!(!state.should_announce(2000, corridor_start_cm),
-            "Idle state should not trigger announcement");
+        assert!(
+            !state.should_announce(2000, corridor_start_cm),
+            "Idle state should not trigger announcement"
+        );
 
         // Approaching state should announce
         state.fsm_state = FsmState::Approaching;
-        assert!(state.should_announce(2000, corridor_start_cm),
-            "Approaching state should trigger announcement");
+        assert!(
+            state.should_announce(2000, corridor_start_cm),
+            "Approaching state should trigger announcement"
+        );
     }
 
     #[test]
@@ -476,15 +598,23 @@ mod tests {
         // Move to Arriving state (Approaching -> Arriving)
         state.update(6000, 100, stop_progress, corridor_start_cm, 100);
         assert_eq!(state.fsm_state, FsmState::Arriving);
-        assert_eq!(state.dwell_time_s, 2, "After corridor entry + Arriving transition");
+        assert_eq!(
+            state.dwell_time_s, 2,
+            "After corridor entry + Arriving transition"
+        );
 
         // GPS drifts backward past corridor start
         state.update(1000, 100, stop_progress, corridor_start_cm, 50);
 
         // Should transition to Idle and reset dwell_time
-        assert_eq!(state.fsm_state, FsmState::Idle,
-            "Arriving should transition to Idle when s_cm < corridor_start_cm");
-        assert_eq!(state.dwell_time_s, 0,
-            "dwell_time_s should be reset to 0 on corridor exit");
+        assert_eq!(
+            state.fsm_state,
+            FsmState::Idle,
+            "Arriving should transition to Idle when s_cm < corridor_start_cm"
+        );
+        assert_eq!(
+            state.dwell_time_s, 0,
+            "dwell_time_s should be reset to 0 on corridor exit"
+        );
     }
 }

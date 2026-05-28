@@ -179,6 +179,7 @@ impl DetectionState {
                         v_cms: record.v_cms,
                     });
                 }
+                StopEvent::Approaching | StopEvent::Arriving => {}
                 StopEvent::None => {}
             }
         }
