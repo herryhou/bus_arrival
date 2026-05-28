@@ -62,6 +62,7 @@ fun DetectionScreen(
     LaunchedEffect(Unit) {
         viewModel.refreshMapLabelZoomBias()
         viewModel.refreshLastGpsLogReference()
+        viewModel.consumePendingGpsLogSimulation()
     }
 
     val locationPermissions = rememberMultiplePermissionsState(
@@ -77,6 +78,7 @@ fun DetectionScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.loadActiveRoute()
+                viewModel.consumePendingGpsLogSimulation()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -127,12 +129,14 @@ fun DetectionScreen(
 
                 // Timeline scrubber for replay mode
                 if (replayState.traceFile != null) {
+                    val isGpsLogSimulation = replayState.traceFile?.endsWith(".jsonl") == true
                     TimelineScrubber(
                         replayState = replayState,
                         onPlayPause = { viewModel.playPause() },
                         onSeek = { viewModel.seekTo(it) },
                         onSpeedChange = { viewModel.setPlaybackSpeed(it) },
                         onToggleCameraFollow = { viewModel.toggleReplayCameraFollow() },
+                        allowSeek = !isGpsLogSimulation,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }

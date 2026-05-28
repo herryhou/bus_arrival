@@ -166,9 +166,13 @@ private fun Location.toJsonLine(): String = buildString {
     if (hasSpeed()) append(""","s":""").append(speed)
     if (hasBearing()) append(""","b":""").append(bearing)
     provider?.let { append(""","p":"""").append(it.jsonEscaped()).append('"') }
-    @Suppress("DEPRECATION")
-    if (isFromMockProvider) append(""","m":true""")
+    if (isMockLocation()) append(""","m":true""")
     append('}')
+}
+
+private fun Location.isMockLocation(): Boolean {
+    @Suppress("DEPRECATION")
+    return isMock || isFromMockProvider
 }
 
 private fun gpsLogFilename(routeId: String?, startedAtMillis: Long): String {

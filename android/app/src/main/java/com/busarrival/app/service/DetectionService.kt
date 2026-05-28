@@ -14,6 +14,10 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.busarrival.app.R
+import com.busarrival.app.data.gpslog.GpsLogStorageManager
+import com.busarrival.app.data.gpslog.GpsSimulationTiming
+import com.busarrival.app.data.gpslog.RecordedGpsLogParser
+import com.busarrival.app.data.gpslog.SupportedGpsPlaybackSpeeds
 import com.busarrival.app.data.pipeline.types.TimestampMs
 import com.busarrival.app.data.pipeline.types.GpsStatus
 import com.busarrival.app.data.pipeline.detection.probability.ProbabilityModel
@@ -32,6 +36,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -51,6 +56,10 @@ class DetectionService : Service() {
 
     private lateinit var locationManager: LocationManager
     private lateinit var gpsLogWriter: GpsLogWriter
+    private var simulationJob: Job? = null
+    @Volatile private var simulationPlaybackSpeed: Float = 1f
+    @Volatile private var sourceGeneration: Long = 0L
+    private var sourceMode: DetectionSourceMode = DetectionSourceMode.Stopped
 
     private val _isRunning = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _isRunning
@@ -86,13 +95,27 @@ class DetectionService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> startDetection()
+            ACTION_START_SIMULATION -> {
+                val reference = intent.getStringExtra(EXTRA_GPS_LOG_REFERENCE)
+                val displayName = intent.getStringExtra(EXTRA_GPS_LOG_NAME) ?: reference
+                val speed = intent.getFloatExtra(EXTRA_PLAYBACK_SPEED, 1f)
+                if (reference.isNullOrBlank()) {
+                    emitError("No GPS log selected")
+                } else {
+                    startSimulation(reference, displayName.orEmpty(), speed)
+                }
+            }
+            ACTION_SET_SIMULATION_SPEED ->
+                simulationPlaybackSpeed =
+                    SupportedGpsPlaybackSpeeds.clamp(intent.getFloatExtra(EXTRA_PLAYBACK_SPEED, 1f))
             ACTION_STOP -> stopDetection()
         }
         return START_STICKY
     }
 
     private fun startDetection() {
-        if (_isRunning.value) return
+        if (_isRunning.value && sourceMode == DetectionSourceMode.Live) return
+        if (_isRunning.value) stopDetection()
 
         // Load active route
         val activeUuid = preferences.activeRouteUuid
@@ -114,6 +137,8 @@ class DetectionService : Service() {
 
         // Initialize stop state machines
         initializePipeline()
+        sourceMode = DetectionSourceMode.Live
+        sourceGeneration++
 
         // Start foreground service with the service type only on API 29+.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -138,20 +163,95 @@ class DetectionService : Service() {
         // Start location updates
         serviceScope.launch {
             locationManager.startLocationUpdates { location ->
-                processLocation(location)
+                processLocation(location, sourceGeneration)
             }
 
             _isRunning.value = true
         }
     }
 
+    private fun startSimulation(reference: String, displayName: String, speed: Float) {
+        if (_isRunning.value) stopDetection()
+
+        val activeUuid = preferences.activeRouteUuid
+        if (activeUuid == null) {
+            emitError("No active route configured")
+            return
+        }
+
+        activeRoute = routeStorage.loadRoute(activeUuid)
+        if (activeRoute == null) {
+            emitError("Failed to load active route")
+            return
+        }
+
+        if (!locationManager.hasLocationPermission()) {
+            emitError("Location permission not granted")
+            return
+        }
+
+        initializePipeline()
+        sourceMode = DetectionSourceMode.Simulation
+        sourceGeneration++
+        val generation = sourceGeneration
+        simulationPlaybackSpeed = SupportedGpsPlaybackSpeeds.clamp(speed)
+        gpsLogWriter.close()
+        gpsLogWriter = GpsLogWriter(NoopGpsLogStore())
+        _gpsLogStatus.value = GpsLogStatus.Disabled("Simulation mode")
+        _isRunning.value = true
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                createNotification("Simulating ${displayName.ifBlank { "GPS log" }}"),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, createNotification("Simulating ${displayName.ifBlank { "GPS log" }}"))
+        }
+
+        simulationJob =
+            serviceScope.launch {
+                val fixes =
+                    RecordedGpsLogParser.parseLines(GpsLogStorageManager.loadLog(this@DetectionService, reference))
+                        .getOrElse {
+                            if (generation == sourceGeneration) {
+                                emitError(it.message ?: "Failed to load GPS log")
+                                stopDetection()
+                            }
+                            return@launch
+                        }
+
+                var previousTime = fixes.first().timeMillis
+                fixes.forEachIndexed { index, fix ->
+                    if (generation != sourceGeneration || sourceMode != DetectionSourceMode.Simulation) {
+                        return@launch
+                    }
+                    if (index > 0) {
+                        delay(GpsSimulationTiming.delayMillis(previousTime, fix.timeMillis, simulationPlaybackSpeed))
+                    }
+                    previousTime = fix.timeMillis
+                    processLocation(fix.toLocation(), generation)
+                }
+                if (generation == sourceGeneration && sourceMode == DetectionSourceMode.Simulation) {
+                    stopDetection()
+                }
+            }
+    }
+
     private fun stopDetection() {
         if (!_isRunning.value) {
+            simulationJob?.cancel()
+            simulationJob = null
             gpsLogWriter.close()
             _gpsLogStatus.value = GpsLogStatus.Disabled("Not running")
             return
         }
 
+        sourceGeneration++
+        sourceMode = DetectionSourceMode.Stopped
+        simulationJob?.cancel()
+        simulationJob = null
         locationManager.stopLocationUpdates()
         _isRunning.value = false
         gpsLogWriter.close()
@@ -182,11 +282,13 @@ class DetectionService : Service() {
         activeRoute = null
     }
 
-    private fun processLocation(location: android.location.Location) {
+    private fun processLocation(location: android.location.Location, generation: Long = sourceGeneration) {
+        if (generation != sourceGeneration) return
         gpsLogWriter.append(location)
         val route = activeRoute ?: return
 
         serviceScope.launch {
+            if (generation != sourceGeneration) return@launch
             try {
                 // Convert to GpsPoint
                 val gps = com.busarrival.app.domain.model.GpsPoint.fromLocation(location)
@@ -319,7 +421,7 @@ class DetectionService : Service() {
         return FileGpsLogStore(logDir)
     }
 
-    private fun createNotification(): Notification {
+    private fun createNotification(contentText: String = "Processing GPS updates..."): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
@@ -328,7 +430,7 @@ class DetectionService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.service_notification_title))
-            .setContentText("Processing GPS updates...")
+            .setContentText(contentText)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -347,6 +449,11 @@ class DetectionService : Service() {
 
         const val ACTION_START = "com.busarrival.app.START_DETECTION"
         const val ACTION_STOP = "com.busarrival.app.STOP_DETECTION"
+        const val ACTION_START_SIMULATION = "com.busarrival.app.START_GPS_LOG_SIMULATION"
+        const val ACTION_SET_SIMULATION_SPEED = "com.busarrival.app.SET_GPS_LOG_SIMULATION_SPEED"
+        const val EXTRA_GPS_LOG_REFERENCE = "gps_log_reference"
+        const val EXTRA_GPS_LOG_NAME = "gps_log_name"
+        const val EXTRA_PLAYBACK_SPEED = "playback_speed"
 
         fun startService(context: Context) {
             val intent = Intent(context, DetectionService::class.java).apply {
@@ -365,7 +472,40 @@ class DetectionService : Service() {
             }
             context.startService(intent)
         }
+
+        fun startSimulation(
+            context: Context,
+            reference: String,
+            displayName: String,
+            playbackSpeed: Float
+        ) {
+            val intent = Intent(context, DetectionService::class.java).apply {
+                action = ACTION_START_SIMULATION
+                putExtra(EXTRA_GPS_LOG_REFERENCE, reference)
+                putExtra(EXTRA_GPS_LOG_NAME, displayName)
+                putExtra(EXTRA_PLAYBACK_SPEED, playbackSpeed)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+
+        fun setSimulationSpeed(context: Context, playbackSpeed: Float) {
+            val intent = Intent(context, DetectionService::class.java).apply {
+                action = ACTION_SET_SIMULATION_SPEED
+                putExtra(EXTRA_PLAYBACK_SPEED, playbackSpeed)
+            }
+            context.startService(intent)
+        }
     }
+}
+
+private enum class DetectionSourceMode {
+    Stopped,
+    Live,
+    Simulation
 }
 
 private class NoopGpsLogStore : GpsLogStore {

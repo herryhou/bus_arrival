@@ -48,6 +48,7 @@ fun TimelineScrubber(
     onSeek: (Long) -> Unit,
     onSpeedChange: (Float) -> Unit,
     onToggleCameraFollow: () -> Unit,
+    allowSeek: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -129,6 +130,7 @@ fun TimelineScrubber(
                 value = replayState.currentTime.toFloat(),
                 onValueChange = { value -> onSeek(value.toLong()) },
                 valueRange = 0f..replayState.traceDuration.toFloat(),
+                enabled = allowSeek,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp)

@@ -13,6 +13,9 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.busarrival.app.data.gpslog.GpsLogStorageManager
+import com.busarrival.app.data.gpslog.RecordedGpsLogParser
+import com.busarrival.app.data.gpslog.SupportedGpsPlaybackSpeeds
 import com.busarrival.app.data.preferences.DetectionPreferences
 import com.busarrival.app.data.storage.RouteStorageManager
 import com.busarrival.app.data.trace.TraceStorageManager
@@ -89,6 +92,8 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     // Playback state
     private var playbackJob: Job? = null
     private var replayEvents: List<PipelineEvent> = emptyList()
+    private var simulationLogReference: String? = null
+    private var simulationLogName: String? = null
 
     private var service: DetectionService? = null
     private var serviceEventJob: Job? = null
@@ -243,6 +248,7 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
 
+        clearGpsLogSimulation()
         DetectionService.startService(getApplication())
         val intent = Intent(getApplication<Application>(), DetectionService::class.java)
         getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
@@ -254,6 +260,46 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         service = null
         DetectionService.stopService(getApplication<Application>())
         _uiState.value = _uiState.value.copy(isRunning = false)
+    }
+
+    fun consumePendingGpsLogSimulation() {
+        val pending = preferences.consumePendingSimulationGpsLog() ?: return
+        loadGpsLogSimulation(pending.first, pending.second)
+    }
+
+    private fun loadGpsLogSimulation(reference: String, displayName: String) {
+        viewModelScope.launch {
+            val fixes =
+                RecordedGpsLogParser.parseLines(GpsLogStorageManager.loadLog(getApplication(), reference))
+                    .getOrElse {
+                        _uiState.value = _uiState.value.copy(error = it.message ?: "Failed to load GPS log")
+                        return@launch
+                    }
+            val duration = (fixes.last().timeMillis - fixes.first().timeMillis).coerceAtLeast(0L)
+            simulationLogReference = reference
+            simulationLogName = displayName
+            replayEvents = emptyList()
+            playbackJob?.cancel()
+            _replayState.value =
+                ReplayState(
+                    currentTime = 0,
+                    isPlaying = false,
+                    playbackSpeed = 1f,
+                    traceDuration = duration,
+                    cameraFollowEnabled = true,
+                    traceFile = displayName
+                )
+            _uiState.value = _uiState.value.copy(mode = "Simulating $displayName", error = null)
+        }
+    }
+
+    private fun clearGpsLogSimulation() {
+        simulationLogReference = null
+        simulationLogName = null
+        playbackJob?.cancel()
+        if (replayEvents.isEmpty() && _replayState.value.traceFile != null) {
+            _replayState.value = ReplayState()
+        }
     }
 
     /** Toggle camera follow mode. */
@@ -400,6 +446,29 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
 
     /** Toggle playback state. */
     fun playPause() {
+        simulationLogReference?.let { reference ->
+            val current = _replayState.value
+            if (current.isPlaying) {
+                playbackJob?.cancel()
+                playbackJob = null
+                DetectionService.stopService(getApplication<Application>())
+                _replayState.value = current.copy(isPlaying = false)
+                _uiState.value = _uiState.value.copy(isRunning = false)
+            } else {
+                _replayState.value = current.copy(isPlaying = true)
+                DetectionService.startSimulation(
+                    getApplication(),
+                    reference,
+                    simulationLogName ?: current.traceFile.orEmpty(),
+                    current.playbackSpeed
+                )
+                val intent = Intent(getApplication<Application>(), DetectionService::class.java)
+                getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+                startPlayback()
+            }
+            return
+        }
+
         val current = _replayState.value
         if (current.isPlaying) {
             // Pause playback
@@ -428,11 +497,16 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
      * @param speed Speed multiplier (0.5x, 1x, 2x, 4x)
      */
     fun setPlaybackSpeed(speed: Float) {
-        _replayState.value = _replayState.value.copy(playbackSpeed = speed)
+        val clampedSpeed = SupportedGpsPlaybackSpeeds.clamp(speed)
+        _replayState.value = _replayState.value.copy(playbackSpeed = clampedSpeed)
         android.util.Log.d("DetectionViewModel", "Playback speed set to ${speed}x")
 
+        if (simulationLogReference != null) {
+            DetectionService.setSimulationSpeed(getApplication(), clampedSpeed)
+        }
+
         // Restart playback if currently playing to apply new speed
-        if (_replayState.value.isPlaying) {
+        if (_replayState.value.isPlaying && simulationLogReference == null) {
             playbackJob?.cancel()
             startPlayback()
         }

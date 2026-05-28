@@ -73,7 +73,17 @@ fun BusArrivalNavGraph() {
                 DetectionScreen()
             }
             composable(Screen.History.route) {
-                HistoryScreen()
+                HistoryScreen(
+                    onSimulateLog = {
+                        navController.navigate(Screen.Detection.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
             }
         }
     }
