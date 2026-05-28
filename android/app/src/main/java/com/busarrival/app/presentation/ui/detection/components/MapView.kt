@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -68,6 +69,7 @@ import kotlin.math.PI
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -122,6 +124,7 @@ fun MapView(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     val tileDiskCache = remember { TileCache(context) }
 
     val scale by viewModel.mapScale.collectAsState()
@@ -575,7 +578,16 @@ fun MapView(
                 busScreenPosition?.let { pos ->
                     Box(
                         modifier = Modifier.offset {
-                            IntOffset(pos.x.toInt() - 16, pos.y.toInt() - 16)
+                            val markerTopLeft =
+                                with(density) {
+                                    vehicleHeadingMarkerTopLeft(
+                                        gpsPosition = pos,
+                                        bearing = gpsBearing,
+                                        markerPx = vehicleHeadingMarkerSize.toPx(),
+                                        iconPx = vehicleHeadingIconSize.toPx()
+                                    )
+                                }
+                            IntOffset(markerTopLeft.x.roundToInt(), markerTopLeft.y.roundToInt())
                         }
                     ) {
                         VehicleHeadingMarker(bearing = gpsBearing)
