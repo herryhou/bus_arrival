@@ -54,6 +54,7 @@ private class HistoryViewModelFactory(
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
 fun HistoryScreen(
+    onSimulateLog: () -> Unit = {},
     viewModel: HistoryViewModel = viewModel(
         factory = HistoryViewModelFactory(LocalContext.current.applicationContext as Application)
     )
@@ -161,7 +162,12 @@ fun HistoryScreen(
                     ) { item ->
                         GpsLogRow(
                             item = item,
-                            onToggle = viewModel::toggleSelection
+                            onToggle = viewModel::toggleSelection,
+                            onSimulate = { reference ->
+                                if (viewModel.requestSimulation(reference)) {
+                                    onSimulateLog()
+                                }
+                            }
                         )
                     }
                 }

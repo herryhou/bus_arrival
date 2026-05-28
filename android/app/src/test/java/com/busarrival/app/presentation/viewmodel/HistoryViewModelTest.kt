@@ -4,6 +4,7 @@ import com.busarrival.app.data.preferences.DetectionPreferences
 import java.io.File
 import java.util.zip.ZipFile
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.Dispatchers
@@ -106,5 +107,36 @@ class HistoryViewModelTest {
         assertTrue(active.exists())
         assertTrue(inactive.exists())
         assertEquals("Stop recording before deleting the active log.", viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun requestSimulationStoresPendingLogForInactiveLogOnly() = runTest {
+        val active =
+            File(logDir, "gps-log-active.jsonl").apply {
+                writeText("""{"t":1}""")
+                setLastModified(2_000L)
+            }
+        val inactive =
+            File(logDir, "gps-log-inactive.jsonl").apply {
+                writeText("""{"t":2}""")
+                setLastModified(1_000L)
+            }
+        val preferences = DetectionPreferences(context)
+        preferences.lastGpsLogReference = active.absolutePath
+
+        val viewModel = HistoryViewModel(context)
+        advanceUntilIdle()
+
+        val inactiveItem = viewModel.uiState.value.logs.single { it.reference == inactive.absolutePath }
+        assertTrue(inactiveItem.canSimulate)
+        assertTrue(viewModel.requestSimulation(inactive.absolutePath))
+        assertEquals(inactive.absolutePath, preferences.pendingSimulationGpsLogReference)
+        assertEquals("gps-log-inactive.jsonl", preferences.pendingSimulationGpsLogName)
+
+        val activeItem = viewModel.uiState.value.logs.single { it.reference == active.absolutePath }
+        assertFalse(activeItem.canSimulate)
+        assertFalse(viewModel.requestSimulation(active.absolutePath))
+        assertEquals("Stop recording before simulating the active log.", viewModel.uiState.value.error)
+        assertEquals(inactive.absolutePath, preferences.pendingSimulationGpsLogReference)
     }
 }

@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import com.busarrival.app.data.gpslog.GpsLogMetadata
 import com.busarrival.app.data.gpslog.GpsLogStorageManager
+import com.busarrival.app.data.preferences.DetectionPreferences
 import com.busarrival.app.service.GpsLogArchive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +19,7 @@ data class LogManagerItem(
     val modifiedAtMillis: Long,
     val sizeBytes: Long,
     val isActive: Boolean,
+    val canSimulate: Boolean = !isActive,
     val isSelected: Boolean = false
 )
 
@@ -30,6 +32,7 @@ data class LogManagerUiState(
 )
 
 class HistoryViewModel(application: Application) : AndroidViewModel(application) {
+    private val preferences = DetectionPreferences(application)
     private val _uiState = MutableStateFlow(LogManagerUiState(isLoading = true))
     val uiState: StateFlow<LogManagerUiState> = _uiState.asStateFlow()
 
@@ -76,6 +79,19 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
             selected.forEach { GpsLogStorageManager.deleteLog(context, it.reference) }
         }
         reloadLogs(preserveSelection = false)
+    }
+
+    fun requestSimulation(reference: String): Boolean {
+        val item = _uiState.value.logs.firstOrNull { it.reference == reference } ?: return false
+        if (item.isActive) {
+            _uiState.value =
+                _uiState.value.copy(error = "Stop recording before simulating the active log.")
+            return false
+        }
+
+        preferences.setPendingSimulationGpsLog(item.reference, item.filename)
+        _uiState.value = _uiState.value.copy(error = null)
+        return true
     }
 
     private fun reloadLogs(preserveSelection: Boolean) {
@@ -139,6 +155,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
             modifiedAtMillis = modifiedAtMillis,
             sizeBytes = sizeBytes,
             isActive = isActive,
+            canSimulate = !isActive,
             isSelected = isSelected
         )
     }
