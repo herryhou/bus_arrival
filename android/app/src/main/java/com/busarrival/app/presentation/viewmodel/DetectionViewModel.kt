@@ -185,6 +185,10 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     private fun handleServiceEvent(event: PipelineEvent) {
         when (event) {
             is PipelineEvent.PositionUpdate -> {
+                android.util.Log.d(
+                    "DetectionViewModel",
+                    "handleServiceEvent: stop=${event.activeStopIndex} state=${event.activeStopState} sCm=${event.sCm}"
+                )
                 _uiState.value = _uiState.value.copy(
                     sCm = event.sCm,
                     vCms = event.vCms,
@@ -560,7 +564,11 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                 _replayState.value.copy(
                         currentTime = position.coerceIn(0, _replayState.value.traceDuration)
                 )
-        updateUiForPosition(position)
+        // Only use replay-based UI updates for trace file replay
+        // GPS log replay uses service events (handleServiceEvent)
+        if (simulationLogReference == null) {
+            updateUiForPosition(position)
+        }
     }
 
     /** Start playback coroutine. */
@@ -603,6 +611,8 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
      * Update UI state for a given replay position. Finds the relevant PositionUpdate events and
      * applies them to UI.
      *
+     * Priority: PositionUpdate embedded state (source of truth) → Arrival/Departure fallback
+     *
      * LIMITATION: PositionUpdate events don't have timestamps, so we map position to event index.
      * This is approximate since events aren't guaranteed to be evenly spaced in time. A more
      * accurate approach would require adding timestamps to PipelineEvent.
@@ -621,18 +631,25 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                     eventIndex <= targetIndex
                 }
 
-        latestUpdate?.let { event ->
+        if (latestUpdate != null) {
+            // PositionUpdate has embedded stop state from StateMachine - use it as source of truth
+            android.util.Log.d(
+                "DetectionViewModel",
+                "updateUiForPosition: from PositionUpdate stop=${latestUpdate.activeStopIndex} state=${latestUpdate.activeStopState}"
+            )
             _uiState.value =
                     _uiState.value.copy(
-                            sCm = event.sCm,
-                            vCms = event.vCms,
-                            mode = event.mode,
-                            currentStop = event.activeStopIndex,
-                            currentStopState = event.activeStopState
+                            sCm = latestUpdate.sCm,
+                            vCms = latestUpdate.vCms,
+                            mode = latestUpdate.mode,
+                            currentStop = latestUpdate.activeStopIndex,
+                            currentStopState = latestUpdate.activeStopState
                     )
+            return
         }
 
-        // Find arrivals/departures at this position
+        // Fallback: No PositionUpdate found, compute from Arrival/Departure events
+        android.util.Log.d("DetectionViewModel", "updateUiForPosition: NO PositionUpdate, fallback to Arrival/Departure")
         val eventIndex =
                 (position.toFloat() / _replayState.value.traceDuration * replayEvents.size).toInt()
         val currentEvents = replayEvents.take(eventIndex)
@@ -651,11 +668,16 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                             lastArrival?.stopIndex ?: -1 // Arrived after departure
                     else -> lastDeparture.stopIndex + 1 // Departed after arrival
                 }
+
+        android.util.Log.d(
+            "DetectionViewModel",
+            "updateUiForPosition: fallback FINAL stop=$currentStop state=${if (currentStop >= 0) _uiState.value.currentStopState else "Idle"}"
+        )
+
         _uiState.value =
                 _uiState.value.copy(
                         currentStop = currentStop,
-                        currentStopState =
-                                if (currentStop >= 0) _uiState.value.currentStopState else "Idle"
+                        currentStopState = if (currentStop >= 0) _uiState.value.currentStopState else "Idle"
                 )
     }
 

@@ -100,7 +100,6 @@ fun DetectionScreen(
                     isCameraFollowEnabled = uiState.isCameraFollowEnabled,
                     replayState = replayState,
                     viewModel = viewModel,
-                    gpsFixState = gpsFixState,
                     gpsLat = uiState.gpsLat,
                     gpsLon = uiState.gpsLon,
                     gpsBearing = uiState.gpsBearing,

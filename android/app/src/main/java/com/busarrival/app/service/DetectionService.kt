@@ -18,20 +18,9 @@ import com.busarrival.app.data.gpslog.GpsLogStorageManager
 import com.busarrival.app.data.gpslog.GpsSimulationTiming
 import com.busarrival.app.data.gpslog.RecordedGpsLogParser
 import com.busarrival.app.data.gpslog.SupportedGpsPlaybackSpeeds
-import com.busarrival.app.data.pipeline.types.TimestampMs
-import com.busarrival.app.data.pipeline.types.GpsStatus
-import com.busarrival.app.data.pipeline.detection.probability.ProbabilityModel
-import com.busarrival.app.data.pipeline.detection.statemachine.StateMachine
-import com.busarrival.app.data.pipeline.localization.kalman.KalmanFilter
-import com.busarrival.app.data.pipeline.localization.mapmatcher.MapMatcher
 import com.busarrival.app.data.preferences.DetectionPreferences
 import com.busarrival.app.data.storage.RouteStorageManager
 import com.busarrival.app.presentation.MainActivity
-import com.busarrival.app.domain.model.ArrivalEvent
-import com.busarrival.app.domain.model.DepartureEvent
-import com.busarrival.app.domain.model.FsmState
-import com.busarrival.app.domain.model.KalmanState
-import com.busarrival.app.domain.model.StopState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -72,9 +61,7 @@ class DetectionService : Service() {
 
     // Pipeline state
     private var activeRoute: com.busarrival.app.domain.model.RouteData? = null
-    private var kalmanState: KalmanState? = null
-    private var stopStates: Map<Int, StopState> = emptyMap()
-    private var lastGpsTime: TimestampMs = 0
+    private var detectionPipeline = DetectionPipeline()
 
     inner class LocalBinder : Binder() {
         fun getService(): DetectionService = this@DetectionService
@@ -266,141 +253,71 @@ class DetectionService : Service() {
     private fun initializePipeline() {
         val route = activeRoute ?: return
 
-        // Initialize stop state machines
-        stopStates = route.stops.mapIndexed { idx, _ ->
-            idx to StateMachine.initialState(idx)
-        }.toMap()
-
-        kalmanState = null
-        lastGpsTime = 0
+        detectionPipeline = DetectionPipeline()
+        detectionPipeline.initialize(route)
     }
 
     private fun resetPipeline() {
-        kalmanState = null
-        stopStates = emptyMap()
-        lastGpsTime = 0
+        detectionPipeline.close()
+        detectionPipeline = DetectionPipeline()
         activeRoute = null
     }
 
     private fun processLocation(location: android.location.Location, generation: Long = sourceGeneration) {
         if (generation != sourceGeneration) return
         gpsLogWriter.append(location)
-        val route = activeRoute ?: return
+        if (activeRoute == null) return
 
         serviceScope.launch {
             if (generation != sourceGeneration) return@launch
             try {
-                // Convert to GpsPoint
                 val gps = com.busarrival.app.domain.model.GpsPoint.fromLocation(location)
+                val result = detectionPipeline.process(location)
 
-                // Check for GPS jump (recovery trigger)
-                val isFirstFix = lastGpsTime == 0L
-
-                // Convert to grid coordinates
-                val (xCm, yCm) = GeoCoordinateConverter.toGridCoordinates(gps.lat, gps.lon, route)
-
-                // Phase 1: Map matching
-                val lastSegIdx = kalmanState?.lastSegIdx ?: 0
-                val matchResult = MapMatcher.match(
-                    gpsX = xCm,
-                    gpsY = yCm,
-                    gpsHeading = gps.headingCdeg,
-                    gpsSpeed = gps.speedCms ?: 0,
-                    routeData = route,
-                    lastIdx = lastSegIdx,
-                    isFirstFix = isFirstFix
-                )
-
-                // Project to route progress (simplified - uses node position)
-                val zCm = route.nodes[matchResult.segIdx].cumDistCm
-
-                // Phase 2: Kalman filter
-                if (kalmanState == null) {
-                    // First fix: initialize
-                    kalmanState = KalmanState.init(
-                        zCm = zCm,
-                        vGpsCms = gps.speedCms ?: 0,
-                        segIdx = matchResult.segIdx
-                    )
-                }
-
-                val signals = KalmanFilter.update(
-                    state = kalmanState!!,
-                    zCm = zCm,
-                    vGpsCms = gps.speedCms ?: 0,
-                    accuracyM = gps.accuracyM,
-                    hdopX10 = null,  // Location API doesn't provide HDOP
-                    isSoftResync = false
-                )
-
-                // Update segment index
-                kalmanState!!.lastSegIdx = matchResult.segIdx
-
-                // Phase 3: Detection - process all stops
-                for ((idx, stop) in route.stops.withIndex()) {
-                    val state = stopStates[idx] ?: continue
-
-                    // Compute probability
-                    // TODO: DetectionService needs proper GPS status tracking (Task 6)
-                    val probability = ProbabilityModel.compute(
-                        signals = signals,
-                        stop = stop,
-                        vCms = kalmanState!!.vCms,
-                        dwellS = state.dwellTimeS,
-                        gpsStatus = GpsStatus.Valid  // Temporary workaround
-                    )
-
-                    // Update state machine
-                    val (arrival, departure) = StateMachine.update(
-                        state = state,
-                        stop = stop,
-                        sCm = signals.sCm,
-                        probability = probability,
-                        timestamp = gps.timestamp
-                    )
-
-                    // Emit arrival event
-                    arrival?.let {
-                        _events.value = PipelineEvent.Arrival(
-                            stopIndex = it.stopIndex,
-                            probability = it.probability.value
+                when (result) {
+                    PipelineResult.NotInitialized -> return@launch
+                    is PipelineResult.Acquiring -> {
+                        _events.value = PipelineEvent.PositionUpdate(
+                            sCm = 0,
+                            vCms = 0,
+                            mode = "acquiring",
+                            activeStopIndex = -1,
+                            activeStopState = "Idle",
+                            accuracyM = gps.accuracyM ?: Float.MAX_VALUE,
+                            satellites = gps.hdop?.toInt() ?: 0,
+                            bearing = gps.headingCdeg?.toFloat()?.div(100f),
+                            lat = gps.lat,
+                            lon = gps.lon
                         )
                     }
-
-                    // Emit departure event
-                    departure?.let {
-                        _events.value = PipelineEvent.Departure(
-                            stopIndex = it.stopIndex,
-                            dwellTimeS = it.dwellTimeS
-                        )
-                    }
-                }
-
-                // Emit position update with GPS metadata
-                val primaryStopState =
-                    stopStates.entries
-                        .filter { (_, state) ->
-                            state.fsmState != FsmState.Idle &&
-                                    state.fsmState != FsmState.Departed
+                    is PipelineResult.Success -> {
+                        result.arrivals.forEach { arrival ->
+                            _events.value = PipelineEvent.Arrival(
+                                stopIndex = arrival.stopIndex,
+                                probability = arrival.probability.value
+                            )
                         }
-                        .maxByOrNull { it.key }
-                        ?.let { (idx, state) -> idx to state.fsmState.name }
-                        ?: (-1 to FsmState.Idle.name)
+                        result.departures.forEach { departure ->
+                            _events.value = PipelineEvent.Departure(
+                                stopIndex = departure.stopIndex,
+                                dwellTimeS = departure.dwellTimeS
+                            )
+                        }
 
-                _events.value = PipelineEvent.PositionUpdate(
-                    sCm = signals.sCm,
-                    vCms = kalmanState!!.vCms,
-                    mode = "Normal",
-                    activeStopIndex = primaryStopState.first,
-                    activeStopState = primaryStopState.second,
-                    accuracyM = gps.accuracyM ?: Float.MAX_VALUE,
-                    satellites = gps.hdop?.toInt() ?: 0,
-                    bearing = gps.headingCdeg?.toFloat()?.div(100f),
-                    lat = gps.lat,
-                    lon = gps.lon
-                )
-
-                lastGpsTime = gps.timestamp
+                        _events.value = PipelineEvent.PositionUpdate(
+                            sCm = result.sCm,
+                            vCms = result.vCms,
+                            mode = result.mode,
+                            activeStopIndex = result.activeStopIndex,
+                            activeStopState = result.activeStopState,
+                            accuracyM = gps.accuracyM ?: Float.MAX_VALUE,
+                            satellites = gps.hdop?.toInt() ?: 0,
+                            bearing = gps.headingCdeg?.toFloat()?.div(100f),
+                            lat = gps.lat,
+                            lon = gps.lon
+                        )
+                    }
+                }
 
             } catch (e: Exception) {
                 emitError("Pipeline error: ${e.message}")

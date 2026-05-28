@@ -200,6 +200,48 @@ class DetectionPipelineTraceV2Test {
     }
 
     @Test
+    fun process_offRouteReturnsFrozenPositionAndStatus() {
+        val traceFile = File.createTempFile("trace-v2-off-route-freeze", ".jsonl")
+        val pipeline = DetectionPipeline()
+
+        try {
+            pipeline.initialize(straightSyntheticRoute(), traceFile = traceFile)
+
+            val firstGood = pipeline.process(syntheticLocation(xCm = 10_000, yCm = 0, timeMs = 1_000))
+            val secondGood = pipeline.process(syntheticLocation(xCm = 12_000, yCm = 0, timeMs = 2_000))
+            assertTrue(firstGood is PipelineResult.Acquiring)
+            assertTrue(secondGood is PipelineResult.Success)
+            val lockedPosition = (secondGood as PipelineResult.Success).sCm
+
+            val offRouteResults =
+                (3_000L..7_000L step 1_000L).map { timeMs ->
+                    pipeline.process(syntheticLocation(xCm = 12_000, yCm = 6_000, timeMs = timeMs))
+                }
+            pipeline.close()
+
+            offRouteResults.forEachIndexed { idx, result ->
+                assertTrue("off-route result[$idx] should be Success", result is PipelineResult.Success)
+                val success = result as PipelineResult.Success
+                assertEquals(
+                    "off-route result[$idx] must keep the frozen route position",
+                    lockedPosition,
+                    success.sCm
+                )
+            }
+
+            val confirmedOffRoute = offRouteResults.last() as PipelineResult.Success
+            assertEquals("off_route", confirmedOffRoute.mode)
+
+            val ticks = TraceLoader.load(traceFile)
+            assertEquals("off_route", ticks.last().detection.status)
+            assertEquals(lockedPosition.toLong(), ticks.last().kalman.s_cm)
+        } finally {
+            pipeline.close()
+            traceFile.delete()
+        }
+    }
+
+    @Test
     fun process_gateClosedDoesNotAdvanceStopFsmState() {
         val traceFile = File.createTempFile("trace-v2-gate-closed", ".jsonl")
         val pipeline = DetectionPipeline()

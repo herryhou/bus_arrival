@@ -62,7 +62,6 @@ import com.busarrival.app.data.cache.TileResolution
 import com.busarrival.app.domain.model.ReplayState
 import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.domain.model.RouteNode
-import com.busarrival.app.domain.model.GpsFixState
 import com.busarrival.app.presentation.ui.detection.components.VehicleHeadingMarker
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 import kotlin.math.PI
@@ -117,7 +116,6 @@ fun MapView(
     isCameraFollowEnabled: Boolean,
     replayState: ReplayState = ReplayState(),
     viewModel: DetectionViewModel,
-    gpsFixState: GpsFixState,
     gpsLat: Double,
     gpsLon: Double,
     gpsBearing: Float?,
@@ -131,7 +129,6 @@ fun MapView(
     val offset by viewModel.mapOffset.collectAsState()
     val mapLabelZoomBias by viewModel.mapLabelZoomBias.collectAsState()
     val tileCache by viewModel.tileCache.collectAsState()
-    val uiState by viewModel.uiState.collectAsState()
     val canvasSize = remember { androidx.compose.runtime.mutableStateOf(IntSize.Zero) }
     val showDebugDetails = remember { mutableStateOf(true) }
     val centerLatLon =
@@ -240,25 +237,6 @@ fun MapView(
 
                     val worldX = lonToPixelX(gpsLon, BASE_Z) - lonToPixelX(center.lon, BASE_Z)
                     val worldY = latToPixelY(gpsLat, BASE_Z) - latToPixelY(center.lat, BASE_Z)
-                    val x = worldX * scale + offset.x + size.width / 2f
-                    val y = worldY * scale + offset.y + size.height / 2f
-                    if (x.isFinite() && y.isFinite()) Offset(x, y) else null
-                }
-            }
-
-    // Snapped route position (for stop marker)
-    val snappedScreenPosition by
-            remember(routeData, centerLatLon, currentSCm, scale, offset, canvasSize.value) {
-                derivedStateOf {
-                    val route = routeData ?: return@derivedStateOf null
-                    val center = centerLatLon ?: return@derivedStateOf null
-                    val size = canvasSize.value
-                    if (size.width <= 0 || size.height <= 0) return@derivedStateOf null
-
-                    val pos = route.interpolatePosition(currentSCm) ?: return@derivedStateOf null
-                    val ll = route.cmToLatLon(pos.first, pos.second)
-                    val worldX = lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(center.lon, BASE_Z)
-                    val worldY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(center.lat, BASE_Z)
                     val x = worldX * scale + offset.x + size.width / 2f
                     val y = worldY * scale + offset.y + size.height / 2f
                     if (x.isFinite() && y.isFinite()) Offset(x, y) else null

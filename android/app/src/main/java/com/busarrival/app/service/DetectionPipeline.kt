@@ -132,6 +132,9 @@ class DetectionPipeline {
             return PipelineResult.Success(
                 sCm = frozenSCm,
                 vCms = kalmanState?.vCms ?: 0,
+                mode = "off_route",
+                activeStopIndex = -1,
+                activeStopState = FsmState.Idle.name,
                 arrivals = emptyList(),
                 departures = emptyList()
             )
@@ -148,6 +151,9 @@ class DetectionPipeline {
             return PipelineResult.Success(
                 sCm = frozenSCm,
                 vCms = kalmanState?.vCms ?: 0,
+                mode = "suspect_off_route",
+                activeStopIndex = -1,
+                activeStopState = FsmState.Idle.name,
                 arrivals = emptyList(),
                 departures = emptyList()
             )
@@ -187,12 +193,15 @@ class DetectionPipeline {
                 lastGpsTime = gps.timestamp
                 val posSignals = PositionSignals(zGpsCm = drSCm, sCm = drSCm)
                 writeTraceCore(gps, matchResult, posSignals, "rejected", false, emptySet(), drSCm, true)
-                return PipelineResult.Success(
-                    sCm = drSCm,
-                    vCms = kalmanState!!.vCms,
-                    arrivals = emptyList(),
-                    departures = emptyList()
-                )
+            return PipelineResult.Success(
+                sCm = drSCm,
+                vCms = kalmanState!!.vCms,
+                mode = "rejected",
+                activeStopIndex = -1,
+                activeStopState = FsmState.Idle.name,
+                arrivals = emptyList(),
+                departures = emptyList()
+            )
             }
         }
         */
@@ -245,6 +254,9 @@ class DetectionPipeline {
             return PipelineResult.Success(
                 sCm = positionSignals.sCm,
                 vCms = kalmanState!!.vCms,
+                mode = "normal",
+                activeStopIndex = -1,
+                activeStopState = FsmState.Idle.name,
                 arrivals = emptyList(),
                 departures = emptyList()
             )
@@ -297,6 +309,15 @@ class DetectionPipeline {
             departure?.let { departures.add(it) }
         }
 
+        val primaryStopState =
+            stopStates.entries
+                .filter { (_, state) ->
+                    state.fsmState != FsmState.Idle && state.fsmState != FsmState.Departed
+                }
+                .maxByOrNull { it.key }
+                ?.let { (idx, state) -> idx to state.fsmState.name }
+                ?: (-1 to FsmState.Idle.name)
+
         lastGpsTime = gps.timestamp
         lastSCm = positionSignals.sCm
         writeTraceCore(gps, matchResult, positionSignals, "normal", false, arrivals.map { it.stopIndex }.toSet(), positionSignals.sCm, true)
@@ -304,6 +325,9 @@ class DetectionPipeline {
         return PipelineResult.Success(
             sCm = positionSignals.sCm,
             vCms = kalmanState!!.vCms,
+            mode = "normal",
+            activeStopIndex = primaryStopState.first,
+            activeStopState = primaryStopState.second,
             arrivals = arrivals,
             departures = departures
         )
@@ -487,6 +511,9 @@ class DetectionPipeline {
         return PipelineResult.Success(
             sCm = state.sCm,
             vCms = state.vCms,
+            mode = "normal",
+            activeStopIndex = -1,
+            activeStopState = FsmState.Idle.name,
             arrivals = emptyList(),
             departures = emptyList()
         )
@@ -574,11 +601,9 @@ class DetectionPipeline {
 
         // Use relaxed heading grid search with min_s and max_s constraints
         // Rust: mod.rs:162-175
-        val maxSCm = frozenSCm + 500_000  // 5km forward
-
-        // TODO: Implement MapMatcher.findBestSegmentGridOnly(minSCm, maxSCm)
+        // TODO: Implement MapMatcher.findBestSegmentGridOnly(minSCm, frozenSCm + 5km)
         // For now, use the projection we already have
-        val (sCm, segIdx) = GeoCoordinateConverter.projectToRoute(
+        val (sCm, _) = GeoCoordinateConverter.projectToRoute(
             xCm = gpsX,
             yCm = gpsY,
             routeData = route,
@@ -633,6 +658,9 @@ sealed class PipelineResult {
     data class Success(
         val sCm: DistCm,
         val vCms: SpeedCms,
+        val mode: String = "normal",
+        val activeStopIndex: Int = -1,
+        val activeStopState: String = FsmState.Idle.name,
         val arrivals: List<ArrivalEvent>,
         val departures: List<DepartureEvent>
     ) : PipelineResult()
