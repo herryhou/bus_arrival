@@ -564,34 +564,6 @@ fun MapView(
 
             // Positioned elements layer (without center alignment affecting offsets)
             Box(modifier = Modifier.fillMaxSize()) {
-                // Stop marker at snapped route position
-                snappedScreenPosition?.let { pos ->
-                    val markerLabel =
-                            formatBusMarkerLabel(
-                                    stopIndex = uiState.currentStop,
-                                    stopState = uiState.currentStopState
-                            )
-                    Box(
-                            modifier =
-                                    Modifier.offset {
-                                                IntOffset((pos.x + 14f + 50f).toInt(), (pos.y - 42f).toInt())
-                                            }
-                                            .background(
-                                                    color =
-                                                            busStateColor(uiState.currentStopState)
-                                                                    .copy(alpha = 0.86f),
-                                                    shape = RoundedCornerShape(10.dp)
-                                            )
-                                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                                text = markerLabel,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Color.White
-                        )
-                    }
-                }
-
                 // Draw vehicle heading arrow when GPS is ready with bearing
                 busScreenPosition?.let { pos ->
                     Box(
