@@ -147,20 +147,38 @@ fun MapView(
                 }
             }
 
-    // Camera follow: center map on current position when enabled
+    // Camera follow: center map on current position only when near edge
     val shouldFollow = isCameraFollowEnabled || replayState.cameraFollowEnabled
-    LaunchedEffect(currentSCm, shouldFollow, routeData) {
+    val edgeThresholdPx = 100f
+
+    LaunchedEffect(currentSCm, shouldFollow, routeData, scale, offset, canvasSize.value) {
         if (shouldFollow && routeData != null && centerLatLon != null) {
+            val size = canvasSize.value
+            if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
+
+            // Get current screen position
             val pos = routeData.interpolatePosition(currentSCm)
             if (pos != null) {
                 val ll = routeData.cmToLatLon(pos.first, pos.second)
 
-                // Calculate world offset from route center to current position
-                val targetX = lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLatLon.lon, BASE_Z)
-                val targetY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLatLon.lat, BASE_Z)
+                // Calculate current screen position
+                val worldX = lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLatLon.lon, BASE_Z)
+                val worldY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLatLon.lat, BASE_Z)
+                val screenX = worldX * scale + offset.x + size.width / 2f
+                val screenY = worldY * scale + offset.y + size.height / 2f
 
-                // Offset = -target * scale centers current position on screen
-                viewModel.updateMapState(scale, Offset(-targetX * scale, -targetY * scale))
+                // Check if near edge (within threshold)
+                val nearLeft = screenX < edgeThresholdPx
+                val nearRight = screenX > size.width - edgeThresholdPx
+                val nearTop = screenY < edgeThresholdPx
+                val nearBottom = screenY > size.height - edgeThresholdPx
+
+                // Update center only when near edge
+                if (nearLeft || nearRight || nearTop || nearBottom) {
+                    val targetX = lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLatLon.lon, BASE_Z)
+                    val targetY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLatLon.lat, BASE_Z)
+                    viewModel.updateMapState(scale, Offset(-targetX * scale, -targetY * scale))
+                }
             }
         }
     }
