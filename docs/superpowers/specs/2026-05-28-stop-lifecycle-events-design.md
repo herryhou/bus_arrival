@@ -15,7 +15,7 @@ Each event type must emit at most once per stop per pipeline session. UI code wi
 
 ## Existing Behavior
 
-The stop FSM already has internal `StopEvent` values for confirmed arrival and departure:
+The Rust stop FSM already has internal `detection::state_machine::StopEvent` values for confirmed arrival and departure:
 
 - `StopEvent::Arrived`
 - `StopEvent::Departed`
@@ -28,9 +28,16 @@ Rust host code converts `Arrived` and `Departed` into existing domain outputs:
 
 Android currently creates `ArrivalEvent` and `DepartureEvent` directly from selected FSM transitions. `Idle -> Approaching` and `Approaching -> Arriving` update raw state but do not emit an event.
 
+There are other `StopEvent` types in the repo for trace analysis:
+
+- `tools/validate_trace.py`
+- `crates/trace_validator/src/types.rs`
+
+Those types record trace/state-change analysis data and are not part of this feature.
+
 ## Design
 
-Extend the internal stop event model to include lifecycle transitions:
+Extend the Rust internal stop event model to include lifecycle transitions:
 
 ```text
 StopEvent.Approaching
@@ -50,11 +57,16 @@ Arriving -> Departed        emits Departed
 AtStop -> Departed          emits Departed
 ```
 
+The `Arriving -> Departed` transition covers the blow-past edge case where the bus passes the stop without satisfying the confirmed arrival threshold. It should still emit `Departed` once for that stop.
+
 No event is emitted for transitions back to `Idle`, terminal no-op updates, or repeated states.
 
 ## Once-Per-Stop Rule
 
-Each `StopState` tracks whether it has already emitted each lifecycle event:
+Each `StopState` tracks whether it has already emitted each lifecycle event. This applies to both implementations:
+
+- Rust `detection::state_machine::StopState`
+- Android `StopState`
 
 ```text
 approaching_emitted
@@ -63,7 +75,14 @@ arrived_emitted
 departed_emitted
 ```
 
-If GPS jitter causes a stop to leave and re-enter a state, the event does not fire again. These flags reset only when the pipeline or route is reset and stop states are recreated.
+If GPS jitter causes a stop to leave and re-enter a state, the event does not fire again. These flags reset when stop states are recreated:
+
+- pipeline initialization
+- route change
+- explicit pipeline reset
+- recovery logic that intentionally rebuilds stop states from a recovered stop index
+
+They do not reset on ordinary `Idle` fallback, suspect/off-route ticks, or a clean GPS re-entry that preserves stop state.
 
 ## Domain Events
 
@@ -71,17 +90,32 @@ Keep existing domain events unchanged:
 
 - `ArrivalEvent` still represents confirmed arrival.
 - `DepartureEvent` still represents departure.
-- `StopEvent` represents internal lifecycle transition output from the FSM.
+- Rust `detection::state_machine::StopEvent` represents internal lifecycle transition output from the Rust FSM.
+- Android uses a lifecycle-specific enum, not the trace-analysis `StopEvent` names.
 
 Do not extend `ArrivalEvent` or `ArrivalEventType` for `Approaching` or `Arriving`. Those states are lifecycle/progress signals, not confirmed arrivals.
 
 ## Android Boundary
 
+This section applies to the Android Kotlin pipeline only: `android/app/src/main/java/com/busarrival/app/service/DetectionPipeline.kt`. It does not change Rust `crates/pipeline/src/lib.rs::PipelineResult`.
+
+Add an Android lifecycle enum:
+
+```kotlin
+enum class StopLifecycleEvent {
+    Approaching,
+    Arriving,
+    Arrived,
+    Departed,
+    None
+}
+```
+
 Android `StateMachine.update(...)` should return a result object instead of only a pair:
 
 ```kotlin
 data class StopMachineUpdate(
-    val stopEvent: StopEvent,
+    val lifecycleEvent: StopLifecycleEvent,
     val arrivalEvent: ArrivalEvent?,
     val departureEvent: DepartureEvent?
 )
@@ -92,7 +126,7 @@ data class StopMachineUpdate(
 ```kotlin
 data class StopUiEvent(
     val stopIndex: Int,
-    val event: StopEvent,
+    val event: StopLifecycleEvent,
     val timestamp: TimestampMs
 )
 ```
@@ -125,7 +159,10 @@ Add focused tests for the state machine and pipeline boundary:
 - Re-entering `Approaching` after falling back to `Idle` does not emit `Approaching` again.
 - `Approaching -> Arriving` emits `Arriving` once.
 - `Arriving -> AtStop` emits `Arrived` once and still creates the existing `ArrivalEvent`.
+- `Arriving -> Departed` emits `Departed` once when the bus passes the stop without entering `AtStop`.
 - `AtStop -> Departed` emits `Departed` once and still creates the existing `DepartureEvent`.
+- A backward GPS jump after `AtStop` does not re-emit earlier lifecycle events if the FSM regresses.
+- Multiple active stops can each emit their own once-per-stop lifecycle event in the same pipeline session.
 - `DetectionPipeline` exposes lifecycle events in `PipelineResult.Success` without UI dependencies.
 
 ## Non-Goals
