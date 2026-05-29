@@ -89,6 +89,7 @@ private const val TILE_REQUEST_DELAY_MS = 75L
 private const val TILE_PREFETCH_PADDING = 1
 private const val MAX_FETCH_RANGE = 5
 private const val MAX_TILE_CONCURRENCY = 4
+private const val CAMERA_ANIMATION_MS = 350
 
 data class LatLon(val lat: Double, val lon: Double)
 
@@ -155,8 +156,19 @@ fun MapView(
     val shouldFollow = isCameraFollowEnabled || replayState.cameraFollowEnabled
     val edgeThresholdPx = 100f
 
-    LaunchedEffect(currentSCm, shouldFollow, routeData, scale, offset, canvasSize.value) {
-        if (shouldFollow && routeData != null && centerLatLon != null) {
+    // Track user interaction to auto-disable camera follow
+    val isUserInteracting = remember { mutableStateOf(false) }
+
+    // Reset user interaction flag after gesture ends
+    LaunchedEffect(isUserInteracting.value) {
+        if (isUserInteracting.value) {
+            kotlinx.coroutines.delay(100L)
+            isUserInteracting.value = false
+        }
+    }
+
+    LaunchedEffect(currentSCm, shouldFollow, routeData, scale, canvasSize.value, isUserInteracting.value) {
+        if (shouldFollow && routeData != null && centerLatLon != null && !isUserInteracting.value) {
             val size = canvasSize.value
             if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
 
@@ -177,13 +189,39 @@ fun MapView(
                 val nearTop = screenY < edgeThresholdPx
                 val nearBottom = screenY > size.height - edgeThresholdPx
 
-                // Update center only when near edge
+                // Update center only when near edge - with smooth animation
                 if (nearLeft || nearRight || nearTop || nearBottom) {
                     val targetX =
                             lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLatLon.lon, BASE_Z)
                     val targetY =
                             latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLatLon.lat, BASE_Z)
-                    viewModel.updateMapState(scale, Offset(-targetX * scale, -targetY * scale))
+                    val targetOffset = Offset(-targetX * scale, -targetY * scale)
+
+                    // Smooth animation with ease-in-out
+                    val startOffset = offset
+                    val startTime = System.currentTimeMillis()
+                    val duration = CAMERA_ANIMATION_MS.toLong()
+
+                    while (true) {
+                        val elapsed = System.currentTimeMillis() - startTime
+                        if (elapsed >= duration) {
+                            viewModel.updateMapState(scale, targetOffset)
+                            break
+                        }
+
+                        // Ease-in-out cubic interpolation
+                        val t = elapsed.toFloat() / duration.toFloat()
+                        val easeT = t * t * (3f - 2f * t) // smoothstep
+
+                        val animOffset =
+                            Offset(
+                                startOffset.x + (targetOffset.x - startOffset.x) * easeT,
+                                startOffset.y + (targetOffset.y - startOffset.y) * easeT
+                            )
+                        viewModel.updateMapState(scale, animOffset)
+
+                        kotlinx.coroutines.delay(16L) // ~60fps
+                    }
                 }
             }
         }
@@ -327,6 +365,12 @@ fun MapView(
                                                             pan
 
                                             viewModel.updateMapState(newScale, newOffset)
+
+                                            // Auto-disable camera follow on user gesture
+                                            if (isCameraFollowEnabled || replayState.cameraFollowEnabled) {
+                                                isUserInteracting.value = true
+                                                onToggleCameraFollow()
+                                            }
                                         }
                                     }
             ) {
