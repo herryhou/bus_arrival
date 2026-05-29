@@ -22,9 +22,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -55,8 +54,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -66,7 +65,6 @@ import com.busarrival.app.data.cache.TileResolution
 import com.busarrival.app.domain.model.ReplayState
 import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.domain.model.RouteNode
-import com.busarrival.app.presentation.ui.detection.components.VehicleHeadingMarker
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 import kotlin.math.PI
 import kotlin.math.ceil
@@ -115,16 +113,16 @@ fun RouteData.cmToLatLon(xCm: Int, yCm: Int): LatLon {
 
 @Composable
 fun MapView(
-    routeData: RouteData?,
-    currentSCm: Int,
-    isCameraFollowEnabled: Boolean,
-    replayState: ReplayState = ReplayState(),
-    viewModel: DetectionViewModel,
-    gpsLat: Double,
-    gpsLon: Double,
-    gpsBearing: Float?,
-    onToggleCameraFollow: () -> Unit = {},
-    modifier: Modifier = Modifier
+        routeData: RouteData?,
+        currentSCm: Int,
+        isCameraFollowEnabled: Boolean,
+        replayState: ReplayState = ReplayState(),
+        viewModel: DetectionViewModel,
+        gpsLat: Double,
+        gpsLon: Double,
+        gpsBearing: Float?,
+        onToggleCameraFollow: () -> Unit = {},
+        modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -135,7 +133,7 @@ fun MapView(
     val mapLabelZoomBias by viewModel.mapLabelZoomBias.collectAsState()
     val tileCache by viewModel.tileCache.collectAsState()
     val canvasSize = remember { androidx.compose.runtime.mutableStateOf(IntSize.Zero) }
-    val showDebugDetails = remember { mutableStateOf(true) }
+    val showDebugDetails = remember { mutableStateOf(false) }
     val centerLatLon =
             remember(routeData) {
                 routeData?.let {
@@ -177,8 +175,10 @@ fun MapView(
 
                 // Update center only when near edge
                 if (nearLeft || nearRight || nearTop || nearBottom) {
-                    val targetX = lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLatLon.lon, BASE_Z)
-                    val targetY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLatLon.lat, BASE_Z)
+                    val targetX =
+                            lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLatLon.lon, BASE_Z)
+                    val targetY =
+                            latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLatLon.lat, BASE_Z)
                     viewModel.updateMapState(scale, Offset(-targetX * scale, -targetY * scale))
                 }
             }
@@ -523,15 +523,65 @@ fun MapView(
 
                         // Draw 50m reference circle (semi-transparent filled disc)
                         val refRadiusM = 50f
-                        val eastPoint = routeData.cmToLatLon(pos.first + (refRadiusM * 100).toInt(), pos.second)
+                        val eastPoint =
+                                routeData.cmToLatLon(
+                                        pos.first + (refRadiusM * 100).toInt(),
+                                        pos.second
+                                )
                         val pxEast = toScreenX(eastPoint.lon)
                         val refRadiusPx = kotlin.math.abs(pxEast - px)
                         drawCircle(
-                            color = Color.Red.copy(alpha = 0.3f),
-                            radius = refRadiusPx,
-                            center = Offset(px, py)
+                                color = Color.Red.copy(alpha = 0.1f),
+                                radius = refRadiusPx,
+                                center = Offset(px, py)
                         )
                     }
+                }
+
+                // Draw vehicle heading arrow when GPS is ready (behind snap point)
+                busScreenPosition?.let { pos ->
+                    val arrowSize = 48f
+                    val bearing = gpsBearing ?: 0f
+
+                    // Navigation arrow shape (standard icon, scaled to 48x48)
+                    // Based on Material navigation icon, tip points up by default
+                    val bearingRad = bearing * PI / 180f
+                    val cosB = kotlin.math.cos(bearingRad).toFloat()
+                    val sinB = kotlin.math.sin(bearingRad).toFloat()
+
+                    // Arrow dimensions (48x48, coordinates relative to center)
+                    // Tip: (0, -20) from center
+                    // Outer base: (-15, 16.58) to (15, 16.58)
+                    // Inner cutout: (-13.58, 18) to (0, 12) to (13.58, 18)
+
+                    fun rotate(x: Float, y: Float): Offset {
+                        // Rotate point around origin
+                        val rx = x * cosB - y * sinB
+                        val ry = x * sinB + y * cosB
+                        return Offset(rx + pos.x, ry + pos.y)
+                    }
+
+                    val p1 = rotate(0f, -20f)
+                    val p2 = rotate(-15f, 16.58f)
+                    val p3 = rotate(-13.58f, 18f)
+                    val p4 = rotate(0f, 12f)
+                    val p5 = rotate(13.58f, 18f)
+                    val p6 = rotate(15f, 16.58f)
+
+                    val arrowPath = Path()
+                    // Outer shape (clockwise from tip)
+                    arrowPath.moveTo(p1.x, p1.y)
+                    arrowPath.lineTo(p2.x, p2.y)
+                    arrowPath.lineTo(p3.x, p3.y)
+                    arrowPath.lineTo(p4.x, p4.y)
+                    arrowPath.lineTo(p5.x, p5.y)
+                    arrowPath.lineTo(p6.x, p6.y)
+                    arrowPath.close()
+
+                    // Draw white edge
+                    drawPath(path = arrowPath, color = Color.White, style = Stroke(width = 3f))
+                    // Draw filled arrow
+                    drawPath(path = arrowPath, color = Color(0xFF2E7D32))
                 }
 
                 // Draw current position (live or replay) with scaled radius (interpolated)
@@ -546,38 +596,28 @@ fun MapView(
                     // Use different colors for live vs replay mode
                     val markerColor =
                             if (replayState.traceFile != null) {
-                                Color.Blue // Replay mode: blue marker
+                                Color.Cyan // Replay mode: blue marker
                             } else {
                                 Color.Green // Live mode: green marker
                             }
 
                     val markerRadius = 12f
-                    drawCircle(color = markerColor, radius = markerRadius, center = Offset(px, py))
+                    drawCircle(
+                            color = Color.White,
+                            radius = markerRadius,
+                            center = Offset(px, py),
+                            style = Stroke(width = 3f)
+                    )
+                    drawCircle(
+                            color = markerColor,
+                            radius = markerRadius - 1.5f,
+                            center = Offset(px, py)
+                    )
                 }
             }
 
             // Positioned elements layer (without center alignment affecting offsets)
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Draw vehicle heading arrow when GPS is ready with bearing
-                busScreenPosition?.let { pos ->
-                    Box(
-                        modifier = Modifier.offset {
-                            val markerTopLeft =
-                                with(density) {
-                                    vehicleHeadingMarkerTopLeft(
-                                        gpsPosition = pos,
-                                        bearing = gpsBearing,
-                                        markerPx = vehicleHeadingMarkerSize.toPx(),
-                                        iconPx = vehicleHeadingIconSize.toPx()
-                                    )
-                                }
-                            IntOffset(markerTopLeft.x.roundToInt(), markerTopLeft.y.roundToInt())
-                        }
-                    ) {
-                        VehicleHeadingMarker(bearing = gpsBearing)
-                    }
-                }
-            }
+            Box(modifier = Modifier.fillMaxSize()) {}
 
             Column(modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) {
                 IconButton(onClick = { showDebugDetails.value = !showDebugDetails.value }) {
@@ -631,22 +671,21 @@ fun MapView(
             }
 
             // Camera follow toggle (top-right, mirrors info button top-left)
-            Column(
-                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-            ) {
+            Column(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
                 IconButton(
-                    onClick = onToggleCameraFollow,
-                    modifier = Modifier
-                        .semantics { contentDescription = "Toggle camera follow" }
+                        onClick = onToggleCameraFollow,
+                        modifier =
+                                Modifier.semantics { contentDescription = "Toggle camera follow" }
                 ) {
                     Icon(
-                        imageVector = Icons.Default.LocationOn,
-                        contentDescription = "Toggle camera follow",
-                        tint = if (isCameraFollowEnabled) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = "Toggle camera follow",
+                            tint =
+                                    if (isCameraFollowEnabled) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
                     )
                 }
             }
