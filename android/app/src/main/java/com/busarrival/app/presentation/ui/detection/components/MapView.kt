@@ -515,6 +515,17 @@ fun MapView(
                         val px = toScreenX(ll.lon)
                         val py = toScreenY(ll.lat)
                         drawCircle(color = Color.Red, radius = stopRadius, center = Offset(px, py))
+
+                        // Draw 50m reference circle (semi-transparent filled disc)
+                        val refRadiusM = 50f
+                        val eastPoint = routeData.cmToLatLon(pos.first + (refRadiusM * 100).toInt(), pos.second)
+                        val pxEast = toScreenX(eastPoint.lon)
+                        val refRadiusPx = kotlin.math.abs(pxEast - px)
+                        drawCircle(
+                            color = Color.Red.copy(alpha = 0.3f),
+                            radius = refRadiusPx,
+                            center = Offset(px, py)
+                        )
                     }
                 }
 
