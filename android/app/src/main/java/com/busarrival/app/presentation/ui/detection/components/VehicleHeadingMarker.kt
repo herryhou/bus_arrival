@@ -66,7 +66,14 @@ internal fun vehicleHeadingMarkerTopLeft(
     iconPx: Float
 ): Offset {
     val markerCenter = markerPx / 2f
-    return Offset(gpsPosition.x - markerCenter, gpsPosition.y - markerCenter)
+    if (bearing == null) {
+        return Offset(gpsPosition.x - markerCenter, gpsPosition.y - markerCenter)
+    }
+    val iconHalf = iconPx / 2f
+    val bearingRad = bearing * PI / 180.0
+    val offsetDx = (-kotlin.math.sin(bearingRad) * iconHalf).toFloat()
+    val offsetDy = (+kotlin.math.cos(bearingRad) * iconHalf).toFloat()
+    return Offset(gpsPosition.x - markerCenter + offsetDx, gpsPosition.y - markerCenter + offsetDy)
 }
 
 private val vehicleNavigationIcon: ImageVector =
