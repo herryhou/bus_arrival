@@ -17,8 +17,9 @@ Users report:
 
 1. **Toggle Follow ON**: Always animate bus to screen center, regardless of current position
 2. **Follow enabled**: Track bus continuously, interpolate toward center when near edge
-3. **User gesture**: Auto-disable Follow, stop animation immediately
+3. **User gesture**: Auto-disable active follow source (live or replay), stop animation immediately
 4. **Smooth animation**: Ease-in-out, no jumps, tracks moving target
+5. **Position source**: Use route-interpolated position (from currentSCm) for both live and replay modes. Raw GPS only for bus marker rendering, not camera follow.
 
 ## Architecture
 
@@ -26,7 +27,9 @@ Users report:
 
 Replaces current 3-effect system with one unified effect.
 
-**Dependencies**: `shouldFollow, currentSCm, scale, canvasSize, isUserInteracting`
+**Dependencies**: `shouldFollow, scale, canvasSize, isUserInteracting`
+
+**Current position access**: `currentSCm` read via `rememberUpdatedState(currentSCm)` inside the effect. This allows continuous 60fps loop without restart on every position update.
 
 **State**:
 - `wasFollowingLastFrame`: Track if follow was enabled previously (detect enable transition)
@@ -35,13 +38,14 @@ Replaces current 3-effect system with one unified effect.
 
 **Per-frame logic (60fps)**:
 ```
-1. If !shouldFollow → exit
-2. If isUserInteracting → skip frame
-3. If !wasFollowingLastFrame AND shouldFollow → just enabled, set target
-4. Else if bus near edge → set target = center bus
-5. Else → target = null (stop interpolating)
-6. If target exists → interpolate offset toward target
-7. Update wasFollowingLastFrame = shouldFollow
+1. If !shouldFollow → exit, wasFollowingLastFrame = false
+2. If isUserInteracting → skip frame, keep checking
+3. Get current bus position from routeData.interpolatePosition(currentSCm)
+4. If !wasFollowingLastFrame AND shouldFollow → just enabled, set target = center bus
+5. Else if nearEdge → set target = center bus
+6. Else if inCenter → target = null (stop interpolating, allow comfortable center zone)
+7. If target exists → interpolate offset toward target
+8. Update wasFollowingLastFrame = shouldFollow
 ```
 
 ### Edge Detection
@@ -51,22 +55,43 @@ Replaces current 3-effect system with one unified effect.
 - Center zone: inner 50% of screen width/height
 - Transition zone: 25% buffer between edge and center
 
-```kotlin
-val edgeThreshold = size.width * 0.25f
-val centerThreshold = size.width * 0.25f
+**Hysteresis to prevent oscillation:**
+- Follow STARTS when bus enters edge zone (outer 25%)
+- Follow STOPS when bus enters center zone (inner 50%)
+- 25% gap prevents rapid toggle at boundary
 
-val nearEdge = screenX < edgeThreshold ||
-               screenX > size.width - edgeThreshold ||
-               screenY < edgeThreshold ||
-               screenY > size.height - edgeThreshold
+```kotlin
+val edgeThresholdX = size.width * 0.25f
+val edgeThresholdY = size.height * 0.25f
+val centerThresholdX = size.width * 0.25f
+val centerThresholdY = size.height * 0.25f
+
+val nearEdge = screenX < edgeThresholdX ||
+               screenX > size.width - edgeThresholdX ||
+               screenY < edgeThresholdY ||
+               screenY > size.height - edgeThresholdY
+
+val inCenter = screenX > centerThresholdX &&
+               screenX < size.width - centerThresholdX &&
+               screenY > centerThresholdY &&
+               screenY < size.height - centerThresholdY
 ```
 
 ### Interpolation Math
 
+**Position source**: Always use route-interpolated position from `currentSCm` (works for both live and replay modes).
+```kotlin
+val pos = routeData.interpolatePosition(currentSCm)
+if (pos != null) {
+    val ll = routeData.cmToLatLon(pos.first, pos.second)
+    // Calculate world coordinates from ll.lon, ll.lat
+}
+```
+
 **Target calculation**:
 ```kotlin
-val busWorldX = lonToPixelX(busLon, BASE_Z) - lonToPixelX(centerLon, BASE_Z)
-val busWorldY = latToPixelY(busLat, BASE_Z) - latToPixelY(centerLat, BASE_Z)
+val busWorldX = lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLon, BASE_Z)
+val busWorldY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLat, BASE_Z)
 targetOffset = Offset(-busWorldX * scale, -busWorldY * scale)
 ```
 
@@ -87,18 +112,27 @@ if distance < 1f {
 
 ### User Gesture Handling
 
+**API requirement**: MapView needs explicit callbacks to disable each follow source independently:
+```kotlin
+// MapView signature changes
+fun MapView(
+    // ... existing params
+    onDisableLiveFollow: () -> Unit = {},    // NEW: disable live camera follow
+    onDisableReplayFollow: () -> Unit = {},  // NEW: disable replay camera follow
+    // ... onToggleCameraFollow() removed
+)
+```
+
+**Gesture detector logic**:
 ```kotlin
 // In gesture detector
-if ((isCameraFollowEnabled || replayState.cameraFollowEnabled) && !isUserInteracting) {
+if (!isUserInteracting) {
     isUserInteracting = true
-    onToggleCameraFollow() // Auto-disable
-}
-
-// Reset after gesture ends
-LaunchedEffect(isUserInteracting) {
-    if (isUserInteracting) {
-        delay(100L)
-        isUserInteracting = false
+    // Disable whichever follow source is active
+    if (isCameraFollowEnabled) {
+        onDisableLiveFollow()
+    } else if (replayState.cameraFollowEnabled) {
+        onDisableReplayFollow()
     }
 }
 ```
@@ -121,13 +155,12 @@ User clicks Follow button
 Bus moves toward edge
 → LaunchedEffect runs every frame (60fps)
 → Calculate bus screen position
-→ nearEdge = true
+→ Enters edge zone (nearEdge = true)
 → Set target = bus position
 → Interpolate offset (15% per frame)
-→ Bus exits edge zone
-→ nearEdge = false
+→ Bus exits edge zone, enters center zone (inCenter = true)
 → target = null
-→ Stop interpolating
+→ Stop interpolating (comfortable center zone prevents oscillation)
 ```
 
 ### User Gesture Interruption
@@ -135,7 +168,10 @@ Bus moves toward edge
 User pans/zooms
 → detectTransformGestures fires
 → isUserInteracting = true
-→ onToggleCameraFollow() → shouldFollow = false
+→ Check active follow source:
+  - If live follow active: onDisableLiveFollow()
+  - If replay follow active: onDisableReplayFollow()
+→ shouldFollow = false
 → LaunchedEffect exits
 → After 100ms: isUserInteracting = false
 ```
@@ -171,8 +207,11 @@ User pans/zooms
 
 ## Implementation Notes
 
-- Remove `wasNearEdge` flag (no longer needed)
-- Remove LaunchedEffect #3 (follow-toggle check) - handled by main effect
+- Remove `wasNearEdge` flag (no longer needed, use `wasFollowingLastFrame`)
+- Remove LaunchedEffect #3 (follow-toggle check) - handled by main effect's transition detection
 - Keep `isUserInteracting` flag and reset LaunchedEffect
-- Change edgeThresholdPx from 100f to ratio-based (0.25f)
-- Animation: continuous 60fps interpolation vs. fixed 350ms while loop
+- Change edgeThresholdPx from 100f to ratio-based (0.25f for X and Y separately)
+- Animation: continuous 60fps interpolation with `rememberUpdatedState(currentSCm)` for position
+- API change: Replace `onToggleCameraFollow()` with `onDisableLiveFollow()` and `onDisableReplayFollow()`
+- Always use `routeData.interpolatePosition(currentSCm)` for camera follow target
+- Raw GPS (gpsLat/gpsLon) only for bus marker rendering, never for camera follow
