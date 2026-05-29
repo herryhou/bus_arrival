@@ -241,6 +241,33 @@ fun MapView(
             }
         }
     }
+
+    // Auto-pan when Follow toggled on while bus already near edge
+    LaunchedEffect(shouldFollow, routeData, currentSCm, scale, canvasSize.value) {
+        if (shouldFollow && routeData != null && centerLatLon != null) {
+            val size = canvasSize.value
+            if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
+
+            val pos = routeData.interpolatePosition(currentSCm)
+            if (pos != null) {
+                val ll = routeData.cmToLatLon(pos.first, pos.second)
+
+                val worldX = lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLatLon.lon, BASE_Z)
+                val worldY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLatLon.lat, BASE_Z)
+                val screenX = worldX * scale + offset.x + size.width / 2f
+                val screenY = worldY * scale + offset.y + size.height / 2f
+
+                val nearLeft = screenX < edgeThresholdPx
+                val nearRight = screenX > size.width - edgeThresholdPx
+                val nearTop = screenY < edgeThresholdPx
+                val nearBottom = screenY > size.height - edgeThresholdPx
+
+                if (nearLeft || nearRight || nearTop || nearBottom) {
+                    wasNearEdge.value = true
+                }
+            }
+        }
+    }
     // Calculate tile zoom level from scale - use derivedStateOf to ensure updates
     val tileZ by remember {
         derivedStateOf {
@@ -381,8 +408,8 @@ fun MapView(
 
                                             viewModel.updateMapState(newScale, newOffset)
 
-                                            // Auto-disable camera follow on user gesture
-                                            if (isCameraFollowEnabled || replayState.cameraFollowEnabled) {
+                                            // Auto-disable camera follow on user gesture (once per session)
+                                            if ((isCameraFollowEnabled || replayState.cameraFollowEnabled) && !isUserInteracting.value) {
                                                 isUserInteracting.value = true
                                                 onToggleCameraFollow()
                                             }
