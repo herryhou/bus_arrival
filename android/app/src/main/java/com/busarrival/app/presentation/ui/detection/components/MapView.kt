@@ -87,9 +87,9 @@ private const val TILE_REQUEST_DELAY_MS = 75L
 private const val TILE_PREFETCH_PADDING = 1
 private const val MAX_FETCH_RANGE = 5
 private const val MAX_TILE_CONCURRENCY = 4
-private const val CAMERA_EDGE_THRESHOLD_PX = 80f
-private const val CAMERA_COMFORT_ZONE_RATIO = 0.8f
-private const val CAMERA_ANIMATION_MS = 600
+private const val CAMERA_EDGE_THRESHOLD_RATIO = 0.25f
+private const val CAMERA_COMFORT_ZONE_RATIO = 0.35f
+private const val CAMERA_ANIMATION_MS = 400
 
 data class LatLon(val lat: Double, val lon: Double)
 
@@ -174,18 +174,21 @@ fun MapView(
                 var targetOffsetX = offset.x
                 var targetOffsetY = offset.y
 
-                if (currentScreenX < CAMERA_EDGE_THRESHOLD_PX) {
+                val edgeThresholdX = size.width * CAMERA_EDGE_THRESHOLD_RATIO
+                val edgeThresholdY = size.height * CAMERA_EDGE_THRESHOLD_RATIO
+
+                if (currentScreenX < edgeThresholdX) {
                     val targetScreenX = size.width * CAMERA_COMFORT_ZONE_RATIO
                     targetOffsetX = targetScreenX - worldX * scale - size.width / 2f
-                } else if (currentScreenX > size.width - CAMERA_EDGE_THRESHOLD_PX) {
+                } else if (currentScreenX > size.width - edgeThresholdX) {
                     val targetScreenX = size.width * (1 - CAMERA_COMFORT_ZONE_RATIO)
                     targetOffsetX = targetScreenX - worldX * scale - size.width / 2f
                 }
 
-                if (currentScreenY < CAMERA_EDGE_THRESHOLD_PX) {
+                if (currentScreenY < edgeThresholdY) {
                     val targetScreenY = size.height * CAMERA_COMFORT_ZONE_RATIO
                     targetOffsetY = targetScreenY - worldY * scale - size.height / 2f
-                } else if (currentScreenY > size.height - CAMERA_EDGE_THRESHOLD_PX) {
+                } else if (currentScreenY > size.height - edgeThresholdY) {
                     val targetScreenY = size.height * (1 - CAMERA_COMFORT_ZONE_RATIO)
                     targetOffsetY = targetScreenY - worldY * scale - size.height / 2f
                 }
