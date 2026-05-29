@@ -2,6 +2,8 @@
 
 Date: 2026-05-28
 
+Status: Implemented on 2026-05-29 in commit `ab9a6b8`.
+
 ## Goal
 
 Emit one-shot lifecycle events when a stop enters these FSM states:
@@ -60,6 +62,8 @@ AtStop -> Departed          emits Departed
 The `Arriving -> Departed` transition covers the blow-past edge case where the bus passes the stop without satisfying the confirmed arrival threshold. It should still emit `Departed` once for that stop.
 
 No event is emitted for transitions back to `Idle`, terminal no-op updates, or repeated states.
+
+Android implementation note: the pipeline must continue updating stops already in `Arriving` or `AtStop` even after route progress passes `corridorEndCm`. A strict `s_cm <= corridorEndCm` active-stop filter prevents the FSM from receiving the first tick that satisfies the departure threshold (`d_to_stop > 4000`), so `Departed` never reaches `PipelineResult.Success.stopEvents` or the UI callback.
 
 ## Once-Per-Stop Rule
 
@@ -150,6 +154,8 @@ interface StopEventCallback {
 ```
 
 The callback implementation can show a toast now and can later be replaced with snackbar, sound, notification, logging, or other presentation behavior.
+
+Implemented behavior: `DetectionViewModel` registers `StopEventCallback`, maps lifecycle events to `EventHint` values, and leaves `StateMachine`/`DetectionPipeline` free of UI dependencies.
 
 ## Testing
 

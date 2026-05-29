@@ -42,9 +42,19 @@ A stop should be processed when either condition is true:
 1. `s_cm` is within `[corridor_start_cm, corridor_end_cm]`.
 2. The stop FSM state is `Arriving` or `AtStop`.
 
-The second condition is intentionally state-based. It lets the FSM receive the
-post-corridor sample needed to emit `Departed`, but it does not make idle stops
-outside their corridors active.
+The second condition is intentionally FSM-state-based. It lets the FSM receive
+the post-corridor sample needed to emit `Departed`, but it does not make idle
+stops outside their corridors active.
+
+This design does not add corridor hysteresis. A stop that is still `Idle` after
+the vehicle has passed `corridor_end_cm` remains ineligible. Lifecycle detection
+requires at least one eligible in-corridor update before post-corridor departure
+tracking can continue.
+
+This design also does not add a new stale-state timeout. Cleanup remains the
+normal `Arriving`/`AtStop` to `Departed` transition. If a future requirement needs
+timeouts for stalled GPS or never-departed stops, that should be designed as a
+separate FSM behavior change because it affects host and firmware semantics.
 
 ## Data Flow
 
@@ -64,6 +74,9 @@ Add focused tests before implementation:
   just after `corridor_end_cm` and emits `Departed`.
 - Firmware predicate regression: post-corridor `Arriving` and `AtStop` stops are
   eligible, while a post-corridor `Idle` stop is not.
+- Boundary regression: `s_cm == corridor_end_cm` remains eligible through strict
+  inclusive corridor semantics.
+- Cleanup regression: a post-corridor `Departed` stop is not lifecycle-eligible.
 
 Run the targeted tests first, then the Rust regression suites:
 
@@ -76,13 +89,22 @@ rtk cargo test -p pipeline --lib
 
 ## Documentation
 
-Update state-machine documentation to clarify that the shared corridor filter remains
-strict, while host and firmware orchestration keep `Arriving` and `AtStop` stops
-eligible until departure can be observed.
+Update `docs/specs/06-state_machine.md` to clarify that the shared corridor filter
+remains strict, while host and firmware orchestration keep `Arriving` and `AtStop`
+stops eligible until departure can be observed.
+
+## Firmware Cost
+
+Firmware should use a direct route-stop scan with a small local predicate rather
+than adding FSM state to the shared filter API. The expected runtime cost is one
+extra FSM-state comparison per stop considered. The implementation must not add heap
+allocation and should keep the output bounded by the existing `heapless::Vec`
+capacity.
 
 ## Success Criteria
 
 - Rust host and firmware can emit `Departed` after the strict corridor end.
 - Idle stops outside their corridors are not processed because of this change.
+- Departed stops outside their corridors are not processed because of this change.
 - `pipeline_filter::active_stops()` keeps its existing strict corridor semantics.
 - Targeted and regression tests pass.

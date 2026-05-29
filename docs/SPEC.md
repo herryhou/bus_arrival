@@ -29,7 +29,8 @@ The pipeline has three phases:
    Kalman filtering, dead reckoning, and off-route recovery.
 3. **Runtime detection** combines corridor gating, weighted arrival probability,
    a stop state machine, and stop-index recovery to emit `Announce`, `Arrival`,
-   and `Departure` events.
+   and `Departure` domain events plus one-shot stop lifecycle events for
+   `Approaching`, `Arriving`, `Arrived`, and `Departed`.
 
 Runtime responsibilities are split by layer:
 
@@ -49,6 +50,10 @@ Trace output must expose enough state to debug decisions: GPS input/status,
 map-match segment and distance, heading eligibility, `z_gps_cm`, `s_cm`,
 `v_cms`, divergence, off-route/recovery state, active stop corridor, probability
 features, FSM state, and emitted events.
+
+Android exposes stop lifecycle events through `PipelineResult.Success.stopEvents`
+and dispatches them through `StopEventCallback`. The detection pipeline remains
+UI-neutral; toast/snackbar/sound behavior belongs in service/viewmodel/UI layers.
 
 ## Universal Rules
 
@@ -122,6 +127,7 @@ features, FSM state, and emitted events.
 - **`specs/06-state_machine.md`** - Detection state machine
   - State transitions (Approaching → Arriving → AtStop → Departed)
   - Event emission rules
+  - One-shot lifecycle events and Android UI-neutral boundary
   - Dwell time tracking
 
 - **`specs/07-stop_recovery.md`** - Stop index recovery
@@ -154,6 +160,7 @@ features, FSM state, and emitted events.
 | GPS outage handling | 03-dead_reckoning |
 | GPS processing issues | 12-gps_processing |
 | State transition issues | 06-state_machine |
+| Stop lifecycle/toast event issues | 06-state_machine, superpowers/specs/2026-05-28-stop-lifecycle-events-design.md |
 | Stop index problems | 07-stop_recovery |
 | Route preprocessing | 09-preprocessing |
 | Performance optimization | 00-constraints (see budgets section) |
@@ -163,6 +170,7 @@ features, FSM state, and emitted events.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1 | 2026-05-29 | Documented one-shot stop lifecycle events and Android UI-neutral boundary |
 | 1.0 | 2025-04-19 | Initial LLM-spec system created |
 
 ## For Spec Authors
