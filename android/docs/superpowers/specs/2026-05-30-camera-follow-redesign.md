@@ -18,7 +18,7 @@ Users report:
 1. **Toggle Follow ON**: Always animate bus to screen center, regardless of current position
 2. **Follow enabled**: Track bus continuously, interpolate toward center when near edge
 3. **User gesture**: Auto-disable active follow source (live or replay), stop animation immediately
-4. **Smooth animation**: Ease-in-out, no jumps, tracks moving target
+4. **Smooth animation**: Exponential lerp (ease-out), no jumps, tracks moving target
 5. **Position source**: Use route-interpolated position (from currentSCm) for both live and replay modes. Raw GPS only for bus marker rendering, not camera follow.
 
 ## Architecture
@@ -27,9 +27,11 @@ Users report:
 
 Replaces current 3-effect system with one unified effect.
 
-**Dependencies**: `shouldFollow, scale, canvasSize, isUserInteracting`
+**Dependencies**: `shouldFollow, routeData, centerLatLon, scale, canvasSize, isUserInteracting`
 
 **Current position access**: `currentSCm` read via `rememberUpdatedState(currentSCm)` inside the effect. This allows continuous 60fps loop without restart on every position update.
+
+**Route data handling**: Route changes trigger effect restart (via dependencies), ensuring position calculations use current route geometry and center point.
 
 **State**:
 - `wasFollowingLastFrame`: Track if follow was enabled previously (detect enable transition)
@@ -62,20 +64,23 @@ Replaces current 3-effect system with one unified effect.
 ### Edge Detection
 
 **Ratio-based thresholds** (scale with screen size):
-- Edge zone: outer 25% of screen width/height
-- Center zone: inner 50% of screen width/height
-- Transition zone: 25% buffer between edge and center
+- **Edge zone**: outer 25% of screen (start following when bus here)
+- **Center zone**: inner 40% of screen (stop following when bus here)
+- **Transition gap**: 35% between zones prevents oscillation
 
 **Hysteresis to prevent oscillation:**
-- Follow STARTS when bus enters edge zone (outer 25%)
-- Follow STOPS when bus enters center zone (inner 50%)
-- 25% gap prevents rapid toggle at boundary
+- Follow STARTS when bus enters edge zone (outside 25% from edges)
+- Follow STOPS when bus enters center zone (inside 40% from edges)
+- 35% gap prevents rapid toggle at boundary
 
 ```kotlin
+// Edge zone: outer 25%
 val edgeThresholdX = size.width * 0.25f
 val edgeThresholdY = size.height * 0.25f
-val centerThresholdX = size.width * 0.25f
-val centerThresholdY = size.height * 0.25f
+
+// Center zone: inner 40%
+val centerThresholdX = size.width * 0.30f  // 30% from left/right = 40% center
+val centerThresholdY = size.height * 0.30f // 30% from top/bottom = 40% center
 
 val nearEdge = screenX < edgeThresholdX ||
                screenX > size.width - edgeThresholdX ||
@@ -106,11 +111,12 @@ val busWorldY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLat, BASE_Z)
 targetOffset = Offset(-busWorldX * scale, -busWorldY * scale)
 ```
 
-**Per-frame interpolation** (when target active):
+**Per-frame interpolation** (exponential lerp, ease-out):
 ```kotlin
-val lerpFactor = 0.15f // 15% per frame → ~350ms to settle
+val lerpFactor = 0.15f // 15% per frame → exponential decay, ~350ms to settle
 val newOffset = currentOffset + (targetOffset - currentOffset) * lerpFactor
 ```
+This produces ease-out motion: fast initially, slowing as it approaches target. Each frame covers 15% of remaining distance.
 
 **Stop condition**:
 ```kotlin
@@ -148,10 +154,11 @@ fun MapView(
 // In gesture detector
 if (!isUserInteracting) {
     isUserInteracting = true
-    // Disable whichever follow source is active
+    // Disable active follow sources (both may be active)
     if (isCameraFollowEnabled) {
         onDisableLiveFollow()
-    } else if (replayState.cameraFollowEnabled) {
+    }
+    if (replayState.cameraFollowEnabled) {
         onDisableReplayFollow()
     }
 }
@@ -200,7 +207,7 @@ User pans/zooms
 
 - **No route data**: Exit LaunchedEffect early
 - **Canvas size zero**: Exit early, wait for layout
-- **Invalid GPS (0,0)**: Skip position calculation
+- **Invalid route position**: `interpolatePosition(currentSCm)` returns null → skip frame, continue loop
 - **Coroutine canceled**: Compose handles gracefully on effect restart
 
 ## Performance Considerations
