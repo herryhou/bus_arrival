@@ -44,8 +44,19 @@ Replaces current 3-effect system with one unified effect.
 4. If !wasFollowingLastFrame AND shouldFollow → just enabled, set target = center bus
 5. Else if nearEdge → set target = center bus
 6. Else if inCenter → target = null (stop interpolating, allow comfortable center zone)
-7. If target exists → interpolate offset toward target
-8. Update wasFollowingLastFrame = shouldFollow
+
+7. IDLE GUARD: If target == null → delay(100L), continue loop
+   (Prevent unnecessary recomposition when camera settled)
+
+8. If target exists → interpolate offset toward target
+
+9. MOVEMENT THRESHOLD: Only update state if movement >= 0.5px
+   if ((newOffset - currentOffset).getDistance() >= 0.5f) {
+       viewModel.updateMapState(scale, newOffset)
+   }
+   (Prevent tile loading churn from micro-movements)
+
+10. Update wasFollowingLastFrame = shouldFollow
 ```
 
 ### Edge Detection
@@ -107,6 +118,15 @@ val distance = abs(targetOffset - currentOffset)
 if distance < 1f {
     currentOffset = targetOffset // Snap
     targetOffset = null // Stop
+}
+```
+
+**Movement threshold for state update**:
+```kotlin
+// Only trigger recomposition if movement is meaningful
+val movementDelta = (newOffset - currentOffset).getDistance()
+if (movementDelta >= 0.5f) {
+    viewModel.updateMapState(scale, newOffset)
 }
 ```
 
@@ -182,6 +202,31 @@ User pans/zooms
 - **Canvas size zero**: Exit early, wait for layout
 - **Invalid GPS (0,0)**: Skip position calculation
 - **Coroutine canceled**: Compose handles gracefully on effect restart
+
+## Performance Considerations
+
+**Why 60fps loop is safe:**
+- Math (coordinate transforms, edge checks, lerp) is cheap
+- Expensive part is `viewModel.updateMapState()` → triggers recomposition, tile requests
+
+**Two guards prevent unnecessary churn:**
+
+1. **Idle guard**: When `targetOffset == null` (bus centered, no animation needed):
+   ```kotlin
+   if (targetOffset == null) {
+       delay(100L) // Don't spin at 60fps doing nothing
+       continue
+   }
+   ```
+
+2. **Movement threshold**: Only update state when movement >= 0.5px:
+   ```kotlin
+   if ((newOffset - currentOffset).getDistance() >= 0.5f) {
+       viewModel.updateMapState(scale, newOffset)
+   }
+   ```
+
+**Result**: Loop only calls `updateMapState` when actively animating toward target. When bus centered, loop idles (100ms delay) without triggering recomposition.
 
 ## Testing Strategy
 
