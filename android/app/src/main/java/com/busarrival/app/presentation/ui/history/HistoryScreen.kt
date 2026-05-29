@@ -11,20 +11,29 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -67,85 +76,120 @@ fun HistoryScreen(
     )
     val totalLogs = uiState.logs.size
     val allSelected = totalLogs > 0 && uiState.selectedCount == totalLogs
-    val selectionLabel =
-        when {
-            totalLogs == 0 -> "No logs"
-            uiState.selectedCount == 0 -> "Select all"
-            allSelected -> "Clear selection"
-            else -> "${uiState.selectedCount} selected"
-        }
-    val selectionState =
-        when {
-            uiState.selectedCount == 0 -> ToggleableState.Off
-            allSelected -> ToggleableState.On
-            else -> ToggleableState.Indeterminate
-        }
+    val hasSelection = uiState.selectedCount > 0
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            Text(
-                text = "GPS Logs",
-                style = MaterialTheme.typography.headlineSmall
+        TopAppBar(
+            title = {
+                Column {
+                    Text(
+                        text = "GPS Logs",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Text(
+                        text = "$totalLogs logs",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            actions = {
+                IconButton(onClick = { }) {
+                    Icon(Icons.Default.ArrowDropDown, "Sort")
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Manage the logs from the active storage backend.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        )
 
-            if (uiState.error != null) {
-                Spacer(modifier = Modifier.height(8.dp))
+        if (uiState.error != null) {
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Text(
                     text = uiState.error.orEmpty(),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(12.dp)
                 )
             }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            BulkActionBar(
-                selectionState = selectionState,
-                selectionLabel = selectionLabel,
-                hasLogs = totalLogs > 0,
-                canDelete = uiState.canDeleteSelected,
-                onToggleSelection = {
-                    if (allSelected) {
-                        viewModel.clearSelection()
-                    } else {
-                        viewModel.selectAll()
-                    }
-                },
-                onShare = {
-                    viewModel.shareSelected()?.let { zipFile ->
-                        val shareIntent =
-                            Intent.createChooser(
-                                GpsLogArchive.shareZip(context, zipFile),
-                                "Share GPS logs"
-                            ).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                        context.startActivity(shareIntent)
-                    }
-                },
-                onDelete = viewModel::deleteSelected
-            )
         }
 
-        HorizontalDivider()
+        if (hasSelection) {
+            Surface(
+                tonalElevation = 3.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TriStateCheckbox(
+                        state = when {
+                            allSelected -> ToggleableState.On
+                            uiState.selectedCount == 0 -> ToggleableState.Off
+                            else -> ToggleableState.Indeterminate
+                        },
+                        onClick = {
+                            if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
+                        }
+                    )
+
+                    Text(
+                        text = "${uiState.selectedCount} selected",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Button(
+                        onClick = {
+                            viewModel.shareSelected()?.let { zipFile ->
+                                val shareIntent = Intent.createChooser(
+                                    GpsLogArchive.shareZip(context, zipFile),
+                                    "Share GPS logs"
+                                ).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(shareIntent)
+                            }
+                        },
+                        enabled = hasSelection,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    ) {
+                        Icon(Icons.Default.Share, null, Modifier.width(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Share ${uiState.selectedCount}")
+                    }
+
+                    Button(
+                        onClick = viewModel::deleteSelected,
+                        enabled = uiState.canDeleteSelected,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    ) {
+                        Icon(Icons.Default.Delete, null, Modifier.width(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Delete ${uiState.selectedCount}")
+                    }
+                }
+            }
+            HorizontalDivider()
+        }
 
         Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .pullRefresh(pullRefreshState),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                contentPadding = PaddingValues(vertical = 8.dp)
             ) {
                 when {
                     uiState.isLoading -> item {
@@ -169,6 +213,7 @@ fun HistoryScreen(
                                 }
                             }
                         )
+                        HorizontalDivider()
                     }
                 }
             }
@@ -183,66 +228,15 @@ fun HistoryScreen(
 }
 
 @Composable
-private fun BulkActionBar(
-    selectionState: ToggleableState,
-    selectionLabel: String,
-    hasLogs: Boolean,
-    canDelete: Boolean,
-    onToggleSelection: () -> Unit,
-    onShare: () -> Unit,
-    onDelete: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        TriStateCheckbox(
-            state = selectionState,
-            onClick = onToggleSelection,
-            enabled = hasLogs
-        )
-
-        Text(
-            text = selectionLabel,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f)
-        )
-
-        IconButton(
-            onClick = onShare,
-            enabled = selectionState != ToggleableState.Off
-        ) {
-            Icon(
-                imageVector = Icons.Default.Share,
-                contentDescription = "Share selected logs"
-            )
-        }
-
-        IconButton(
-            onClick = onDelete,
-            enabled = canDelete
-        ) {
-            Icon(
-                imageVector = Icons.Default.Delete,
-                contentDescription = "Delete selected logs"
-            )
-        }
-    }
-}
-
-@Composable
 private fun LoadingContent(modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier,
+        modifier = modifier.padding(24.dp),
         verticalArrangement = Arrangement.Center
     ) {
         Text(
             text = "Loading GPS logs...",
             style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(24.dp)
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -250,12 +244,13 @@ private fun LoadingContent(modifier: Modifier = Modifier) {
 @Composable
 private fun EmptyLogsContent(modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier.padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.Center
+        modifier = modifier.padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = "No GPS logs found",
-            style = MaterialTheme.typography.titleLarge
+            style = MaterialTheme.typography.titleMedium
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
