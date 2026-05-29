@@ -103,6 +103,7 @@ fun DetectionScreen(
                     gpsLat = uiState.gpsLat,
                     gpsLon = uiState.gpsLon,
                     gpsBearing = uiState.gpsBearing,
+                    onToggleCameraFollow = { viewModel.toggleCameraFollow() },
                     modifier = Modifier.weight(0.6f)
                 )
 

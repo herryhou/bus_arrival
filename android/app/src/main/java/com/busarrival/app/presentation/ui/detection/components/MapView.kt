@@ -16,6 +16,7 @@ package com.busarrival.app.presentation.ui.detection.components
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,6 +55,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -119,6 +123,7 @@ fun MapView(
     gpsLat: Double,
     gpsLon: Double,
     gpsBearing: Float?,
+    onToggleCameraFollow: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -621,6 +626,27 @@ fun MapView(
                                     "Origin(0,0): ${"%.4f".format(testOrigin.lat)}, ${"%.4f".format(testOrigin.lon)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Black
+                    )
+                }
+            }
+
+            // Camera follow toggle (top-right, mirrors info button top-left)
+            Column(
+                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+            ) {
+                IconButton(
+                    onClick = onToggleCameraFollow,
+                    modifier = Modifier
+                        .semantics { contentDescription = "Toggle camera follow" }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = "Toggle camera follow",
+                        tint = if (isCameraFollowEnabled) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
                     )
                 }
             }
