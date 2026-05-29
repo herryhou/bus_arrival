@@ -88,7 +88,7 @@ private const val TILE_PREFETCH_PADDING = 1
 private const val MAX_FETCH_RANGE = 5
 private const val MAX_TILE_CONCURRENCY = 4
 private const val CAMERA_EDGE_THRESHOLD_PX = 80f
-private const val CAMERA_COMFORT_ZONE_RATIO = 0.3f
+private const val CAMERA_COMFORT_ZONE_RATIO = 0.8f
 private const val CAMERA_ANIMATION_MS = 600
 
 data class LatLon(val lat: Double, val lon: Double)
@@ -139,6 +139,7 @@ fun MapView(
     val tileCache by viewModel.tileCache.collectAsState()
     val canvasSize = remember { androidx.compose.runtime.mutableStateOf(IntSize.Zero) }
     val showDebugDetails = remember { mutableStateOf(false) }
+    val isUserInteracting = remember { mutableStateOf(false) }
     val centerLatLon =
             remember(routeData) {
                 routeData?.let {
@@ -155,8 +156,8 @@ fun MapView(
     // Camera follow: single-axis smooth adjustment when near edge
     val shouldFollow = isCameraFollowEnabled || replayState.cameraFollowEnabled
 
-    LaunchedEffect(currentSCm, shouldFollow, routeData, scale, canvasSize.value) {
-        if (shouldFollow && routeData != null && centerLatLon != null) {
+    LaunchedEffect(currentSCm, shouldFollow, routeData, scale, canvasSize.value, isUserInteracting.value) {
+        if (shouldFollow && routeData != null && centerLatLon != null && !isUserInteracting.value) {
             val size = canvasSize.value
             if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
 
@@ -210,6 +211,14 @@ fun MapView(
 
                 viewModel.updateMapState(scale, Offset(targetOffsetX, targetOffsetY))
             }
+        }
+    }
+
+    // Reset user interaction flag after gesture ends
+    LaunchedEffect(isUserInteracting.value) {
+        if (isUserInteracting.value) {
+            kotlinx.coroutines.delay(100L)
+            isUserInteracting.value = false
         }
     }
 
@@ -325,6 +334,7 @@ fun MapView(
                                     .onSizeChanged { canvasSize.value = it }
                                     .pointerInput(Unit) {
                                         detectTransformGestures { centroid, pan, zoom, _ ->
+                                            isUserInteracting.value = true
                                             val oldScale = scale
                                             val newScale = (oldScale * zoom).coerceIn(0.1f, 10f)
 
