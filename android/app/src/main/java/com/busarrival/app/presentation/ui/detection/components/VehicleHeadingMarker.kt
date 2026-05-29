@@ -25,7 +25,7 @@ internal val vehicleHeadingIconSize = vehicleHeadingMarkerSize / 2f
 
 @Composable
 fun VehicleHeadingMarker(bearing: Float?, modifier: Modifier = Modifier) {
-    val arrowColor = Color(0xFF2196F3)
+    val arrowColor = Color(0xFF2E7D32)  // Material Green 800
     val questionColor = Color.Red
 
     if (bearing != null) {
