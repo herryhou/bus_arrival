@@ -630,7 +630,7 @@ fun MapView(
                                 Color.Green // Live mode: green marker
                             }
 
-                    val markerRadius = 12f
+                    val markerRadius = 8f
                     drawCircle(
                             color = Color.White,
                             radius = markerRadius,
