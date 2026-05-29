@@ -41,16 +41,18 @@ Replaces current 3-effect system with one unified effect.
 **Per-frame logic (60fps)**:
 ```
 1. If !shouldFollow → exit, wasFollowingLastFrame = false
-2. If isUserInteracting → skip frame, keep checking
+2. If isUserInteracting → delay(16L), continue loop (don't busy-loop)
 3. Get current bus position from routeData.interpolatePosition(currentSCm)
 4. If !wasFollowingLastFrame AND shouldFollow → just enabled, set target = center bus
-5. Else if nearEdge → set target = center bus
+5. Else if nearEdge → set target = center bus (recompute every frame)
 6. Else if inCenter → target = null (stop interpolating, allow comfortable center zone)
 
 7. IDLE GUARD: If target == null → delay(100L), continue loop
    (Prevent unnecessary recomposition when camera settled)
 
 8. If target exists → interpolate offset toward target
+   CRITICAL: When target active (near edge or just enabled), recompute target every frame
+   from current currentSCm. This tracks moving bus even in transition zone.
 
 9. MOVEMENT THRESHOLD: Only update state if movement >= 0.5px
    if ((newOffset - currentOffset).getDistance() >= 0.5f) {
@@ -58,7 +60,13 @@ Replaces current 3-effect system with one unified effect.
    }
    (Prevent tile loading churn from micro-movements)
 
-10. Update wasFollowingLastFrame = shouldFollow
+10. STOP CONDITION: When reached target, update state one final time
+    if distance < 1px {
+        viewModel.updateMapState(scale, targetOffset) // Final snap
+        targetOffset = null
+    }
+
+11. Update wasFollowingLastFrame = shouldFollow
 ```
 
 ### Edge Detection
@@ -66,12 +74,12 @@ Replaces current 3-effect system with one unified effect.
 **Ratio-based thresholds** (scale with screen size):
 - **Edge zone**: outer 25% of screen (start following when bus here)
 - **Center zone**: inner 40% of screen (stop following when bus here)
-- **Transition gap**: 35% between zones prevents oscillation
+- **Transition gap**: 10% total horizontal/vertical dead band (5% per edge) prevents oscillation
 
 **Hysteresis to prevent oscillation:**
 - Follow STARTS when bus enters edge zone (outside 25% from edges)
 - Follow STOPS when bus enters center zone (inside 40% from edges)
-- 35% gap prevents rapid toggle at boundary
+- 10% dead band prevents rapid toggle at boundary
 
 ```kotlin
 // Edge zone: outer 25%
@@ -118,12 +126,21 @@ val newOffset = currentOffset + (targetOffset - currentOffset) * lerpFactor
 ```
 This produces ease-out motion: fast initially, slowing as it approaches target. Each frame covers 15% of remaining distance.
 
+**Target recomputation** (critical for tracking moving bus):
+```kotlin
+// When actively tracking (near edge or just enabled), recompute target every frame
+val pos = routeData.interpolatePosition(currentSCm)
+val ll = routeData.cmToLatLon(pos.first, pos.second)
+val targetOffset = Offset(-busWorldX * scale, -busWorldY * scale)
+// This ensures camera tracks bus even in transition zone
+```
+
 **Stop condition**:
 ```kotlin
 val distance = abs(targetOffset - currentOffset)
 if distance < 1f {
-    currentOffset = targetOffset // Snap
-    targetOffset = null // Stop
+    viewModel.updateMapState(scale, targetOffset) // Final snap to state
+    targetOffset = null // Stop tracking
 }
 ```
 
