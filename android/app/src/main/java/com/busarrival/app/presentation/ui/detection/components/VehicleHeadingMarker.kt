@@ -20,7 +20,7 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-internal val vehicleHeadingMarkerSize = 32.dp
+internal val vehicleHeadingMarkerSize = 64.dp
 internal val vehicleHeadingIconSize = vehicleHeadingMarkerSize / 2f
 
 @Composable
