@@ -29,7 +29,16 @@ Replaces current 3-effect system with one unified effect.
 
 **Dependencies**: `shouldFollow, routeData, centerLatLon, scale, canvasSize, isUserInteracting`
 
-**Current position access**: `currentSCm` read via `rememberUpdatedState(currentSCm)` inside the effect. This allows continuous 60fps loop without restart on every position update.
+**Non-key dependencies** (read via `rememberUpdatedState` to prevent animation restart):
+- `currentSCm`: Position updates every ~100ms, would cancel animation if key
+- `offset`: Animation writes this every frame, would cause infinite restart loop if key
+
+**Access pattern**:
+```kotlin
+val currentSCm by rememberUpdatedState(viewModel.currentSCm)
+val offset by rememberUpdatedState(viewModel.mapOffset.collectAsState().value)
+```
+Both values refresh inside loop without triggering effect restart.
 
 **Route data handling**: Route changes trigger effect restart (via dependencies), ensuring position calculations use current route geometry and center point.
 
@@ -43,30 +52,34 @@ Replaces current 3-effect system with one unified effect.
 1. If !shouldFollow → exit, wasFollowingLastFrame = false
 2. If isUserInteracting → delay(16L), continue loop (don't busy-loop)
 3. Get current bus position from routeData.interpolatePosition(currentSCm)
-4. If !wasFollowingLastFrame AND shouldFollow → just enabled, set target = center bus
-5. Else if nearEdge → set target = center bus (recompute every frame)
-6. Else if inCenter → target = null (stop interpolating, allow comfortable center zone)
+4. If position == null → delay(16L), continue loop (route unavailable, don't busy-loop)
+5. If !wasFollowingLastFrame AND shouldFollow → just enabled, set target = center bus
+6. Else if nearEdge → set target = center bus (recompute every frame)
+7. Else if inCenter → target = null (stop interpolating, allow comfortable center zone)
 
-7. IDLE GUARD: If target == null → delay(100L), continue loop
+8. IDLE GUARD: If target == null → delay(100L), continue loop
    (Prevent unnecessary recomposition when camera settled)
 
-8. If target exists → interpolate offset toward target
+9. If target exists → interpolate offset toward target
    CRITICAL: When target active (near edge or just enabled), recompute target every frame
    from current currentSCm. This tracks moving bus even in transition zone.
 
-9. MOVEMENT THRESHOLD: Only update state if movement >= 0.5px
-   if ((newOffset - currentOffset).getDistance() >= 0.5f) {
-       viewModel.updateMapState(scale, newOffset)
-   }
-   (Prevent tile loading churn from micro-movements)
+10. MOVEMENT THRESHOLD: Only update state if movement >= 0.5px
+    if ((newOffset - currentOffset).getDistance() >= 0.5f) {
+        viewModel.updateMapState(scale, newOffset)
+    }
+    (Prevent tile loading churn from micro-movements)
 
-10. STOP CONDITION: When reached target, update state one final time
+11. STOP CONDITION: When reached target, update state one final time
     if distance < 1px {
         viewModel.updateMapState(scale, targetOffset) // Final snap
         targetOffset = null
     }
 
-11. Update wasFollowingLastFrame = shouldFollow
+12. ACTIVE FRAME PACE: delay(16L) to maintain ~60fps
+    (Prevent loop running faster than frame rate)
+
+13. Update wasFollowingLastFrame = shouldFollow
 ```
 
 ### Edge Detection
@@ -155,14 +168,14 @@ if (movementDelta >= 0.5f) {
 
 ### User Gesture Handling
 
-**API requirement**: MapView needs explicit callbacks to disable each follow source independently:
+**API requirement**: MapView needs separate callbacks for toggle (UI button) and disable (gesture):
 ```kotlin
 // MapView signature changes
 fun MapView(
     // ... existing params
-    onDisableLiveFollow: () -> Unit = {},    // NEW: disable live camera follow
-    onDisableReplayFollow: () -> Unit = {},  // NEW: disable replay camera follow
-    // ... onToggleCameraFollow() removed
+    onToggleCameraFollow: () -> Unit = {},       // KEEP: for Follow button click
+    onDisableLiveFollow: () -> Unit = {},        // NEW: gesture disables live follow
+    onDisableReplayFollow: () -> Unit = {},     // NEW: gesture disables replay follow
 )
 ```
 
@@ -179,6 +192,12 @@ if (!isUserInteracting) {
         onDisableReplayFollow()
     }
 }
+```
+
+**Follow button (unchanged)**:
+```kotlin
+// Top-right Follow button click handler
+onClick = { onToggleCameraFollow() }
 ```
 
 ## Data Flow
@@ -279,8 +298,8 @@ User pans/zooms
 - Remove `wasNearEdge` flag (no longer needed, use `wasFollowingLastFrame`)
 - Remove LaunchedEffect #3 (follow-toggle check) - handled by main effect's transition detection
 - Keep `isUserInteracting` flag and reset LaunchedEffect
-- Change edgeThresholdPx from 100f to ratio-based (0.25f for X and Y separately)
-- Animation: continuous 60fps interpolation with `rememberUpdatedState(currentSCm)` for position
-- API change: Replace `onToggleCameraFollow()` with `onDisableLiveFollow()` and `onDisableReplayFollow()`
+- Change edgeThresholdPx from 100f to ratio-based (0.25f edge, 0.30f center for X and Y separately)
+- Animation: continuous 60fps interpolation with `rememberUpdatedState` for `currentSCm` and `offset`
+- API change: Keep `onToggleCameraFollow()` (for Follow button), add `onDisableLiveFollow()` and `onDisableReplayFollow()` (for gestures)
 - Always use `routeData.interpolatePosition(currentSCm)` for camera follow target
 - Raw GPS (gpsLat/gpsLon) only for bus marker rendering, never for camera follow
