@@ -3,7 +3,7 @@
 use crate::{gps::GpsRecord, ArrivalEvent, DepartureEvent, PipelineResult, StopTraceState};
 use detection::state_machine::{StopEvent, StopState};
 use shared::binfile::RouteData;
-use shared::{DistCm, PositionSignals, Prob8, TimestampMs};
+use shared::{DistCm, FsmState, PositionSignals, Prob8, Stop, TimestampMs};
 
 /// Detection state (Phase 3: Arrival detection)
 pub struct DetectionState {
@@ -119,10 +119,9 @@ impl DetectionState {
             return;
         }
 
-        // Find active stops (corridor filter)
+        // Find stops eligible for detection.
         for (idx, stop) in stops.iter().enumerate() {
-            if s_cm >= stop.corridor_start_cm
-                && s_cm <= stop.corridor_end_cm
+            if should_update_stop_for_detection(s_cm, stop, &self.stop_states[idx])
                 && !self.stop_states[idx].skip_on_reentry
             {
                 self.active_indices.push(idx);
@@ -258,6 +257,11 @@ impl DetectionState {
     }
 }
 
+fn should_update_stop_for_detection(s_cm: DistCm, stop: &Stop, stop_state: &StopState) -> bool {
+    (s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm)
+        || matches!(stop_state.fsm_state, FsmState::Arriving | FsmState::AtStop)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +276,55 @@ mod tests {
 
     fn gps_record(status: &'static str, s_cm: DistCm) -> GpsRecord {
         GpsRecord::new(1_234_567, 25.0, 121.0, s_cm, 250, Some(9000), status)
+    }
+
+    #[test]
+    fn process_gps_record_emits_departure_after_corridor_end_for_arriving_stop() {
+        let route_data = load_route_data();
+        let mut state = DetectionState::new(&route_data);
+        let mut result = PipelineResult::new();
+        let stop = &route_data.stops()[0];
+
+        state.stop_states[0].fsm_state = shared::FsmState::Arriving;
+
+        let record = gps_record("valid", stop.corridor_end_cm + 1);
+        state.process_gps_record(&record, &route_data, &mut result);
+
+        assert_eq!(state.active_indices(), &[0]);
+        assert_eq!(state.stop_states[0].fsm_state, shared::FsmState::Departed);
+        assert_eq!(result.departures.len(), 1);
+        assert_eq!(result.departures[0].stop_idx, 0);
+    }
+
+    #[test]
+    fn process_gps_record_keeps_corridor_end_boundary_inclusive() {
+        let route_data = load_route_data();
+        let mut state = DetectionState::new(&route_data);
+        let mut result = PipelineResult::new();
+        let stop = &route_data.stops()[0];
+
+        let record = gps_record("valid", stop.corridor_end_cm);
+        state.process_gps_record(&record, &route_data, &mut result);
+
+        assert_eq!(state.active_indices(), &[0]);
+    }
+
+    #[test]
+    fn process_gps_record_excludes_post_corridor_idle_and_departed_stops() {
+        let route_data = load_route_data();
+        let stop = &route_data.stops()[0];
+        let record = gps_record("valid", stop.corridor_end_cm + 1);
+
+        let mut idle_state = DetectionState::new(&route_data);
+        let mut idle_result = PipelineResult::new();
+        idle_state.process_gps_record(&record, &route_data, &mut idle_result);
+        assert!(!idle_state.active_indices().contains(&0));
+
+        let mut departed_state = DetectionState::new(&route_data);
+        let mut departed_result = PipelineResult::new();
+        departed_state.stop_states[0].fsm_state = shared::FsmState::Departed;
+        departed_state.process_gps_record(&record, &route_data, &mut departed_result);
+        assert!(!departed_state.active_indices().contains(&0));
     }
 
     #[test]

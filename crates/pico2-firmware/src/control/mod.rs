@@ -8,7 +8,7 @@ pub mod timeout;
 
 use crate::estimation::EstimationInput;
 use crate::estimation::EstimationOutput;
-use shared::{binfile::RouteData, ArrivalEvent, DistCm, GpsPoint};
+use shared::{binfile::RouteData, ArrivalEvent, DistCm, FsmState, GpsPoint, Stop};
 
 pub use mode::{SystemMode, TransitionAction};
 pub use timeout::{check_recovering_timeout, find_closest_stop_index};
@@ -783,10 +783,26 @@ impl<'a> SystemState<'a> {
             s_cm: est.s_cm,
         };
 
-        // Step 1: Find active stops (corridor filter)
-        let skip_flags = &[false; 32]; // TODO: track skip flags per stop
-        let active_indices =
-            crate::detection::find_active_stops(est.s_cm, self.route_data, skip_flags);
+        // Step 1: Find stops eligible for detection.
+        let mut active_indices = heapless::Vec::<usize, 16>::new();
+        for stop_idx in 0..self.route_data.stop_count {
+            if stop_idx >= self.stop_states.len() {
+                continue;
+            }
+
+            let stop = match self.route_data.get_stop(stop_idx) {
+                Some(s) => s,
+                None => continue,
+            };
+
+            if should_update_stop_for_detection(s_cm, &stop, self.stop_states[stop_idx].fsm_state)
+                && active_indices.push(stop_idx).is_err()
+            {
+                #[cfg(feature = "firmware")]
+                defmt::warn!("Active stops overflow (>16), truncating");
+                break;
+            }
+        }
 
         // Step 2: For each active stop, compute probability and update FSM
         for stop_idx in active_indices {
@@ -872,6 +888,11 @@ impl<'a> SystemState<'a> {
     }
 }
 
+fn should_update_stop_for_detection(s_cm: DistCm, stop: &Stop, fsm_state: FsmState) -> bool {
+    (s_cm >= stop.corridor_start_cm && s_cm <= stop.corridor_end_cm)
+        || matches!(fsm_state, FsmState::Arriving | FsmState::AtStop)
+}
+
 /// Enforce hard monotonic invariant at system boundary.
 ///
 /// # Returns
@@ -899,6 +920,51 @@ pub fn enforce_monotonic(s_new: DistCm, s_prev: DistCm, mode: SystemMode) -> (Di
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_update_stop_for_detection_keeps_departure_states_after_corridor_end() {
+        let stop = shared::Stop {
+            progress_cm: 10_000,
+            corridor_start_cm: 2_000,
+            corridor_end_cm: 14_000,
+        };
+
+        assert!(should_update_stop_for_detection(
+            14_001,
+            &stop,
+            shared::FsmState::Arriving
+        ));
+        assert!(should_update_stop_for_detection(
+            14_001,
+            &stop,
+            shared::FsmState::AtStop
+        ));
+        assert!(!should_update_stop_for_detection(
+            14_001,
+            &stop,
+            shared::FsmState::Idle
+        ));
+        assert!(!should_update_stop_for_detection(
+            14_001,
+            &stop,
+            shared::FsmState::Departed
+        ));
+    }
+
+    #[test]
+    fn should_update_stop_for_detection_keeps_corridor_end_boundary_inclusive() {
+        let stop = shared::Stop {
+            progress_cm: 10_000,
+            corridor_start_cm: 2_000,
+            corridor_end_cm: 14_000,
+        };
+
+        assert!(should_update_stop_for_detection(
+            14_000,
+            &stop,
+            shared::FsmState::Idle
+        ));
+    }
 
     #[test]
     fn test_warmup_methods() {
