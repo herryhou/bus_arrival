@@ -13,6 +13,7 @@ package com.busarrival.app.presentation.ui.detection.components
  * when zooming past tile boundaries.
  */
 // Coordinate functions from MapCoordinateUtils.kt (same package)
+import androidx.compose.animation.core.EaseInOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,12 +27,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,7 +47,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -60,7 +60,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.busarrival.app.BuildConfig
@@ -74,7 +73,6 @@ import kotlin.math.PI
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.pow
-import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -89,6 +87,9 @@ private const val TILE_REQUEST_DELAY_MS = 75L
 private const val TILE_PREFETCH_PADDING = 1
 private const val MAX_FETCH_RANGE = 5
 private const val MAX_TILE_CONCURRENCY = 4
+private const val CAMERA_EDGE_THRESHOLD_PX = 80f
+private const val CAMERA_COMFORT_ZONE_RATIO = 0.3f
+private const val CAMERA_ANIMATION_MS = 600
 
 data class LatLon(val lat: Double, val lon: Double)
 
@@ -151,43 +152,67 @@ fun MapView(
                 }
             }
 
-    // Camera follow: center map on current position only when near edge
+    // Camera follow: single-axis smooth adjustment when near edge
     val shouldFollow = isCameraFollowEnabled || replayState.cameraFollowEnabled
-    val edgeThresholdPx = 100f
 
-    LaunchedEffect(currentSCm, shouldFollow, routeData, scale, offset, canvasSize.value) {
+    LaunchedEffect(currentSCm, shouldFollow, routeData, scale, canvasSize.value) {
         if (shouldFollow && routeData != null && centerLatLon != null) {
             val size = canvasSize.value
             if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
 
-            // Get current screen position
             val pos = routeData.interpolatePosition(currentSCm)
             if (pos != null) {
                 val ll = routeData.cmToLatLon(pos.first, pos.second)
 
-                // Calculate current screen position
                 val worldX = lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLatLon.lon, BASE_Z)
                 val worldY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLatLon.lat, BASE_Z)
-                val screenX = worldX * scale + offset.x + size.width / 2f
-                val screenY = worldY * scale + offset.y + size.height / 2f
 
-                // Check if near edge (within threshold)
-                val nearLeft = screenX < edgeThresholdPx
-                val nearRight = screenX > size.width - edgeThresholdPx
-                val nearTop = screenY < edgeThresholdPx
-                val nearBottom = screenY > size.height - edgeThresholdPx
+                val currentScreenX = worldX * scale + offset.x + size.width / 2f
+                val currentScreenY = worldY * scale + offset.y + size.height / 2f
 
-                // Update center only when near edge
-                if (nearLeft || nearRight || nearTop || nearBottom) {
-                    val targetX =
-                            lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLatLon.lon, BASE_Z)
-                    val targetY =
-                            latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLatLon.lat, BASE_Z)
-                    viewModel.updateMapState(scale, Offset(-targetX * scale, -targetY * scale))
+                var targetOffsetX = offset.x
+                var targetOffsetY = offset.y
+
+                if (currentScreenX < CAMERA_EDGE_THRESHOLD_PX) {
+                    val targetScreenX = size.width * CAMERA_COMFORT_ZONE_RATIO
+                    targetOffsetX = targetScreenX - worldX * scale - size.width / 2f
+                } else if (currentScreenX > size.width - CAMERA_EDGE_THRESHOLD_PX) {
+                    val targetScreenX = size.width * (1 - CAMERA_COMFORT_ZONE_RATIO)
+                    targetOffsetX = targetScreenX - worldX * scale - size.width / 2f
                 }
+
+                if (currentScreenY < CAMERA_EDGE_THRESHOLD_PX) {
+                    val targetScreenY = size.height * CAMERA_COMFORT_ZONE_RATIO
+                    targetOffsetY = targetScreenY - worldY * scale - size.height / 2f
+                } else if (currentScreenY > size.height - CAMERA_EDGE_THRESHOLD_PX) {
+                    val targetScreenY = size.height * (1 - CAMERA_COMFORT_ZONE_RATIO)
+                    targetOffsetY = targetScreenY - worldY * scale - size.height / 2f
+                }
+
+                val startX = offset.x
+                val startY = offset.y
+                val startTime = System.currentTimeMillis()
+                val duration = CAMERA_ANIMATION_MS
+
+                while (true) {
+                    val elapsed = System.currentTimeMillis() - startTime
+                    if (elapsed >= duration) break
+
+                    val t = elapsed.toFloat() / duration
+                    val eased = EaseInOut.transform(t)
+
+                    val currentX = startX + (targetOffsetX - startX) * eased
+                    val currentY = startY + (targetOffsetY - startY) * eased
+
+                    viewModel.updateMapState(scale, Offset(currentX, currentY))
+                    kotlinx.coroutines.delay(16L)
+                }
+
+                viewModel.updateMapState(scale, Offset(targetOffsetX, targetOffsetY))
             }
         }
     }
+
     // Calculate tile zoom level from scale - use derivedStateOf to ensure updates
     val tileZ by remember {
         derivedStateOf {
@@ -600,7 +625,7 @@ fun MapView(
                     // Use different colors for live vs replay mode
                     val markerColor =
                             if (replayState.traceFile != null) {
-                                Color.Cyan // Replay mode: blue marker
+                                Color.Cyan.copy(alpha = 0.5f) // Replay mode: blue marker
                             } else {
                                 Color.Green // Live mode: green marker
                             }
@@ -722,7 +747,7 @@ fun MapView(
                                             MaterialTheme.colorScheme.onPrimary
                                         } else {
                                             MaterialTheme.colorScheme.onSurfaceVariant
-                                }
+                                        }
                         )
                     }
                 }
