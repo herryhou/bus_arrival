@@ -104,6 +104,8 @@ fun DetectionScreen(
                     gpsLon = uiState.gpsLon,
                     gpsBearing = uiState.gpsBearing,
                     onToggleCameraFollow = { viewModel.toggleCameraFollow() },
+                    onDisableLiveFollow = { viewModel.disableLiveFollow() },
+                    onDisableReplayFollow = { viewModel.toggleReplayCameraFollow() },
                     modifier = Modifier.weight(0.6f)
                 )
 
