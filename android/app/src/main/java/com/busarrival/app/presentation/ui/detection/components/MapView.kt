@@ -44,6 +44,8 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.size
@@ -156,6 +158,19 @@ fun MapView(
 
     // Track user interaction state
     val isUserInteracting = remember { mutableStateOf(false) }
+
+    // Camera follow state
+    val shouldFollow = isCameraFollowEnabled || replayState.cameraFollowEnabled
+
+    // Track if follow was enabled in previous frame (detect enable transition)
+    var wasFollowingLastFrame by remember { mutableStateOf(false) }
+
+    // Target offset for animation (null = no interpolation needed)
+    var targetOffset by remember { mutableStateOf<Offset?>(null) }
+
+    // Non-key dependencies via rememberUpdatedState (prevents animation restart)
+    val currentSCm by rememberUpdatedState(currentSCm)
+    val currentOffset by rememberUpdatedState(offset)
 
     // Calculate tile zoom level from scale - use derivedStateOf to ensure updates
     val tileZ by remember {
