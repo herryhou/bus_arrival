@@ -81,4 +81,68 @@ class MapViewportRequestTest {
         )
         assertEquals(5, zoomedOutScale)
     }
+
+    @Test
+    fun liveCameraFollowTargetsRawGpsPositionWhenGpsIsValid() {
+        val routeCenter = LatLon(lat = 25.0330, lon = 121.5654)
+        val snappedPosition = routeCenter
+        val gpsWorldX = lonToPixelX(routeCenter.lon, 15) + 1000f
+        val gpsPosition = LatLon(lat = routeCenter.lat, lon = pixelXToLon(gpsWorldX, 15))
+
+        val target =
+                computeCameraFollowTargetOffset(
+                        routeCenter = routeCenter,
+                        snappedPosition = snappedPosition,
+                        gpsPosition = gpsPosition,
+                        scale = 1f
+                )
+
+        assertEquals(-1000f, target.x, 1f)
+        assertEquals(0f, target.y, 1f)
+    }
+
+    @Test
+    fun cameraFollowKeepsAnimatingToCenterAfterEdgeTrigger() {
+        val activeTarget = androidx.compose.ui.geometry.Offset(-1000f, 0f)
+        val followTarget = androidx.compose.ui.geometry.Offset(-1000f, 0f)
+
+        val target =
+                chooseCameraFollowTargetOffset(
+                        currentTarget = activeTarget,
+                        followTarget = followTarget,
+                        justEnabled = false,
+                        nearEdge = false,
+                        inCenter = true
+                )
+
+        assertEquals(activeTarget, target)
+    }
+
+    @Test
+    fun gestureStartDisablesActiveFollowSourcesOnFirstGestureFrame() {
+        val action =
+                handleCameraFollowGestureStart(
+                        wasUserInteracting = false,
+                        liveFollowEnabled = true,
+                        replayFollowEnabled = true
+                )
+
+        assertTrue(action.isUserInteracting)
+        assertTrue(action.disableLiveFollow)
+        assertTrue(action.disableReplayFollow)
+    }
+
+    @Test
+    fun gestureStartDoesNotDisableFollowAgainDuringSameGestureSession() {
+        val action =
+                handleCameraFollowGestureStart(
+                        wasUserInteracting = true,
+                        liveFollowEnabled = true,
+                        replayFollowEnabled = true
+                )
+
+        assertTrue(action.isUserInteracting)
+        assertEquals(false, action.disableLiveFollow)
+        assertEquals(false, action.disableReplayFollow)
+    }
 }
