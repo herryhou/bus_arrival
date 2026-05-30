@@ -16,9 +16,13 @@ import androidx.lifecycle.viewModelScope
 import com.busarrival.app.data.gpslog.GpsLogStorageManager
 import com.busarrival.app.data.gpslog.RecordedGpsLogParser
 import com.busarrival.app.data.gpslog.SupportedGpsPlaybackSpeeds
+import com.busarrival.app.data.pipeline.detection.statemachine.StopLifecycleEvent
 import com.busarrival.app.data.preferences.DetectionPreferences
 import com.busarrival.app.data.storage.RouteStorageManager
 import com.busarrival.app.data.trace.TraceStorageManager
+import com.busarrival.app.domain.model.EventHint
+import com.busarrival.app.domain.model.GpsFixState
+import com.busarrival.app.domain.model.HintType
 import com.busarrival.app.domain.model.ReplayState
 import com.busarrival.app.domain.model.RouteData
 import com.busarrival.app.service.DetectionService
@@ -27,10 +31,6 @@ import com.busarrival.app.service.GpsLogStatus
 import com.busarrival.app.service.PipelineEvent
 import com.busarrival.app.service.StopEventCallback
 import com.busarrival.app.service.StopUiEvent
-import com.busarrival.app.data.pipeline.detection.statemachine.StopLifecycleEvent
-import com.busarrival.app.domain.model.GpsFixState
-import com.busarrival.app.domain.model.EventHint
-import com.busarrival.app.domain.model.HintType
 import java.util.LinkedHashMap
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,8 +57,10 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     private val _activeRoute = MutableStateFlow<RouteData?>(null)
     val activeRoute: StateFlow<RouteData?> = _activeRoute.asStateFlow()
 
-    private val _activeRouteMetadata = MutableStateFlow<com.busarrival.app.domain.model.RouteMetadata?>(null)
-    val activeRouteMetadata: StateFlow<com.busarrival.app.domain.model.RouteMetadata?> = _activeRouteMetadata.asStateFlow()
+    private val _activeRouteMetadata =
+            MutableStateFlow<com.busarrival.app.domain.model.RouteMetadata?>(null)
+    val activeRouteMetadata: StateFlow<com.busarrival.app.domain.model.RouteMetadata?> =
+            _activeRouteMetadata.asStateFlow()
 
     // Replay state for timeline/replay functionality
     private val _replayState = MutableStateFlow(ReplayState())
@@ -86,11 +88,16 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     private val _tileCache = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
     val tileCache: StateFlow<Map<String, ImageBitmap>> = _tileCache.asStateFlow()
 
-    private val _gpsFixState = MutableStateFlow<com.busarrival.app.domain.model.GpsFixState>(com.busarrival.app.domain.model.GpsFixState.NoSignal)
-    val gpsFixState: StateFlow<com.busarrival.app.domain.model.GpsFixState> = _gpsFixState.asStateFlow()
+    private val _gpsFixState =
+            MutableStateFlow<com.busarrival.app.domain.model.GpsFixState>(
+                    com.busarrival.app.domain.model.GpsFixState.NoSignal
+            )
+    val gpsFixState: StateFlow<com.busarrival.app.domain.model.GpsFixState> =
+            _gpsFixState.asStateFlow()
 
     private val _eventHints = MutableStateFlow<com.busarrival.app.domain.model.EventHint?>(null)
-    val eventHints: StateFlow<com.busarrival.app.domain.model.EventHint?> = _eventHints.asStateFlow()
+    val eventHints: StateFlow<com.busarrival.app.domain.model.EventHint?> =
+            _eventHints.asStateFlow()
 
     // Playback state
     private var playbackJob: Job? = null
@@ -102,11 +109,11 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     private var serviceEventJob: Job? = null
     private var gpsLogStatusJob: Job? = null
     private val stopEventCallback =
-        object : StopEventCallback {
-            override fun onStopEvent(event: StopUiEvent) {
-                handleStopUiEvent(event)
+            object : StopEventCallback {
+                override fun onStopEvent(event: StopUiEvent) {
+                    handleStopUiEvent(event)
+                }
             }
-        }
 
     private val serviceConnection =
             object : ServiceConnection {
@@ -152,18 +159,15 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun handleStopUiEvent(event: StopUiEvent) {
         val hintType =
-            when (event.event) {
-                StopLifecycleEvent.Approaching -> HintType.APPROACHING
-                StopLifecycleEvent.Arriving -> HintType.ARRIVING
-                StopLifecycleEvent.Arrived -> HintType.ATSTOP
-                StopLifecycleEvent.Departed -> HintType.DEPART
-                StopLifecycleEvent.None -> return
-            }
-        _eventHints.value = EventHint(
-            type = hintType,
-            stopIndex = event.stopIndex,
-            timestamp = event.timestamp
-        )
+                when (event.event) {
+                    StopLifecycleEvent.Approaching -> HintType.APPROACHING
+                    StopLifecycleEvent.Arriving -> HintType.ARRIVING
+                    StopLifecycleEvent.Arrived -> HintType.ATSTOP
+                    StopLifecycleEvent.Departed -> HintType.DEPART
+                    StopLifecycleEvent.None -> return
+                }
+        _eventHints.value =
+                EventHint(type = hintType, stopIndex = event.stopIndex, timestamp = event.timestamp)
     }
 
     init {
@@ -196,15 +200,20 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun computeGpsFixState(
-        accuracyM: Float,
-        satellites: Int,
-        bearing: Float?
+            accuracyM: Float,
+            satellites: Int,
+            bearing: Float?
     ): com.busarrival.app.domain.model.GpsFixState {
         return when {
             accuracyM == Float.MAX_VALUE -> com.busarrival.app.domain.model.GpsFixState.NoSignal
             accuracyM > 20f -> com.busarrival.app.domain.model.GpsFixState.Searching
             satellites < 6 -> com.busarrival.app.domain.model.GpsFixState.Acquiring(satellites)
-            else -> com.busarrival.app.domain.model.GpsFixState.Ready(accuracyM, satellites, bearing)
+            else ->
+                    com.busarrival.app.domain.model.GpsFixState.Ready(
+                            accuracyM,
+                            satellites,
+                            bearing
+                    )
         }
     }
 
@@ -213,31 +222,32 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         when (event) {
             is PipelineEvent.PositionUpdate -> {
                 android.util.Log.d(
-                    "DetectionViewModel",
-                    "handleServiceEvent: stop=${event.activeStopIndex} state=${event.activeStopState} sCm=${event.sCm}"
+                        "DetectionViewModel",
+                        "handleServiceEvent: stop=${event.activeStopIndex} state=${event.activeStopState} sCm=${event.sCm}"
                 )
-                _uiState.value = _uiState.value.copy(
-                    sCm = event.sCm,
-                    vCms = event.vCms,
-                    mode = event.mode,
-                    currentStop = event.activeStopIndex,
-                    currentStopState = event.activeStopState,
-                    gpsLat = event.lat,
-                    gpsLon = event.lon,
-                    gpsBearing = event.bearing
-                )
+                _uiState.value =
+                        _uiState.value.copy(
+                                sCm = event.sCm,
+                                vCms = event.vCms,
+                                mode = event.mode,
+                                currentStop = event.activeStopIndex,
+                                currentStopState = event.activeStopState,
+                                gpsLat = event.lat,
+                                gpsLon = event.lon,
+                                gpsBearing = event.bearing
+                        )
                 // Update GPS fix state
-                _gpsFixState.value = computeGpsFixState(
-                    accuracyM = event.accuracyM,
-                    satellites = event.satellites,
-                    bearing = event.bearing
-                )
+                _gpsFixState.value =
+                        computeGpsFixState(
+                                accuracyM = event.accuracyM,
+                                satellites = event.satellites,
+                                bearing = event.bearing
+                        )
             }
             is PipelineEvent.Arrival -> {
                 _uiState.value = _uiState.value.copy(currentStop = event.stopIndex)
             }
-            is PipelineEvent.Departure -> {
-            }
+            is PipelineEvent.Departure -> {}
         }
 
         // Add to event list
@@ -272,7 +282,8 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         clearGpsLogSimulation()
         DetectionService.startService(getApplication())
         val intent = Intent(getApplication<Application>(), DetectionService::class.java)
-        getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        getApplication<Application>()
+                .bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
     /** Stop detection service and unbind. */
@@ -292,26 +303,35 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     private fun loadGpsLogSimulation(reference: String, displayName: String) {
         viewModelScope.launch {
             val fixes =
-                RecordedGpsLogParser.parseLines(GpsLogStorageManager.loadLog(getApplication(), reference))
-                    .getOrElse {
-                        _uiState.value = _uiState.value.copy(error = it.message ?: "Failed to load GPS log")
-                        return@launch
-                    }
+                    RecordedGpsLogParser.parseLines(
+                                    GpsLogStorageManager.loadLog(getApplication(), reference)
+                            )
+                            .getOrElse {
+                                _uiState.value =
+                                        _uiState.value.copy(
+                                                error = it.message ?: "Failed to load GPS log"
+                                        )
+                                return@launch
+                            }
             val duration = (fixes.last().timeMillis - fixes.first().timeMillis).coerceAtLeast(0L)
             simulationLogReference = reference
             simulationLogName = displayName
             replayEvents = emptyList()
             playbackJob?.cancel()
+            val truncatedName =
+                    displayName.take(20).let {
+                        if (it.length < displayName.length) "$it..." else it
+                    }
             _replayState.value =
-                ReplayState(
-                    currentTime = 0,
-                    isPlaying = false,
-                    playbackSpeed = 1f,
-                    traceDuration = duration,
-                    cameraFollowEnabled = true,
-                    traceFile = displayName
-                )
-            _uiState.value = _uiState.value.copy(mode = "Simulating $displayName", error = null)
+                    ReplayState(
+                            currentTime = 0,
+                            isPlaying = false,
+                            playbackSpeed = 1f,
+                            traceDuration = duration,
+                            cameraFollowEnabled = true,
+                            traceFile = truncatedName
+                    )
+            _uiState.value = _uiState.value.copy(mode = "Simulating $truncatedName", error = null)
         }
     }
 
@@ -486,13 +506,14 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
             } else {
                 _replayState.value = current.copy(isPlaying = true)
                 DetectionService.startSimulation(
-                    getApplication(),
-                    reference,
-                    simulationLogName ?: current.traceFile.orEmpty(),
-                    current.playbackSpeed
+                        getApplication(),
+                        reference,
+                        simulationLogName ?: current.traceFile.orEmpty(),
+                        current.playbackSpeed
                 )
                 val intent = Intent(getApplication<Application>(), DetectionService::class.java)
-                getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+                getApplication<Application>()
+                        .bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
                 startPlayback()
             }
             return
@@ -659,8 +680,8 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         if (latestUpdate != null) {
             // PositionUpdate has embedded stop state from StateMachine - use it as source of truth
             android.util.Log.d(
-                "DetectionViewModel",
-                "updateUiForPosition: from PositionUpdate stop=${latestUpdate.activeStopIndex} state=${latestUpdate.activeStopState}"
+                    "DetectionViewModel",
+                    "updateUiForPosition: from PositionUpdate stop=${latestUpdate.activeStopIndex} state=${latestUpdate.activeStopState}"
             )
             _uiState.value =
                     _uiState.value.copy(
@@ -674,7 +695,10 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         // Fallback: No PositionUpdate found, compute from Arrival/Departure events
-        android.util.Log.d("DetectionViewModel", "updateUiForPosition: NO PositionUpdate, fallback to Arrival/Departure")
+        android.util.Log.d(
+                "DetectionViewModel",
+                "updateUiForPosition: NO PositionUpdate, fallback to Arrival/Departure"
+        )
         val eventIndex =
                 (position.toFloat() / _replayState.value.traceDuration * replayEvents.size).toInt()
         val currentEvents = replayEvents.take(eventIndex)
@@ -695,14 +719,15 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                 }
 
         android.util.Log.d(
-            "DetectionViewModel",
-            "updateUiForPosition: fallback FINAL stop=$currentStop state=${if (currentStop >= 0) _uiState.value.currentStopState else "Idle"}"
+                "DetectionViewModel",
+                "updateUiForPosition: fallback FINAL stop=$currentStop state=${if (currentStop >= 0) _uiState.value.currentStopState else "Idle"}"
         )
 
         _uiState.value =
                 _uiState.value.copy(
                         currentStop = currentStop,
-                        currentStopState = if (currentStop >= 0) _uiState.value.currentStopState else "Idle"
+                        currentStopState =
+                                if (currentStop >= 0) _uiState.value.currentStopState else "Idle"
                 )
     }
 

@@ -1,13 +1,13 @@
 package com.busarrival.app.presentation.ui.detection.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -23,7 +23,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -36,30 +35,27 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.busarrival.app.domain.model.GpsFixState
 import com.busarrival.app.presentation.viewmodel.DetectionUiState
 import com.busarrival.app.service.PipelineEvent
-import com.busarrival.app.domain.model.GpsFixState
 import java.util.Locale
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StatusPanel(
-    uiState: DetectionUiState,
-    events: List<PipelineEvent>,
-    routeName: String?,
-    gpsLoggingEnabled: Boolean,
-    gpsFixState: GpsFixState,
-    onStartStop: () -> Unit,
-    onToggleGpsLogging: () -> Unit,
-    modifier: Modifier = Modifier
+        uiState: DetectionUiState,
+        events: List<PipelineEvent>,
+        routeName: String?,
+        gpsLoggingEnabled: Boolean,
+        gpsFixState: GpsFixState,
+        onStartStop: () -> Unit,
+        onToggleGpsLogging: () -> Unit,
+        modifier: Modifier = Modifier
 ) {
     Card(
-            modifier = modifier.fillMaxWidth(),
+            modifier = modifier.fillMaxHeight().heightIn(max = 500.dp),
             shape = RoundedCornerShape(8.dp),
-            colors =
-                    CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                    ),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(
@@ -68,10 +64,7 @@ fun StatusPanel(
                                 .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            DashboardHeader(
-                    routeName = routeName ?: "Active route",
-                    isRunning = uiState.isRunning
-            )
+            DashboardHeader(routeName = routeName ?: "Active route", isRunning = uiState.isRunning)
 
             CurrentStopPanel(
                     stopLabel = formatStopLabel(uiState.currentStop),
@@ -80,10 +73,10 @@ fun StatusPanel(
             )
 
             GpsStatusRow(
-                gpsFixState = gpsFixState,
-                positionCm = uiState.sCm,
-                speedCms = uiState.vCms,
-                modifier = Modifier.fillMaxWidth()
+                    gpsFixState = gpsFixState,
+                    positionCm = uiState.sCm,
+                    speedCms = uiState.vCms,
+                    modifier = Modifier.fillMaxWidth()
             )
 
             ActionRow(
@@ -108,11 +101,6 @@ private fun DashboardHeader(routeName: String, isRunning: Boolean) {
             verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                    text = "Detect",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
             Text(
                     text = routeName,
                     style = MaterialTheme.typography.titleLarge,
@@ -170,7 +158,8 @@ private fun CurrentStopPanel(stopLabel: String, stopState: String, mode: String)
                         text = mode,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f),
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                 )
             }
         }
@@ -185,10 +174,7 @@ private fun ActionRow(
         onStartStop: () -> Unit,
         onToggleGpsLogging: () -> Unit
 ) {
-    Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
                 onClick = onStartStop,
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp),
@@ -201,9 +187,7 @@ private fun ActionRow(
                         } else {
                             ButtonDefaults.buttonColors()
                         }
-        ) {
-            Text(if (isRunning) "Stop Detection" else "Start Detection")
-        }
+        ) { Text(if (isRunning) "Stop Detection" else "Start Detection") }
 
         SecondarySwitch(
                 label = "GPS log",
@@ -221,10 +205,7 @@ private fun SecondarySwitch(
         onToggle: () -> Unit,
         contentDescription: String
 ) {
-    Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant
-    ) {
+    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.background) {
         Row(
                 modifier = Modifier.padding(start = 12.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -270,14 +251,12 @@ private fun RecentEvents(events: List<PipelineEvent>) {
         Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            events.forEach { event -> EventSummaryItem(event) }
-        }
+        ) { events.forEach { event -> EventSummaryItem(event) } }
     }
 }
 
 internal fun formatStopLabel(currentStop: Int): String {
-    return if (currentStop >= 0) "Stop ${currentStop + 1}" else "No active stop"
+    return if (currentStop >= 0) "Stop ${currentStop + 1}" else "--"
 }
 
 internal fun formatDistance(positionCm: Int): String {

@@ -1,8 +1,6 @@
 package com.busarrival.app.service
 
 import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -21,6 +19,7 @@ import com.busarrival.app.data.gpslog.SupportedGpsPlaybackSpeeds
 import com.busarrival.app.data.preferences.DetectionPreferences
 import com.busarrival.app.data.storage.RouteStorageManager
 import com.busarrival.app.presentation.MainActivity
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,11 +28,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import java.io.File
 
 /**
- * Foreground service for GPS processing and arrival detection.
- * Full pipeline: Location → MapMatcher → Kalman → StateMachine → Events
+ * Foreground service for GPS processing and arrival detection. Full pipeline: Location → MapMatcher
+ * → Kalman → StateMachine → Events
  */
 class DetectionService : Service() {
 
@@ -98,8 +96,10 @@ class DetectionService : Service() {
                 }
             }
             ACTION_SET_SIMULATION_SPEED ->
-                simulationPlaybackSpeed =
-                    SupportedGpsPlaybackSpeeds.clamp(intent.getFloatExtra(EXTRA_PLAYBACK_SPEED, 1f))
+                    simulationPlaybackSpeed =
+                            SupportedGpsPlaybackSpeeds.clamp(
+                                    intent.getFloatExtra(EXTRA_PLAYBACK_SPEED, 1f)
+                            )
             ACTION_STOP -> stopDetection()
         }
         return START_STICKY
@@ -135,9 +135,9 @@ class DetectionService : Service() {
         // Start foreground service with the service type only on API 29+.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
-                NOTIFICATION_ID,
-                createNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                    NOTIFICATION_ID,
+                    createNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
             )
         } else {
             startForeground(NOTIFICATION_ID, createNotification())
@@ -194,41 +194,59 @@ class DetectionService : Service() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
-                NOTIFICATION_ID,
-                createNotification("Simulating ${displayName.ifBlank { "GPS log" }}"),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                    NOTIFICATION_ID,
+                    createNotification("Simulating ${displayName.ifBlank { "GPS log" }}"),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
             )
         } else {
-            startForeground(NOTIFICATION_ID, createNotification("Simulating ${displayName.ifBlank { "GPS log" }}"))
+            startForeground(
+                    NOTIFICATION_ID,
+                    createNotification("Simulating ${displayName.ifBlank { "GPS log" }}")
+            )
         }
 
         simulationJob =
-            serviceScope.launch {
-                val fixes =
-                    RecordedGpsLogParser.parseLines(GpsLogStorageManager.loadLog(this@DetectionService, reference))
-                        .getOrElse {
-                            if (generation == sourceGeneration) {
-                                emitError(it.message ?: "Failed to load GPS log")
-                                stopDetection()
-                            }
+                serviceScope.launch {
+                    val fixes =
+                            RecordedGpsLogParser.parseLines(
+                                            GpsLogStorageManager.loadLog(
+                                                    this@DetectionService,
+                                                    reference
+                                            )
+                                    )
+                                    .getOrElse {
+                                        if (generation == sourceGeneration) {
+                                            emitError(it.message ?: "Failed to load GPS log")
+                                            stopDetection()
+                                        }
+                                        return@launch
+                                    }
+
+                    var previousTime = fixes.first().timeMillis
+                    fixes.forEachIndexed { index, fix ->
+                        if (generation != sourceGeneration ||
+                                        sourceMode != DetectionSourceMode.Simulation
+                        ) {
                             return@launch
                         }
-
-                var previousTime = fixes.first().timeMillis
-                fixes.forEachIndexed { index, fix ->
-                    if (generation != sourceGeneration || sourceMode != DetectionSourceMode.Simulation) {
-                        return@launch
+                        if (index > 0) {
+                            delay(
+                                    GpsSimulationTiming.delayMillis(
+                                            previousTime,
+                                            fix.timeMillis,
+                                            simulationPlaybackSpeed
+                                    )
+                            )
+                        }
+                        previousTime = fix.timeMillis
+                        processLocation(fix.toLocation(), generation)
                     }
-                    if (index > 0) {
-                        delay(GpsSimulationTiming.delayMillis(previousTime, fix.timeMillis, simulationPlaybackSpeed))
+                    if (generation == sourceGeneration &&
+                                    sourceMode == DetectionSourceMode.Simulation
+                    ) {
+                        stopDetection()
                     }
-                    previousTime = fix.timeMillis
-                    processLocation(fix.toLocation(), generation)
                 }
-                if (generation == sourceGeneration && sourceMode == DetectionSourceMode.Simulation) {
-                    stopDetection()
-                }
-            }
     }
 
     private fun stopDetection() {
@@ -268,7 +286,10 @@ class DetectionService : Service() {
         activeRoute = null
     }
 
-    private fun processLocation(location: android.location.Location, generation: Long = sourceGeneration) {
+    private fun processLocation(
+            location: android.location.Location,
+            generation: Long = sourceGeneration
+    ) {
         if (generation != sourceGeneration) return
         gpsLogWriter.append(location)
         if (activeRoute == null) return
@@ -282,51 +303,52 @@ class DetectionService : Service() {
                 when (result) {
                     PipelineResult.NotInitialized -> return@launch
                     is PipelineResult.Acquiring -> {
-                        _events.value = PipelineEvent.PositionUpdate(
-                            sCm = 0,
-                            vCms = 0,
-                            mode = "acquiring",
-                            activeStopIndex = -1,
-                            activeStopState = "Idle",
-                            accuracyM = gps.accuracyM ?: Float.MAX_VALUE,
-                            satellites = gps.hdop?.toInt() ?: 0,
-                            bearing = gps.headingCdeg?.toFloat()?.div(100f),
-                            lat = gps.lat,
-                            lon = gps.lon
-                        )
+                        _events.value =
+                                PipelineEvent.PositionUpdate(
+                                        sCm = 0,
+                                        vCms = 0,
+                                        mode = "acquiring",
+                                        activeStopIndex = -1,
+                                        activeStopState = "Idle",
+                                        accuracyM = gps.accuracyM ?: Float.MAX_VALUE,
+                                        satellites = gps.hdop?.toInt() ?: 0,
+                                        bearing = gps.headingCdeg?.toFloat()?.div(100f),
+                                        lat = gps.lat,
+                                        lon = gps.lon
+                                )
                     }
                     is PipelineResult.Success -> {
-                        result.stopEvents.forEach { event ->
-                            stopEventCallback?.onStopEvent(event)
-                        }
+                        result.stopEvents.forEach { event -> stopEventCallback?.onStopEvent(event) }
                         result.arrivals.forEach { arrival ->
-                            _events.value = PipelineEvent.Arrival(
-                                stopIndex = arrival.stopIndex,
-                                probability = arrival.probability.value
-                            )
+                            _events.value =
+                                    PipelineEvent.Arrival(
+                                            stopIndex = arrival.stopIndex,
+                                            probability = arrival.probability.value
+                                    )
                         }
                         result.departures.forEach { departure ->
-                            _events.value = PipelineEvent.Departure(
-                                stopIndex = departure.stopIndex,
-                                dwellTimeS = departure.dwellTimeS
-                            )
+                            _events.value =
+                                    PipelineEvent.Departure(
+                                            stopIndex = departure.stopIndex,
+                                            dwellTimeS = departure.dwellTimeS
+                                    )
                         }
 
-                        _events.value = PipelineEvent.PositionUpdate(
-                            sCm = result.sCm,
-                            vCms = result.vCms,
-                            mode = result.mode,
-                            activeStopIndex = result.activeStopIndex,
-                            activeStopState = result.activeStopState,
-                            accuracyM = gps.accuracyM ?: Float.MAX_VALUE,
-                            satellites = gps.hdop?.toInt() ?: 0,
-                            bearing = gps.headingCdeg?.toFloat()?.div(100f),
-                            lat = gps.lat,
-                            lon = gps.lon
-                        )
+                        _events.value =
+                                PipelineEvent.PositionUpdate(
+                                        sCm = result.sCm,
+                                        vCms = result.vCms,
+                                        mode = result.mode,
+                                        activeStopIndex = result.activeStopIndex,
+                                        activeStopState = result.activeStopState,
+                                        accuracyM = gps.accuracyM ?: Float.MAX_VALUE,
+                                        satellites = gps.hdop?.toInt() ?: 0,
+                                        bearing = gps.headingCdeg?.toFloat()?.div(100f),
+                                        lat = gps.lat,
+                                        lon = gps.lon
+                                )
                     }
                 }
-
             } catch (e: Exception) {
                 emitError("Pipeline error: ${e.message}")
             }
@@ -346,20 +368,25 @@ class DetectionService : Service() {
         return FileGpsLogStore(logDir)
     }
 
-    private fun createNotification(contentText: String = "Processing GPS updates..."): Notification {
+    private fun createNotification(
+            contentText: String = "Processing GPS updates..."
+    ): Notification {
         val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
+        val pendingIntent =
+                PendingIntent.getActivity(
+                        this,
+                        0,
+                        intent,
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.service_notification_title))
-            .setContentText(contentText)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .build()
+                .setContentTitle(getString(R.string.service_notification_title))
+                .setContentText(contentText)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .build()
     }
 
     override fun onDestroy() {
@@ -381,9 +408,8 @@ class DetectionService : Service() {
         const val EXTRA_PLAYBACK_SPEED = "playback_speed"
 
         fun startService(context: Context) {
-            val intent = Intent(context, DetectionService::class.java).apply {
-                action = ACTION_START
-            }
+            val intent =
+                    Intent(context, DetectionService::class.java).apply { action = ACTION_START }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -392,24 +418,24 @@ class DetectionService : Service() {
         }
 
         fun stopService(context: Context) {
-            val intent = Intent(context, DetectionService::class.java).apply {
-                action = ACTION_STOP
-            }
+            val intent =
+                    Intent(context, DetectionService::class.java).apply { action = ACTION_STOP }
             context.startService(intent)
         }
 
         fun startSimulation(
-            context: Context,
-            reference: String,
-            displayName: String,
-            playbackSpeed: Float
+                context: Context,
+                reference: String,
+                displayName: String,
+                playbackSpeed: Float
         ) {
-            val intent = Intent(context, DetectionService::class.java).apply {
-                action = ACTION_START_SIMULATION
-                putExtra(EXTRA_GPS_LOG_REFERENCE, reference)
-                putExtra(EXTRA_GPS_LOG_NAME, displayName)
-                putExtra(EXTRA_PLAYBACK_SPEED, playbackSpeed)
-            }
+            val intent =
+                    Intent(context, DetectionService::class.java).apply {
+                        action = ACTION_START_SIMULATION
+                        putExtra(EXTRA_GPS_LOG_REFERENCE, reference)
+                        putExtra(EXTRA_GPS_LOG_NAME, displayName)
+                        putExtra(EXTRA_PLAYBACK_SPEED, playbackSpeed)
+                    }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -418,10 +444,11 @@ class DetectionService : Service() {
         }
 
         fun setSimulationSpeed(context: Context, playbackSpeed: Float) {
-            val intent = Intent(context, DetectionService::class.java).apply {
-                action = ACTION_SET_SIMULATION_SPEED
-                putExtra(EXTRA_PLAYBACK_SPEED, playbackSpeed)
-            }
+            val intent =
+                    Intent(context, DetectionService::class.java).apply {
+                        action = ACTION_SET_SIMULATION_SPEED
+                        putExtra(EXTRA_PLAYBACK_SPEED, playbackSpeed)
+                    }
             context.startService(intent)
         }
     }
@@ -447,22 +474,20 @@ private class NoopGpsLogStore : GpsLogStore {
     }
 }
 
-/**
- * Pipeline event for UI updates.
- */
+/** Pipeline event for UI updates. */
 sealed class PipelineEvent {
     data class Arrival(val stopIndex: Int, val probability: Int) : PipelineEvent()
     data class Departure(val stopIndex: Int, val dwellTimeS: Int) : PipelineEvent()
     data class PositionUpdate(
-        val sCm: Int,
-        val vCms: Int,
-        val mode: String = "Normal",
-        val activeStopIndex: Int = -1,
-        val activeStopState: String = "Idle",
-        val accuracyM: Float = Float.MAX_VALUE,
-        val satellites: Int = 0,
-        val bearing: Float? = null,
-        val lat: Double = 0.0,
-        val lon: Double = 0.0
+            val sCm: Int,
+            val vCms: Int,
+            val mode: String = "Normal",
+            val activeStopIndex: Int = -1,
+            val activeStopState: String = "Idle",
+            val accuracyM: Float = Float.MAX_VALUE,
+            val satellites: Int = 0,
+            val bearing: Float? = null,
+            val lat: Double = 0.0,
+            val lon: Double = 0.0
     ) : PipelineEvent()
 }
