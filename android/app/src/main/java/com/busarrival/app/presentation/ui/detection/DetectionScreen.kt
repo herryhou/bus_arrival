@@ -1,8 +1,7 @@
 package com.busarrival.app.presentation.ui.detection
 
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.LocationOn
@@ -12,9 +11,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -28,8 +24,6 @@ import com.busarrival.app.presentation.ui.detection.components.MapView
 import com.busarrival.app.presentation.ui.detection.components.StatusPanel
 import com.busarrival.app.presentation.ui.detection.components.TimelineScrubber
 import com.busarrival.app.presentation.ui.detection.components.EventToastHost
-import com.busarrival.app.domain.model.GpsFixState
-import com.busarrival.app.domain.model.EventHint
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
@@ -166,55 +160,48 @@ private fun PermissionRequestContent(onRequest: () -> Unit) {
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(32.dp)
+        Surface(
+            modifier = Modifier.padding(24.dp).widthIn(max = 420.dp),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 1.dp
         ) {
-            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-            val scale by infiniteTransition.animateFloat(
-                initialValue = 1f,
-                targetValue = 1.1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1000),
-                    repeatMode = RepeatMode.Reverse
-                ), label = "scale"
-            )
-
-            Icon(
-                imageVector = Icons.Default.LocationOn,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(80.dp)
-                    .scale(scale),
-                tint = MaterialTheme.colorScheme.primary
-            )
-
-            Text(
-                text = "Location Permission Required",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-
-            Text(
-                text = "The app needs location access to detect bus arrivals along the route.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(
-                onClick = onRequest,
-                modifier = Modifier.fillMaxWidth()
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.padding(28.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Check,
+                    imageVector = Icons.Default.LocationOn,
                     contentDescription = null,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.primary
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Grant Permission")
+
+                Text(
+                    text = "Location Permission Required",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Text(
+                    text = "The app needs location access to detect bus arrivals along the route.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Button(
+                    onClick = onRequest,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Grant Permission")
+                }
             }
         }
     }
@@ -226,36 +213,42 @@ private fun NoRouteContent() {
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(32.dp)
+        Surface(
+            modifier = Modifier.padding(24.dp).widthIn(max = 420.dp),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 1.dp
         ) {
-            Icon(
-                imageVector = Icons.Default.Place,
-                contentDescription = null,
-                modifier = Modifier.size(80.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-            )
-
-            Text(
-                text = "No Route Loaded",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-
-            Text(
-                text = "Please load a route in the Configuration tab first.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(
-                onClick = { /* Navigate to config */ }
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.padding(28.dp)
             ) {
-                Text("Go to Configuration")
+                Icon(
+                    imageVector = Icons.Default.Place,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.tertiary
+                )
+
+                Text(
+                    text = "No Route Loaded",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Text(
+                    text = "Please load a route in the Configuration tab first.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Button(
+                    onClick = { /* Navigate to config */ },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("Go to Configuration")
+                }
             }
         }
     }

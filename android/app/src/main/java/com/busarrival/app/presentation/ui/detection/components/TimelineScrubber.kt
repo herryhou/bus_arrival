@@ -1,18 +1,24 @@
 package com.busarrival.app.presentation.ui.detection.components
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.Card
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +47,7 @@ private const val SPEED_1X = 1f
 private const val SPEED_2X = 2f
 private const val SPEED_4X = 4f
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TimelineScrubber(
     replayState: ReplayState,
@@ -53,95 +60,78 @@ fun TimelineScrubber(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Play/Pause button
-            IconButton(onClick = onPlayPause) {
-                Icon(
-                    imageVector = if (replayState.isPlaying) {
-                        Icons.Default.Close
-                    } else {
-                        Icons.Default.PlayArrow
-                    },
-                    contentDescription = if (replayState.isPlaying) "Pause" else "Play",
-                    tint = MaterialTheme.colorScheme.primary
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Replay",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = replayTimeLabel(replayState),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+
+                IconButton(onClick = onPlayPause) {
+                    Icon(
+                        imageVector = if (replayState.isPlaying) Icons.Default.Close else Icons.Default.PlayArrow,
+                        contentDescription = if (replayState.isPlaying) "Pause" else "Play",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
 
-            // Speed selector
-            SpeedSelector(
-                currentSpeed = replayState.playbackSpeed,
-                onSpeedChange = onSpeedChange
-            )
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SpeedSelector(
+                    currentSpeed = replayState.playbackSpeed,
+                    onSpeedChange = onSpeedChange
+                )
 
-            // Camera follow toggle
-            IconButton(onClick = onToggleCameraFollow) {
-                Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = "Toggle camera follow",
-                    tint = if (replayState.cameraFollowEnabled) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                FilterChip(
+                    selected = replayState.cameraFollowEnabled,
+                    onClick = onToggleCameraFollow,
+                    label = { Text("Camera follow") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null
+                        )
                     }
                 )
             }
 
-            // Time display and progress
-            Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = formatTime(replayState.currentTime),
-                    style = MaterialTheme.typography.bodyMedium
+            if (replayState.traceDuration > 0) {
+                Slider(
+                    value = replayState.currentTime.toFloat(),
+                    onValueChange = { value -> onSeek(value.toLong()) },
+                    valueRange = 0f..replayState.traceDuration.toFloat(),
+                    enabled = allowSeek,
+                    modifier = Modifier.fillMaxWidth()
                 )
+            } else {
                 Text(
-                    text = " / ",
+                    text = "No trace loaded",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.error
                 )
-                Text(
-                    text = formatTime(replayState.traceDuration),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                if (replayState.traceDuration > 0) {
-                    val progress = (replayState.currentTime.toFloat() / replayState.traceDuration * 100).toInt()
-                    Text(
-                        text = " [$progress%]",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
-        }
-
-        // Timeline slider
-        if (replayState.traceDuration > 0) {
-            Slider(
-                value = replayState.currentTime.toFloat(),
-                onValueChange = { value -> onSeek(value.toLong()) },
-                valueRange = 0f..replayState.traceDuration.toFloat(),
-                enabled = allowSeek,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            )
-        } else {
-            Text(
-                text = "No trace loaded",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            )
         }
     }
 }
@@ -157,7 +147,7 @@ private fun SpeedSelector(
     val speeds = listOf(SPEED_0_5X, SPEED_1X, SPEED_2X, SPEED_4X)
 
     Row(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         speeds.forEach { speed ->
@@ -175,10 +165,12 @@ private fun SpeedSelector(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     }
                 ),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                modifier = Modifier.heightIn(min = 40.dp),
+                shape = RoundedCornerShape(8.dp)
             ) {
                 Text(
-                    text = "${speed}x",
+                    text = speedLabel(speed),
                     style = if (currentSpeed == speed) {
                         MaterialTheme.typography.labelMedium
                     } else {
@@ -188,6 +180,20 @@ private fun SpeedSelector(
             }
         }
     }
+}
+
+private fun speedLabel(speed: Float): String {
+    return if (speed == speed.toInt().toFloat()) {
+        "${speed.toInt()}x"
+    } else {
+        "${speed}x"
+    }
+}
+
+private fun replayTimeLabel(replayState: ReplayState): String {
+    if (replayState.traceDuration <= 0) return "No trace loaded"
+    val progress = (replayState.currentTime.toFloat() / replayState.traceDuration * 100).toInt()
+    return "${formatTime(replayState.currentTime)} / ${formatTime(replayState.traceDuration)}  $progress%"
 }
 
 /**

@@ -3,7 +3,12 @@ package com.busarrival.app.presentation.ui.detection.components
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -21,59 +26,74 @@ fun GpsStatusRow(
     modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // GPS Status Column
-        Column(modifier = Modifier.weight(1f)) {
+        val (statusText, statusColor) = gpsStatusTextAndColor(gpsFixState)
+        MetricTile(
+            label = "GPS",
+            value = statusText,
+            valueColor = statusColor,
+            modifier = Modifier.weight(1f)
+        )
+        MetricTile(
+            label = "Position",
+            value = formatDistance(positionCm),
+            modifier = Modifier.weight(1f)
+        )
+        MetricTile(
+            label = "Speed",
+            value = formatSpeed(speedCms),
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun MetricTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface
+) {
+    Surface(
+        modifier = modifier.heightIn(min = 56.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.68f)
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             Text(
-                text = "GPS:",
+                text = label,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            val (statusText, statusColor) = when (gpsFixState) {
-                is GpsFixState.NoSignal -> "No signal" to Color.Gray
-                is GpsFixState.Searching -> "Searching..." to Color.Gray
-                is GpsFixState.Acquiring -> "Acquiring (${gpsFixState.satellites} sats)" to Color.Gray
-                is GpsFixState.Ready -> {
-                    val accText = "±${gpsFixState.accuracyM.toInt()}m"
-                    val satText = "${gpsFixState.satellites}sats"
-                    "$accText, $satText" to Color(0xFF2E7D32)
-                }
-            }
             Text(
-                text = statusText,
+                text = value,
                 style = MaterialTheme.typography.bodyMedium,
-                color = statusColor,
-                fontWeight = if (gpsFixState is GpsFixState.Ready) FontWeight.Bold else FontWeight.Normal
+                color = valueColor,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
             )
         }
+    }
+}
 
-        // Position Column
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "Position:",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "${positionCm} cm",
-                style = MaterialTheme.typography.bodyMedium
-            )
+@Composable
+private fun gpsStatusTextAndColor(gpsFixState: GpsFixState): Pair<String, Color> {
+    return when (gpsFixState) {
+        is GpsFixState.NoSignal -> "No signal" to MaterialTheme.colorScheme.error
+        is GpsFixState.Searching -> "Searching" to MaterialTheme.colorScheme.onSurfaceVariant
+        is GpsFixState.Acquiring -> {
+            "Acquiring ${gpsFixState.satellites}" to MaterialTheme.colorScheme.tertiary
         }
-
-        // Speed Column
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "Speed:",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "${speedCms} cm/s",
-                style = MaterialTheme.typography.bodyMedium
-            )
+        is GpsFixState.Ready -> {
+            val accText = "+/-${gpsFixState.accuracyM.toInt()}m"
+            val satText = "${gpsFixState.satellites} sats"
+            "$accText, $satText" to Color(0xFF2E7D32)
         }
     }
 }
