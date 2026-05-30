@@ -330,6 +330,13 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                 _uiState.value.copy(isCameraFollowEnabled = !_uiState.value.isCameraFollowEnabled)
     }
 
+    /** Disable live camera follow (called from gesture). */
+    fun disableLiveFollow() {
+        if (_uiState.value.isCameraFollowEnabled) {
+            _uiState.value = _uiState.value.copy(isCameraFollowEnabled = false)
+        }
+    }
+
     /** Clear error message. */
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
