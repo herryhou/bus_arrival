@@ -40,7 +40,7 @@ Add state and methods:
 
 ```kotlin
 // State
-private val _cameraFollowEnabled = MutableStateFlow(preferences.cameraFollowEnabled ?: true)
+private val _cameraFollowEnabled = MutableStateFlow(preferences.cameraFollowEnabled)
 val cameraFollowEnabled: StateFlow<Boolean> = _cameraFollowEnabled.asStateFlow()
 
 // Methods
@@ -57,21 +57,51 @@ fun disableCameraFollow() {
 
 ### 2. MapView
 
+#### Vehicle Position Computation (Add to MapView)
+
+First, extract position calculation into shared derived state (works for both GPS and replay):
+
+```kotlin
+// Screen position of the followed vehicle (GPS or replay marker)
+val followedVehicleScreenPos by remember(routeData, centerLatLon, currentSCm, gpsLat, gpsLon, replayState, scale, offset, canvasSize.value) {
+    derivedStateOf {
+        val center = centerLatLon ?: return@derivedStateOf null
+        val size = canvasSize.value
+        if (size.width <= 0 || size.height <= 0) return@derivedStateOf null
+
+        // Priority: Replay marker > GPS marker
+        val posLL = if (replayState.traceFile != null && currentSCm > 0) {
+            // Replay mode: use interpolated route position
+            val pos = routeData.interpolatePosition(currentSCm)
+            if (pos != null) routeData.cmToLatLon(pos.first, pos.second) else null
+        } else {
+            // Live mode: use GPS position
+            if (gpsLat == 0.0 || gpsLon == 0.0) null
+            else LatLon(gpsLat, gpsLon)
+        }
+
+        posLL?.let { (lat, lon) ->
+            val worldX = lonToPixelX(lon, BASE_Z) - lonToPixelX(center.lon, BASE_Z)
+            val worldY = latToPixelY(lat, BASE_Z) - latToPixelY(center.lat, BASE_Z)
+            val x = worldX * scale + offset.x + size.width / 2f
+            val y = worldY * scale + offset.y + size.height / 2f
+            if (x.isFinite() && y.isFinite()) Offset(x, y) else null
+        }
+    }
+}
+```
+
 #### Auto-pan Logic (LaunchedEffect)
 
 ```kotlin
 val cameraFollowEnabled by viewModel.cameraFollowEnabled.collectAsState()
 
-// Animated offset target
-val targetOffset = remember { mutableStateOf(offset) }
-val animatedOffset by animateOffsetAsState(
-    targetValue = targetOffset.value,
-    animationSpec = tween(durationMillis = 300)
-)
+// Smooth animation using Animatable
+val animatable = remember { Animatable(initialValue = offset.x, Offset.VectorConverter) }
 
-LaunchedEffect(busScreenPosition, cameraFollowEnabled, canvasSize.value) {
+LaunchedEffect(cameraFollowEnabled, followedVehicleScreenPos, canvasSize.value, scale) {
     if (!cameraFollowEnabled) return@LaunchedEffect
-    val pos = busScreenPosition ?: return@LaunchedEffect
+    val pos = followedVehicleScreenPos ?: return@LaunchedEffect
     val size = canvasSize.value
     if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
 
@@ -81,11 +111,25 @@ LaunchedEffect(busScreenPosition, cameraFollowEnabled, canvasSize.value) {
 
     if (pos.x < marginX || pos.x > size.width - marginX ||
         pos.y < marginY || pos.y > size.height - marginY) {
-        // Vehicle outside safe zone: calculate offset to center
-        val targetWorldX = (size.width / 2f - pos.x) / scale
-        val targetWorldY = (size.height / 2f - pos.y) / scale
-        targetOffset.value = Offset(targetWorldX, targetWorldY)
-        viewModel.updateMapState(scale, targetOffset.value)
+        // Vehicle outside safe zone: animate to center
+        val centerX = size.width / 2f
+        val centerY = size.height / 2f
+        val targetOffset = Offset(
+            x = offset.x + (centerX - pos.x),
+            y = offset.y + (centerY - pos.y)
+        )
+
+        // Animate both X and Y components
+        animatable.updateBounds(offset.x, targetOffset.x)
+        animatable.snapTo(offset)
+
+        animatable.animateTo(
+            targetValue = targetOffset,
+            animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic),
+            block = { animatedValue ->
+                viewModel.updateMapState(scale, animatedValue)
+            }
+        )
     }
 }
 ```
@@ -161,7 +205,7 @@ Column(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
 Add persistence:
 
 ```kotlin
-var cameraFollowEnabled: Boolean?
+var cameraFollowEnabled: Boolean
     get() = prefs.getBoolean(KEY_CAMERA_FOLLOW, true)
     set(value) = prefs.edit().putBoolean(KEY_CAMERA_FOLLOW, value).apply()
 
@@ -199,9 +243,9 @@ companion object {
 - Initial state loads from preferences (default true)
 
 **Viewport math** (`CameraFollowViewportTest.kt`):
-- Vehicle at center → no auto-pan
-- Vehicle at 5% margin → no auto-pan
-- Vehicle at 15% margin → auto-pan triggers
+- Vehicle at center → no auto-pan (inside safe zone)
+- Vehicle at 5% margin → auto-pan triggers (OUTSIDE safe zone, < 10%)
+- Vehicle at 15% margin → no auto-pan (inside safe zone, > 10%)
 - Vehicle outside viewport → auto-pan centers it
 - Scale changes → margin recalculates correctly
 
