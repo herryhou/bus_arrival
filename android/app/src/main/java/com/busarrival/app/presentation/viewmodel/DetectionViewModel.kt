@@ -347,8 +347,14 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
 
     /** Toggle camera follow mode. */
     fun toggleCameraFollow() {
+        val nextEnabled = !_uiState.value.isCameraFollowEnabled
         _uiState.value =
-                _uiState.value.copy(isCameraFollowEnabled = !_uiState.value.isCameraFollowEnabled)
+                _uiState.value.copy(
+                        isCameraFollowEnabled = nextEnabled,
+                        cameraFollowRequestId =
+                                if (nextEnabled) _uiState.value.cameraFollowRequestId + 1
+                                else _uiState.value.cameraFollowRequestId
+                )
     }
 
     /** Disable live camera follow (called from gesture). */
@@ -754,5 +760,6 @@ data class DetectionUiState(
         val error: String? = null,
         val gpsLat: Double = 0.0,
         val gpsLon: Double = 0.0,
-        val gpsBearing: Float? = null
+        val gpsBearing: Float? = null,
+        val cameraFollowRequestId: Long = 0L
 )

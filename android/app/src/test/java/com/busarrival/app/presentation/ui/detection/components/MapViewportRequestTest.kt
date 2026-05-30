@@ -90,15 +90,35 @@ class MapViewportRequestTest {
         val gpsPosition = LatLon(lat = routeCenter.lat, lon = pixelXToLon(gpsWorldX, 15))
 
         val target =
-                computeCameraFollowTargetOffset(
-                        routeCenter = routeCenter,
-                        snappedPosition = snappedPosition,
-                        gpsPosition = gpsPosition,
-                        scale = 1f
+                requireNotNull(
+                        computeCameraFollowTargetOffset(
+                                routeCenter = routeCenter,
+                                snappedPosition = snappedPosition,
+                                gpsPosition = gpsPosition,
+                                scale = 1f
+                        )
                 )
 
         assertEquals(-1000f, target.x, 1f)
         assertEquals(0f, target.y, 1f)
+    }
+
+    @Test
+    fun cameraFollowTargetsRawGpsWhenSnappedPositionIsUnavailable() {
+        val routeCenter = LatLon(lat = 25.0330, lon = 121.5654)
+        val gpsWorldX = lonToPixelX(routeCenter.lon, 15) + 1000f
+        val gpsPosition = LatLon(lat = routeCenter.lat, lon = pixelXToLon(gpsWorldX, 15))
+
+        val target =
+                computeCameraFollowTargetOffset(
+                        routeCenter = routeCenter,
+                        snappedPosition = null,
+                        gpsPosition = gpsPosition,
+                        scale = 1f
+                )
+
+        assertEquals(-1000f, target?.x ?: 0f, 1f)
+        assertEquals(0f, target?.y ?: 0f, 1f)
     }
 
     @Test
@@ -137,6 +157,40 @@ class MapViewportRequestTest {
 
         // Should return fresh followTarget, not stale target
         assertEquals(followTarget, target)
+    }
+
+    @Test
+    fun cameraFollowRequestRecentersEvenWhenBusIsNotNearEdge() {
+        val followTarget = androidx.compose.ui.geometry.Offset(-2000f, 0f)
+
+        val target =
+                chooseCameraFollowTargetOffset(
+                        currentTarget = null,
+                        followTarget = followTarget,
+                        forceRecenter = true,
+                        nearEdge = false,
+                        inCenter = false
+                )
+
+        assertEquals(followTarget, target)
+    }
+
+    @Test
+    fun forcedCameraFollowTargetKeepsAnimatingThroughComfortZone() {
+        val activeTarget = androidx.compose.ui.geometry.Offset(-2000f, 0f)
+        val followTarget = androidx.compose.ui.geometry.Offset(-2100f, 0f)
+
+        val target =
+                chooseCameraFollowTargetOffset(
+                        currentTarget = activeTarget,
+                        currentTargetIsForcedRecenter = true,
+                        followTarget = followTarget,
+                        forceRecenter = false,
+                        nearEdge = false,
+                        inCenter = true
+                )
+
+        assertEquals(activeTarget, target)
     }
 
     @Test

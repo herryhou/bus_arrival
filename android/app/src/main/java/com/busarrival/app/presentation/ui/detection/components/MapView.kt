@@ -90,8 +90,8 @@ private const val TILE_REQUEST_DELAY_MS = 75L
 private const val TILE_PREFETCH_PADDING = 1
 private const val MAX_FETCH_RANGE = 5
 private const val MAX_TILE_CONCURRENCY = 4
-private const val CAMERA_EDGE_THRESHOLD_RATIO = 0.25f
-private const val CAMERA_COMFORT_ZONE_RATIO = 0.35f
+private const val CAMERA_EDGE_THRESHOLD_RATIO = 0.15f
+private const val CAMERA_COMFORT_ZONE_RATIO = 0.40f
 private const val CAMERA_ANIMATION_MS = 400
 
 data class LatLon(val lat: Double, val lon: Double)
@@ -129,6 +129,7 @@ fun MapView(
         gpsLat: Double,
         gpsLon: Double,
         gpsBearing: Float?,
+        cameraFollowRequestId: Long = 0L,
         onToggleCameraFollow: () -> Unit = {},
         onDisableLiveFollow: () -> Unit = {},
         onDisableReplayFollow: () -> Unit = {},
@@ -168,6 +169,8 @@ fun MapView(
 
     // Target offset for animation (null = no interpolation needed)
     var targetOffset by remember { mutableStateOf<Offset?>(null) }
+    var isForcedRecenterTarget by remember { mutableStateOf(false) }
+    var handledCameraFollowRequestId by remember { mutableStateOf(cameraFollowRequestId) }
 
     // Non-key dependencies via rememberUpdatedState (prevents animation restart)
     val currentSCm by rememberUpdatedState(currentSCm)
@@ -190,7 +193,8 @@ fun MapView(
             centerLatLon,
             scale,
             canvasSize.value,
-            isUserInteracting.value
+            isUserInteracting.value,
+            cameraFollowRequestId
     ) {
         if (!shouldFollow || routeData == null || centerLatLon == null) {
             wasFollowingLastFrame = false
@@ -217,20 +221,14 @@ fun MapView(
                 continue
             }
 
-            // Get current bus position from route interpolation
             val pos = routeData.interpolatePosition(currentSCm)
-            if (pos == null) {
-                delay(16L)
-                continue
-            }
-
-            val ll = routeData.cmToLatLon(pos.first, pos.second)
             val gpsPosition =
                     if (currentGpsLat != 0.0 && currentGpsLon != 0.0) {
                         LatLon(lat = currentGpsLat, lon = currentGpsLon)
                     } else {
                         null
                     }
+            val ll = pos?.let { routeData.cmToLatLon(it.first, it.second) }
 
             // Calculate screen position
             val followTarget =
@@ -240,16 +238,20 @@ fun MapView(
                             gpsPosition = gpsPosition,
                             scale = scale
                     )
+            if (followTarget == null) {
+                delay(16L)
+                continue
+            }
             val busWorldX = -followTarget.x / scale
             val busWorldY = -followTarget.y / scale
             val screenX = busWorldX * scale + currentOffset.x + size.width / 2f
             val screenY = busWorldY * scale + currentOffset.y + size.height / 2f
 
-            // Ratio-based edge detection - match edge and center thresholds to eliminate gap
-            val edgeThresholdX = size.width * 0.30f
-            val edgeThresholdY = size.height * 0.30f
-            val centerThresholdX = size.width * 0.30f
-            val centerThresholdY = size.height * 0.30f
+            // Ratio-based edge detection - use constants for consistent behavior
+            val edgeThresholdX = size.width * CAMERA_EDGE_THRESHOLD_RATIO
+            val edgeThresholdY = size.height * CAMERA_EDGE_THRESHOLD_RATIO
+            val centerThresholdX = size.width * CAMERA_COMFORT_ZONE_RATIO
+            val centerThresholdY = size.height * CAMERA_COMFORT_ZONE_RATIO
 
             val nearEdge =
                     screenX < edgeThresholdX ||
@@ -265,18 +267,30 @@ fun MapView(
 
             // Detect enable transition (just turned on)
             val justEnabled = !wasFollowingLastFrame && shouldFollow
+            val forceRecenter = justEnabled || cameraFollowRequestId != handledCameraFollowRequestId
 
             // Debug logging
-            android.util.Log.d("CameraFollow", "screenX=$screenX screenY=$screenY nearEdge=$nearEdge inCenter=$inCenter shouldFollow=$shouldFollow currentOffset=$currentOffset")
+            android.util.Log.d(
+                    "CameraFollow",
+                    "screenX=$screenX screenY=$screenY nearEdge=$nearEdge inCenter=$inCenter shouldFollow=$shouldFollow forceRecenter=$forceRecenter currentOffset=$currentOffset"
+            )
 
             targetOffset =
                     chooseCameraFollowTargetOffset(
                             currentTarget = targetOffset,
+                            currentTargetIsForcedRecenter = isForcedRecenterTarget,
                             followTarget = followTarget,
                             justEnabled = justEnabled,
+                            forceRecenter = forceRecenter,
                             nearEdge = nearEdge,
                             inCenter = inCenter
                     )
+            if (forceRecenter) {
+                handledCameraFollowRequestId = cameraFollowRequestId
+                isForcedRecenterTarget = true
+            } else if (nearEdge) {
+                isForcedRecenterTarget = false
+            }
 
             // Idle guard: if no target, wait 100ms before next check
             val target = targetOffset
@@ -301,6 +315,7 @@ fun MapView(
             if (distance < 1f) {
                 viewModel.updateMapState(scale, target)
                 targetOffset = null
+                isForcedRecenterTarget = false
             }
 
             // Frame pacing: 60fps
@@ -1086,15 +1101,16 @@ internal fun computeVisibleTileRange(
 
 internal fun computeCameraFollowTargetOffset(
         routeCenter: LatLon,
-        snappedPosition: LatLon,
+        snappedPosition: LatLon?,
         gpsPosition: LatLon?,
         scale: Float
-): Offset {
+): Offset? {
     val position =
             gpsPosition?.takeIf {
                 it.lat.isFinite() && it.lon.isFinite() && it.lat != 0.0 && it.lon != 0.0
             }
                     ?: snappedPosition
+                    ?: return null
     val worldX = lonToPixelX(position.lon, BASE_Z) - lonToPixelX(routeCenter.lon, BASE_Z)
     val worldY = latToPixelY(position.lat, BASE_Z) - latToPixelY(routeCenter.lat, BASE_Z)
     return Offset(-worldX * scale, -worldY * scale)
@@ -1102,14 +1118,17 @@ internal fun computeCameraFollowTargetOffset(
 
 internal fun chooseCameraFollowTargetOffset(
         currentTarget: Offset?,
+        currentTargetIsForcedRecenter: Boolean = false,
         followTarget: Offset,
-        justEnabled: Boolean,
+        justEnabled: Boolean = false,
+        forceRecenter: Boolean = justEnabled,
         nearEdge: Boolean,
         inCenter: Boolean
 ): Offset? {
     return when {
-        justEnabled -> followTarget
+        forceRecenter -> followTarget
         nearEdge -> followTarget
+        currentTargetIsForcedRecenter && currentTarget != null -> currentTarget
         inCenter -> null
         currentTarget != null -> currentTarget
         else -> null
