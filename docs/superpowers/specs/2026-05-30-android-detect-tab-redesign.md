@@ -48,21 +48,54 @@ Use a clean dashboard layout:
 ## Visual Requirements
 
 - Use Material 3 colors and typography.
+- Use concrete Material 3 primitives rather than custom drawing where possible:
+  `Card`/`ElevatedCard` for dashboard groups, `Button` for the primary Start/Stop action,
+  `OutlinedButton` or `TextButton` for secondary actions, `Switch` for binary settings,
+  `Slider` for replay position, and `FilterChip` or small `Surface` chips for status labels.
+- Keep dashboard card elevation low: use 0-1 dp for regular dashboard surfaces and reserve
+  stronger elevation only for overlays such as snackbars or transient hints.
 - Avoid nested cards.
-- Use stable spacing and dimensions so controls do not shift as values change.
+- Use stable spacing and dimensions so controls do not shift as values change:
+  metric tiles should be at least 56 dp tall, use 8 dp internal spacing, and sit in rows or
+  grids with 8-12 dp gaps depending on available width.
+- Keep primary action controls at least 48 dp tall.
 - Use larger, clearer controls for primary actions.
 - Keep text concise and scannable.
 - Keep the palette balanced and avoid a single dominant hue.
 - Ensure tablet readability while remaining responsive for narrower Android layouts.
 
+## Callback Wiring To Preserve
+
+- `MapView.onToggleCameraFollow` must still call `viewModel.toggleCameraFollow()`.
+- `MapView.onDisableLiveFollow` must still call `viewModel.disableLiveFollow()`.
+- `MapView.onDisableReplayFollow` must still call `viewModel.toggleReplayCameraFollow()`.
+- `StatusPanel.onStartStop` must still call `viewModel.stopDetection()` when running and
+  `viewModel.startDetection()` when stopped.
+- `StatusPanel.onToggleCamera` must still call `viewModel.toggleCameraFollow()`.
+- `StatusPanel.onToggleGpsLogging` must still call `viewModel.toggleGpsLogging()`.
+- `TimelineScrubber.onPlayPause` must still call `viewModel.playPause()`.
+- `TimelineScrubber.onSeek` must still call `viewModel.seekTo(it)`.
+- `TimelineScrubber.onSpeedChange` must still call `viewModel.setPlaybackSpeed(it)`.
+- `TimelineScrubber.onToggleCameraFollow` must still call
+  `viewModel.toggleReplayCameraFollow()`.
+- `TimelineScrubber.allowSeek` must still be `false` for replay trace files ending in
+  `.jsonl` and `true` otherwise.
+- `EventToastHost` must remain overlaid outside the main `Column`.
+- `ErrorSnackbar.onDismiss` must still call `viewModel.clearError()`.
+
 ## Test And Verification
 
 Verification should include:
 
+- Capture a before screenshot of the current Detect tab when an emulator or device is
+  available. If local screenshot capture is not available, record that limitation in the
+  completion notes.
 - Confirm `MapView.kt` is unchanged.
 - Run focused Android unit tests for detection UI components where available.
 - Run Android compile or unit test verification for the app.
 - Inspect the final diff for behavior-only regressions, especially callback wiring and replay seek rules.
+- Capture or inspect the final Detect tab after implementation when an emulator or device is
+  available, and compare it against the before screenshot.
 
 ## Success Criteria
 
