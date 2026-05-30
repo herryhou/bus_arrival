@@ -50,7 +50,6 @@ fun StatusPanel(
     gpsLoggingEnabled: Boolean,
     gpsFixState: GpsFixState,
     onStartStop: () -> Unit,
-    onToggleCamera: () -> Unit,
     onToggleGpsLogging: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -89,10 +88,8 @@ fun StatusPanel(
 
             ActionRow(
                     isRunning = uiState.isRunning,
-                    cameraFollowEnabled = uiState.isCameraFollowEnabled,
                     gpsLoggingEnabled = gpsLoggingEnabled,
                     onStartStop = onStartStop,
-                    onToggleCamera = onToggleCamera,
                     onToggleGpsLogging = onToggleGpsLogging
             )
 
@@ -184,16 +181,17 @@ private fun CurrentStopPanel(stopLabel: String, stopState: String, mode: String)
 @Composable
 private fun ActionRow(
         isRunning: Boolean,
-        cameraFollowEnabled: Boolean,
         gpsLoggingEnabled: Boolean,
         onStartStop: () -> Unit,
-        onToggleCamera: () -> Unit,
         onToggleGpsLogging: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         Button(
                 onClick = onStartStop,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                 colors =
                         if (isRunning) {
                             ButtonDefaults.buttonColors(
@@ -207,24 +205,12 @@ private fun ActionRow(
             Text(if (isRunning) "Stop Detection" else "Start Detection")
         }
 
-        FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedButton(
-                    onClick = onToggleCamera,
-                    modifier = Modifier.heightIn(min = 48.dp)
-            ) {
-                Text(if (cameraFollowEnabled) "Camera Follow On" else "Camera Follow Off")
-            }
-            SecondarySwitch(
-                    label = "GPS log",
-                    checked = gpsLoggingEnabled,
-                    onToggle = onToggleGpsLogging,
-                    contentDescription = "Toggle GPS logging"
-            )
-        }
+        SecondarySwitch(
+                label = "GPS log",
+                checked = gpsLoggingEnabled,
+                onToggle = onToggleGpsLogging,
+                contentDescription = "Toggle GPS logging"
+        )
     }
 }
 

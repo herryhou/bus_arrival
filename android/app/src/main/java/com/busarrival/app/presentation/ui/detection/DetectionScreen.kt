@@ -116,7 +116,6 @@ fun DetectionScreen(
                             viewModel.startDetection()
                         }
                     },
-                    onToggleCamera = { viewModel.toggleCameraFollow() },
                     onToggleGpsLogging = { viewModel.toggleGpsLogging() },
                     modifier = Modifier
                         .weight(0.4f)
@@ -131,7 +130,6 @@ fun DetectionScreen(
                         onPlayPause = { viewModel.playPause() },
                         onSeek = { viewModel.seekTo(it) },
                         onSpeedChange = { viewModel.setPlaybackSpeed(it) },
-                        onToggleCameraFollow = { viewModel.toggleReplayCameraFollow() },
                         allowSeek = !isGpsLogSimulation,
                         modifier = Modifier.fillMaxWidth()
                     )

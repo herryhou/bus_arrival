@@ -36,7 +36,6 @@ import com.busarrival.app.domain.model.ReplayState
  * Features:
  * - Play/pause button
  * - Playback speed selector (0.5x, 1x, 2x, 4x)
- * - Camera follow toggle
  * - Timeline slider with position display
  * - Time display (current/total)
  * - Progress percentage
@@ -54,7 +53,6 @@ fun TimelineScrubber(
     onPlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
     onSpeedChange: (Float) -> Unit,
-    onToggleCameraFollow: () -> Unit,
     allowSeek: Boolean = true,
     modifier: Modifier = Modifier
 ) {
@@ -102,18 +100,6 @@ fun TimelineScrubber(
                 SpeedSelector(
                     currentSpeed = replayState.playbackSpeed,
                     onSpeedChange = onSpeedChange
-                )
-
-                FilterChip(
-                    selected = replayState.cameraFollowEnabled,
-                    onClick = onToggleCameraFollow,
-                    label = { Text("Camera follow") },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null
-                        )
-                    }
                 )
             }
 
