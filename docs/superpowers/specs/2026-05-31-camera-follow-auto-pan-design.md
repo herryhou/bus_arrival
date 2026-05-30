@@ -59,18 +59,14 @@ fun disableCameraFollow() {
 
 #### Vehicle Position Computation (Add to MapView)
 
-Extract position calculation into shared derived state (works for both GPS and replay). Keys exclude `offset` to prevent LaunchedEffect restart loops during animation:
+**Step 1:** Derive vehicle world/LatLon position (independent of offset):
 
 ```kotlin
-// Screen position of the followed vehicle (GPS or replay marker)
-val followedVehicleScreenPos by remember(routeData, centerLatLon, currentSCm, gpsLat, gpsLon, replayState, scale, canvasSize.value) {
+// LatLon of the followed vehicle (GPS or replay marker) - no offset dependency
+val followedVehicleLatLon by remember(routeData, currentSCm, gpsLat, gpsLon, replayState) {
     derivedStateOf {
-        val center = centerLatLon ?: return@derivedStateOf null
-        val size = canvasSize.value
-        if (size.width <= 0 || size.height <= 0) return@derivedStateOf null
-
         // Priority: Replay marker > GPS marker
-        val posLL = if (replayState.traceFile != null && currentSCm >= 0) {
+        if (replayState.traceFile != null && currentSCm >= 0) {
             // Replay mode: use interpolated route position (0 is valid start-of-route)
             val pos = routeData.interpolatePosition(currentSCm)
             if (pos != null) routeData.cmToLatLon(pos.first, pos.second) else null
@@ -79,15 +75,15 @@ val followedVehicleScreenPos by remember(routeData, centerLatLon, currentSCm, gp
             if (gpsLat == 0.0 || gpsLon == 0.0) null
             else LatLon(gpsLat, gpsLon)
         }
-
-        posLL?.let { (lat, lon) ->
-            val worldX = lonToPixelX(lon, BASE_Z) - lonToPixelX(center.lon, BASE_Z)
-            val worldY = latToPixelY(lat, BASE_Z) - latToPixelY(center.lat, BASE_Z)
-            val x = worldX * scale + offset.x + size.width / 2f
-            val y = worldY * scale + offset.y + size.height / 2f
-            if (x.isFinite() && y.isFinite()) Offset(x, y) else null
-        }
     }
+}
+```
+
+**Step 2:** Compute screen position inside trigger effect with current offset:
+
+```kotlin
+LaunchedEffect(cameraFollowEnabled, followedVehicleLatLon, offset, scale, canvasSize.value) {
+    // ... trigger logic computes screen pos here
 }
 ```
 
@@ -108,19 +104,29 @@ val animatedOffset by animateOffsetAsState(
     label = "cameraFollow"
 )
 
-// Apply animated offset when active
-LaunchedEffect(animatedOffset) {
-    if (autoPanTarget != null) {
+// Apply animated offset when follow is enabled AND animation is active
+LaunchedEffect(animatedOffset, cameraFollowEnabled) {
+    if (cameraFollowEnabled && autoPanTarget != null) {
         viewModel.updateMapState(scale, animatedOffset)
     }
 }
 
-// Trigger viewport check when vehicle moves (keys exclude offset)
-LaunchedEffect(cameraFollowEnabled, followedVehicleScreenPos, canvasSize.value, scale) {
+// Trigger viewport check when vehicle moves (keys include offset for screen pos calculation)
+LaunchedEffect(cameraFollowEnabled, followedVehicleLatLon, offset, canvasSize.value, scale) {
     if (!cameraFollowEnabled || autoPanTarget != null) return@LaunchedEffect
-    val pos = followedVehicleScreenPos ?: return@LaunchedEffect
+    val posLL = followedVehicleLatLon ?: return@LaunchedEffect
+    val center = centerLatLon ?: return@LaunchedEffect
     val size = canvasSize.value
     if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
+
+    // Compute screen position with CURRENT offset (not stale)
+    val worldX = lonToPixelX(posLL.lon, BASE_Z) - lonToPixelX(center.lon, BASE_Z)
+    val worldY = latToPixelY(posLL.lat, BASE_Z) - latToPixelY(center.lat, BASE_Z)
+    val pos = Offset(
+        x = worldX * scale + offset.x + size.width / 2f,
+        y = worldY * scale + offset.y + size.height / 2f
+    )
+    if (!pos.x.isFinite() || !pos.y.isFinite()) return@LaunchedEffect
 
     // Check 10% margin from edges
     val marginX = size.width * 0.1f
@@ -148,12 +154,13 @@ LaunchedEffect(animatedOffset, autoPanTarget) {
 
 #### Pan Gesture Integration
 
-Modify existing `detectTransformGestures` block:
+Modify existing `detectTransformGestures` block to cancel animation and disable follow:
 
 ```kotlin
 detectTransformGestures { centroid, pan, zoom, _ ->
     if (cameraFollowEnabled) {
         viewModel.disableCameraFollow()
+        autoPanTarget = null  // Cancel any in-progress auto-pan animation
     }
     // ... existing pan/zoom logic
 }
@@ -230,11 +237,12 @@ companion object {
 
 | Scenario | Behavior |
 |----------|----------|
-| No GPS signal | `followedVehicleScreenPos` is null → LaunchedEffect skips (no-op) |
+| No GPS signal | `followedVehicleLatLon` is null → LaunchedEffect skips (no-op) |
 | Canvas not ready | `canvasSize` is zero → LaunchedEffect skips (no-op) |
 | Route not loaded | Toggle hidden, no auto-pan possible |
-| Pan during animation | Animation cancels, Follow disables |
+| Pan during animation | `autoPanTarget` cleared, animation LaunchedEffect guarded on `cameraFollowEnabled` |
 | Replay scrubbing | Each seek triggers viewport check |
+| Follow OFF | Zero overhead, LaunchedEffect returns early, `animatedOffset` falls back to current `offset` |
 | Follow OFF | Zero overhead, LaunchedEffect returns early |
 | Scale changes | Margin recalculates in screen coords |
 
@@ -263,10 +271,17 @@ companion object {
 
 ### Integration Tests (Manual)
 
+**Basic behavior:**
 1. GPS mode: Enable Follow, drive bus → verify auto-pan
 2. Replay mode: Enable Follow, play trace → verify auto-pan
-3. Pan gesture: Auto-pan active, user pans → Follow disables
-4. Toggle UI: Click Follow button → state changes, visual updates
+3. Toggle UI: Click Follow button → state changes, visual updates
+
+**Cancellation and edge cases (high-risk):**
+4. Pan during animation: Enable Follow, wait for auto-pan to start, then immediately pan → animation cancels, Follow disables, map stays at user-pan position
+5. Pan after auto-pan completes: Manual pan → Follow disables, subsequent vehicle movement does NOT trigger auto-pan
+6. Rapid vehicle movement: Enable Follow, bus moves quickly → auto-pan triggers on each viewport boundary crossing (not stuck)
+7. Scale change during animation: Pinch-zoom while auto-pan active → animation completes at new scale, no stale offset
+8. Disable via toggle during animation: Click Follow button during auto-pan → animation cancels immediately
 
 ## Implementation Notes
 
