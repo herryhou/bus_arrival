@@ -181,6 +181,116 @@ fun MapView(
         }
     }
 
+    // Single unified camera follow LaunchedEffect (60fps loop)
+    LaunchedEffect(shouldFollow, routeData, centerLatLon, scale, canvasSize.value, isUserInteracting.value) {
+        if (!shouldFollow || routeData == null || centerLatLon == null) {
+            wasFollowingLastFrame = false
+            return@LaunchedEffect
+        }
+
+        val size = canvasSize.value
+        if (size.width <= 0 || size.height <= 0) {
+            wasFollowingLastFrame = false
+            return@LaunchedEffect
+        }
+
+        // Per-frame animation loop
+        while (true) {
+            // Exit if follow was disabled
+            if (!shouldFollow) {
+                wasFollowingLastFrame = false
+                break
+            }
+
+            // If user is interacting, wait and continue
+            if (isUserInteracting.value) {
+                delay(16L)
+                continue
+            }
+
+            // Get current bus position from route interpolation
+            val pos = routeData.interpolatePosition(currentSCm)
+            if (pos == null) {
+                delay(16L)
+                continue
+            }
+
+            val ll = routeData.cmToLatLon(pos.first, pos.second)
+
+            // Calculate screen position
+            val busWorldX = lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLatLon.lon, BASE_Z)
+            val busWorldY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLatLon.lat, BASE_Z)
+            val screenX = busWorldX * scale + currentOffset.x + size.width / 2f
+            val screenY = busWorldY * scale + currentOffset.y + size.height / 2f
+
+            // Ratio-based edge detection
+            val edgeThresholdX = size.width * 0.25f
+            val edgeThresholdY = size.height * 0.25f
+            val centerThresholdX = size.width * 0.30f
+            val centerThresholdY = size.height * 0.30f
+
+            val nearEdge = screenX < edgeThresholdX ||
+                           screenX > size.width - edgeThresholdX ||
+                           screenY < edgeThresholdY ||
+                           screenY > size.height - edgeThresholdY
+
+            val inCenter = screenX > centerThresholdX &&
+                           screenX < size.width - centerThresholdX &&
+                           screenY > centerThresholdY &&
+                           screenY < size.height - centerThresholdY
+
+            // Detect enable transition (just turned on)
+            val justEnabled = !wasFollowingLastFrame && shouldFollow
+
+            // Set target based on state
+            when {
+                justEnabled -> {
+                    // Toggle ON: always center bus, regardless of position
+                    targetOffset = Offset(-busWorldX * scale, -busWorldY * scale)
+                }
+                nearEdge -> {
+                    // Active tracking: recompute target every frame
+                    targetOffset = Offset(-busWorldX * scale, -busWorldY * scale)
+                }
+                inCenter -> {
+                    // Comfortable center zone: stop interpolating
+                    targetOffset = null
+                }
+            }
+
+            // Idle guard: if no target, wait 100ms before next check
+            val target = targetOffset
+            if (target == null) {
+                delay(100L)
+                wasFollowingLastFrame = shouldFollow
+                continue
+            }
+
+            // Interpolate toward target (exponential lerp)
+            val lerpFactor = 0.15f
+            val newOffset = currentOffset + (target - currentOffset) * lerpFactor
+
+            // Movement threshold: only update state if movement >= 0.5px
+            val movementDelta = (newOffset - currentOffset).getDistance()
+            if (movementDelta >= 0.5f) {
+                viewModel.updateMapState(scale, newOffset)
+            }
+
+            // Stop condition: when reached target, final snap and clear
+            val distance = (target - newOffset).getDistance()
+            if (distance < 1f) {
+                viewModel.updateMapState(scale, target)
+                targetOffset = null
+            }
+
+            // Frame pacing: 60fps
+            delay(16L)
+
+            // Update tracking flag for next iteration
+            wasFollowingLastFrame = shouldFollow
+        }
+    }
+
     // Calculate tile zoom level from scale - use derivedStateOf to ensure updates
     val tileZ by remember {
         derivedStateOf {
