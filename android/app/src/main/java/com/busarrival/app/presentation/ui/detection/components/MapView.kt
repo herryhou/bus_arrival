@@ -127,6 +127,8 @@ fun MapView(
         gpsLon: Double,
         gpsBearing: Float?,
         onToggleCameraFollow: () -> Unit = {},
+        onDisableLiveFollow: () -> Unit = {},
+        onDisableReplayFollow: () -> Unit = {},
         modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
