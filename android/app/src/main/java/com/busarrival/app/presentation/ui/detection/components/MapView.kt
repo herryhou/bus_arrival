@@ -45,8 +45,12 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.delay
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -127,6 +131,8 @@ fun MapView(
         gpsLon: Double,
         gpsBearing: Float?,
         onToggleCameraFollow: () -> Unit = {},
+        onDisableLiveFollow: () -> Unit = {},
+        onDisableReplayFollow: () -> Unit = {},
         modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -139,7 +145,6 @@ fun MapView(
     val tileCache by viewModel.tileCache.collectAsState()
     val canvasSize = remember { androidx.compose.runtime.mutableStateOf(IntSize.Zero) }
     val showDebugDetails = remember { mutableStateOf(false) }
-    val isUserInteracting = remember { mutableStateOf(false) }
     val centerLatLon =
             remember(routeData) {
                 routeData?.let {
@@ -153,75 +158,137 @@ fun MapView(
                 }
             }
 
-    // Camera follow: single-axis smooth adjustment when near edge
+    // Track user interaction state
+    val isUserInteracting = remember { mutableStateOf(false) }
+
+    // Camera follow state
     val shouldFollow = isCameraFollowEnabled || replayState.cameraFollowEnabled
 
-    LaunchedEffect(currentSCm, shouldFollow, routeData, scale, canvasSize.value, isUserInteracting.value) {
-        if (shouldFollow && routeData != null && centerLatLon != null && !isUserInteracting.value) {
-            val size = canvasSize.value
-            if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
+    // Track if follow was enabled in previous frame (detect enable transition)
+    var wasFollowingLastFrame by remember { mutableStateOf(false) }
 
-            val pos = routeData.interpolatePosition(currentSCm)
-            if (pos != null) {
-                val ll = routeData.cmToLatLon(pos.first, pos.second)
+    // Target offset for animation (null = no interpolation needed)
+    var targetOffset by remember { mutableStateOf<Offset?>(null) }
 
-                val worldX = lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLatLon.lon, BASE_Z)
-                val worldY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLatLon.lat, BASE_Z)
+    // Non-key dependencies via rememberUpdatedState (prevents animation restart)
+    val currentSCm by rememberUpdatedState(currentSCm)
+    val currentOffset by rememberUpdatedState(offset)
 
-                val currentScreenX = worldX * scale + offset.x + size.width / 2f
-                val currentScreenY = worldY * scale + offset.y + size.height / 2f
-
-                var targetOffsetX = offset.x
-                var targetOffsetY = offset.y
-
-                val edgeThresholdX = size.width * CAMERA_EDGE_THRESHOLD_RATIO
-                val edgeThresholdY = size.height * CAMERA_EDGE_THRESHOLD_RATIO
-
-                if (currentScreenX < edgeThresholdX) {
-                    val targetScreenX = size.width * CAMERA_COMFORT_ZONE_RATIO
-                    targetOffsetX = targetScreenX - worldX * scale - size.width / 2f
-                } else if (currentScreenX > size.width - edgeThresholdX) {
-                    val targetScreenX = size.width * (1 - CAMERA_COMFORT_ZONE_RATIO)
-                    targetOffsetX = targetScreenX - worldX * scale - size.width / 2f
-                }
-
-                if (currentScreenY < edgeThresholdY) {
-                    val targetScreenY = size.height * CAMERA_COMFORT_ZONE_RATIO
-                    targetOffsetY = targetScreenY - worldY * scale - size.height / 2f
-                } else if (currentScreenY > size.height - edgeThresholdY) {
-                    val targetScreenY = size.height * (1 - CAMERA_COMFORT_ZONE_RATIO)
-                    targetOffsetY = targetScreenY - worldY * scale - size.height / 2f
-                }
-
-                val startX = offset.x
-                val startY = offset.y
-                val startTime = System.currentTimeMillis()
-                val duration = CAMERA_ANIMATION_MS
-
-                while (true) {
-                    val elapsed = System.currentTimeMillis() - startTime
-                    if (elapsed >= duration) break
-
-                    val t = elapsed.toFloat() / duration
-                    val eased = EaseInOut.transform(t)
-
-                    val currentX = startX + (targetOffsetX - startX) * eased
-                    val currentY = startY + (targetOffsetY - startY) * eased
-
-                    viewModel.updateMapState(scale, Offset(currentX, currentY))
-                    kotlinx.coroutines.delay(16L)
-                }
-
-                viewModel.updateMapState(scale, Offset(targetOffsetX, targetOffsetY))
-            }
+    // Reset user interaction flag 100ms after gesture ends
+    LaunchedEffect(isUserInteracting.value) {
+        if (isUserInteracting.value) {
+            delay(100L)
+            isUserInteracting.value = false
         }
     }
 
-    // Reset user interaction flag after gesture ends
-    LaunchedEffect(isUserInteracting.value) {
-        if (isUserInteracting.value) {
-            kotlinx.coroutines.delay(100L)
-            isUserInteracting.value = false
+    // Single unified camera follow LaunchedEffect (60fps loop)
+    LaunchedEffect(shouldFollow, routeData, centerLatLon, scale, canvasSize.value, isUserInteracting.value) {
+        if (!shouldFollow || routeData == null || centerLatLon == null) {
+            wasFollowingLastFrame = false
+            return@LaunchedEffect
+        }
+
+        val size = canvasSize.value
+        if (size.width <= 0 || size.height <= 0) {
+            wasFollowingLastFrame = false
+            return@LaunchedEffect
+        }
+
+        // Per-frame animation loop
+        while (true) {
+            // Exit if follow was disabled
+            if (!shouldFollow) {
+                wasFollowingLastFrame = false
+                break
+            }
+
+            // If user is interacting, wait and continue
+            if (isUserInteracting.value) {
+                delay(16L)
+                continue
+            }
+
+            // Get current bus position from route interpolation
+            val pos = routeData.interpolatePosition(currentSCm)
+            if (pos == null) {
+                delay(16L)
+                continue
+            }
+
+            val ll = routeData.cmToLatLon(pos.first, pos.second)
+
+            // Calculate screen position
+            val busWorldX = lonToPixelX(ll.lon, BASE_Z) - lonToPixelX(centerLatLon.lon, BASE_Z)
+            val busWorldY = latToPixelY(ll.lat, BASE_Z) - latToPixelY(centerLatLon.lat, BASE_Z)
+            val screenX = busWorldX * scale + currentOffset.x + size.width / 2f
+            val screenY = busWorldY * scale + currentOffset.y + size.height / 2f
+
+            // Ratio-based edge detection
+            val edgeThresholdX = size.width * 0.25f
+            val edgeThresholdY = size.height * 0.25f
+            val centerThresholdX = size.width * 0.30f
+            val centerThresholdY = size.height * 0.30f
+
+            val nearEdge = screenX < edgeThresholdX ||
+                           screenX > size.width - edgeThresholdX ||
+                           screenY < edgeThresholdY ||
+                           screenY > size.height - edgeThresholdY
+
+            val inCenter = screenX > centerThresholdX &&
+                           screenX < size.width - centerThresholdX &&
+                           screenY > centerThresholdY &&
+                           screenY < size.height - centerThresholdY
+
+            // Detect enable transition (just turned on)
+            val justEnabled = !wasFollowingLastFrame && shouldFollow
+
+            // Set target based on state
+            when {
+                justEnabled -> {
+                    // Toggle ON: always center bus, regardless of position
+                    targetOffset = Offset(-busWorldX * scale, -busWorldY * scale)
+                }
+                nearEdge -> {
+                    // Active tracking: recompute target every frame
+                    targetOffset = Offset(-busWorldX * scale, -busWorldY * scale)
+                }
+                inCenter -> {
+                    // Comfortable center zone: stop interpolating
+                    targetOffset = null
+                }
+            }
+
+            // Idle guard: if no target, wait 100ms before next check
+            val target = targetOffset
+            if (target == null) {
+                delay(100L)
+                wasFollowingLastFrame = shouldFollow
+                continue
+            }
+
+            // Interpolate toward target (exponential lerp)
+            val lerpFactor = 0.15f
+            val newOffset = currentOffset + (target - currentOffset) * lerpFactor
+
+            // Movement threshold: only update state if movement >= 0.5px
+            val movementDelta = (newOffset - currentOffset).getDistance()
+            if (movementDelta >= 0.5f) {
+                viewModel.updateMapState(scale, newOffset)
+            }
+
+            // Stop condition: when reached target, final snap and clear
+            val distance = (target - newOffset).getDistance()
+            if (distance < 1f) {
+                viewModel.updateMapState(scale, target)
+                targetOffset = null
+            }
+
+            // Frame pacing: 60fps
+            delay(16L)
+
+            // Update tracking flag for next iteration
+            wasFollowingLastFrame = shouldFollow
         }
     }
 
@@ -365,6 +432,18 @@ fun MapView(
                                                             pan
 
                                             viewModel.updateMapState(newScale, newOffset)
+
+                                            // Auto-disable camera follow on user gesture (once per session)
+                                            if (!isUserInteracting.value) {
+                                                isUserInteracting.value = true
+                                                // Disable active follow source(s)
+                                                if (isCameraFollowEnabled) {
+                                                    onDisableLiveFollow()
+                                                }
+                                                if (replayState.cameraFollowEnabled) {
+                                                    onDisableReplayFollow()
+                                                }
+                                            }
                                         }
                                     }
             ) {
