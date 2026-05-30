@@ -102,7 +102,7 @@ class MapViewportRequestTest {
     }
 
     @Test
-    fun cameraFollowKeepsAnimatingToCenterAfterEdgeTrigger() {
+    fun cameraFollowStopsWhenBusInCenter() {
         val activeTarget = androidx.compose.ui.geometry.Offset(-1000f, 0f)
         val followTarget = androidx.compose.ui.geometry.Offset(-1000f, 0f)
 
@@ -115,7 +115,28 @@ class MapViewportRequestTest {
                         inCenter = true
                 )
 
-        assertEquals(activeTarget, target)
+        // When bus is in center, camera should stop (return null)
+        assertEquals(null, target)
+    }
+
+    @Test
+    fun cameraFollowTriggeredByEdgeEvenWhenOldTargetExists() {
+        // Bug fix: when bus leaves viewport, nearEdge should take priority
+        // over existing stale target
+        val staleTarget = androidx.compose.ui.geometry.Offset(-1000f, 0f)
+        val followTarget = androidx.compose.ui.geometry.Offset(-2000f, 0f)
+
+        val target =
+                chooseCameraFollowTargetOffset(
+                        currentTarget = staleTarget,
+                        followTarget = followTarget,
+                        justEnabled = false,
+                        nearEdge = true,  // Bus near edge
+                        inCenter = false
+                )
+
+        // Should return fresh followTarget, not stale target
+        assertEquals(followTarget, target)
     }
 
     @Test

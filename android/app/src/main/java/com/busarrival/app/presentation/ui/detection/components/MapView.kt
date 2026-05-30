@@ -245,9 +245,9 @@ fun MapView(
             val screenX = busWorldX * scale + currentOffset.x + size.width / 2f
             val screenY = busWorldY * scale + currentOffset.y + size.height / 2f
 
-            // Ratio-based edge detection
-            val edgeThresholdX = size.width * 0.1f
-            val edgeThresholdY = size.height * 0.1f
+            // Ratio-based edge detection - match edge and center thresholds to eliminate gap
+            val edgeThresholdX = size.width * 0.30f
+            val edgeThresholdY = size.height * 0.30f
             val centerThresholdX = size.width * 0.30f
             val centerThresholdY = size.height * 0.30f
 
@@ -265,6 +265,9 @@ fun MapView(
 
             // Detect enable transition (just turned on)
             val justEnabled = !wasFollowingLastFrame && shouldFollow
+
+            // Debug logging
+            android.util.Log.d("CameraFollow", "screenX=$screenX screenY=$screenY nearEdge=$nearEdge inCenter=$inCenter shouldFollow=$shouldFollow currentOffset=$currentOffset")
 
             targetOffset =
                     chooseCameraFollowTargetOffset(
@@ -1107,8 +1110,8 @@ internal fun chooseCameraFollowTargetOffset(
     return when {
         justEnabled -> followTarget
         nearEdge -> followTarget
-        currentTarget != null -> currentTarget
         inCenter -> null
+        currentTarget != null -> currentTarget
         else -> null
     }
 }

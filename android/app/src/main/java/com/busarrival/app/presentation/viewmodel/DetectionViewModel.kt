@@ -284,6 +284,7 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         val intent = Intent(getApplication<Application>(), DetectionService::class.java)
         getApplication<Application>()
                 .bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        _uiState.value = _uiState.value.copy(isCameraFollowEnabled = true)
     }
 
     /** Stop detection service and unbind. */
