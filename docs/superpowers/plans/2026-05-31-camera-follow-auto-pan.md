@@ -98,19 +98,22 @@ fun disableCameraFollow() {
 }
 ```
 
-- [ ] **Step 4: Add camera follow tests to existing test file**
+- [ ] **Step 4: Replace existing ViewModel test file with camera follow tests**
 
-Append to `android/app/src/test/java/com/busarrival/app/presentation/viewmodel/DetectionViewModelTest.kt` (after line 13):
+Replace the contents of `android/app/src/test/java/com/busarrival/app/presentation/viewmodel/DetectionViewModelTest.kt` with:
 
 ```kotlin
-import org.junit.After
-import org.junit.Before
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+package com.busarrival.app.presentation.viewmodel
+
 import com.busarrival.app.data.preferences.DetectionPreferences
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 
 @RunWith(RobolectricTestRunner::class)
 class DetectionViewModelTest {
@@ -183,7 +186,7 @@ Expected: PASS (all 5 tests pass)
 
 ```bash
 rtk git add android/app/src/main/java/com/busarrival/app/presentation/viewmodel/DetectionViewModel.kt
-git add android/app/src/test/java/com/busarrival/app/presentation/viewmodel/DetectionViewModelTest.kt
+rtk git add android/app/src/test/java/com/busarrival/app/presentation/viewmodel/DetectionViewModelTest.kt
 rtk git commit -m "feat(viewModel): add cameraFollowEnabled state and toggle methods
 
 - Add StateFlow persisted from preferences (default true)
@@ -661,7 +664,7 @@ class CameraFollowViewportTest {
 - [ ] **Step 2: Run tests to verify viewport math**
 
 Run: `cd android && rtk ./gradlew test --tests CameraFollowViewportTest`
-Expected: PASS (all 9 tests pass)
+Expected: PASS (all 8 tests pass)
 
 - [ ] **Step 3: Commit**
 
@@ -763,7 +766,7 @@ Expected: SUCCESS
 - [ ] **Step 4: Create summary commit**
 
 ```bash
-git commit --allow-empty -m "feat(camera-follow): complete Camera Follow auto-pan feature
+rtk git commit --allow-empty -m "feat(camera-follow): complete Camera Follow auto-pan feature
 
 Implementation complete per spec 2026-05-31-camera-follow-auto-pan-design.md
 

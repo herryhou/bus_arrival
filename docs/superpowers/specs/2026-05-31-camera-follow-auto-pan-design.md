@@ -14,7 +14,7 @@ Automatic map panning to keep the vehicle marker visible within the inner 80% of
 - **Activation:** Both GPS (live) and simulator (replay) modes
 - **Animation:** 300ms smooth tween using `animateOffsetAsState()`
 - **Default state:** Global ON, persisted in preferences
-- **User interaction:** Any pan gesture auto-disables Follow
+- **User interaction:** Any user map transform gesture (pan or pinch zoom) auto-disables Follow
 
 ## Architecture
 
@@ -24,7 +24,7 @@ Automatic map panning to keep the vehicle marker visible within the inner 80% of
 DetectionViewModel                MapView.kt
 ├── cameraFollowEnabled    ────> ├── Viewport check (10% margin)
 ├── toggleCameraFollow()          ├── Auto-pan trigger
-└── disableCameraFollow()   <─────├── Pan gesture detection
+└── disableCameraFollow()   <─────├── Transform gesture detection
                                     └── animateOffsetAsState() (300ms)
 ```
 
@@ -65,11 +65,13 @@ fun disableCameraFollow() {
 // LatLon of the followed vehicle (GPS or replay marker) - no offset dependency
 val followedVehicleLatLon by remember(routeData, currentSCm, gpsLat, gpsLon, replayState) {
     derivedStateOf {
+        val route = routeData ?: return@derivedStateOf null
+
         // Priority: Replay marker > GPS marker
         if (replayState.traceFile != null && currentSCm >= 0) {
             // Replay mode: use interpolated route position (0 is valid start-of-route)
-            val pos = routeData.interpolatePosition(currentSCm)
-            if (pos != null) routeData.cmToLatLon(pos.first, pos.second) else null
+            val pos = route.interpolatePosition(currentSCm)
+            if (pos != null) route.cmToLatLon(pos.first, pos.second) else null
         } else {
             // Live mode: use GPS position
             if (gpsLat == 0.0 || gpsLon == 0.0) null
@@ -108,6 +110,13 @@ val animatedOffset by animateOffsetAsState(
 LaunchedEffect(animatedOffset, cameraFollowEnabled) {
     if (cameraFollowEnabled && autoPanTarget != null) {
         viewModel.updateMapState(scale, animatedOffset)
+    }
+}
+
+// Cancel pending auto-pan when Follow is disabled via toggle or gesture
+LaunchedEffect(cameraFollowEnabled) {
+    if (!cameraFollowEnabled) {
+        autoPanTarget = null
     }
 }
 
@@ -152,15 +161,17 @@ LaunchedEffect(animatedOffset, autoPanTarget) {
 }
 ```
 
-#### Pan Gesture Integration
+#### Transform Gesture Integration
 
-Modify existing `detectTransformGestures` block to cancel animation and disable follow:
+Modify existing `detectTransformGestures` block to cancel animation and disable follow for user-initiated map transforms:
 
 ```kotlin
 detectTransformGestures { centroid, pan, zoom, _ ->
-    if (cameraFollowEnabled) {
-        viewModel.disableCameraFollow()
+    if (cameraFollowEnabled || autoPanTarget != null) {
         autoPanTarget = null  // Cancel any in-progress auto-pan animation
+        if (cameraFollowEnabled) {
+            viewModel.disableCameraFollow()
+        }
     }
     // ... existing pan/zoom logic
 }
@@ -240,16 +251,15 @@ companion object {
 | No GPS signal | `followedVehicleLatLon` is null → LaunchedEffect skips (no-op) |
 | Canvas not ready | `canvasSize` is zero → LaunchedEffect skips (no-op) |
 | Route not loaded | Toggle hidden, no auto-pan possible |
-| Pan during animation | `autoPanTarget` cleared, animation LaunchedEffect guarded on `cameraFollowEnabled` |
+| User transform during animation | `autoPanTarget` cleared, animation LaunchedEffect guarded on `cameraFollowEnabled` |
 | Replay scrubbing | Each seek triggers viewport check |
 | Follow OFF | Zero overhead, LaunchedEffect returns early, `animatedOffset` falls back to current `offset` |
-| Follow OFF | Zero overhead, LaunchedEffect returns early |
-| Scale changes | Margin recalculates in screen coords |
+| Scale changes while Follow remains enabled | Margin recalculates in screen coords |
 
 ## Files to Modify
 
 1. `DetectionViewModel.kt` - Add `cameraFollowEnabled` state, `toggleCameraFollow()`, `disableCameraFollow()`
-2. `MapView.kt` - Add LaunchedEffect, animation, toggle UI, pan gesture integration
+2. `MapView.kt` - Add LaunchedEffect, animation, toggle UI, transform gesture integration
 3. `DetectionPreferences.kt` - Add `cameraFollowEnabled` persistence
 4. `CameraFollowViewportTest.kt` (NEW) - Viewport math unit tests
 
@@ -280,7 +290,7 @@ companion object {
 4. Pan during animation: Enable Follow, wait for auto-pan to start, then immediately pan → animation cancels, Follow disables, map stays at user-pan position
 5. Pan after auto-pan completes: Manual pan → Follow disables, subsequent vehicle movement does NOT trigger auto-pan
 6. Rapid vehicle movement: Enable Follow, bus moves quickly → auto-pan triggers on each viewport boundary crossing (not stuck)
-7. Scale change during animation: Pinch-zoom while auto-pan active → animation completes at new scale, no stale offset
+7. Pinch-zoom during animation: Follow disables, pending animation cancels, user zoom/pan wins
 8. Disable via toggle during animation: Click Follow button during auto-pan → animation cancels immediately
 
 ## Implementation Notes
