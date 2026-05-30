@@ -25,7 +25,7 @@ DetectionViewModel                MapView.kt
 ├── cameraFollowEnabled    ────> ├── Viewport check (10% margin)
 ├── toggleCameraFollow()          ├── Auto-pan trigger
 └── disableCameraFollow()   <─────├── Pan gesture detection
-                                    └── animateToAsState() (300ms)
+                                    └── animateOffsetAsState() (300ms)
 ```
 
 **State ownership:**
@@ -59,19 +59,19 @@ fun disableCameraFollow() {
 
 #### Vehicle Position Computation (Add to MapView)
 
-First, extract position calculation into shared derived state (works for both GPS and replay):
+Extract position calculation into shared derived state (works for both GPS and replay). Keys exclude `offset` to prevent LaunchedEffect restart loops during animation:
 
 ```kotlin
 // Screen position of the followed vehicle (GPS or replay marker)
-val followedVehicleScreenPos by remember(routeData, centerLatLon, currentSCm, gpsLat, gpsLon, replayState, scale, offset, canvasSize.value) {
+val followedVehicleScreenPos by remember(routeData, centerLatLon, currentSCm, gpsLat, gpsLon, replayState, scale, canvasSize.value) {
     derivedStateOf {
         val center = centerLatLon ?: return@derivedStateOf null
         val size = canvasSize.value
         if (size.width <= 0 || size.height <= 0) return@derivedStateOf null
 
         // Priority: Replay marker > GPS marker
-        val posLL = if (replayState.traceFile != null && currentSCm > 0) {
-            // Replay mode: use interpolated route position
+        val posLL = if (replayState.traceFile != null && currentSCm >= 0) {
+            // Replay mode: use interpolated route position (0 is valid start-of-route)
             val pos = routeData.interpolatePosition(currentSCm)
             if (pos != null) routeData.cmToLatLon(pos.first, pos.second) else null
         } else {
@@ -91,16 +91,33 @@ val followedVehicleScreenPos by remember(routeData, centerLatLon, currentSCm, gp
 }
 ```
 
-#### Auto-pan Logic (LaunchedEffect)
+#### Auto-pan Logic (LaunchedEffect + animateOffsetAsState)
+
+Use `animateOffsetAsState` for smooth animation with LaunchedEffect for trigger logic:
 
 ```kotlin
 val cameraFollowEnabled by viewModel.cameraFollowEnabled.collectAsState()
 
-// Smooth animation using Animatable
-val animatable = remember { Animatable(initialValue = offset.x, Offset.VectorConverter) }
+// Target offset for animation (null = no animation in progress)
+var autoPanTarget by remember { mutableStateOf<Offset?>(null) }
 
+// Animated offset that smoothly transitions to target
+val animatedOffset by animateOffsetAsState(
+    targetValue = autoPanTarget ?: offset,
+    animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic),
+    label = "cameraFollow"
+)
+
+// Apply animated offset when active
+LaunchedEffect(animatedOffset) {
+    if (autoPanTarget != null) {
+        viewModel.updateMapState(scale, animatedOffset)
+    }
+}
+
+// Trigger viewport check when vehicle moves (keys exclude offset)
 LaunchedEffect(cameraFollowEnabled, followedVehicleScreenPos, canvasSize.value, scale) {
-    if (!cameraFollowEnabled) return@LaunchedEffect
+    if (!cameraFollowEnabled || autoPanTarget != null) return@LaunchedEffect
     val pos = followedVehicleScreenPos ?: return@LaunchedEffect
     val size = canvasSize.value
     if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
@@ -111,25 +128,20 @@ LaunchedEffect(cameraFollowEnabled, followedVehicleScreenPos, canvasSize.value, 
 
     if (pos.x < marginX || pos.x > size.width - marginX ||
         pos.y < marginY || pos.y > size.height - marginY) {
-        // Vehicle outside safe zone: animate to center
+        // Vehicle outside safe zone: trigger animation
         val centerX = size.width / 2f
         val centerY = size.height / 2f
-        val targetOffset = Offset(
+        autoPanTarget = Offset(
             x = offset.x + (centerX - pos.x),
             y = offset.y + (centerY - pos.y)
         )
+    }
+}
 
-        // Animate both X and Y components
-        animatable.updateBounds(offset.x, targetOffset.x)
-        animatable.snapTo(offset)
-
-        animatable.animateTo(
-            targetValue = targetOffset,
-            animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic),
-            block = { animatedValue ->
-                viewModel.updateMapState(scale, animatedValue)
-            }
-        )
+// Clear target when animation completes
+LaunchedEffect(animatedOffset, autoPanTarget) {
+    if (autoPanTarget != null && animatedOffset == autoPanTarget) {
+        autoPanTarget = null
     }
 }
 ```
@@ -218,7 +230,7 @@ companion object {
 
 | Scenario | Behavior |
 |----------|----------|
-| No GPS signal | `busScreenPosition` is null → LaunchedEffect skips (no-op) |
+| No GPS signal | `followedVehicleScreenPos` is null → LaunchedEffect skips (no-op) |
 | Canvas not ready | `canvasSize` is zero → LaunchedEffect skips (no-op) |
 | Route not loaded | Toggle hidden, no auto-pan possible |
 | Pan during animation | Animation cancels, Follow disables |
