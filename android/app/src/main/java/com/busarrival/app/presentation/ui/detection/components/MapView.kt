@@ -48,6 +48,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -171,6 +172,14 @@ fun MapView(
     // Non-key dependencies via rememberUpdatedState (prevents animation restart)
     val currentSCm by rememberUpdatedState(currentSCm)
     val currentOffset by rememberUpdatedState(offset)
+
+    // Reset user interaction flag 100ms after gesture ends
+    LaunchedEffect(isUserInteracting.value) {
+        if (isUserInteracting.value) {
+            delay(100L)
+            isUserInteracting.value = false
+        }
+    }
 
     // Calculate tile zoom level from scale - use derivedStateOf to ensure updates
     val tileZ by remember {
