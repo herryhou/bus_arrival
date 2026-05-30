@@ -22,25 +22,27 @@ class VehicleHeadingMarkerTest {
     }
 
     @Test
-    fun vehicleHeadingMarkerTopLeftAnchorsTipAtGpsPosition() {
+    fun vehicleHeadingMarkerTopLeftCentersMarkerAtGpsPosition() {
         val gpsPosition = Offset(100f, 100f)
-        val markerPx = 64f  // was 32f
-        val iconPx = 32f     // was 16f
+        val markerPx = 64f
+        val iconPx = 32f
 
+        // Implementation centers marker regardless of bearing
+        val centered = Offset(68f, 68f) // 100 - 64/2 = 68
         assertEquals(
-            Offset(68f, 84f),
+            centered,
             vehicleHeadingMarkerTopLeft(gpsPosition, 0f, markerPx, iconPx)
         )
         assertEquals(
-            Offset(52f, 68f),
+            centered,
             vehicleHeadingMarkerTopLeft(gpsPosition, 90f, markerPx, iconPx)
         )
         assertEquals(
-            Offset(68f, 52f),
+            centered,
             vehicleHeadingMarkerTopLeft(gpsPosition, 180f, markerPx, iconPx)
         )
         assertEquals(
-            Offset(84f, 68f),
+            centered,
             vehicleHeadingMarkerTopLeft(gpsPosition, 270f, markerPx, iconPx)
         )
     }

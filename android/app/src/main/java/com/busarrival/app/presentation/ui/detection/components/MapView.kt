@@ -90,9 +90,6 @@ private const val TILE_REQUEST_DELAY_MS = 75L
 private const val TILE_PREFETCH_PADDING = 1
 private const val MAX_FETCH_RANGE = 5
 private const val MAX_TILE_CONCURRENCY = 4
-private const val CAMERA_EDGE_THRESHOLD_RATIO = 0.15f
-private const val CAMERA_COMFORT_ZONE_RATIO = 0.40f
-private const val CAMERA_ANIMATION_MS = 400
 
 data class LatLon(val lat: Double, val lon: Double)
 
@@ -123,16 +120,11 @@ fun RouteData.cmToLatLon(xCm: Int, yCm: Int): LatLon {
 fun MapView(
         routeData: RouteData?,
         currentSCm: Int,
-        isCameraFollowEnabled: Boolean,
         replayState: ReplayState = ReplayState(),
         viewModel: DetectionViewModel,
         gpsLat: Double,
         gpsLon: Double,
         gpsBearing: Float?,
-        cameraFollowRequestId: Long = 0L,
-        onToggleCameraFollow: () -> Unit = {},
-        onDisableLiveFollow: () -> Unit = {},
-        onDisableReplayFollow: () -> Unit = {},
         modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -158,173 +150,7 @@ fun MapView(
                 }
             }
 
-    // Track user interaction state
-    val isUserInteracting = remember { mutableStateOf(false) }
-
-    // Camera follow state
-    val shouldFollow = isCameraFollowEnabled || replayState.cameraFollowEnabled
-
-    // Track if follow was enabled in previous frame (detect enable transition)
-    var wasFollowingLastFrame by remember { mutableStateOf(false) }
-
-    // Target offset for animation (null = no interpolation needed)
-    var targetOffset by remember { mutableStateOf<Offset?>(null) }
-    var isForcedRecenterTarget by remember { mutableStateOf(false) }
-    var handledCameraFollowRequestId by remember { mutableStateOf(cameraFollowRequestId) }
-
-    // Non-key dependencies via rememberUpdatedState (prevents animation restart)
     val currentSCm by rememberUpdatedState(currentSCm)
-    val currentOffset by rememberUpdatedState(offset)
-    val currentGpsLat by rememberUpdatedState(gpsLat)
-    val currentGpsLon by rememberUpdatedState(gpsLon)
-
-    // Reset user interaction flag 100ms after gesture ends
-    LaunchedEffect(isUserInteracting.value) {
-        if (isUserInteracting.value) {
-            delay(100L)
-            isUserInteracting.value = false
-        }
-    }
-
-    // Single unified camera follow LaunchedEffect (60fps loop)
-    LaunchedEffect(
-            shouldFollow,
-            routeData,
-            centerLatLon,
-            scale,
-            canvasSize.value,
-            isUserInteracting.value,
-            cameraFollowRequestId
-    ) {
-        if (!shouldFollow || routeData == null || centerLatLon == null) {
-            wasFollowingLastFrame = false
-            return@LaunchedEffect
-        }
-
-        val size = canvasSize.value
-        if (size.width <= 0 || size.height <= 0) {
-            wasFollowingLastFrame = false
-            return@LaunchedEffect
-        }
-
-        // Per-frame animation loop
-        while (true) {
-            // Exit if follow was disabled
-            if (!shouldFollow) {
-                wasFollowingLastFrame = false
-                break
-            }
-
-            // If user is interacting, wait and continue
-            if (isUserInteracting.value) {
-                delay(16L)
-                continue
-            }
-
-            val pos = routeData.interpolatePosition(currentSCm)
-            val gpsPosition =
-                    if (currentGpsLat != 0.0 && currentGpsLon != 0.0) {
-                        LatLon(lat = currentGpsLat, lon = currentGpsLon)
-                    } else {
-                        null
-                    }
-            val ll = pos?.let { routeData.cmToLatLon(it.first, it.second) }
-
-            // Calculate screen position
-            val followTarget =
-                    computeCameraFollowTargetOffset(
-                            routeCenter = centerLatLon,
-                            snappedPosition = ll,
-                            gpsPosition = gpsPosition,
-                            scale = scale
-                    )
-            if (followTarget == null) {
-                delay(16L)
-                continue
-            }
-            val busWorldX = -followTarget.x / scale
-            val busWorldY = -followTarget.y / scale
-            val screenX = busWorldX * scale + currentOffset.x + size.width / 2f
-            val screenY = busWorldY * scale + currentOffset.y + size.height / 2f
-
-            // Ratio-based edge detection - use constants for consistent behavior
-            val edgeThresholdX = size.width * CAMERA_EDGE_THRESHOLD_RATIO
-            val edgeThresholdY = size.height * CAMERA_EDGE_THRESHOLD_RATIO
-            val centerThresholdX = size.width * CAMERA_COMFORT_ZONE_RATIO
-            val centerThresholdY = size.height * CAMERA_COMFORT_ZONE_RATIO
-
-            val nearEdge =
-                    screenX < edgeThresholdX ||
-                            screenX > size.width - edgeThresholdX ||
-                            screenY < edgeThresholdY ||
-                            screenY > size.height - edgeThresholdY
-
-            val inCenter =
-                    screenX > centerThresholdX &&
-                            screenX < size.width - centerThresholdX &&
-                            screenY > centerThresholdY &&
-                            screenY < size.height - centerThresholdY
-
-            // Detect enable transition (just turned on)
-            val justEnabled = !wasFollowingLastFrame && shouldFollow
-            val forceRecenter = justEnabled || cameraFollowRequestId != handledCameraFollowRequestId
-
-            // Debug logging
-            android.util.Log.d(
-                    "CameraFollow",
-                    "screenX=$screenX screenY=$screenY nearEdge=$nearEdge inCenter=$inCenter shouldFollow=$shouldFollow forceRecenter=$forceRecenter currentOffset=$currentOffset"
-            )
-
-            targetOffset =
-                    chooseCameraFollowTargetOffset(
-                            currentTarget = targetOffset,
-                            currentTargetIsForcedRecenter = isForcedRecenterTarget,
-                            followTarget = followTarget,
-                            justEnabled = justEnabled,
-                            forceRecenter = forceRecenter,
-                            nearEdge = nearEdge,
-                            inCenter = inCenter
-                    )
-            if (forceRecenter) {
-                handledCameraFollowRequestId = cameraFollowRequestId
-                isForcedRecenterTarget = true
-            } else if (nearEdge) {
-                isForcedRecenterTarget = false
-            }
-
-            // Idle guard: if no target, wait 100ms before next check
-            val target = targetOffset
-            if (target == null) {
-                delay(100L)
-                wasFollowingLastFrame = shouldFollow
-                continue
-            }
-
-            // Interpolate toward target (exponential lerp)
-            val lerpFactor = 0.15f
-            val newOffset = currentOffset + (target - currentOffset) * lerpFactor
-
-            // Movement threshold: only update state if movement >= 0.5px
-            val movementDelta = (newOffset - currentOffset).getDistance()
-            if (movementDelta >= 0.5f) {
-                viewModel.updateMapState(scale, newOffset)
-            }
-
-            // Stop condition: when reached target, final snap and clear
-            val distance = (target - newOffset).getDistance()
-            if (distance < 1f) {
-                viewModel.updateMapState(scale, target)
-                targetOffset = null
-                isForcedRecenterTarget = false
-            }
-
-            // Frame pacing: 60fps
-            delay(16L)
-
-            // Update tracking flag for next iteration
-            wasFollowingLastFrame = shouldFollow
-        }
-    }
 
     // Calculate tile zoom level from scale - use derivedStateOf to ensure updates
     val tileZ by remember {
@@ -438,24 +264,6 @@ fun MapView(
                                     .onSizeChanged { canvasSize.value = it }
                                     .pointerInput(Unit) {
                                         detectTransformGestures { centroid, pan, zoom, _ ->
-                                            val gestureAction =
-                                                    handleCameraFollowGestureStart(
-                                                            wasUserInteracting =
-                                                                    isUserInteracting.value,
-                                                            liveFollowEnabled =
-                                                                    isCameraFollowEnabled,
-                                                            replayFollowEnabled =
-                                                                    replayState.cameraFollowEnabled
-                                                    )
-                                            isUserInteracting.value =
-                                                    gestureAction.isUserInteracting
-                                            if (gestureAction.disableLiveFollow) {
-                                                onDisableLiveFollow()
-                                            }
-                                            if (gestureAction.disableReplayFollow) {
-                                                onDisableReplayFollow()
-                                            }
-
                                             val oldScale = scale
                                             val newScale = (oldScale * zoom).coerceIn(0.1f, 10f)
 
@@ -830,29 +638,18 @@ fun MapView(
                 }
             }
 
-            // Camera follow toggle (top-right)
+            // Camera follow toggle (top-right) - non-functional stub
             Column(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
                 Box(
                         modifier =
                                 Modifier.semantics { contentDescription = "Toggle camera follow" }
-                                        .clickable { onToggleCameraFollow() }
                                         .background(
-                                                color =
-                                                        if (isCameraFollowEnabled) {
-                                                            MaterialTheme.colorScheme.primary
-                                                        } else {
-                                                            MaterialTheme.colorScheme.surfaceVariant
-                                                        },
+                                                color = MaterialTheme.colorScheme.surfaceVariant,
                                                 shape = MaterialTheme.shapes.large
                                         )
                                         .border(
                                                 width = 1.dp,
-                                                color =
-                                                        if (isCameraFollowEnabled) {
-                                                            MaterialTheme.colorScheme.primary
-                                                        } else {
-                                                            MaterialTheme.colorScheme.outline
-                                                        },
+                                                color = MaterialTheme.colorScheme.outline,
                                                 shape = MaterialTheme.shapes.large
                                         )
                                         .padding(horizontal = 12.dp, vertical = 6.dp)
@@ -861,24 +658,10 @@ fun MapView(
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (isCameraFollowEnabled) {
-                            Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(16.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(if (isCameraFollowEnabled) 6.dp else 0.dp))
                         Text(
                                 text = "Follow",
                                 style = MaterialTheme.typography.labelMedium,
-                                color =
-                                        if (isCameraFollowEnabled) {
-                                            MaterialTheme.colorScheme.onPrimary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -1097,66 +880,4 @@ internal fun computeVisibleTileRange(
     val tileWorldSize = 256f * 2.0f.pow(BASE_Z - zoom)
     val viewportHalfWorld = maxOf(canvasWidth, canvasHeight) / 2f / scale
     return ceil(viewportHalfWorld / tileWorldSize).toInt() + 1
-}
-
-internal fun computeCameraFollowTargetOffset(
-        routeCenter: LatLon,
-        snappedPosition: LatLon?,
-        gpsPosition: LatLon?,
-        scale: Float
-): Offset? {
-    val position =
-            gpsPosition?.takeIf {
-                it.lat.isFinite() && it.lon.isFinite() && it.lat != 0.0 && it.lon != 0.0
-            }
-                    ?: snappedPosition
-                    ?: return null
-    val worldX = lonToPixelX(position.lon, BASE_Z) - lonToPixelX(routeCenter.lon, BASE_Z)
-    val worldY = latToPixelY(position.lat, BASE_Z) - latToPixelY(routeCenter.lat, BASE_Z)
-    return Offset(-worldX * scale, -worldY * scale)
-}
-
-internal fun chooseCameraFollowTargetOffset(
-        currentTarget: Offset?,
-        currentTargetIsForcedRecenter: Boolean = false,
-        followTarget: Offset,
-        justEnabled: Boolean = false,
-        forceRecenter: Boolean = justEnabled,
-        nearEdge: Boolean,
-        inCenter: Boolean
-): Offset? {
-    return when {
-        forceRecenter -> followTarget
-        nearEdge -> followTarget
-        currentTargetIsForcedRecenter && currentTarget != null -> currentTarget
-        inCenter -> null
-        currentTarget != null -> currentTarget
-        else -> null
-    }
-}
-
-internal data class CameraFollowGestureAction(
-        val isUserInteracting: Boolean,
-        val disableLiveFollow: Boolean,
-        val disableReplayFollow: Boolean
-)
-
-internal fun handleCameraFollowGestureStart(
-        wasUserInteracting: Boolean,
-        liveFollowEnabled: Boolean,
-        replayFollowEnabled: Boolean
-): CameraFollowGestureAction {
-    if (wasUserInteracting) {
-        return CameraFollowGestureAction(
-                isUserInteracting = true,
-                disableLiveFollow = false,
-                disableReplayFollow = false
-        )
-    }
-
-    return CameraFollowGestureAction(
-            isUserInteracting = true,
-            disableLiveFollow = liveFollowEnabled,
-            disableReplayFollow = replayFollowEnabled
-    )
 }

@@ -91,16 +91,11 @@ fun DetectionScreen(
                 MapView(
                     routeData = activeRoute,
                     currentSCm = uiState.sCm,
-                    isCameraFollowEnabled = uiState.isCameraFollowEnabled,
                     replayState = replayState,
                     viewModel = viewModel,
                     gpsLat = uiState.gpsLat,
                     gpsLon = uiState.gpsLon,
                     gpsBearing = uiState.gpsBearing,
-                    cameraFollowRequestId = uiState.cameraFollowRequestId,
-                    onToggleCameraFollow = { viewModel.toggleCameraFollow() },
-                    onDisableLiveFollow = { viewModel.disableLiveFollow() },
-                    onDisableReplayFollow = { viewModel.toggleReplayCameraFollow() },
                     modifier = Modifier.weight(0.6f)
                 )
 

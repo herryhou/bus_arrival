@@ -284,7 +284,6 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         val intent = Intent(getApplication<Application>(), DetectionService::class.java)
         getApplication<Application>()
                 .bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-        _uiState.value = _uiState.value.copy(isCameraFollowEnabled = true)
     }
 
     /** Stop detection service and unbind. */
@@ -329,7 +328,6 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                             isPlaying = false,
                             playbackSpeed = 1f,
                             traceDuration = duration,
-                            cameraFollowEnabled = true,
                             traceFile = truncatedName
                     )
             _uiState.value = _uiState.value.copy(mode = "Simulating $truncatedName", error = null)
@@ -342,25 +340,6 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         playbackJob?.cancel()
         if (replayEvents.isEmpty() && _replayState.value.traceFile != null) {
             _replayState.value = ReplayState()
-        }
-    }
-
-    /** Toggle camera follow mode. */
-    fun toggleCameraFollow() {
-        val nextEnabled = !_uiState.value.isCameraFollowEnabled
-        _uiState.value =
-                _uiState.value.copy(
-                        isCameraFollowEnabled = nextEnabled,
-                        cameraFollowRequestId =
-                                if (nextEnabled) _uiState.value.cameraFollowRequestId + 1
-                                else _uiState.value.cameraFollowRequestId
-                )
-    }
-
-    /** Disable live camera follow (called from gesture). */
-    fun disableLiveFollow() {
-        if (_uiState.value.isCameraFollowEnabled) {
-            _uiState.value = _uiState.value.copy(isCameraFollowEnabled = false)
         }
     }
 
@@ -485,7 +464,6 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                                 isPlaying = false,
                                 playbackSpeed = 1f,
                                 traceDuration = duration,
-                                cameraFollowEnabled = true,
                                 traceFile = traceFile
                         )
 
@@ -597,18 +575,6 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
             _replayState.value = _replayState.value.copy(isPlaying = true)
             startPlayback()
         }
-    }
-
-    /** Toggle camera follow mode for replay. */
-    fun toggleReplayCameraFollow() {
-        _replayState.value =
-                _replayState.value.copy(
-                        cameraFollowEnabled = !_replayState.value.cameraFollowEnabled
-                )
-        android.util.Log.d(
-                "DetectionViewModel",
-                "Replay camera follow: ${_replayState.value.cameraFollowEnabled}"
-        )
     }
 
     /** Update current replay position (called during playback). */
@@ -755,11 +721,9 @@ data class DetectionUiState(
         val currentStopState: String = "Idle",
         val sCm: Int = 0,
         val vCms: Int = 0,
-        val isCameraFollowEnabled: Boolean = true,
         val mode: String = "Normal",
         val error: String? = null,
         val gpsLat: Double = 0.0,
         val gpsLon: Double = 0.0,
-        val gpsBearing: Float? = null,
-        val cameraFollowRequestId: Long = 0L
+        val gpsBearing: Float? = null
 )

@@ -10,8 +10,8 @@ class StatusPanelFormattingTest {
     }
 
     @Test
-    fun formatStopLabel_whenNoStopIsActive_returnsNoActiveStop() {
-        assertEquals("No active stop", formatStopLabel(-1))
+    fun formatStopLabel_whenNoStopIsActive_returnsDoubleDash() {
+        assertEquals("--", formatStopLabel(-1))
     }
 
     @Test
