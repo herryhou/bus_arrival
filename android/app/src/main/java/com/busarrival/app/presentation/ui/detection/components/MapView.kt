@@ -92,7 +92,6 @@ private const val TILE_REQUEST_DELAY_MS = 75L
 private const val TILE_PREFETCH_PADDING = 1
 private const val MAX_FETCH_RANGE = 5
 private const val MAX_TILE_CONCURRENCY = 4
-private const val CAMERA_ANIMATION_MS = 350
 
 data class LatLon(val lat: Double, val lon: Double)
 
