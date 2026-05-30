@@ -432,9 +432,15 @@ fun MapView(
                                             viewModel.updateMapState(newScale, newOffset)
 
                                             // Auto-disable camera follow on user gesture (once per session)
-                                            if ((isCameraFollowEnabled || replayState.cameraFollowEnabled) && !isUserInteracting.value) {
+                                            if (!isUserInteracting.value) {
                                                 isUserInteracting.value = true
-                                                onToggleCameraFollow()
+                                                // Disable active follow source(s)
+                                                if (isCameraFollowEnabled) {
+                                                    onDisableLiveFollow()
+                                                }
+                                                if (replayState.cameraFollowEnabled) {
+                                                    onDisableReplayFollow()
+                                                }
                                             }
                                         }
                                     }
