@@ -45,14 +45,14 @@ var cameraFollowEnabled: Boolean
 
 - [ ] **Step 2: Run tests to verify no regressions**
 
-Run: `cd android && ./gradlew test`
+Run: `cd android && rtk ./gradlew test`
 Expected: PASS (all existing tests still pass)
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add android/app/src/main/java/com/busarrival/app/data/preferences/DetectionPreferences.kt
-git commit -m "feat(prefs): add cameraFollowEnabled persistence
+rtk git add android/app/src/main/java/com/busarrival/app/data/preferences/DetectionPreferences.kt
+rtk git commit -m "feat(prefs): add cameraFollowEnabled persistence
 
 Default: true (ON)
 Key: camera_follow_enabled
@@ -65,7 +65,7 @@ Non-null Boolean type for getBoolean/putBoolean compatibility"
 
 **Files:**
 - Modify: `android/app/src/main/java/com/busarrival/app/presentation/viewmodel/DetectionViewModel.kt`
-- Test: `android/app/src/test/java/com/busarrival/app/presentation/viewmodel/DetectionViewModelTest.kt` (CREATE)
+- Modify: `android/app/src/test/java/com/busarrival/app/presentation/viewmodel/DetectionViewModelTest.kt`
 
 - [ ] **Step 1: Add StateFlow property**
 
@@ -98,23 +98,35 @@ fun disableCameraFollow() {
 }
 ```
 
-- [ ] **Step 4: Create ViewModel test file**
+- [ ] **Step 4: Add camera follow tests to existing test file**
 
-Create: `android/app/src/test/java/com/busarrival/app/presentation/viewmodel/DetectionViewModelTest.kt`
+Append to `android/app/src/test/java/com/busarrival/app/presentation/viewmodel/DetectionViewModelTest.kt` (after line 13):
 
 ```kotlin
-package com.busarrival.app.presentation.viewmodel
-
-import org.junit.Test
+import org.junit.After
+import org.junit.Before
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
-import kotlin.test.assertEquals
+import com.busarrival.app.data.preferences.DetectionPreferences
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
 class DetectionViewModelTest {
+
+    private lateinit var preferences: DetectionPreferences
+
+    @Before
+    fun setup() {
+        preferences = DetectionPreferences(RuntimeEnvironment.getApplication())
+        preferences.clear()  // Isolate test from previous test state
+    }
+
+    @After
+    fun teardown() {
+        preferences.clear()  // Clean up after test
+    }
 
     @Test
     fun cameraFollowEnabledByDefault() {
@@ -164,15 +176,15 @@ class DetectionViewModelTest {
 
 - [ ] **Step 5: Run tests to verify implementation**
 
-Run: `cd android && ./gradlew test --tests DetectionViewModelTest`
+Run: `cd android && rtk ./gradlew test --tests DetectionViewModelTest`
 Expected: PASS (all 5 tests pass)
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add android/app/src/main/java/com/busarrival/app/presentation/viewmodel/DetectionViewModel.kt
+rtk git add android/app/src/main/java/com/busarrival/app/presentation/viewmodel/DetectionViewModel.kt
 git add android/app/src/test/java/com/busarrival/app/presentation/viewmodel/DetectionViewModelTest.kt
-git commit -m "feat(viewModel): add cameraFollowEnabled state and toggle methods
+rtk git commit -m "feat(viewModel): add cameraFollowEnabled state and toggle methods
 
 - Add StateFlow persisted from preferences (default true)
 - Add toggleCameraFollow() to flip state
@@ -213,14 +225,14 @@ val followedVehicleLatLon by remember(routeData, currentSCm, gpsLat, gpsLon, rep
 
 - [ ] **Step 2: Build to verify compilation**
 
-Run: `cd android && ./gradlew assembleDebug`
+Run: `cd android && rtk ./gradlew assembleDebug`
 Expected: SUCCESS (no compilation errors)
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add android/app/src/main/java/com/busarrival/app/presentation/ui/detection/components/MapView.kt
-git commit -m "feat(map): add followedVehicleLatLon derived state
+rtk git add android/app/src/main/java/com/busarrival/app/presentation/ui/detection/components/MapView.kt
+rtk git commit -m "feat(map): add followedVehicleLatLon derived state
 
 Prioritizes replay marker over GPS, includes sCm=0 for route start"
 ```
@@ -268,14 +280,14 @@ val animatedOffset by animateOffsetAsState(
 
 - [ ] **Step 4: Build to verify compilation**
 
-Run: `cd android && ./gradlew assembleDebug`
+Run: `cd android && rtk ./gradlew assembleDebug`
 Expected: SUCCESS (no compilation errors)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add android/app/src/main/java/com/busarrival/app/presentation/ui/detection/components/MapView.kt
-git commit -m "feat(map): add auto-pan animation state
+rtk git add android/app/src/main/java/com/busarrival/app/presentation/ui/detection/components/MapView.kt
+rtk git commit -m "feat(map): add auto-pan animation state
 
 - Add animateOffsetAsState with 300ms tween
 - Default to current offset when no target (null)
@@ -317,14 +329,14 @@ LaunchedEffect(cameraFollowEnabled) {
 
 - [ ] **Step 3: Build and verify**
 
-Run: `cd android && ./gradlew assembleDebug`
+Run: `cd android && rtk ./gradlew assembleDebug`
 Expected: SUCCESS
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add android/app/src/main/java/com/busarrival/app/presentation/ui/detection/components/MapView.kt
-git commit -m "feat(map): add animation apply and cancellation LaunchedEffects
+rtk git add android/app/src/main/java/com/busarrival/app/presentation/ui/detection/components/MapView.kt
+rtk git commit -m "feat(map): add animation apply and cancellation LaunchedEffects
 
 - Guard animation apply on cameraFollowEnabled AND autoPanTarget
 - Clear autoPanTarget when Follow disabled (toggle or gesture)"
@@ -391,14 +403,14 @@ LaunchedEffect(animatedOffset, autoPanTarget) {
 
 - [ ] **Step 3: Build and verify**
 
-Run: `cd android && ./gradlew assembleDebug`
+Run: `cd android && rtk ./gradlew assembleDebug`
 Expected: SUCCESS
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add android/app/src/main/java/com/busarrival/app/presentation/ui/detection/components/MapView.kt
-git commit -m "feat(map): add viewport trigger and completion LaunchedEffects
+rtk git add android/app/src/main/java/com/busarrival/app/presentation/ui/detection/components/MapView.kt
+rtk git commit -m "feat(map): add viewport trigger and completion LaunchedEffects
 
 - Check 10% margin from viewport edges
 - Compute screen position with current offset (not stale)
@@ -458,14 +470,14 @@ detectTransformGestures { centroid, pan, zoom, _ ->
 
 - [ ] **Step 2: Build and verify**
 
-Run: `cd android && ./gradlew assembleDebug`
+Run: `cd android && rtk ./gradlew assembleDebug`
 Expected: SUCCESS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add android/app/src/main/java/com/busarrival/app/presentation/ui/detection/components/MapView.kt
-git commit -m "feat(map): cancel auto-pan on user transform gesture
+rtk git add android/app/src/main/java/com/busarrival/app/presentation/ui/detection/components/MapView.kt
+rtk git commit -m "feat(map): cancel auto-pan on user transform gesture
 
 - Clear autoPanTarget before user pan/zoom
 - Disable cameraFollow if enabled
@@ -536,14 +548,14 @@ Box(
 
 - [ ] **Step 3: Build and verify**
 
-Run: `cd android && ./gradlew assembleDebug`
+Run: `cd android && rtk ./gradlew assembleDebug`
 Expected: SUCCESS
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add android/app/src/main/java/com/busarrival/app/presentation/ui/detection/components/MapView.kt
-git commit -m "feat(map): replace Follow stub with functional toggle
+rtk git add android/app/src/main/java/com/busarrival/app/presentation/ui/detection/components/MapView.kt
+rtk git commit -m "feat(map): replace Follow stub with functional toggle
 
 - Adds clickable handler calling toggleCameraFollow()
 - Visual feedback: primary color + check icon when enabled
@@ -648,14 +660,14 @@ class CameraFollowViewportTest {
 
 - [ ] **Step 2: Run tests to verify viewport math**
 
-Run: `cd android && ./gradlew test --tests CameraFollowViewportTest`
+Run: `cd android && rtk ./gradlew test --tests CameraFollowViewportTest`
 Expected: PASS (all 9 tests pass)
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add android/app/src/test/java/com/busarrival/app/presentation/ui/detection/components/CameraFollowViewportTest.kt
-git commit -m "test(map): add viewport boundary math unit tests
+rtk git add android/app/src/test/java/com/busarrival/app/presentation/ui/detection/components/CameraFollowViewportTest.kt
+rtk git commit -m "test(map): add viewport boundary math unit tests
 
 - Tests 10% margin safe zone logic
 - Coverage: center, 5% margin (trigger), 15% margin (no trigger), edges, corners
@@ -671,7 +683,7 @@ git commit -m "test(map): add viewport boundary math unit tests
 
 - [ ] **Step 1: Basic GPS mode test**
 
-1. Build and install: `cd android && ./gradlew installDebug`
+1. Build and install: `cd android && rtk ./gradlew installDebug`
 2. Open app, load a route
 3. Click "Follow" button (should show check icon)
 4. Simulate GPS movement (drive or use replay in GPS mode)
@@ -713,7 +725,7 @@ git commit -m "test(map): add viewport boundary math unit tests
 1. Enable "Follow"
 2. Trigger auto-pan
 3. Immediately pinch-zoom during animation
-4. **Expected:** Animation completes at new scale, no stale offset, user gesture wins
+4. **Expected:** Auto-pan animation cancels immediately, Follow disables, user zoom wins (no stale offset)
 
 - [ ] **Step 8: Disable via toggle during animation test**
 
@@ -731,7 +743,7 @@ git commit -m "test(map): add viewport boundary math unit tests
 
 - [ ] **Step 1: Run full test suite**
 
-Run: `cd android && ./gradlew test`
+Run: `cd android && rtk ./gradlew test`
 Expected: All tests pass (including new ViewModel and viewport tests)
 
 - [ ] **Step 2: Verify spec compliance**
@@ -745,7 +757,7 @@ Check each requirement from spec:
 
 - [ ] **Step 3: Build release APK**
 
-Run: `cd android && ./gradlew assembleRelease`
+Run: `cd android && rtk ./gradlew assembleRelease`
 Expected: SUCCESS
 
 - [ ] **Step 4: Create summary commit**
