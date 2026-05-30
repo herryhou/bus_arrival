@@ -109,6 +109,7 @@ fun DetectionScreen(
                     routeName = activeRouteMetadata?.name,
                     gpsLoggingEnabled = gpsLoggingEnabled,
                     gpsFixState = gpsFixState,
+                    replayState = replayState,
                     onStartStop = {
                         if (uiState.isRunning) {
                             viewModel.stopDetection()
@@ -117,23 +118,13 @@ fun DetectionScreen(
                         }
                     },
                     onToggleGpsLogging = { viewModel.toggleGpsLogging() },
+                    onPlayPause = { viewModel.playPause() },
+                    onSeek = { viewModel.seekTo(it) },
+                    onSpeedChange = { viewModel.setPlaybackSpeed(it) },
                     modifier = Modifier
                         .weight(0.4f)
                         .fillMaxWidth()
                 )
-
-                // Timeline scrubber for replay mode
-                if (replayState.traceFile != null) {
-                    val isGpsLogSimulation = replayState.traceFile?.endsWith(".jsonl") == true
-                    TimelineScrubber(
-                        replayState = replayState,
-                        onPlayPause = { viewModel.playPause() },
-                        onSeek = { viewModel.seekTo(it) },
-                        onSpeedChange = { viewModel.setPlaybackSpeed(it) },
-                        allowSeek = !isGpsLogSimulation,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
             }
 
             // Event hints overlay (outside Column to avoid blocking touches)

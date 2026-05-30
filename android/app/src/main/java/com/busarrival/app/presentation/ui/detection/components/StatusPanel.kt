@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.busarrival.app.domain.model.GpsFixState
+import com.busarrival.app.domain.model.ReplayState
 import com.busarrival.app.presentation.viewmodel.DetectionUiState
 import com.busarrival.app.service.PipelineEvent
 import java.util.Locale
@@ -48,8 +49,12 @@ fun StatusPanel(
         routeName: String?,
         gpsLoggingEnabled: Boolean,
         gpsFixState: GpsFixState,
+        replayState: ReplayState,
         onStartStop: () -> Unit,
         onToggleGpsLogging: () -> Unit,
+        onPlayPause: () -> Unit,
+        onSeek: (Long) -> Unit,
+        onSpeedChange: (Float) -> Unit,
         modifier: Modifier = Modifier
 ) {
     Card(
@@ -79,12 +84,22 @@ fun StatusPanel(
                     modifier = Modifier.fillMaxWidth()
             )
 
-            ActionRow(
-                    isRunning = uiState.isRunning,
-                    gpsLoggingEnabled = gpsLoggingEnabled,
-                    onStartStop = onStartStop,
-                    onToggleGpsLogging = onToggleGpsLogging
-            )
+            if (replayState.traceFile != null) {
+                TimelineScrubber(
+                        replayState = replayState,
+                        onPlayPause = onPlayPause,
+                        onSeek = onSeek,
+                        onSpeedChange = onSpeedChange,
+                        allowSeek = !replayState.traceFile.orEmpty().endsWith(".jsonl")
+                )
+            } else {
+                ActionRow(
+                        isRunning = uiState.isRunning,
+                        gpsLoggingEnabled = gpsLoggingEnabled,
+                        onStartStop = onStartStop,
+                        onToggleGpsLogging = onToggleGpsLogging
+                )
+            }
 
             if (events.isNotEmpty()) {
                 RecentEvents(events = events.take(5))
