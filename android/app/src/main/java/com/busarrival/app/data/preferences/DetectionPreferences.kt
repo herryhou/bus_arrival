@@ -24,6 +24,7 @@ class DetectionPreferences(context: Context) {
         private const val KEY_LAST_GPS_LOG_REFERENCE = "last_gps_log_reference"
         private const val KEY_PENDING_SIMULATION_GPS_LOG_REFERENCE = "pending_simulation_gps_log_reference"
         private const val KEY_PENDING_SIMULATION_GPS_LOG_NAME = "pending_simulation_gps_log_name"
+        private const val KEY_CAMERA_FOLLOW = "camera_follow_enabled"
         private const val DEFAULT_MAP_LABEL_ZOOM_BIAS = 1
 
         val DEFAULT_PARAMETERS = DetectionParameters(
@@ -82,6 +83,10 @@ class DetectionPreferences(context: Context) {
     var pendingSimulationGpsLogName: String?
         get() = prefs.getString(KEY_PENDING_SIMULATION_GPS_LOG_NAME, null)
         set(value) = prefs.edit().putString(KEY_PENDING_SIMULATION_GPS_LOG_NAME, value).apply()
+
+    var cameraFollowEnabled: Boolean
+        get() = prefs.getBoolean(KEY_CAMERA_FOLLOW, true)
+        set(value) = prefs.edit().putBoolean(KEY_CAMERA_FOLLOW, value).apply()
 
     fun setPendingSimulationGpsLog(reference: String, name: String) {
         prefs.edit()

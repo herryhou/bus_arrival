@@ -76,6 +76,9 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     private val _mapLabelZoomBias = MutableStateFlow(preferences.mapLabelZoomBias)
     val mapLabelZoomBias: StateFlow<Int> = _mapLabelZoomBias.asStateFlow()
 
+    private val _cameraFollowEnabled = MutableStateFlow(preferences.cameraFollowEnabled)
+    val cameraFollowEnabled: StateFlow<Boolean> = _cameraFollowEnabled.asStateFlow()
+
     private val _gpsLoggingEnabled = MutableStateFlow(preferences.gpsLoggingEnabled)
     val gpsLoggingEnabled: StateFlow<Boolean> = _gpsLoggingEnabled.asStateFlow()
 
@@ -392,6 +395,17 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         val enabled = !preferences.gpsLoggingEnabled
         preferences.gpsLoggingEnabled = enabled
         _gpsLoggingEnabled.value = enabled
+    }
+
+    fun toggleCameraFollow() {
+        val enabled = !_cameraFollowEnabled.value
+        preferences.cameraFollowEnabled = enabled
+        _cameraFollowEnabled.value = enabled
+    }
+
+    fun disableCameraFollow() {
+        preferences.cameraFollowEnabled = false
+        _cameraFollowEnabled.value = false
     }
 
     fun shareGpsLog(context: Context) {

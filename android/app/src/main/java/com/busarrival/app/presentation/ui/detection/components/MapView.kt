@@ -14,6 +14,9 @@ package com.busarrival.app.presentation.ui.detection.components
  */
 // Coordinate functions from MapCoordinateUtils.kt (same package)
 
+import androidx.compose.animation.core.EaseInOutCubic
+import androidx.compose.animation.core.animateOffsetAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -135,6 +138,10 @@ fun MapView(
     val offset by viewModel.mapOffset.collectAsState()
     val mapLabelZoomBias by viewModel.mapLabelZoomBias.collectAsState()
     val tileCache by viewModel.tileCache.collectAsState()
+    val cameraFollowEnabled by viewModel.cameraFollowEnabled.collectAsState()
+    val latestScale = rememberUpdatedState(scale)
+    val latestOffset = rememberUpdatedState(offset)
+    val latestCameraFollowEnabled = rememberUpdatedState(cameraFollowEnabled)
     val canvasSize = remember { androidx.compose.runtime.mutableStateOf(IntSize.Zero) }
     val showDebugDetails = remember { mutableStateOf(false) }
     val centerLatLon =
@@ -152,6 +159,19 @@ fun MapView(
 
     val currentSCm by rememberUpdatedState(currentSCm)
 
+    val followedVehicleLatLon by
+            remember(routeData, currentSCm, gpsLat, gpsLon, replayState.traceFile) {
+                derivedStateOf {
+                    val route = routeData ?: return@derivedStateOf null
+                    if (replayState.traceFile != null && currentSCm >= 0) {
+                        val pos = route.interpolatePosition(currentSCm)
+                        if (pos != null) route.cmToLatLon(pos.first, pos.second) else null
+                    } else {
+                        if (gpsLat == 0.0 || gpsLon == 0.0) null else LatLon(gpsLat, gpsLon)
+                    }
+                }
+            }
+
     // Calculate tile zoom level from scale - use derivedStateOf to ensure updates
     val tileZ by remember {
         derivedStateOf {
@@ -164,6 +184,15 @@ fun MapView(
     val requestedTileZ by remember {
         derivedStateOf { (tileZ - mapLabelZoomBias).coerceIn(MIN_TILE_Z, MAX_TILE_Z) }
     }
+
+    var autoPanTarget by remember { mutableStateOf<Offset?>(null) }
+    val latestAutoPanTarget = rememberUpdatedState(autoPanTarget)
+    val animatedOffset by
+            animateOffsetAsState(
+                    targetValue = autoPanTarget ?: offset,
+                    animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic),
+                    label = "cameraFollow"
+            )
 
     // Viewport center in world coordinates (changes with pan)
     val viewportCenterWorld by remember {
@@ -216,6 +245,49 @@ fun MapView(
                 }
             }
 
+    LaunchedEffect(animatedOffset, cameraFollowEnabled) {
+        if (cameraFollowEnabled && autoPanTarget != null) {
+            viewModel.updateMapState(scale, animatedOffset)
+        }
+    }
+
+    LaunchedEffect(cameraFollowEnabled) {
+        if (!cameraFollowEnabled) {
+            autoPanTarget = null
+        }
+    }
+
+    LaunchedEffect(cameraFollowEnabled, followedVehicleLatLon, offset, canvasSize.value, scale) {
+        if (!cameraFollowEnabled || autoPanTarget != null) return@LaunchedEffect
+        val posLL = followedVehicleLatLon ?: return@LaunchedEffect
+        val center = centerLatLon ?: return@LaunchedEffect
+        val size = canvasSize.value
+        if (size.width <= 0 || size.height <= 0) return@LaunchedEffect
+
+        val worldX = lonToPixelX(posLL.lon, BASE_Z) - lonToPixelX(center.lon, BASE_Z)
+        val worldY = latToPixelY(posLL.lat, BASE_Z) - latToPixelY(center.lat, BASE_Z)
+        val vehicleScreenPosition =
+                Offset(
+                        x = worldX * scale + offset.x + size.width / 2f,
+                        y = worldY * scale + offset.y + size.height / 2f
+                )
+
+        if (shouldTriggerCameraFollowAutoPan(vehicleScreenPosition, size)) {
+            autoPanTarget =
+                    cameraFollowTargetOffset(
+                            vehicleScreenPosition = vehicleScreenPosition,
+                            currentOffset = offset,
+                            viewportSize = size
+                    )
+        }
+    }
+
+    LaunchedEffect(animatedOffset, autoPanTarget) {
+        if (autoPanTarget != null && animatedOffset == autoPanTarget) {
+            autoPanTarget = null
+        }
+    }
+
     val drawTileRange by
             remember(requestedTileZ, canvasSize.value, scale) {
                 derivedStateOf {
@@ -264,33 +336,32 @@ fun MapView(
                                     .onSizeChanged { canvasSize.value = it }
                                     .pointerInput(Unit) {
                                         detectTransformGestures { centroid, pan, zoom, _ ->
-                                            val oldScale = scale
-                                            val newScale = (oldScale * zoom).coerceIn(0.1f, 10f)
+                                            val result =
+                                                    cameraFollowTransformGesture(
+                                                            cameraFollowEnabled =
+                                                                    latestCameraFollowEnabled.value,
+                                                            autoPanTarget =
+                                                                    latestAutoPanTarget.value,
+                                                            oldScale = latestScale.value,
+                                                            oldOffset = latestOffset.value,
+                                                            canvasSize = size,
+                                                            centroid = centroid,
+                                                            pan = pan,
+                                                            zoom = zoom
+                                                    )
 
-                                            // Convert centroid from screen coordinates to centered
-                                            // coordinates
-                                            // Screen origin is top-left, our offset origin is
-                                            // center
-                                            val centroidCentered =
-                                                    centroid -
-                                                            Offset(
-                                                                    size.width / 2f,
-                                                                    size.height / 2f
-                                                            )
+                                            if (result.shouldCancelAutoPan) {
+                                                autoPanTarget = null
+                                            }
 
-                                            // Adjust offset to keep pinch point stable: zoom around
-                                            // centroid
-                                            // Formula: offset += (centroid - offset) * (1 -
-                                            // newScale/oldScale)
-                                            val oldOffset = offset
-                                            val scaleChange = 1 - newScale / oldScale
-                                            val newOffset =
-                                                    oldOffset +
-                                                            (centroidCentered - oldOffset) *
-                                                                    scaleChange +
-                                                            pan
+                                            if (result.shouldDisableCameraFollow) {
+                                                viewModel.disableCameraFollow()
+                                            }
 
-                                            viewModel.updateMapState(newScale, newOffset)
+                                            viewModel.updateMapState(
+                                                    result.newScale,
+                                                    result.newOffset
+                                            )
                                         }
                                     }
             ) {
@@ -638,30 +709,56 @@ fun MapView(
                 }
             }
 
-            // Camera follow toggle (top-right) - non-functional stub
+            // Camera follow toggle (top-right)
             Column(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
                 Box(
                         modifier =
                                 Modifier.semantics { contentDescription = "Toggle camera follow" }
                                         .background(
-                                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                                color =
+                                                        if (cameraFollowEnabled) {
+                                                            MaterialTheme.colorScheme
+                                                                    .primaryContainer
+                                                        } else {
+                                                            MaterialTheme.colorScheme.surfaceVariant
+                                                        },
                                                 shape = MaterialTheme.shapes.large
                                         )
                                         .border(
-                                                width = 1.dp,
-                                                color = MaterialTheme.colorScheme.outline,
+                                                width = if (cameraFollowEnabled) 2.dp else 1.dp,
+                                                color =
+                                                        if (cameraFollowEnabled) {
+                                                            MaterialTheme.colorScheme.primary
+                                                        } else {
+                                                            MaterialTheme.colorScheme.outline
+                                                        },
                                                 shape = MaterialTheme.shapes.large
                                         )
+                                        .clickable { viewModel.toggleCameraFollow() }
                                         .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Row(
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                     ) {
+                        if (cameraFollowEnabled) {
+                            Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Follow enabled",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
                         Text(
                                 text = "Follow",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color =
+                                        if (cameraFollowEnabled) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
                         )
                     }
                 }
@@ -793,6 +890,64 @@ private fun RouteData.interpolatePosition(progressCm: Int): Pair<Int, Int>? {
 }
 
 private data class BoundingBoxData(val minX: Int, val minY: Int, val maxX: Int, val maxY: Int)
+
+internal fun shouldTriggerCameraFollowAutoPan(
+        vehicleScreenPosition: Offset,
+        viewportSize: IntSize
+): Boolean {
+    if (viewportSize.width <= 0 || viewportSize.height <= 0) return false
+    if (!vehicleScreenPosition.x.isFinite() || !vehicleScreenPosition.y.isFinite()) return false
+
+    val marginX = viewportSize.width * 0.1f
+    val marginY = viewportSize.height * 0.1f
+    return vehicleScreenPosition.x < marginX ||
+            vehicleScreenPosition.x > viewportSize.width - marginX ||
+            vehicleScreenPosition.y < marginY ||
+            vehicleScreenPosition.y > viewportSize.height - marginY
+}
+
+internal fun cameraFollowTargetOffset(
+        vehicleScreenPosition: Offset,
+        currentOffset: Offset,
+        viewportSize: IntSize
+): Offset {
+    val centerX = viewportSize.width / 2f
+    val centerY = viewportSize.height / 2f
+    return Offset(
+            x = currentOffset.x + (centerX - vehicleScreenPosition.x),
+            y = currentOffset.y + (centerY - vehicleScreenPosition.y)
+    )
+}
+
+internal data class CameraFollowTransformGestureResult(
+        val newScale: Float,
+        val newOffset: Offset,
+        val shouldDisableCameraFollow: Boolean,
+        val shouldCancelAutoPan: Boolean
+)
+
+internal fun cameraFollowTransformGesture(
+        cameraFollowEnabled: Boolean,
+        autoPanTarget: Offset?,
+        oldScale: Float,
+        oldOffset: Offset,
+        canvasSize: IntSize,
+        centroid: Offset,
+        pan: Offset,
+        zoom: Float
+): CameraFollowTransformGestureResult {
+    val newScale = (oldScale * zoom).coerceIn(0.1f, 10f)
+    val centroidCentered = centroid - Offset(canvasSize.width / 2f, canvasSize.height / 2f)
+    val scaleChange = 1 - newScale / oldScale
+    val newOffset = oldOffset + (centroidCentered - oldOffset) * scaleChange + pan
+
+    return CameraFollowTransformGestureResult(
+            newScale = newScale,
+            newOffset = newOffset,
+            shouldDisableCameraFollow = cameraFollowEnabled,
+            shouldCancelAutoPan = autoPanTarget != null
+    )
+}
 
 /** Load tiles for a specific zoom level (for dynamic loading when zooming). */
 private suspend fun loadTilesForZoom(
