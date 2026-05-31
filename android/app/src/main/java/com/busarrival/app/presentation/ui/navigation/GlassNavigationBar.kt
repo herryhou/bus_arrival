@@ -116,7 +116,7 @@ fun GlassNavigationBar(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .aspectRatio(1f)
+                        .fillMaxHeight()
                         .scale(animatedScale)
                         .clip(RoundedCornerShape(16.dp))
                         .clickable(
@@ -142,7 +142,8 @@ fun GlassNavigationBar(
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxHeight()
                     ) {
                         // Glow for selected item
                         if (isSelected) {
@@ -161,16 +162,21 @@ fun GlassNavigationBar(
                             )
                         }
 
-                        Icon(
-                            imageVector = item.icon,
-                            contentDescription = item.label,
-                            tint = if (isSelected) {
-                                item.color
-                            } else {
-                                Color.White.copy(alpha = 0.5f)
-                            },
-                            modifier = Modifier.size(24.dp)
-                        )
+                        Box(
+                            modifier = Modifier.height(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = item.icon,
+                                contentDescription = item.label,
+                                tint = if (isSelected) {
+                                    item.color
+                                } else {
+                                    Color.White.copy(alpha = 0.5f)
+                                },
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
 
                         Spacer(modifier = Modifier.height(4.dp))
 
