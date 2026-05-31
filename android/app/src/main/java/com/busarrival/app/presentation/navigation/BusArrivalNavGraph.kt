@@ -1,15 +1,14 @@
 package com.busarrival.app.presentation.navigation
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Place
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -20,35 +19,71 @@ import androidx.navigation.compose.rememberNavController
 import com.busarrival.app.presentation.ui.config.ConfigScreen
 import com.busarrival.app.presentation.ui.detection.DetectionScreen
 import com.busarrival.app.presentation.ui.history.HistoryScreen
+import com.busarrival.app.presentation.ui.navigation.GlassNavigationBar
+import com.busarrival.app.presentation.ui.navigation.NavItem
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
-
-sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    object Config : Screen("config", "Config", Icons.Default.Settings)
-    object Detection : Screen("detection", "Detect", Icons.Default.Place)
-    object History : Screen("history", "History", Icons.Default.List)
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BusArrivalNavGraph() {
     val navController = rememberNavController()
-    val screens = listOf(Screen.Config, Screen.Detection, Screen.History)
+    val navItems = listOf(
+        NavItem.Config,
+        NavItem.Detection,
+        NavItem.History
+    )
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar {
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentDestination = navBackStackEntry?.destination
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
+    val selectedRoute = currentDestination?.route ?: NavItem.Detection.route
 
-                screens.forEach { screen ->
-                    NavigationBarItem(
-                        icon = {
-                            Icon(screen.icon, contentDescription = screen.title)
-                        },
-                        label = { Text(screen.title) },
-                        selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
-                        onClick = {
-                            navController.navigate(screen.route) {
+    // Background gradient matching config screen
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF1A1A2E).copy(alpha = 0.95f),
+                        Color(0xFF16213E).copy(alpha = 0.9f),
+                        Color(0xFF0F0F1A)
+                    )
+                )
+            )
+    ) {
+        Scaffold(
+            containerColor = Color.Transparent,
+            bottomBar = {
+                GlassNavigationBar(
+                    items = navItems,
+                    selectedRoute = selectedRoute,
+                    onItemSelected = { route ->
+                        navController.navigate(route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+            }
+        ) { innerPadding ->
+            NavHost(
+                navController = navController,
+                startDestination = NavItem.Detection.route,
+                modifier = Modifier.padding(innerPadding)
+            ) {
+                composable(NavItem.Config.route) {
+                    ConfigScreen()
+                }
+                composable(NavItem.Detection.route) {
+                    DetectionScreen()
+                }
+                composable(NavItem.History.route) {
+                    HistoryScreen(
+                        onSimulateLog = {
+                            navController.navigate(NavItem.Detection.route) {
                                 popUpTo(navController.graph.findStartDestination().id) {
                                     saveState = true
                                 }
@@ -58,32 +93,6 @@ fun BusArrivalNavGraph() {
                         }
                     )
                 }
-            }
-        }
-    ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = Screen.Detection.route,
-            modifier = Modifier.padding(innerPadding)
-        ) {
-            composable(Screen.Config.route) {
-                ConfigScreen()
-            }
-            composable(Screen.Detection.route) {
-                DetectionScreen()
-            }
-            composable(Screen.History.route) {
-                HistoryScreen(
-                    onSimulateLog = {
-                        navController.navigate(Screen.Detection.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    }
-                )
             }
         }
     }
