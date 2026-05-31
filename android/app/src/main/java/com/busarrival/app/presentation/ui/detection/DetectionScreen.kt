@@ -168,6 +168,7 @@ fun DetectionScreen(
                     modifier = Modifier
                         .weight(0.4f)
                         .fillMaxWidth()
+                        .padding(bottom = 84.dp)
                 )
             }
 

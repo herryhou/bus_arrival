@@ -248,11 +248,13 @@ private fun GlassHeader(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 16.dp)
+                .padding(vertical = 16.dp)
         ) {
             // Title row
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -306,8 +308,13 @@ private fun GlassHeader(
                     animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
                 ) + fadeOut()
             ) {
-                Column {
-                    Spacer(modifier = Modifier.height(16.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                ) {
+                    Column {
+                        Spacer(modifier = Modifier.height(16.dp))
 
                     // Selection toolbar
                     Row(
@@ -442,6 +449,7 @@ private fun GlassHeader(
                                 }
                             }
                         }
+                    }
                     }
                 }
             }
