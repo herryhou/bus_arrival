@@ -44,6 +44,10 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         reloadLogs(preserveSelection = true)
     }
 
+    fun clearError() {
+        _uiState.value = _uiState.value.copy(error = null)
+    }
+
     fun toggleSelection(reference: String) {
         updateSelection { item ->
             if (item.reference == reference) item.copy(isSelected = !item.isSelected) else item
