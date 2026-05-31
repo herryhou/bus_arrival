@@ -63,7 +63,7 @@ fun BusArrivalNavGraph() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Screen.Config.route,
+            startDestination = Screen.Detection.route,
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Config.route) {
