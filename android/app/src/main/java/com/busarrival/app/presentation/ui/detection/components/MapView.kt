@@ -19,8 +19,6 @@ import androidx.compose.animation.core.animateOffsetAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,10 +34,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -709,35 +707,22 @@ fun MapView(
                 }
             }
 
-            // Camera follow toggle (top-right)
+            // Camera follow toggle (top-right) - secondary action
             Column(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
-                Box(
+                Surface(
+                        onClick = { viewModel.toggleCameraFollow() },
+                        color =
+                                if (cameraFollowEnabled) {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
                         modifier =
                                 Modifier.semantics { contentDescription = "Toggle camera follow" }
-                                        .background(
-                                                color =
-                                                        if (cameraFollowEnabled) {
-                                                            MaterialTheme.colorScheme
-                                                                    .primaryContainer
-                                                        } else {
-                                                            MaterialTheme.colorScheme.surfaceVariant
-                                                        },
-                                                shape = MaterialTheme.shapes.large
-                                        )
-                                        .border(
-                                                width = if (cameraFollowEnabled) 2.dp else 1.dp,
-                                                color =
-                                                        if (cameraFollowEnabled) {
-                                                            MaterialTheme.colorScheme.primary
-                                                        } else {
-                                                            MaterialTheme.colorScheme.outline
-                                                        },
-                                                shape = MaterialTheme.shapes.large
-                                        )
-                                        .clickable { viewModel.toggleCameraFollow() }
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -745,7 +730,7 @@ fun MapView(
                             Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = "Follow enabled",
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                     modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
@@ -755,7 +740,7 @@ fun MapView(
                                 style = MaterialTheme.typography.labelMedium,
                                 color =
                                         if (cameraFollowEnabled) {
-                                            MaterialTheme.colorScheme.primary
+                                            MaterialTheme.colorScheme.onSecondaryContainer
                                         } else {
                                             MaterialTheme.colorScheme.onSurfaceVariant
                                         }
@@ -764,26 +749,35 @@ fun MapView(
                 }
             }
 
-            Row(
-                    modifier = Modifier.align(Alignment.BottomStart).padding(16.dp),
-                    horizontalArrangement =
-                            androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            // Clear tiles button (bottom-left) - secondary action
+            Surface(
+                    onClick = {
+                        viewModel.clearTileCache()
+                        tileDiskCache.clearCacheAll()
+                    },
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                    modifier =
+                            Modifier.align(Alignment.BottomStart).padding(16.dp).semantics {
+                                contentDescription = "Clear tile cache"
+                            }
             ) {
-                androidx.compose.material3.Button(
-                        onClick = {
-                            viewModel.clearTileCache()
-                            tileDiskCache.clearCacheAll()
-                        }
+                Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                 ) {
-                    androidx.compose.material3.Icon(
+                    Icon(
                             imageVector = Icons.Default.Delete,
-                            contentDescription = null
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    androidx.compose.material3.Text(
-                            "Clear Tiles",
-                            style = MaterialTheme.typography.bodySmall
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                            text = "Clear Tiles",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
