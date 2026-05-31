@@ -1,5 +1,6 @@
 package com.busarrival.app.presentation.ui.detection.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,11 +9,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -55,45 +56,50 @@ private fun MetricTile(
     label: String,
     value: String,
     modifier: Modifier = Modifier,
-    valueColor: Color = MaterialTheme.colorScheme.onSurface
+    valueColor: Color = Color.White
 ) {
-    Surface(
-        modifier = modifier.heightIn(min = 56.dp),
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.68f)
+    Column(
+        modifier = modifier
+            .heightIn(min = 60.dp)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.06f),
+                        Color.White.copy(alpha = 0.02f)
+                    )
+                ),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodyMedium,
-                color = valueColor,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1
-            )
-        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = 0.5f)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = valueColor,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
+        )
     }
 }
 
 @Composable
 private fun gpsStatusTextAndColor(gpsFixState: GpsFixState): Pair<String, Color> {
     return when (gpsFixState) {
-        is GpsFixState.NoSignal -> "No signal" to MaterialTheme.colorScheme.error
-        is GpsFixState.Searching -> "Searching" to MaterialTheme.colorScheme.onSurfaceVariant
+        is GpsFixState.NoSignal -> "No signal" to Color(0xFFFF6B6B)
+        is GpsFixState.Searching -> "Searching" to Color.White.copy(alpha = 0.6f)
         is GpsFixState.Acquiring -> {
-            "Acquiring ${gpsFixState.satellites}" to MaterialTheme.colorScheme.tertiary
+            "Acquiring ${gpsFixState.satellites}" to Color(0xFF6C5CE7)
         }
         is GpsFixState.Ready -> {
             val accText = "+/-${gpsFixState.accuracyM.toInt()}m"
             val satText = "${gpsFixState.satellites} sats"
-            "$accText, $satText" to Color(0xFF2E7D32)
+            "$accText, $satText" to Color(0xFF00CEC9)
         }
     }
 }

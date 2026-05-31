@@ -1,22 +1,37 @@
 package com.busarrival.app.presentation.ui.detection
 
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -81,12 +96,45 @@ fun DetectionScreen(
         }
     }
 
-    if (!locationPermissions.allPermissionsGranted) {
-        PermissionRequestContent(onRequest = { locationPermissions.launchMultiplePermissionRequest() })
-    } else if (activeRoute == null) {
-        NoRouteContent()
-    } else {
-        Box(modifier = Modifier.fillMaxSize()) {
+    // Glassmorphic background
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Ambient glow background
+        Box(modifier = Modifier.fillMaxSize().blur(100.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(300.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF6C5CE7).copy(alpha = 0.4f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+                    .align(Alignment.TopStart)
+                    .offset(x = (-80).dp, y = (-100).dp)
+            )
+            Box(
+                modifier = Modifier
+                    .size(250.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF00CEC9).copy(alpha = 0.3f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 80.dp, y = 100.dp)
+            )
+        }
+
+        if (!locationPermissions.allPermissionsGranted) {
+            PermissionRequestContent(onRequest = { locationPermissions.launchMultiplePermissionRequest() })
+        } else if (activeRoute == null) {
+            NoRouteContent()
+        } else {
             Column(modifier = Modifier.fillMaxSize()) {
                 MapView(
                     routeData = activeRoute,
@@ -123,19 +171,21 @@ fun DetectionScreen(
                 )
             }
 
-            // Event hints overlay (outside Column to avoid blocking touches)
+            // Event hints overlay
             EventToastHost(
                 hint = eventHints,
                 modifier = Modifier.align(Alignment.TopCenter)
             )
         }
-    }
 
-    uiState.error?.let { error ->
-        ErrorSnackbar(
-            error = error,
-            onDismiss = { viewModel.clearError() }
-        )
+        // Error snackbar overlay
+        uiState.error?.let { error ->
+            ErrorSnackbar(
+                error = error,
+                onDismiss = { viewModel.clearError() },
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+        }
     }
 }
 
@@ -145,48 +195,37 @@ private fun PermissionRequestContent(onRequest: () -> Unit) {
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        Surface(
-            modifier = Modifier.padding(24.dp).widthIn(max = 420.dp),
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 1.dp
-        ) {
+        GlassCard(modifier = Modifier.padding(horizontal = 32.dp)) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.padding(28.dp)
+                modifier = Modifier.padding(32.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.LocationOn,
                     contentDescription = null,
                     modifier = Modifier.size(64.dp),
-                    tint = MaterialTheme.colorScheme.primary
+                    tint = Color(0xFF6C5CE7)
                 )
 
                 Text(
                     text = "Location Permission Required",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
 
                 Text(
                     text = "The app needs location access to detect bus arrivals along the route.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White.copy(alpha = 0.7f)
                 )
 
-                Button(
+                GlowingButton(
                     onClick = onRequest,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Grant Permission")
-                }
+                    text = "Grant Permission",
+                    icon = Icons.Default.Check
+                )
             }
         }
     }
@@ -198,43 +237,40 @@ private fun NoRouteContent() {
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        Surface(
-            modifier = Modifier.padding(24.dp).widthIn(max = 420.dp),
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 1.dp
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.padding(28.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Place,
-                    contentDescription = null,
-                    modifier = Modifier.size(64.dp),
-                    tint = MaterialTheme.colorScheme.tertiary
-                )
+            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+            val scale by infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = 1.1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1500, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "pulse"
+            )
 
-                Text(
-                    text = "No Route Loaded",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
+            Icon(
+                imageVector = Icons.Default.Place,
+                contentDescription = null,
+                modifier = Modifier.size(80.dp).graphicsLayer { scaleX = scale; scaleY = scale },
+                tint = Color(0xFF6C5CE7).copy(alpha = 0.8f)
+            )
 
-                Text(
-                    text = "Please load a route in the Configuration tab first.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Text(
+                text = "No Route Loaded",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
 
-                Button(
-                    onClick = { /* Navigate to config */ },
-                    modifier = Modifier.heightIn(min = 48.dp)
-                ) {
-                    Text("Go to Configuration")
-                }
-            }
+            Text(
+                text = "Please load a route in the Configuration tab first.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.White.copy(alpha = 0.7f)
+            )
         }
     }
 }
@@ -242,25 +278,95 @@ private fun NoRouteContent() {
 @Composable
 private fun ErrorSnackbar(
     error: String,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Snackbar(
-        modifier = Modifier.padding(16.dp),
-        action = {
+    Surface(
+        modifier = modifier
+            .padding(16.dp)
+            .fillMaxWidth()
+            .heightIn(min = 56.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFF1A1A2E).copy(alpha = 0.95f),
+        shadowElevation = 8.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = Color(0xFFFF6B6B),
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.9f)
+                )
+            }
             TextButton(onClick = onDismiss) {
-                Text("Dismiss")
+                Text(
+                    "Dismiss",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Default.Warning,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(20.dp)
+    }
+}
+
+// Glassmorphic card component
+@Composable
+private fun GlassCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.08f),
+                        Color.White.copy(alpha = 0.03f)
+                    )
+                )
             )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(error)
-        }
+            .padding(20.dp),
+        content = content
+    )
+}
+
+// Glowing button component
+@Composable
+private fun GlowingButton(
+    onClick: () -> Unit,
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector
+) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF6C5CE7)
+        ),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Icon(imageVector = icon, contentDescription = null)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text, fontWeight = FontWeight.Bold, color = Color.White)
     }
 }
