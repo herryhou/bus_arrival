@@ -4,14 +4,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,6 +21,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,7 +46,6 @@ private const val SPEED_1X = 1f
 private const val SPEED_2X = 2f
 private const val SPEED_4X = 4f
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TimelineScrubber(
         replayState: ReplayState,
@@ -104,16 +104,10 @@ fun TimelineScrubber(
                 }
             }
 
-            FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                SpeedSelector(
-                        currentSpeed = replayState.playbackSpeed,
-                        onSpeedChange = onSpeedChange
-                )
-            }
+            SpeedSelector(
+                    currentSpeed = replayState.playbackSpeed,
+                    onSpeedChange = onSpeedChange
+            )
 
             if (replayState.traceDuration > 0) {
                 Slider(
@@ -134,45 +128,30 @@ fun TimelineScrubber(
     }
 }
 
-/** Speed selector buttons for playback control. */
+/** Speed selector chips for playback control. */
 @Composable
 private fun SpeedSelector(currentSpeed: Float, onSpeedChange: (Float) -> Unit) {
     val speeds = listOf(SPEED_0_5X, SPEED_1X, SPEED_2X, SPEED_4X)
+    val selectedIndex = speeds.indexOf(currentSpeed).coerceAtLeast(0)
 
-    Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-    ) {
-        speeds.forEach { speed ->
-            androidx.compose.material3.Button(
+    SingleChoiceSegmentedButtonRow {
+        speeds.forEachIndexed { index, speed ->
+            SegmentedButton(
+                    selected = index == selectedIndex,
                     onClick = { onSpeedChange(speed) },
-                    colors =
-                            androidx.compose.material3.ButtonDefaults.buttonColors(
-                                    containerColor =
-                                            if (currentSpeed == speed) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.surfaceVariant
-                                            },
-                                    contentColor =
-                                            if (currentSpeed == speed) {
-                                                MaterialTheme.colorScheme.onPrimary
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            }
+                    shape =
+                            RoundedCornerShape(
+                                    when (index) {
+                                        0 -> 8.dp
+                                        speeds.size - 1 -> 8.dp
+                                        else -> 0.dp
+                                    }
                             ),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                    modifier = Modifier.heightIn(min = 40.dp),
-                    shape = RoundedCornerShape(8.dp)
+                    modifier = Modifier.heightIn(min = 32.dp)
             ) {
                 Text(
                         text = speedLabel(speed),
-                        style =
-                                if (currentSpeed == speed) {
-                                    MaterialTheme.typography.labelMedium
-                                } else {
-                                    MaterialTheme.typography.labelSmall
-                                }
+                        style = MaterialTheme.typography.labelSmall
                 )
             }
         }
