@@ -1,9 +1,7 @@
 package com.busarrival.app.presentation.ui.detection
 
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,7 +25,6 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -114,12 +111,6 @@ fun DetectionScreen(
                     modifier =
                             Modifier.fillMaxWidth()
                                     .fillMaxHeight()
-                                    .onSizeChanged {
-                                        android.util.Log.d(
-                                                "DEBUG",
-                                                "Column size: ${it.width}x${it.height}"
-                                        )
-                                    }
                                     .drawBehind {
                                         // Purple glow (top-left)
                                         drawCircle(
@@ -131,14 +122,14 @@ fun DetectionScreen(
                                                                 y = -100.dp.toPx()
                                                         )
                                         )
-                                        // Teal glow (bottom-right)
+                                        // Teal glow (bottom-right, inside bounds)
                                         drawCircle(
                                                 color = Color(0xFF00CEC9).copy(alpha = 0.3f),
                                                 radius = 250.dp.toPx() / 2,
                                                 center =
                                                         androidx.compose.ui.geometry.Offset(
-                                                                x = size.width + 80.dp.toPx(),
-                                                                y = size.height + 100.dp.toPx()
+                                                                x = size.width - 80.dp.toPx(),
+                                                                y = size.height - 100.dp.toPx()
                                                         )
                                         )
                                     }
@@ -153,13 +144,6 @@ fun DetectionScreen(
                         gpsBearing = uiState.gpsBearing,
                         modifier =
                                 Modifier.weight(0.6f)
-                                        .onSizeChanged {
-                                            android.util.Log.d(
-                                                    "DEBUG",
-                                                    "MapView size: ${it.width}x${it.height}"
-                                            )
-                                        }
-                                        .border(BorderStroke(4.dp, Color.Cyan))
                 )
 
                 StatusPanel(
@@ -180,13 +164,7 @@ fun DetectionScreen(
                         onPlayPause = { viewModel.playPause() },
                         onSeek = { viewModel.seekTo(it) },
                         onSpeedChange = { viewModel.setPlaybackSpeed(it) },
-                        modifier =
-                                Modifier.weight(0.4f).onSizeChanged {
-                                    android.util.Log.d(
-                                            "DEBUG",
-                                            "StatusPanel size: ${it.width}x${it.height}"
-                                    )
-                                }
+                        modifier = Modifier.weight(0.4f)
                 )
             }
         }
