@@ -19,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -33,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.busarrival.app.domain.model.ReplayState
+import com.busarrival.app.presentation.ui.*
 
 /**
  * Timeline scrubber component for replay control with glassmorphism design.
@@ -64,8 +66,8 @@ fun TimelineScrubber(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.08f),
-                        Color.White.copy(alpha = 0.03f)
+                        Surface1.copy(alpha = 0.12f),
+                        Surface2.copy(alpha = 0.06f)
                     )
                 ),
                 shape = RoundedCornerShape(16.dp)
@@ -82,12 +84,12 @@ fun TimelineScrubber(
                 Text(
                     text = "Replay",
                     style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.6f)
+                    color = TextLow
                 )
                 Text(
                     text = replayTimeLabel(replayState),
                     style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
+                    color = TextHigh,
                     fontWeight = FontWeight.SemiBold
                 )
             }
@@ -111,9 +113,9 @@ fun TimelineScrubber(
                 enabled = allowSeek,
                 modifier = Modifier.fillMaxWidth(),
                 colors = SliderDefaults.colors(
-                    activeTrackColor = Color(0xFF6C5CE7),
+                    activeTrackColor = AccentPrimary,
                     inactiveTrackColor = Color.White.copy(alpha = 0.1f),
-                    thumbColor = Color(0xFF6C5CE7),
+                    thumbColor = AccentPrimary,
                     activeTickColor = Color.Transparent,
                     inactiveTickColor = Color.Transparent
                 )
@@ -122,7 +124,7 @@ fun TimelineScrubber(
             Text(
                 text = "No trace loaded",
                 style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFFFF6B6B)
+                color = StateError
             )
         }
     }
@@ -153,7 +155,7 @@ private fun PlayPauseButton(
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF6C5CE7).copy(alpha = glowAlpha),
+                            AccentPrimary.copy(alpha = glowAlpha),
                             Color.Transparent
                         )
                     ),
@@ -168,8 +170,8 @@ private fun PlayPauseButton(
                 .background(
                     Brush.linearGradient(
                         colors = listOf(
-                            Color(0xFF6C5CE7),
-                            Color(0xFF5A4AD1)
+                            AccentPrimary,
+                            AccentPrimary.copy(alpha = 0.8f)
                         )
                     ),
                     shape = CircleShape
@@ -198,11 +200,11 @@ private fun SpeedSelector(currentSpeed: Float, onSpeedChange: (Float) -> Unit) {
                 onClick = { onSpeedChange(speed) },
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.heightIn(min = 36.dp),
-                colors = androidx.compose.material3.SegmentedButtonDefaults.colors(
-                    activeContainerColor = Color(0xFF00CEC9).copy(alpha = 0.2f),
-                    activeContentColor = Color(0xFF00CEC9),
-                    inactiveContainerColor = Color.White.copy(alpha = 0.05f),
-                    inactiveContentColor = Color.White.copy(alpha = 0.5f)
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = AccentContainer.copy(alpha = 0.4f),
+                    activeContentColor = AccentPrimary,
+                    inactiveContainerColor = Surface2.copy(alpha = 0.05f),
+                    inactiveContentColor = TextLow
                 )
             ) {
                 Text(
