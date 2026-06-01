@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.busarrival.app.domain.model.EventHint
 import com.busarrival.app.domain.model.HintType
+import com.busarrival.app.presentation.ui.*
 
 @Composable
 fun EventToast(
@@ -43,10 +44,10 @@ fun EventToast(
     }
 
     val (accentColor, backgroundColor) = when (hint.type) {
-        HintType.APPROACHING -> Color(0xFF1565C0) to Color(0xFF1565C0).copy(alpha = 0.15f)
-        HintType.ARRIVING -> Color(0xFFF57C00) to Color(0xFFF57C00).copy(alpha = 0.15f)
-        HintType.ATSTOP -> Color(0xFF00CEC9) to Color(0xFF00CEC9).copy(alpha = 0.15f)
-        HintType.DEPART -> Color(0xFF6C5CE7) to Color(0xFF6C5CE7).copy(alpha = 0.15f)
+        HintType.APPROACHING -> AccentPrimary.copy(red = 0.4f, blue = 0.6f) to AccentContainer.copy(alpha = 0.3f)
+        HintType.ARRIVING -> AccentPrimary.copy(green = 0.3f) to AccentContainer.copy(alpha = 0.4f)
+        HintType.ATSTOP -> AccentPrimary to AccentContainer.copy(alpha = 0.3f)
+        HintType.DEPART -> AccentPrimary to AccentContainer.copy(alpha = 0.2f)
     }
 
     val message = when (hint.type) {
@@ -82,7 +83,7 @@ fun EventToast(
         Text(
             text = message,
             style = MaterialTheme.typography.bodyMedium,
-            color = Color.White.copy(alpha = 0.9f),
+            color = TextHigh.copy(alpha = 0.9f),
             fontWeight = FontWeight.Medium
         )
     }
