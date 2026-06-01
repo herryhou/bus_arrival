@@ -18,7 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material.icons.Icons as MaterialIcons
+import com.busarrival.app.presentation.ui.*
 
 @Composable
 fun GlowingButton(
@@ -32,7 +32,7 @@ fun GlowingButton(
         initialValue = 0.4f,
         targetValue = 0.7f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = FastOutSlowInEasing),
+            animation = tween(250, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "glow"
@@ -47,12 +47,12 @@ fun GlowingButton(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .clip(RoundedCornerShape(28.dp))
+                .clip(ButtonShape)
                 .background(
                     brush = Brush.horizontalGradient(
                         colors = listOf(
-                            Color(0xFF6C5CE7).copy(alpha = glowAlpha),
-                            Color(0xFF00CEC9).copy(alpha = glowAlpha)
+                            AccentPrimary.copy(alpha = glowAlpha),
+                            AccentPrimary.copy(alpha = glowAlpha * 0.7f)
                         )
                     )
                 )
@@ -64,12 +64,12 @@ fun GlowingButton(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .clip(RoundedCornerShape(28.dp))
+                .clip(ButtonShape)
                 .background(
                     brush = Brush.horizontalGradient(
                         colors = listOf(
-                            Color(0xFF6C5CE7),
-                            Color(0xFF00CEC9)
+                            AccentPrimary,
+                            AccentPrimary.copy(alpha = 0.8f)
                         )
                     )
                 ),
@@ -96,7 +96,7 @@ fun GlowingButton(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .clip(RoundedCornerShape(28.dp))
+                .clip(ButtonShape)
                 .background(Color.Transparent)
         ) {
             androidx.compose.material3.Button(
