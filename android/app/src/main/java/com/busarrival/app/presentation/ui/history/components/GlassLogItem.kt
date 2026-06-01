@@ -1,9 +1,7 @@
 package com.busarrival.app.presentation.ui.history.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -34,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import com.busarrival.app.presentation.ui.*
 import com.busarrival.app.presentation.viewmodel.LogManagerItem
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -50,18 +49,15 @@ fun GlassLogItem(
 
     val scale by animateFloatAsState(
         targetValue = if (isPressed) 0.98f else 1f,
-        animationSpec = spring(
-            dampingRatio = 0.8f,
-            stiffness = Spring.StiffnessMedium
-        ),
+        animationSpec = ExpressiveSpringSpec,
         label = "scale"
     )
 
     val borderColor by animateColorAsState(
         targetValue = when {
-            item.isSelected -> Color(0xFF6C5CE7).copy(alpha = 0.5f)
-            item.isActive -> Color(0xFF00CEC9).copy(alpha = 0.4f)
-            else -> Color.White.copy(alpha = 0.08f)
+            item.isSelected -> AccentContainer.copy(alpha = 0.6f)
+            item.isActive -> AccentPrimary.copy(alpha = 0.4f)
+            else -> Surface1.copy(alpha = 0.08f)
         },
         animationSpec = tween(durationMillis = 300),
         label = "borderColor"
@@ -77,12 +73,12 @@ fun GlassLogItem(
         modifier = Modifier
             .fillMaxWidth()
             .scale(scale)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(CardShape)
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = containerAlpha),
-                        Color.White.copy(alpha = 0.03f)
+                        Surface1.copy(alpha = containerAlpha),
+                        Surface2.copy(alpha = 0.03f)
                     )
                 )
             )
@@ -91,7 +87,7 @@ fun GlassLogItem(
                     width = if (item.isSelected) 1.5.dp else 1.dp,
                     color = borderColor
                 ),
-                RoundedCornerShape(16.dp)
+                CardShape
             )
             .clickable(
                 interactionSource = interactionSource,
@@ -118,8 +114,8 @@ fun GlassLogItem(
                         .clip(RoundedCornerShape(7.dp))
                         .background(
                             when {
-                                item.isSelected -> Color(0xFF6C5CE7)
-                                else -> Color.White.copy(alpha = 0.1f)
+                                item.isSelected -> AccentPrimary
+                                else -> Surface1.copy(alpha = 0.1f)
                             }
                         )
                         .then(
@@ -127,7 +123,7 @@ fun GlassLogItem(
                                 Modifier.border(
                                     BorderStroke(
                                         1.5.dp,
-                                        Color.White.copy(alpha = 0.25f)
+                                        TextLow.copy(alpha = 0.25f)
                                     ),
                                     RoundedCornerShape(7.dp)
                                 )
@@ -142,7 +138,7 @@ fun GlassLogItem(
                         Icon(
                             imageVector = Icons.Default.CheckCircle,
                             contentDescription = "Selected",
-                            tint = Color.White,
+                            tint = TextHigh,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -161,7 +157,7 @@ fun GlassLogItem(
                             text = item.filename,
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = if (item.isActive) FontWeight.Bold else FontWeight.SemiBold,
-                            color = if (item.isActive) Color(0xFF00CEC9) else Color.White.copy(alpha = 0.95f),
+                            color = if (item.isActive) AccentPrimary else TextHigh,
                             letterSpacing = (-0.01).em,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -177,13 +173,13 @@ fun GlassLogItem(
                                     modifier = Modifier
                                         .size(6.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFF00CEC9))
+                                        .background(AccentPrimary)
                                 )
                                 Text(
                                     text = "ACTIVE",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00CEC9),
+                                    color = AccentPrimary,
                                     letterSpacing = (0.05).em
                                 )
                             }
@@ -198,17 +194,17 @@ fun GlassLogItem(
                         Text(
                             text = formatTimestamp(item.modifiedAtMillis),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.5f)
+                            color = TextLow
                         )
                         Text(
                             text = "•",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.3f)
+                            color = TextLow.copy(alpha = 0.6f)
                         )
                         Text(
                             text = formatSize(item.sizeBytes),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.5f)
+                            color = TextLow
                         )
                     }
                 }
@@ -223,15 +219,15 @@ fun GlassLogItem(
                     .clip(RoundedCornerShape(12.dp))
                     .background(
                         if (item.canSimulate)
-                            Color(0xFF6C5CE7).copy(alpha = 0.2f)
+                            AccentContainer.copy(alpha = 0.2f)
                         else
-                            Color.White.copy(alpha = 0.05f)
+                            Surface2.copy(alpha = 0.05f)
                     )
             ) {
                 Icon(
                     imageVector = Icons.Default.PlayArrow,
                     contentDescription = "Simulate",
-                    tint = if (item.canSimulate) Color(0xFF6C5CE7) else Color.White.copy(alpha = 0.3f),
+                    tint = if (item.canSimulate) AccentPrimary else TextLow.copy(alpha = 0.6f),
                     modifier = Modifier.size(22.dp)
                 )
             }
