@@ -12,11 +12,11 @@ import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.FastOutSlowInEasing
 
-// Color tokens matching DESIGN_SYSTEM.md
-val Bg0 = Color(0xFF050505)
-val Surface1 = Color(0xFF111113)
-val Surface2 = Color(0xFF18181C)
-val Surface3 = Color(0xFF202026)
+// Color tokens matching DESIGN_SYSTEM.md (lighter dark theme)
+val Bg0 = Color(0xFF0F0F13)
+val Surface1 = Color(0xFF1A1A1E)
+val Surface2 = Color(0xFF252530)
+val Surface3 = Color(0xFF303038)
 val AccentPrimary = Color(0xFFA855F7)
 val AccentContainer = Color(0xFF2A1738)
 val TextHigh = Color(0xFFF4F4F5)

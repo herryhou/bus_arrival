@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.em
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.busarrival.app.presentation.ui.*
 import com.busarrival.app.presentation.ui.history.components.GlassCard
 import com.busarrival.app.presentation.ui.history.components.GlassLogItem
 import com.busarrival.app.presentation.viewmodel.HistoryViewModel
@@ -80,8 +81,8 @@ fun HistoryScreen(
                 .background(
                     Brush.linearGradient(
                         colors = listOf(
-                            Color(0xFF1A1A2E).copy(alpha = 0.95f),
-                            Color(0xFF16213E).copy(alpha = 0.9f),
+                            Color(0xFF1A1A2E).copy(alpha = 0.55f),
+                            Color(0xFF16213E).copy(alpha = 0.7f),
                             Color(0xFF0F0F1A)
                         )
                     )
@@ -113,7 +114,7 @@ fun HistoryScreen(
                         .background(
                             Brush.radialGradient(
                                 colors = listOf(
-                                    Color(0xFF00CEC9).copy(alpha = 0.25f),
+                                    AccentPrimary.copy(alpha = 0.25f),
                                     Color.Transparent
                                 )
                             )

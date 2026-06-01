@@ -19,8 +19,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -38,6 +38,7 @@ import com.busarrival.app.presentation.ui.detection.components.EventToastHost
 import com.busarrival.app.presentation.ui.detection.components.MapView
 import com.busarrival.app.presentation.ui.detection.components.StatusPanel
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
+import com.busarrival.app.presentation.ui.*
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 
@@ -102,51 +103,67 @@ fun DetectionScreen(
         Box(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
                 // Background gradient
                 Box(
-                        modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                        Brush.linearGradient(
-                                                colors = listOf(
-                                                        Color(0xFF1A1A2E).copy(alpha = 0.95f),
-                                                        Color(0xFF16213E).copy(alpha = 0.9f),
-                                                        Color(0xFF0F0F1A)
+                        modifier =
+                                Modifier.fillMaxSize()
+                                        .background(
+                                                Brush.linearGradient(
+                                                        colors =
+                                                                listOf(
+                                                                        Color(0xFF1A1A2E)
+                                                                                .copy(
+                                                                                        alpha =
+                                                                                                0.55f
+                                                                                ),
+                                                                        Color(0xFF16213E)
+                                                                                .copy(alpha = 0.7f),
+                                                                        Color(0xFF0F0F1A)
+                                                                )
                                                 )
                                         )
-                                )
                 ) {
                         // Glowing orbs
-                        Box(
-                                modifier = Modifier
-                                        .fillMaxSize()
-                                        .blur(100.dp)
-                        ) {
+                        Box(modifier = Modifier.fillMaxSize().blur(100.dp)) {
                                 Box(
-                                        modifier = Modifier
-                                                .size(300.dp)
-                                                .background(
-                                                        Brush.radialGradient(
-                                                                colors = listOf(
-                                                                        Color(0xFF6C5CE7).copy(alpha = 0.4f),
-                                                                        Color.Transparent
+                                        modifier =
+                                                Modifier.size(300.dp)
+                                                        .background(
+                                                                Brush.radialGradient(
+                                                                        colors =
+                                                                                listOf(
+                                                                                        Color(
+                                                                                                        0xFFA855F7
+                                                                                                )
+                                                                                                .copy(
+                                                                                                        alpha =
+                                                                                                                0.4f
+                                                                                                ),
+                                                                                        Color.Transparent
+                                                                                )
                                                                 )
                                                         )
-                                                )
-                                                .align(Alignment.TopStart)
-                                                .offset(x = (-80).dp, y = (-100).dp)
+                                                        .align(Alignment.TopStart)
+                                                        .offset(x = (-80).dp, y = (-100).dp)
                                 )
                                 Box(
-                                        modifier = Modifier
-                                                .size(250.dp)
-                                                .background(
-                                                        Brush.radialGradient(
-                                                                colors = listOf(
-                                                                        Color(0xFF00CEC9).copy(alpha = 0.3f),
-                                                                        Color.Transparent
+                                        modifier =
+                                                Modifier.size(250.dp)
+                                                        .background(
+                                                                Brush.radialGradient(
+                                                                        colors =
+                                                                                listOf(
+                                                                                        Color(
+                                                                                                        0xFFA855F7
+                                                                                                )
+                                                                                                .copy(
+                                                                                                        alpha =
+                                                                                                                0.3f
+                                                                                                ),
+                                                                                        Color.Transparent
+                                                                                )
                                                                 )
                                                         )
-                                                )
-                                                .align(Alignment.BottomEnd)
-                                                .offset(x = 80.dp, y = 100.dp)
+                                                        .align(Alignment.BottomEnd)
+                                                        .offset(x = 80.dp, y = 100.dp)
                                 )
                         }
 
@@ -154,15 +171,14 @@ fun DetectionScreen(
                         if (!locationPermissions.allPermissionsGranted) {
                                 PermissionRequestContent(
                                         onRequest = {
-                                                locationPermissions.launchMultiplePermissionRequest()
+                                                locationPermissions
+                                                        .launchMultiplePermissionRequest()
                                         }
                                 )
                         } else if (activeRoute == null) {
                                 NoRouteContent()
                         } else {
-                                Column(
-                                        modifier = Modifier.fillMaxSize()
-                                ) {
+                                Column(modifier = Modifier.fillMaxSize()) {
                                         MapView(
                                                 routeData = activeRoute,
                                                 currentSCm = uiState.sCm,
@@ -188,7 +204,9 @@ fun DetectionScreen(
                                                                 viewModel.startDetection()
                                                         }
                                                 },
-                                                onToggleGpsLogging = { viewModel.toggleGpsLogging() },
+                                                onToggleGpsLogging = {
+                                                        viewModel.toggleGpsLogging()
+                                                },
                                                 onPlayPause = { viewModel.playPause() },
                                                 onSeek = { viewModel.seekTo(it) },
                                                 onSpeedChange = { viewModel.setPlaybackSpeed(it) },
@@ -220,7 +238,7 @@ private fun PermissionRequestContent(onRequest: () -> Unit) {
                                         imageVector = Icons.Default.LocationOn,
                                         contentDescription = null,
                                         modifier = Modifier.size(64.dp),
-                                        tint = Color(0xFF6C5CE7)
+                                        tint = Color(0xFFA855F7)
                                 )
 
                                 Text(
@@ -279,7 +297,7 @@ private fun NoRouteContent() {
                                                 scaleX = scale
                                                 scaleY = scale
                                         },
-                                tint = Color(0xFF6C5CE7).copy(alpha = 0.8f)
+                                tint = Color(0xFFA855F7).copy(alpha = 0.8f)
                         )
 
                         Text(
@@ -370,7 +388,7 @@ private fun GlowingButton(
         Button(
                 onClick = onClick,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6C5CE7)),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA855F7)),
                 shape = RoundedCornerShape(16.dp)
         ) {
                 Icon(imageVector = icon, contentDescription = null)

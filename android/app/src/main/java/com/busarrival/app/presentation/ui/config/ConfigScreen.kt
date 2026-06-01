@@ -37,6 +37,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.busarrival.app.domain.model.RouteMetadata
+import com.busarrival.app.presentation.ui.*
 import com.busarrival.app.presentation.ui.config.components.GlassCard
 import com.busarrival.app.presentation.ui.config.components.GlowingButton
 import com.busarrival.app.presentation.ui.config.components.ParameterSlider
@@ -84,8 +85,8 @@ fun ConfigScreen(
             .background(
                 Brush.linearGradient(
                     colors = listOf(
-                        Color(0xFF1A1A2E).copy(alpha = 0.95f),
-                        Color(0xFF16213E).copy(alpha = 0.9f),
+                        Color(0xFF1A1A2E).copy(alpha = 0.55f),
+                        Color(0xFF16213E).copy(alpha = 0.7f),
                         Color(0xFF0F0F1A)
                     )
                 )
@@ -103,7 +104,7 @@ fun ConfigScreen(
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                Color(0xFF6C5CE7).copy(alpha = 0.4f),
+                                Color(0xFFA855F7).copy(alpha = 0.4f),
                                 Color.Transparent
                             )
                         )
@@ -117,7 +118,7 @@ fun ConfigScreen(
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                Color(0xFF00CEC9).copy(alpha = 0.3f),
+                                AccentPrimary.copy(alpha = 0.3f),
                                 Color.Transparent
                             )
                         )
@@ -253,7 +254,7 @@ fun ConfigScreen(
                                     Icon(
                                         imageVector = Icons.Rounded.Add,
                                         contentDescription = null,
-                                        tint = Color(0xFF6C5CE7),
+                                        tint = Color(0xFFA855F7),
                                         modifier = Modifier.size(28.dp)
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
@@ -461,7 +462,7 @@ private fun ParametersSheetContent(
                             onClick = { onMapLabelBiasChange(bias) },
                             label = { Text(label) },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFF6C5CE7),
+                                selectedContainerColor = Color(0xFFA855F7),
                                 selectedLabelColor = Color.White
                             ),
                             border = null
@@ -541,7 +542,7 @@ private fun LoadingContent() {
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                Color(0xFF6C5CE7).copy(alpha = 0.6f),
+                                Color(0xFFA855F7).copy(alpha = 0.6f),
                                 Color.Transparent
                             )
                         )
@@ -550,7 +551,7 @@ private fun LoadingContent() {
 
             CircularProgressIndicator(
                 modifier = Modifier.size(48.dp),
-                color = Color(0xFF6C5CE7),
+                color = Color(0xFFA855F7),
                 strokeWidth = 3.dp
             )
             Text(
@@ -590,7 +591,7 @@ private fun EmptyRoutesContent(onAddRoute: () -> Unit) {
             modifier = Modifier
                 .size(80.dp)
                 .scale(scale),
-            tint = Color(0xFF6C5CE7).copy(alpha = 0.8f)
+            tint = Color(0xFFA855F7).copy(alpha = 0.8f)
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -685,7 +686,7 @@ private fun ErrorDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("OK", color = Color(0xFF6C5CE7))
+                Text("OK", color = Color(0xFFA855F7))
             }
         }
     )

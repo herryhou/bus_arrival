@@ -1,0 +1,2 @@
+#!/bin/bash
+cd /Users/herry/project/pico2w/bus_arrival && git add android/app/src/main/java/com/busarrival/app/presentation/ui/history/components/GlassCard.kt && git commit -m "refactor(theme): migrate history GlassCard to surface tokens + spring animation"
