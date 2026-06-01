@@ -73,28 +73,31 @@ val SheetShape = RoundedCornerShape(20.dp)   // Overlays (softer than cards)
 
 ## Motion System
 
-Design system: spring physics 150-350ms for key transitions.
+Design system: spring physics for expressive moments, standard motion for routine tasks. Animations capped at 150-350ms.
 
 ### Motion Tokens
 
 ```kotlin
-val SpringSpec = spring<Float>(
+val ExpressiveSpringSpec = spring<Float>(
     dampingRatio = 0.8f,
     stiffness = 400f
 )
 
-val ExpressiveSpec = tween<Float>(
-    durationMillis = 300,
+val StandardSpec = tween<Float>(
+    durationMillis = 250,
     easing = FastOutSlowInEasing
 )
 ```
 
 ### Migration Targets
 
-- `ActiveIndicator`: 1000ms linear → 300ms spring
-- `GlassCard` press: spring easing
-- `TimelineScrubber`: spring for seek
-- All state changes: spring or 300ms tween
+- `ActiveIndicator`: 1000ms linear → 250ms standard (broadcast indicator, routine)
+- `GlassCard` press: `ExpressiveSpringSpec` (expressive moment)
+- `TimelineScrubber`: `StandardSpec` for seek (routine navigation)
+- Button interactions: `ExpressiveSpringSpec` (expressive moment)
+- Card expand/collapse: `StandardSpec` (routine)
+
+**Per design system:** Use expressive motion for moments of delight or major transitions (button presses, card interactions). Use standard motion for routine navigation and utility tasks (scrubbers, toggles).
 
 ## Component Migration
 
@@ -103,15 +106,21 @@ val ExpressiveSpec = tween<Float>(
 1. Create `ui/BusArrivalTheme.kt`
 2. Update `MainActivity.kt` to wrap content with `BusArrivalTheme`
 3. `StatusPanel.kt` - 13 color/shape replacements
-4. `GlassCard.kt` - shared component, cascades to all screens
-5. Config components - `GlowingButton`, `ParameterSlider`, `RouteCard`
-6. History components - `GlassLogItem`
-7. `EventToast` - notifications
+4. `GpsStatusRow.kt` - GPS metric tiles (color replacements, including GPS state colors)
+5. `GlassCard.kt` - BOTH implementations (`config/components/GlassCard.kt` AND `history/components/GlassCard.kt`)
+6. Config components - `GlowingButton`, `ParameterSlider`, `RouteCard`
+7. History components - `GlassLogItem`
+8. `EventToast` - notifications
+9. `MapView.kt` - canvas/overlay colors
 
 **Files touched:**
 - 1 new: `ui/BusArrivalTheme.kt`
 - 1 modify: `presentation/MainActivity.kt`
-- 13 component files (color/shape/motion updates)
+- 15 component files (color/shape/motion updates):
+  - `detection/components/`: StatusPanel, GpsStatusRow, TimelineScrubber, EventToast, MapView (5 files)
+  - `config/components/`: GlassCard, GlowingButton, ParameterSlider, RouteCard, RouteListItem (5 files)
+  - `history/components/`: GlassCard, GlassLogItem (2 files)
+  - Plus 3 additional detection components (EventToastHost, VehicleHeadingMarker, MapCoordinateUtils)
 
 ## Testing Protocol
 
@@ -141,8 +150,8 @@ val ExpressiveSpec = tween<Float>(
 
 ### Success Criteria
 
-- No hardcoded colors remain in UI code
-- All animations use spring physics
+- No hardcoded colors remain in UI code (all 15 component files use theme tokens)
+- Animations follow motion system (expressive spring for key moments, standard for routine)
 - Visual consistency across all screens
 - Contrast ratios readable per WCAG AA
 
