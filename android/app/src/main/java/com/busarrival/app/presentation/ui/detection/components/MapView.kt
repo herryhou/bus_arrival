@@ -325,7 +325,7 @@ fun MapView(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (routeData != null && centerLatLon != null) {
             Canvas(
                     modifier =
