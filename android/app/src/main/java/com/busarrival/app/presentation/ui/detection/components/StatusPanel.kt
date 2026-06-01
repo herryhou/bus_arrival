@@ -24,6 +24,7 @@ import com.busarrival.app.domain.model.GpsFixState
 import com.busarrival.app.domain.model.ReplayState
 import com.busarrival.app.presentation.viewmodel.DetectionUiState
 import com.busarrival.app.service.PipelineEvent
+import com.busarrival.app.presentation.ui.*
 import java.util.Locale
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -48,14 +49,6 @@ fun StatusPanel(
         modifier = modifier
             .fillMaxHeight()
             .verticalScroll(scrollState)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF1A1A2E).copy(alpha = 0.95f),
-                        Color(0xFF0F0F1A).copy(alpha = 0.98f)
-                    )
-                )
-            )
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         DashboardHeader(routeName = routeName ?: "Active route", isRunning = uiState.isRunning)
@@ -115,7 +108,7 @@ private fun DashboardHeader(routeName: String, isRunning: Boolean) {
                 text = routeName,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Color.White,
+                color = TextHigh,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -142,7 +135,7 @@ private fun ActiveIndicator(isActive: Boolean) {
             text = if (isActive) "Live" else "Ready",
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Medium,
-            color = if (isActive) Color(0xFF00CEC9) else Color.White.copy(alpha = 0.6f)
+            color = if (isActive) AccentPrimary else TextLow
         )
         Spacer(modifier = Modifier.width(8.dp))
         Box(
@@ -151,7 +144,7 @@ private fun ActiveIndicator(isActive: Boolean) {
                 .clip(CircleShape)
                 .background(
                     if (isActive) {
-                        Color(0xFF00CEC9).copy(alpha = alpha)
+                        AccentPrimary.copy(alpha = alpha)
                     } else {
                         Color.White.copy(alpha = 0.3f)
                     }
@@ -174,8 +167,8 @@ private fun CurrentStopPanel(stopLabel: String, stopState: String, mode: String)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color.White.copy(alpha = 0.08f),
-                            Color.White.copy(alpha = 0.04f)
+                            Surface1.copy(alpha = 0.12f),
+                            Surface2.copy(alpha = 0.06f)
                         )
                     ),
                     shape = RoundedCornerShape(16.dp)
@@ -188,13 +181,13 @@ private fun CurrentStopPanel(stopLabel: String, stopState: String, mode: String)
                 Text(
                     text = "Current stop",
                     style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.6f)
+                    color = TextLow
                 )
                 Text(
                     text = stopLabel,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                    color = TextHigh,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -204,13 +197,13 @@ private fun CurrentStopPanel(stopLabel: String, stopState: String, mode: String)
                     text = stopState,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF00CEC9),
+                    color = AccentPrimary,
                     maxLines = 1
                 )
                 Text(
                     text = mode,
                     style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.6f),
+                    color = TextLow,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -236,12 +229,12 @@ private fun ActionRow(
             modifier = Modifier.weight(1f).height(56.dp),
             colors = if (isRunning) {
                 ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFFF6B6B),
+                    containerColor = StateError,
                     contentColor = Color.White
                 )
             } else {
                 ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF6C5CE7),
+                    containerColor = AccentPrimary,
                     contentColor = Color.White
                 )
             },
@@ -275,15 +268,15 @@ private fun GlassSwitch(
         Text(
             text = label,
             style = MaterialTheme.typography.labelLarge,
-            color = Color.White.copy(alpha = 0.7f)
+            color = TextLow
         )
         Switch(
             checked = checked,
             onCheckedChange = { onToggle() },
             modifier = Modifier.semantics { this.contentDescription = contentDescription },
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color(0xFF00CEC9),
-                checkedTrackColor = Color(0xFF00CEC9).copy(alpha = 0.5f),
+                checkedThumbColor = AccentPrimary,
+                checkedTrackColor = AccentContainer,
                 uncheckedThumbColor = Color.White.copy(alpha = 0.5f),
                 uncheckedTrackColor = Color.White.copy(alpha = 0.2f)
             )
@@ -300,7 +293,7 @@ private fun RecentEvents(events: List<PipelineEvent>) {
         Text(
             text = "Recent events",
             style = MaterialTheme.typography.labelLarge,
-            color = Color.White.copy(alpha = 0.6f)
+            color = TextLow
         )
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -346,9 +339,9 @@ internal fun formatStateLabel(stopState: String): String {
 @Composable
 private fun EventSummaryItem(event: PipelineEvent) {
     val markerColor = when (event) {
-        is PipelineEvent.Arrival -> Color(0xFF00CEC9)
-        is PipelineEvent.Departure -> Color(0xFFFF6B6B)
-        is PipelineEvent.PositionUpdate -> Color(0xFF6C5CE7)
+        is PipelineEvent.Arrival -> AccentPrimary
+        is PipelineEvent.Departure -> StateError
+        is PipelineEvent.PositionUpdate -> AccentPrimary
     }
 
     Row(
@@ -376,7 +369,7 @@ private fun EventSummaryItem(event: PipelineEvent) {
         Text(
             text = eventSummaryText(event),
             style = MaterialTheme.typography.bodyMedium,
-            color = Color.White.copy(alpha = 0.8f),
+            color = TextHigh.copy(alpha = 0.8f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
