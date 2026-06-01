@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.busarrival.app.domain.model.GpsFixState
+import com.busarrival.app.presentation.ui.*
 
 @Composable
 fun GpsStatusRow(
@@ -64,8 +65,8 @@ private fun MetricTile(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.06f),
-                        Color.White.copy(alpha = 0.02f)
+                        Surface1.copy(alpha = 0.12f),
+                        Surface2.copy(alpha = 0.06f)
                     )
                 ),
                 shape = RoundedCornerShape(12.dp)
@@ -76,7 +77,7 @@ private fun MetricTile(
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = Color.White.copy(alpha = 0.5f)
+            color = TextLow
         )
         Text(
             text = value,
@@ -91,15 +92,15 @@ private fun MetricTile(
 @Composable
 private fun gpsStatusTextAndColor(gpsFixState: GpsFixState): Pair<String, Color> {
     return when (gpsFixState) {
-        is GpsFixState.NoSignal -> "No signal" to Color(0xFFFF6B6B)
-        is GpsFixState.Searching -> "Searching" to Color.White.copy(alpha = 0.6f)
+        is GpsFixState.NoSignal -> "No signal" to StateError
+        is GpsFixState.Searching -> "Searching" to TextLow
         is GpsFixState.Acquiring -> {
-            "Acquiring ${gpsFixState.satellites}" to Color(0xFF6C5CE7)
+            "Acquiring ${gpsFixState.satellites}" to AccentPrimary
         }
         is GpsFixState.Ready -> {
             val accText = "+/-${gpsFixState.accuracyM.toInt()}m"
             val satText = "${gpsFixState.satellites} sats"
-            "$accText, $satText" to Color(0xFF00CEC9)
+            "$accText, $satText" to AccentPrimary
         }
     }
 }
