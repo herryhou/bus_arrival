@@ -8,12 +8,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import com.busarrival.app.presentation.navigation.BusArrivalNavGraph
+import com.busarrival.app.presentation.ui.BusArrivalTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
+            BusArrivalTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     BusArrivalNavGraph()
                 }
