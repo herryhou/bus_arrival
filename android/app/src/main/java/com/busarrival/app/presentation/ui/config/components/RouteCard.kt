@@ -19,6 +19,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.busarrival.app.domain.model.RouteMetadata
+import com.busarrival.app.presentation.ui.AccentPrimary
+import com.busarrival.app.presentation.ui.CardShape
+import com.busarrival.app.presentation.ui.Surface1
+import com.busarrival.app.presentation.ui.Surface2
+import com.busarrival.app.presentation.ui.TextHigh
+import com.busarrival.app.presentation.ui.TextLow
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -34,15 +40,15 @@ fun RouteCard(
     val cardGradient = if (isActive) {
         Brush.verticalGradient(
             colors = listOf(
-                Color(0xFF6C5CE7).copy(alpha = 0.25f),
-                Color(0xFF6C5CE7).copy(alpha = 0.15f)
+                Surface1,
+                Surface2
             )
         )
     } else {
         Brush.verticalGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.08f),
-                Color.White.copy(alpha = 0.04f)
+                Surface2,
+                Surface1
             )
         )
     }
@@ -51,7 +57,7 @@ fun RouteCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(CardShape)
             .background(cardGradient)
             .clickable(onClick = onClick)
             .padding(16.dp),
@@ -63,7 +69,7 @@ fun RouteCard(
                     text = metadata.name,
                     style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
                     fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-                    color = Color.White
+                    color = TextHigh
                 )
 
                 if (isActive) {
@@ -72,7 +78,7 @@ fun RouteCard(
                         modifier = Modifier
                             .size(6.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF00CEC9))
+                            .background(AccentPrimary)
                     )
                 }
             }
@@ -86,12 +92,12 @@ fun RouteCard(
                 Text(
                     text = "${metadata.stopCount} stops",
                     style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.6f)
+                    color = TextLow
                 )
                 Text(
                     text = formatDate(metadata.timestamp),
                     style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.5f)
+                    color = TextLow
                 )
             }
         }
@@ -100,7 +106,7 @@ fun RouteCard(
             Icon(
                 imageVector = Icons.Rounded.DeleteOutline,
                 contentDescription = "Delete route",
-                tint = Color(0xFFFF6B6B).copy(alpha = 0.8f)
+                tint = androidx.compose.material3.MaterialTheme.colorScheme.error
             )
         }
     }

@@ -15,6 +15,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.busarrival.app.presentation.ui.AccentPrimary
+import com.busarrival.app.presentation.ui.CardShape
+import com.busarrival.app.presentation.ui.Surface1
+import com.busarrival.app.presentation.ui.TextHigh
+import com.busarrival.app.presentation.ui.TextLow
 
 @Composable
 fun ParameterSlider(
@@ -36,19 +41,19 @@ fun ParameterSlider(
                 text = label,
                 style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium,
-                color = Color.White.copy(alpha = 0.9f)
+                color = TextHigh
             )
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF6C5CE7).copy(alpha = 0.2f))
+                    .background(Surface1)
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Text(
                     text = "$value$suffix",
                     style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF00CEC9)
+                    color = AccentPrimary
                 )
             }
         }
@@ -61,9 +66,9 @@ fun ParameterSlider(
             valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
             modifier = Modifier.fillMaxWidth(),
             colors = SliderDefaults.colors(
-                activeTrackColor = Color(0xFF6C5CE7),
-                inactiveTrackColor = Color.White.copy(alpha = 0.1f),
-                thumbColor = Color(0xFF00CEC9),
+                activeTrackColor = AccentPrimary,
+                inactiveTrackColor = TextLow,
+                thumbColor = AccentPrimary,
                 activeTickColor = Color.Transparent,
                 inactiveTickColor = Color.Transparent
             )
