@@ -1,7 +1,9 @@
 package com.busarrival.app.presentation.ui.detection
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
@@ -41,9 +43,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.busarrival.app.presentation.ui.detection.components.MapView
+import com.busarrival.app.presentation.ui.detection.components.EventToastHost
 import com.busarrival.app.presentation.ui.detection.components.StatusPanel
 import com.busarrival.app.presentation.ui.detection.components.TimelineScrubber
-import com.busarrival.app.presentation.ui.detection.components.EventToastHost
 import com.busarrival.app.presentation.viewmodel.DetectionViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
@@ -141,7 +143,7 @@ fun DetectionScreen(
                     gpsLat = uiState.gpsLat,
                     gpsLon = uiState.gpsLon,
                     gpsBearing = uiState.gpsBearing,
-                    modifier = Modifier.weight(0.6f)
+                    modifier = Modifier.weight(0.6f).border(BorderStroke(4.dp, Color.Red))
                 )
 
                 StatusPanel(
@@ -162,10 +164,15 @@ fun DetectionScreen(
                     onPlayPause = { viewModel.playPause() },
                     onSeek = { viewModel.seekTo(it) },
                     onSpeedChange = { viewModel.setPlaybackSpeed(it) },
-                    modifier = Modifier.weight(0.4f)
+                    modifier = Modifier.weight(0.4f).border(BorderStroke(4.dp, Color.Blue))
                 )
             }
         }
+
+        EventToastHost(
+            hint = eventHints,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
 
         // Error snackbar overlay
         uiState.error?.let { error ->

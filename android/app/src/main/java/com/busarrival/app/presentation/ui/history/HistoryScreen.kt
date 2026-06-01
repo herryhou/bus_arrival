@@ -131,7 +131,7 @@ fun HistoryScreen(
                 contentPadding = PaddingValues(
                     start = 20.dp,
                     end = 20.dp,
-                    top = 80.dp,
+                    top = 200.dp,
                     bottom = 100.dp
                 )
             ) {
@@ -223,7 +223,7 @@ private fun GlassHeader(
     canDelete: Boolean
 ) {
     val animatedHeight by animateDpAsState(
-        targetValue = if (hasSelection) 140.dp else 72.dp,
+        targetValue = 190.dp,
         animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
         label = "headerHeight"
     )
@@ -296,18 +296,8 @@ private fun GlassHeader(
                 }
             }
 
-            // Selection actions (animated in)
-            AnimatedVisibility(
-                visible = hasSelection,
-                enter = slideInVertically(
-                    initialOffsetY = { it / 2 },
-                    animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
-                ) + fadeIn(),
-                exit = slideOutVertically(
-                    targetOffsetY = { it / 2 },
-                    animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
-                ) + fadeOut()
-            ) {
+            AnimatedVisibility(visible = hasSelection) {
+                // Selection actions
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -316,140 +306,140 @@ private fun GlassHeader(
                     Column {
                         Spacer(modifier = Modifier.height(16.dp))
 
-                    // Selection toolbar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .border(
-                                BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                                RoundedCornerShape(16.dp)
-                            )
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                        // Selection toolbar
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .border(
+                                    BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                                    RoundedCornerShape(16.dp)
+                                )
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Checkbox
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(
-                                        when {
-                                            allSelected -> Color(0xFF6C5CE7)
-                                            selectedCount > 0 -> Color(0xFF6C5CE7).copy(alpha = 0.6f)
-                                            else -> Color.White.copy(alpha = 0.1f)
-                                        }
-                                    )
-                                    .border(
-                                        BorderStroke(
-                                            1.5.dp,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                // Checkbox
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
                                             when {
                                                 allSelected -> Color(0xFF6C5CE7)
-                                                selectedCount > 0 -> Color(0xFF6C5CE7).copy(alpha = 0.8f)
-                                                else -> Color.White.copy(alpha = 0.3f)
+                                                selectedCount > 0 -> Color(0xFF6C5CE7).copy(alpha = 0.6f)
+                                                else -> Color.White.copy(alpha = 0.1f)
                                             }
-                                        ),
-                                        RoundedCornerShape(6.dp)
-                                    )
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .clickable { onSelectAll() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (allSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.Share,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                } else if (selectedCount > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .background(Color.White, CircleShape)
-                                    )
-                                }
-                            }
-
-                            Text(
-                                text = "$selectedCount selected",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = Color.White.copy(alpha = 0.9f)
-                            )
-                        }
-
-                        // Action buttons
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Share button
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Color(0xFF00CEC9).copy(alpha = 0.15f))
-                                    .clickable { onShareSelected() }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        )
+                                        .border(
+                                            BorderStroke(
+                                                1.5.dp,
+                                                when {
+                                                    allSelected -> Color(0xFF6C5CE7)
+                                                    selectedCount > 0 -> Color(0xFF6C5CE7).copy(alpha = 0.8f)
+                                                    else -> Color.White.copy(alpha = 0.3f)
+                                                }
+                                            ),
+                                            RoundedCornerShape(6.dp)
+                                        )
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { onSelectAll() },
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Share,
-                                        contentDescription = "Share",
-                                        tint = Color(0xFF00CEC9),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = "Share",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xFF00CEC9)
-                                    )
+                                    if (allSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Share,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    } else if (selectedCount > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .background(Color.White, CircleShape)
+                                        )
+                                    }
                                 }
+
+                                Text(
+                                    text = "$selectedCount selected",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White.copy(alpha = 0.9f)
+                                )
                             }
 
-                            // Delete button
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(
-                                        if (canDelete)
-                                            Color(0xFFFF6B6B).copy(alpha = 0.15f)
-                                        else
-                                            Color.White.copy(alpha = 0.05f)
-                                    )
-                                    .clickable(enabled = canDelete) { onDeleteSelected() }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                            // Action buttons
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                // Share button
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF00CEC9).copy(alpha = 0.15f))
+                                        .clickable { onShareSelected() }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Delete",
-                                        tint = if (canDelete) Color(0xFFFF6B6B) else Color.White.copy(alpha = 0.3f),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = "Delete",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (canDelete) Color(0xFFFF6B6B) else Color.White.copy(alpha = 0.3f)
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Share,
+                                            contentDescription = "Share",
+                                            tint = Color(0xFF00CEC9),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "Share",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF00CEC9)
+                                        )
+                                    }
+                                }
+
+                                // Delete button
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(
+                                            if (canDelete)
+                                                Color(0xFFFF6B6B).copy(alpha = 0.15f)
+                                            else
+                                                Color.White.copy(alpha = 0.05f)
+                                        )
+                                        .clickable(enabled = canDelete) { onDeleteSelected() }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Delete",
+                                            tint = if (canDelete) Color(0xFFFF6B6B) else Color.White.copy(alpha = 0.3f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "Delete",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (canDelete) Color(0xFFFF6B6B) else Color.White.copy(alpha = 0.3f)
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
                     }
                 }
             }
