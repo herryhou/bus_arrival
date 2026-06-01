@@ -2,10 +2,11 @@ package com.busarrival.app.presentation.ui.detection.components
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,10 +42,12 @@ fun StatusPanel(
     onSpeedChange: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Glassmorphic panel with gradient background
+    val scrollState = rememberScrollState()
+
     Column(
         modifier = modifier
-            .fillMaxWidth()
+            .fillMaxHeight()
+            .verticalScroll(scrollState)
             .background(
                 Brush.verticalGradient(
                     colors = listOf(

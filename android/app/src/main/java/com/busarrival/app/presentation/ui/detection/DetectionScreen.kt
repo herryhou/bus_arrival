@@ -3,6 +3,9 @@ package com.busarrival.app.presentation.ui.detection
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,9 +25,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -96,46 +101,38 @@ fun DetectionScreen(
         }
     }
 
-    // Glassmorphic background
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Ambient glow background
-        Box(modifier = Modifier.fillMaxSize().blur(100.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(300.dp)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                Color(0xFF6C5CE7).copy(alpha = 0.4f),
-                                Color.Transparent
-                            )
-                        )
-                    )
-                    .align(Alignment.TopStart)
-                    .offset(x = (-80).dp, y = (-100).dp)
-            )
-            Box(
-                modifier = Modifier
-                    .size(250.dp)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                Color(0xFF00CEC9).copy(alpha = 0.3f),
-                                Color.Transparent
-                            )
-                        )
-                    )
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 80.dp, y = 100.dp)
-            )
-        }
-
+    // Glassmorphic background with proper layout
+    Box(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
         if (!locationPermissions.allPermissionsGranted) {
             PermissionRequestContent(onRequest = { locationPermissions.launchMultiplePermissionRequest() })
         } else if (activeRoute == null) {
             NoRouteContent()
         } else {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight()
+                    .drawBehind {
+                        // Purple glow (top-left)
+                        drawCircle(
+                            color = Color(0xFF6C5CE7).copy(alpha = 0.4f),
+                            radius = 300.dp.toPx() / 2,
+                            center = androidx.compose.ui.geometry.Offset(
+                                x = -80.dp.toPx(),
+                                y = -100.dp.toPx()
+                            )
+                        )
+                        // Teal glow (bottom-right)
+                        drawCircle(
+                            color = Color(0xFF00CEC9).copy(alpha = 0.3f),
+                            radius = 250.dp.toPx() / 2,
+                            center = androidx.compose.ui.geometry.Offset(
+                                x = size.width + 80.dp.toPx(),
+                                y = size.height + 100.dp.toPx()
+                            )
+                        )
+                    }
+            ) {
                 MapView(
                     routeData = activeRoute,
                     currentSCm = uiState.sCm,
@@ -165,26 +162,16 @@ fun DetectionScreen(
                     onPlayPause = { viewModel.playPause() },
                     onSeek = { viewModel.seekTo(it) },
                     onSpeedChange = { viewModel.setPlaybackSpeed(it) },
-                    modifier = Modifier
-                        .weight(0.4f)
-                        .fillMaxWidth()
-                        .padding(bottom = 84.dp)
+                    modifier = Modifier.weight(0.4f)
                 )
             }
-
-            // Event hints overlay
-            EventToastHost(
-                hint = eventHints,
-                modifier = Modifier.align(Alignment.TopCenter)
-            )
         }
 
         // Error snackbar overlay
         uiState.error?.let { error ->
             ErrorSnackbar(
                 error = error,
-                onDismiss = { viewModel.clearError() },
-                modifier = Modifier.align(Alignment.BottomCenter)
+                onDismiss = { viewModel.clearError() }
             )
         }
     }
