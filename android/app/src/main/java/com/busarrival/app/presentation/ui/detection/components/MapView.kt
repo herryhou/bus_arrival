@@ -65,6 +65,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.graphicsLayer
 import com.busarrival.app.BuildConfig
 import com.busarrival.app.data.cache.TileCache
 import com.busarrival.app.data.cache.TileResolution
@@ -330,7 +331,8 @@ fun MapView(
             Canvas(
                     modifier =
                             Modifier.fillMaxSize()
-                                    .background(Color.White)
+                                    .graphicsLayer { clip = true }  // Enable clipping to Canvas bounds
+                                    .background(Color(0xFFFFF8E1))  // Light amber for visibility
                                     .onSizeChanged { canvasSize.value = it }
                                     .pointerInput(Unit) {
                                         detectTransformGestures { centroid, pan, zoom, _ ->
@@ -363,6 +365,8 @@ fun MapView(
                                         }
                                     }
             ) {
+
+
                 val canvasWidth = size.width
                 val canvasHeight = size.height
 
