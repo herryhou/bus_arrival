@@ -41,6 +41,7 @@ fun StatusPanel(
     onPlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
     onSpeedChange: (Float) -> Unit,
+    onExitSimulation: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -78,6 +79,7 @@ fun StatusPanel(
                 onPlayPause = onPlayPause,
                 onSeek = onSeek,
                 onSpeedChange = onSpeedChange,
+                onExitSimulation = onExitSimulation,
                 allowSeek = !replayState.traceFile.orEmpty().endsWith(".jsonl")
             )
         } else {

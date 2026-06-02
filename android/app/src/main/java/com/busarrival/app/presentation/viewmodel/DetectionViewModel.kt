@@ -346,6 +346,12 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /** Exit simulation mode and return to live detection. */
+    fun exitSimulation() {
+        clearGpsLogSimulation()
+        _uiState.value = _uiState.value.copy(mode = "Normal")
+    }
+
     /** Clear error message. */
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)

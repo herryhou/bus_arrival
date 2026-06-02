@@ -24,6 +24,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -57,6 +58,7 @@ fun TimelineScrubber(
     onPlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
     onSpeedChange: (Float) -> Unit,
+    onExitSimulation: () -> Unit,
     allowSeek: Boolean = true,
     modifier: Modifier = Modifier
 ) {
@@ -94,10 +96,25 @@ fun TimelineScrubber(
                 )
             }
 
-            PlayPauseButton(
-                isPlaying = replayState.isPlaying,
-                onClick = onPlayPause
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PlayPauseButton(
+                    isPlaying = replayState.isPlaying,
+                    onClick = onPlayPause
+                )
+
+                TextButton(
+                    onClick = onExitSimulation
+                ) {
+                    Text(
+                        text = "Exit",
+                        color = TextLow,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
         }
 
         SpeedSelector(

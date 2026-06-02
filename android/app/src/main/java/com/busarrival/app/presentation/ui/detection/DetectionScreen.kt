@@ -112,10 +112,10 @@ fun DetectionScreen(
                                                                         Color(0xFF1A1A2E)
                                                                                 .copy(
                                                                                         alpha =
-                                                                                                0.55f
+                                                                                                0.75f
                                                                                 ),
                                                                         Color(0xFF16213E)
-                                                                                .copy(alpha = 0.7f),
+                                                                                .copy(alpha = 0.85f),
                                                                         Color(0xFF0F0F1A)
                                                                 )
                                                 )
@@ -210,6 +210,7 @@ fun DetectionScreen(
                                                 onPlayPause = { viewModel.playPause() },
                                                 onSeek = { viewModel.seekTo(it) },
                                                 onSpeedChange = { viewModel.setPlaybackSpeed(it) },
+                                                onExitSimulation = { viewModel.exitSimulation() },
                                                 modifier = Modifier.weight(0.4f)
                                         )
                                 }
